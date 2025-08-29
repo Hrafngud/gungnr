@@ -1,6 +1,7 @@
 Gungnr CLI
+
 A lightweight, powerful command-line interface (CLI) for interacting with any REST API. gungnr simplifies HTTP requests with support for flexible endpoints, pretty-printed JSON responses, and secure token management. Built for developers, it’s optimized for zsh environments like Manjaro/Linux.
-Features
+✨ Features
 
 Flexible Endpoints: Call any API endpoint (e.g., users, posts, api/v1/resources).
 Pretty JSON Output: Responses formatted with jq for readability.
@@ -8,13 +9,13 @@ HTTP Status Codes: Displays status for every request (e.g., 200, 401).
 Token Persistence: Stores API token securely in ~/.gungnr_token.
 Zsh-Optimized: Compact and efficient, leveraging zsh's power.
 
-Requirements
+📋 Requirements
 
 Zsh: Runs in zsh (default on Manjaro).
 jq: For pretty-printing JSON responses (sudo pacman -S jq).
 REST API: A running API server (default: http://localhost:3000/api).
 
-Installation
+🚀 Installation
 
 Clone the Repository:
 git clone https://github.com/Hrafngud/gungnr.git
@@ -45,7 +46,7 @@ Update BASE_URL in gungnr.sh if your API uses a different host/port.
 
 
 
-Usage
+🛠️ Usage
 gungnr [login | get <endpoint> [<id>] | post <endpoint> <json_body> | patch <endpoint> <id> <json_body> | delete <endpoint> <id>]
 
 Commands
@@ -53,51 +54,40 @@ Commands
 Login: Authenticate and save the API token.
 gungnr login
 
-
-Prompts for email, password, and keepLoggedIn (enter t for true, f or empty for false).
-Saves token to ~/.gungnr_token.
-
+Prompts for email, password, and keepLoggedIn (t for true, f or empty for false). Saves token to ~/.gungnr_token.
 
 Get: Retrieve data from an endpoint.
 gungnr get <endpoint> [<id>]
 
-
-Examples:gungnr get users         # List all users
+Examples:
+gungnr get users         # List all users
 gungnr get users/1       # Get user ID 1
 gungnr get api/v1/posts  # List posts from a nested endpoint
-
-
 
 
 Post: Create a resource.
 gungnr post <endpoint> <json_body>
 
-
-Example:gungnr post users '{"name":"New User","email":"user@example.com"}'
-
-
+Example:
+gungnr post users '{"name":"New User","email":"user@example.com"}'
 
 
 Patch: Update a resource.
 gungnr patch <endpoint> <id> <json_body>
 
-
-Example:gungnr patch users/1 '{"name":"Updated User"}'
-
-
+Example:
+gungnr patch users/1 '{"name":"Updated User"}'
 
 
 Delete: Delete a resource.
 gungnr delete <endpoint> <id>
 
-
-Example:gungnr delete users/1
-
-
+Example:
+gungnr delete users/1
 
 
 
-Example Workflow
+📖 Example Workflow
 
 Log in:
 gungnr login
@@ -152,14 +142,14 @@ Response (HTTP 201):
 
 
 
-Debugging
+🐛 Debugging
 
 HTTP 401: Token expired or invalid. Run gungnr login again.
 HTTP 400: Check the Request body output for invalid JSON (e.g., in login).
 No JSON Formatting: Ensure jq is installed (jq --version).
 Server Issues: Verify your API server is running and accessible (default: http://localhost:3000/api).
 
-Optional: Logout Command
+🔧 Optional: Logout Command
 To clear the token, add the following to the case block in gungnr.sh:
 logout) [[ -f $TOKEN_FILE ]] && { rm $TOKEN_FILE; print "Token cleared"; } || print "No token file"; unset API_TOKEN; exit 0 ;;
 
@@ -168,12 +158,3 @@ print "Usage: gungnr [login | logout | get <endpoint> [<id>] | post <endpoint> <
 
 Then run:
 gungnr logout
-
-Contributing
-Contributions are welcome! Please:
-
-Fork the repository.
-Create a feature branch (git checkout -b feature/awesome-feature).
-Commit changes (git commit -m 'Add awesome feature').
-Push to the branch (git push origin feature/awesome-feature).
-Open a pull request.
