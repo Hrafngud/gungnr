@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   db:
     image: postgres:17
@@ -15,7 +13,7 @@ services:
       timeout: 5s
       retries: 5
     ports:
-      - "${DB_PORT:-5432}:5432"  # Keep for local database access if needed
+      - "5432:5432"  # Keep for local database access if needed
     networks:
       - app-network
 
@@ -24,12 +22,20 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      APP_ENV: container
+      APP_ENV: ${APP_ENV:-local}
       PORT: 8080
       DATABASE_URL: ${DATABASE_URL:-postgres://notes:notes@db:5432/notes?sslmode=disable}
       DB_MAX_OPEN_CONNS: ${DB_MAX_OPEN_CONNS:-20}
       DB_MAX_IDLE_CONNS: ${DB_MAX_IDLE_CONNS:-10}
       DB_CONN_MAX_LIFETIME_MIN: ${DB_CONN_MAX_LIFETIME_MIN:-30}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:4173,http://127.0.0.1:4173}
+      SESSION_SECRET: ${SESSION_SECRET}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL}
+      GITHUB_ALLOWED_USERS: ${GITHUB_ALLOWED_USERS}
+      GITHUB_ALLOWED_ORG: ${GITHUB_ALLOWED_ORG}
     depends_on:
       db:
         condition: service_healthy
@@ -51,12 +57,12 @@ services:
       dockerfile: Dockerfile
       args:
         # Use relative path for production/public exposure
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/}
     depends_on:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
