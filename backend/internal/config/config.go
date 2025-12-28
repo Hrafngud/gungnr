@@ -10,13 +10,20 @@ import (
 )
 
 type Config struct {
-	AppEnv            string
-	Port              string
-	DatabaseURL       string
-	DBMaxOpenConns    int
-	DBMaxIdleConns    int
-	DBConnMaxLifetime time.Duration
-	AllowedOrigins    []string
+	AppEnv             string
+	Port               string
+	DatabaseURL        string
+	DBMaxOpenConns     int
+	DBMaxIdleConns     int
+	DBConnMaxLifetime  time.Duration
+	AllowedOrigins     []string
+	SessionSecret      string
+	SessionTTL         time.Duration
+	GitHubClientID     string
+	GitHubClientSecret string
+	GitHubCallbackURL  string
+	GitHubAllowedUsers []string
+	GitHubAllowedOrg   string
 }
 
 func Load() (Config, error) {
@@ -35,6 +42,7 @@ func Load() (Config, error) {
 	v.SetDefault("DB_MAX_IDLE_CONNS", 10)
 	v.SetDefault("DB_CONN_MAX_LIFETIME_MIN", 30)
 	v.SetDefault("CORS_ALLOWED_ORIGINS", "http://localhost:4173,http://127.0.0.1:4173,http://localhost:5173,http://127.0.0.1:5173")
+	v.SetDefault("SESSION_TTL_HOURS", 12)
 
 	v.AutomaticEnv()
 
@@ -46,17 +54,36 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		AppEnv:            v.GetString("APP_ENV"),
-		Port:              v.GetString("PORT"),
-		DatabaseURL:       v.GetString("DATABASE_URL"),
-		DBMaxOpenConns:    v.GetInt("DB_MAX_OPEN_CONNS"),
-		DBMaxIdleConns:    v.GetInt("DB_MAX_IDLE_CONNS"),
-		DBConnMaxLifetime: time.Duration(v.GetInt("DB_CONN_MAX_LIFETIME_MIN")) * time.Minute,
-		AllowedOrigins:    parseCSV(v.GetString("CORS_ALLOWED_ORIGINS")),
+		AppEnv:             v.GetString("APP_ENV"),
+		Port:               v.GetString("PORT"),
+		DatabaseURL:        v.GetString("DATABASE_URL"),
+		DBMaxOpenConns:     v.GetInt("DB_MAX_OPEN_CONNS"),
+		DBMaxIdleConns:     v.GetInt("DB_MAX_IDLE_CONNS"),
+		DBConnMaxLifetime:  time.Duration(v.GetInt("DB_CONN_MAX_LIFETIME_MIN")) * time.Minute,
+		AllowedOrigins:     parseCSV(v.GetString("CORS_ALLOWED_ORIGINS")),
+		SessionSecret:      v.GetString("SESSION_SECRET"),
+		SessionTTL:         time.Duration(v.GetInt("SESSION_TTL_HOURS")) * time.Hour,
+		GitHubClientID:     v.GetString("GITHUB_CLIENT_ID"),
+		GitHubClientSecret: v.GetString("GITHUB_CLIENT_SECRET"),
+		GitHubCallbackURL:  v.GetString("GITHUB_CALLBACK_URL"),
+		GitHubAllowedUsers: parseCSV(v.GetString("GITHUB_ALLOWED_USERS")),
+		GitHubAllowedOrg:   v.GetString("GITHUB_ALLOWED_ORG"),
 	}
 
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL is required")
+	}
+	if cfg.SessionSecret == "" {
+		return Config{}, fmt.Errorf("SESSION_SECRET is required")
+	}
+	if cfg.GitHubClientID == "" {
+		return Config{}, fmt.Errorf("GITHUB_CLIENT_ID is required")
+	}
+	if cfg.GitHubClientSecret == "" {
+		return Config{}, fmt.Errorf("GITHUB_CLIENT_SECRET is required")
+	}
+	if cfg.GitHubCallbackURL == "" {
+		return Config{}, fmt.Errorf("GITHUB_CALLBACK_URL is required")
 	}
 
 	return cfg, nil

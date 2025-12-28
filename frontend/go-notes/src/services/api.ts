@@ -10,14 +10,19 @@ export class ApiError extends Error {
   }
 }
 
-const defaultBaseUrl = 'http://localhost:8080/api/v1'
+const defaultBaseUrl = 'http://localhost:8080'
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || defaultBaseUrl).replace(
+  /\/$/,
+  '',
+)
 
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || defaultBaseUrl,
+  baseURL: apiBaseUrl,
   headers: {
     Accept: 'application/json',
     'Content-Type': 'application/json',
   },
+  withCredentials: true,
   timeout: 15000,
 })
 
@@ -54,4 +59,8 @@ export function parseApiError(error: unknown): ApiError {
 
 export function apiErrorMessage(error: unknown): string {
   return parseApiError(error).message
+}
+
+export function getApiBaseUrl(): string {
+  return apiBaseUrl
 }

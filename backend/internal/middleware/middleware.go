@@ -10,9 +10,10 @@ import (
 
 func DefaultCORSConfig(allowedOrigins []string) cors.Config {
 	cfg := cors.Config{
-		AllowHeaders: []string{"Origin", "Content-Type", "Accept"},
-		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		MaxAge:       12 * time.Hour,
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
 	}
 
 	if len(allowedOrigins) == 0 || slices.Contains(allowedOrigins, "*") {

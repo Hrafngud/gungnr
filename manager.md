@@ -17,9 +17,9 @@
   - Host access: Docker socket bind, templates dir bind, cloudflared config bind.
 - Progress log:
   - TODO: Replace placeholder notes docs with Warp Panel plans and guidelines.
-  - TODO: Implement GitHub OAuth login + allowlist.
-  - TODO: Implement job runner for template creation/deploy/quick-service flows.
-  - TODO: Build UI shell and connect to API.
+- DONE: Implement GitHub OAuth login + allowlist scaffolding with session cookies.
+- TODO: Implement job runner for template creation/deploy/quick-service flows.
+- DONE: Build UI shell and connect to API for `/auth/me`.
 
 ### Docker / Compose usage (target)
 - Defaults live in `.env.example` (copy to `.env` to override).

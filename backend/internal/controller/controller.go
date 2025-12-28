@@ -12,4 +12,10 @@ func (h *HealthController) Register(r *gin.Engine) {
 	r.GET("/healthz", func(ctx *gin.Context) {
 		ctx.JSON(200, gin.H{"status": "ok"})
 	})
+	r.GET("/health/docker", func(ctx *gin.Context) {
+		ctx.JSON(200, gin.H{"status": "ok", "detail": "stub"})
+	})
+	r.GET("/health/tunnel", func(ctx *gin.Context) {
+		ctx.JSON(200, gin.H{"status": "ok", "detail": "stub"})
+	})
 }

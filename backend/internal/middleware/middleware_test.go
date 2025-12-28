@@ -45,5 +45,5 @@ func TestCORSMiddlewareAllowsWildcard(t *testing.T) {
 	r.ServeHTTP(resp, req)
 
 	require.Contains(t, []int{http.StatusNoContent, http.StatusOK}, resp.Code)
-	require.Equal(t, "*", resp.Header().Get("Access-Control-Allow-Origin"))
+	require.Equal(t, "http://frontend.local", resp.Header().Get("Access-Control-Allow-Origin"))
 }

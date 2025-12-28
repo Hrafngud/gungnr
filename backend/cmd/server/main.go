@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 
+	"go-notes/internal/auth"
 	"go-notes/internal/config"
 	"go-notes/internal/controller"
 	"go-notes/internal/db"
@@ -26,12 +27,14 @@ func main() {
 		log.Fatalf("failed to run migrations: %v", err)
 	}
 
-	noteRepo := repository.NewGormNoteRepository(gormDB)
-	noteService := service.NewNoteService(noteRepo)
+	userRepo := repository.NewGormUserRepository(gormDB)
+	authService := service.NewAuthService(cfg, userRepo)
+	sessionManager := auth.NewManager(cfg.SessionSecret, cfg.SessionTTL)
+	secureCookie := cfg.AppEnv == "prod"
 
 	r := router.NewRouter(router.Dependencies{
 		Health:         controller.NewHealthController(),
-		Notes:          controller.NewNoteController(noteService),
+		Auth:           controller.NewAuthController(authService, sessionManager, secureCookie),
 		AllowedOrigins: cfg.AllowedOrigins,
 	})
 

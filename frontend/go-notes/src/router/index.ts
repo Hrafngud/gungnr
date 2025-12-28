@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import NotesView from '@/views/NotesView.vue'
-import NoteDetailView from '@/views/NoteDetailView.vue'
+import LoginView from '@/views/LoginView.vue'
+import DashboardView from '@/views/DashboardView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -8,16 +8,15 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      name: 'notes',
-      component: NotesView,
-      meta: { title: 'Notes' },
+      name: 'dashboard',
+      component: DashboardView,
+      meta: { title: 'Warp Panel' },
     },
     {
-      path: '/notes/:id',
-      name: 'note-detail',
-      component: NoteDetailView,
-      props: true,
-      meta: { title: 'Note detail' },
+      path: '/login',
+      name: 'login',
+      component: LoginView,
+      meta: { title: 'Sign in' },
     },
     {
       path: '/:pathMatch(.*)*',
@@ -28,7 +27,7 @@ const router = createRouter({
 
 router.afterEach((to) => {
   if (to.meta?.title) {
-    document.title = `${to.meta.title} • Go Notes`
+    document.title = `${to.meta.title} • Warp Panel`
   }
 })
 

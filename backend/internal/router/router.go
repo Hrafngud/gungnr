@@ -9,7 +9,7 @@ import (
 
 type Dependencies struct {
 	Health         *controller.HealthController
-	Notes          *controller.NoteController
+	Auth           *controller.AuthController
 	AllowedOrigins []string
 }
 
@@ -21,10 +21,8 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	if deps.Health != nil {
 		deps.Health.Register(r)
 	}
-
-	api := r.Group("/api/v1")
-	if deps.Notes != nil {
-		deps.Notes.Register(api)
+	if deps.Auth != nil {
+		deps.Auth.Register(r)
 	}
 
 	return r
