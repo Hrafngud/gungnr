@@ -46,6 +46,13 @@ const auth = useAuthStore()
           Jobs
         </RouterLink>
         <RouterLink
+          to="/settings"
+          class="rounded-full px-4 py-2 transition hover:bg-black/5"
+          active-class="bg-black/5 text-neutral-900"
+        >
+          Settings
+        </RouterLink>
+        <RouterLink
           v-if="!auth.user"
           to="/login"
           class="rounded-full px-4 py-2 transition hover:bg-black/5"

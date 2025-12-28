@@ -44,3 +44,11 @@ type Job struct {
 	Input      string `gorm:"type:text"`
 	LogLines   string `gorm:"type:text"`
 }
+
+type Settings struct {
+	gorm.Model
+	BaseDomain            string `gorm:"size:255"`
+	GitHubToken           string `gorm:"type:text"`
+	CloudflareToken       string `gorm:"type:text"`
+	CloudflaredConfigPath string `gorm:"size:512"`
+}

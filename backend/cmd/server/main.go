@@ -7,8 +7,6 @@ import (
 	"go-notes/internal/config"
 	"go-notes/internal/controller"
 	"go-notes/internal/db"
-	"go-notes/internal/integrations/cloudflare"
-	gh "go-notes/internal/integrations/github"
 	"go-notes/internal/jobs"
 	"go-notes/internal/middleware"
 	"go-notes/internal/repository"
@@ -34,15 +32,15 @@ func main() {
 	userRepo := repository.NewGormUserRepository(gormDB)
 	projectRepo := repository.NewGormProjectRepository(gormDB)
 	jobRepo := repository.NewGormJobRepository(gormDB)
+	settingsRepo := repository.NewGormSettingsRepository(gormDB)
 
 	authService := service.NewAuthService(cfg, userRepo)
 	jobRunner := jobs.NewRunner(jobRepo)
 	jobService := service.NewJobService(jobRepo, jobRunner)
 	projectService := service.NewProjectService(cfg, projectRepo, jobService)
+	settingsService := service.NewSettingsService(cfg, settingsRepo)
 
-	githubClient := gh.NewClient(cfg)
-	cloudflareClient := cloudflare.NewClient(cfg)
-	workflows := service.NewProjectWorkflows(cfg, projectRepo, cloudflareClient, githubClient)
+	workflows := service.NewProjectWorkflows(cfg, projectRepo, settingsService)
 	workflows.Register(jobRunner)
 
 	sessionManager := auth.NewManager(cfg.SessionSecret, cfg.SessionTTL)
@@ -54,6 +52,8 @@ func main() {
 		Auth:           controller.NewAuthController(authService, sessionManager, secureCookie, cookieDomain),
 		Projects:       controller.NewProjectsController(projectService),
 		Jobs:           controller.NewJobsController(jobService),
+		Settings:       controller.NewSettingsController(settingsService),
+		Host:           controller.NewHostController(service.NewHostService()),
 		AllowedOrigins: cfg.AllowedOrigins,
 		AuthMiddleware: middleware.AuthRequired(sessionManager),
 	})

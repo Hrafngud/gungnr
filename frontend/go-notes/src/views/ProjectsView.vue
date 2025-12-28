@@ -141,7 +141,7 @@ const handleSubmit = async () => {
         return
       }
       const port = parsePort(quickForm.port, true)
-      if (port === null) {
+      if (port === null || port === undefined) {
         submitError.value = 'Port must be numeric.'
         submitting.value = false
         return

@@ -25,16 +25,14 @@ import (
 type ProjectWorkflows struct {
 	cfg      config.Config
 	projects repository.ProjectRepository
-	cloudfl  *cloudflare.Client
-	github   *gh.Client
+	settings *SettingsService
 }
 
-func NewProjectWorkflows(cfg config.Config, projects repository.ProjectRepository, cloudfl *cloudflare.Client, github *gh.Client) *ProjectWorkflows {
+func NewProjectWorkflows(cfg config.Config, projects repository.ProjectRepository, settings *SettingsService) *ProjectWorkflows {
 	return &ProjectWorkflows{
 		cfg:      cfg,
 		projects: projects,
-		cloudfl:  cloudfl,
-		github:   github,
+		settings: settings,
 	}
 }
 
@@ -61,7 +59,12 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 		return err
 	}
 
-	projectDir, err := projectPath(w.cfg.TemplatesDir, req.Name)
+	runtimeCfg, err := w.settings.ResolveConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load settings: %w", err)
+	}
+
+	projectDir, err := projectPath(runtimeCfg.TemplatesDir, req.Name)
 	if err != nil {
 		return err
 	}
@@ -73,7 +76,8 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	}
 
 	logger.Logf("creating GitHub repo from template for %s", req.Name)
-	repo, err := w.github.CreateRepoFromTemplate(ctx, req.Name)
+	githubClient := gh.NewClient(runtimeCfg)
+	repo, err := githubClient.CreateRepoFromTemplate(ctx, req.Name)
 	if err != nil {
 		return err
 	}
@@ -85,7 +89,7 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	if cloneURL == "" {
 		return fmt.Errorf("repo clone URL missing")
 	}
-	authURL, err := buildAuthenticatedCloneURL(cloneURL, w.cfg.GitHubToken)
+	authURL, err := buildAuthenticatedCloneURL(cloneURL, runtimeCfg.GitHubToken)
 	if err != nil {
 		return err
 	}
@@ -137,9 +141,10 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 		return err
 	}
 
-	hostname := fmt.Sprintf("%s.%s", req.Subdomain, w.cfg.Domain)
+	hostname := fmt.Sprintf("%s.%s", req.Subdomain, runtimeCfg.Domain)
 	logger.Logf("configuring tunnel ingress for %s", hostname)
-	if err := w.cloudflareSetup(ctx, hostname, proxyPort); err != nil {
+	cloudflareClient := cloudflare.NewClient(runtimeCfg)
+	if err := w.cloudflareSetup(ctx, runtimeCfg, cloudflareClient, hostname, proxyPort); err != nil {
 		return err
 	}
 
@@ -172,7 +177,12 @@ func (w *ProjectWorkflows) handleDeployExisting(ctx context.Context, job models.
 	}
 	logger.Logf("using host port %d for ingress", req.Port)
 
-	projectDir, err := projectPath(w.cfg.TemplatesDir, req.Name)
+	runtimeCfg, err := w.settings.ResolveConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load settings: %w", err)
+	}
+
+	projectDir, err := projectPath(runtimeCfg.TemplatesDir, req.Name)
 	if err != nil {
 		return err
 	}
@@ -189,9 +199,10 @@ func (w *ProjectWorkflows) handleDeployExisting(ctx context.Context, job models.
 		return err
 	}
 
-	hostname := fmt.Sprintf("%s.%s", req.Subdomain, w.cfg.Domain)
+	hostname := fmt.Sprintf("%s.%s", req.Subdomain, runtimeCfg.Domain)
 	logger.Logf("configuring tunnel ingress for %s", hostname)
-	if err := w.cloudflareSetup(ctx, hostname, req.Port); err != nil {
+	cloudflareClient := cloudflare.NewClient(runtimeCfg)
+	if err := w.cloudflareSetup(ctx, runtimeCfg, cloudflareClient, hostname, req.Port); err != nil {
 		return err
 	}
 
@@ -222,30 +233,36 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 	}
 	logger.Logf("using local port %d for quick service", req.Port)
 
-	hostname := fmt.Sprintf("%s.%s", req.Subdomain, w.cfg.Domain)
+	runtimeCfg, err := w.settings.ResolveConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load settings: %w", err)
+	}
+
+	hostname := fmt.Sprintf("%s.%s", req.Subdomain, runtimeCfg.Domain)
 	logger.Logf("configuring tunnel ingress for %s", hostname)
-	if err := w.cloudflareSetup(ctx, hostname, req.Port); err != nil {
+	cloudflareClient := cloudflare.NewClient(runtimeCfg)
+	if err := w.cloudflareSetup(ctx, runtimeCfg, cloudflareClient, hostname, req.Port); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, hostname string, port int) error {
-	if w.cfg.Domain == "" {
+func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, cfg config.Config, cloudfl *cloudflare.Client, hostname string, port int) error {
+	if cfg.Domain == "" {
 		return fmt.Errorf("DOMAIN not configured")
 	}
-	if w.cloudfl == nil {
+	if cloudfl == nil {
 		return fmt.Errorf("cloudflare client unavailable")
 	}
 
-	if err := w.cloudfl.EnsureDNS(ctx, hostname); err != nil {
+	if err := cloudfl.EnsureDNS(ctx, hostname); err != nil {
 		return err
 	}
-	if err := w.cloudfl.UpdateIngress(hostname, port); err != nil {
+	if err := cloudfl.UpdateIngress(hostname, port); err != nil {
 		return err
 	}
-	if err := w.cloudfl.RestartTunnel(ctx); err != nil {
+	if err := cloudfl.RestartTunnel(ctx); err != nil {
 		return err
 	}
 	return nil
