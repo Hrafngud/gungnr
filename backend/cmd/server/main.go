@@ -7,6 +7,9 @@ import (
 	"go-notes/internal/config"
 	"go-notes/internal/controller"
 	"go-notes/internal/db"
+	"go-notes/internal/integrations/cloudflare"
+	gh "go-notes/internal/integrations/github"
+	"go-notes/internal/jobs"
 	"go-notes/internal/middleware"
 	"go-notes/internal/repository"
 	"go-notes/internal/router"
@@ -33,8 +36,14 @@ func main() {
 	jobRepo := repository.NewGormJobRepository(gormDB)
 
 	authService := service.NewAuthService(cfg, userRepo)
-	projectService := service.NewProjectService(projectRepo)
-	jobService := service.NewJobService(jobRepo)
+	jobRunner := jobs.NewRunner(jobRepo)
+	jobService := service.NewJobService(jobRepo, jobRunner)
+	projectService := service.NewProjectService(cfg, projectRepo, jobService)
+
+	githubClient := gh.NewClient(cfg)
+	cloudflareClient := cloudflare.NewClient(cfg)
+	workflows := service.NewProjectWorkflows(cfg, projectRepo, cloudflareClient, githubClient)
+	workflows.Register(jobRunner)
 
 	sessionManager := auth.NewManager(cfg.SessionSecret, cfg.SessionTTL)
 	secureCookie := cfg.AppEnv == "prod"

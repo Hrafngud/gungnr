@@ -41,5 +41,6 @@ type Job struct {
 	StartedAt  *time.Time
 	FinishedAt *time.Time
 	Error      string `gorm:"type:text"`
+	Input      string `gorm:"type:text"`
 	LogLines   string `gorm:"type:text"`
 }

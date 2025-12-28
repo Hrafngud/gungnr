@@ -7,3 +7,7 @@ export interface Job {
   error?: string | null
   createdAt: string
 }
+
+export interface JobDetail extends Job {
+  logLines: string[]
+}

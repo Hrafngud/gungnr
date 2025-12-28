@@ -3,6 +3,7 @@ import LoginView from '@/views/LoginView.vue'
 import DashboardView from '@/views/DashboardView.vue'
 import ProjectsView from '@/views/ProjectsView.vue'
 import JobsView from '@/views/JobsView.vue'
+import JobDetailView from '@/views/JobDetailView.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const router = createRouter({
@@ -32,6 +33,12 @@ const router = createRouter({
       name: 'jobs',
       component: JobsView,
       meta: { title: 'Jobs' },
+    },
+    {
+      path: '/jobs/:id',
+      name: 'job-detail',
+      component: JobDetailView,
+      meta: { title: 'Job log' },
     },
     {
       path: '/:pathMatch(.*)*',

@@ -9,3 +9,8 @@ export interface Project {
   createdAt: string
   updatedAt: string
 }
+
+export interface LocalProject {
+  name: string
+  path: string
+}

@@ -31,6 +31,10 @@ func NewProjectsController(service *service.ProjectService) *ProjectsController 
 
 func (c *ProjectsController) Register(r gin.IRoutes) {
 	r.GET("/projects", c.List)
+	r.GET("/projects/local", c.ListLocal)
+	r.POST("/projects/template", c.CreateFromTemplate)
+	r.POST("/projects/existing", c.DeployExisting)
+	r.POST("/projects/quick", c.QuickService)
 }
 
 func (c *ProjectsController) List(ctx *gin.Context) {
@@ -56,4 +60,61 @@ func (c *ProjectsController) List(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"projects": response})
+}
+
+func (c *ProjectsController) ListLocal(ctx *gin.Context) {
+	projects, err := c.service.ListLocal(ctx.Request.Context())
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"projects": projects})
+}
+
+func (c *ProjectsController) CreateFromTemplate(ctx *gin.Context) {
+	var req service.CreateTemplateRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	job, err := c.service.CreateFromTemplate(ctx.Request.Context(), req)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
+}
+
+func (c *ProjectsController) DeployExisting(ctx *gin.Context) {
+	var req service.DeployExistingRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	job, err := c.service.DeployExisting(ctx.Request.Context(), req)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
+}
+
+func (c *ProjectsController) QuickService(ctx *gin.Context) {
+	var req service.QuickServiceRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	job, err := c.service.QuickService(ctx.Request.Context(), req)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
 }
