@@ -1,0 +1,11 @@
+bin
+tmp
+vendor
+.git
+.cache
+.vscode
+.idea
+*.log
+.env
+.env.*
+coverage
