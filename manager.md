@@ -11,12 +11,16 @@
   - Vue UI for project wizard, status dashboards, and activity logs.
   - Docker Compose stack with Postgres, API, and web frontend.
 - Tech decisions:
-  - Backend: Go 1.22+, Gin, GORM + pgx, go-github, cloudflare-go, oauth2.
+  - Backend: Go 1.22+, Gin, GORM + pgx, go-github, cloudflared CLI, oauth2.
   - Frontend: Vue 3 + Vite + TS, Tailwind CSS v4, Pinia, Axios, vue-router.
   - DB: Postgres for projects, jobs, and audit logs.
   - Host access: Docker socket bind, templates dir bind, cloudflared config bind.
 - Progress log:
   - TODO: Replace placeholder notes docs with Warp Panel plans and guidelines.
+  - TODO: Add settings persistence + UI for base domain, GitHub token, and cloudflared config path (default to ~/.cloudflared/config.yml).
+  - TODO: Add Cloudflare token input flow in UI and store securely for API calls.
+  - TODO: Surface running Docker services and allow quick tunnel forwarding with subdomains.
+  - TODO: Add tunnel status + cloudflared config preview in the UI.
 - DONE: Implement GitHub OAuth login + allowlist scaffolding with session cookies.
 - DONE: Protect `/api/v1` routes with auth middleware and add project/job list placeholders.
 - DONE: Add integrations stubs, job runner scaffold, and Projects/Jobs UI views.
@@ -24,8 +28,10 @@
 - DONE: Resolve GitHub OAuth callback URLs from the public host when local defaults leak.
   - DONE: Allow configuring auth cookie domain to avoid invalid OAuth state on cross-subdomain callbacks.
   - DONE: Fix GitHub user lookup to use the correct GORM column mapping.
-  - TODO: Implement job runner for template creation/deploy/quick-service flows.
-  - DONE: Build UI shell and connect to API for `/auth/me`.
+- DONE: Implement job runner persistence, workflow handlers, and job log streaming.
+- DONE: Wire template creation, deploy existing, and quick service endpoints + UI flows.
+- DONE: Add GitHub template creation + cloudflared DNS/ingress updates in workflows.
+- DONE: Build UI shell and connect to API for `/auth/me`.
 
 ### Docker / Compose usage (target)
 - Defaults live in `.env.example` (copy to `.env` to override).

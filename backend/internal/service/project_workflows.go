@@ -1,0 +1,423 @@
+package service
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"go-notes/internal/config"
+	"go-notes/internal/integrations/cloudflare"
+	gh "go-notes/internal/integrations/github"
+	"go-notes/internal/jobs"
+	"go-notes/internal/models"
+	"go-notes/internal/repository"
+)
+
+type ProjectWorkflows struct {
+	cfg      config.Config
+	projects repository.ProjectRepository
+	cloudfl  *cloudflare.Client
+	github   *gh.Client
+}
+
+func NewProjectWorkflows(cfg config.Config, projects repository.ProjectRepository, cloudfl *cloudflare.Client, github *gh.Client) *ProjectWorkflows {
+	return &ProjectWorkflows{
+		cfg:      cfg,
+		projects: projects,
+		cloudfl:  cloudfl,
+		github:   github,
+	}
+}
+
+func (w *ProjectWorkflows) Register(runner *jobs.Runner) {
+	runner.Register(JobTypeCreateTemplate, w.handleCreateTemplate)
+	runner.Register(JobTypeDeployExisting, w.handleDeployExisting)
+	runner.Register(JobTypeQuickService, w.handleQuickService)
+}
+
+func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.Job, logger jobs.Logger) error {
+	var req CreateTemplateRequest
+	if err := json.Unmarshal([]byte(job.Input), &req); err != nil {
+		return fmt.Errorf("parse template request: %w", err)
+	}
+	req.Name = strings.ToLower(strings.TrimSpace(req.Name))
+	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
+	if req.Subdomain == "" {
+		req.Subdomain = req.Name
+	}
+	if err := ValidateProjectName(req.Name); err != nil {
+		return err
+	}
+	if err := ValidateSubdomain(req.Subdomain); err != nil {
+		return err
+	}
+
+	projectDir, err := projectPath(w.cfg.TemplatesDir, req.Name)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(projectDir); err == nil {
+		return fmt.Errorf("project already exists at %s", projectDir)
+	}
+	if err := os.MkdirAll(w.cfg.TemplatesDir, 0o755); err != nil {
+		return fmt.Errorf("create templates dir: %w", err)
+	}
+
+	logger.Logf("creating GitHub repo from template for %s", req.Name)
+	repo, err := w.github.CreateRepoFromTemplate(ctx, req.Name)
+	if err != nil {
+		return err
+	}
+	if repo == nil {
+		return fmt.Errorf("github repository response empty")
+	}
+
+	cloneURL := repo.GetCloneURL()
+	if cloneURL == "" {
+		return fmt.Errorf("repo clone URL missing")
+	}
+	authURL, err := buildAuthenticatedCloneURL(cloneURL, w.cfg.GitHubToken)
+	if err != nil {
+		return err
+	}
+
+	logger.Log("cloning repository into templates directory")
+	if err := runQuietCommand(ctx, logger, "", []string{"GIT_TERMINAL_PROMPT=0"}, "git", "clone", authURL, projectDir); err != nil {
+		return err
+	}
+
+	proxyPort := req.ProxyPort
+	dbPort := req.DBPort
+	reserved := map[int]bool{}
+	if proxyPort == 0 {
+		proxyPort, err = findFreePort(80, reserved)
+		if err != nil {
+			return err
+		}
+		reserved[proxyPort] = true
+	}
+	if dbPort == 0 {
+		dbPort, err = findFreePort(5432, reserved)
+		if err != nil {
+			return err
+		}
+	}
+	logger.Logf("using proxy port %d and db port %d", proxyPort, dbPort)
+
+	composePath := filepath.Join(projectDir, "docker-compose.yml")
+	if err := patchComposePorts(composePath, proxyPort, dbPort); err != nil {
+		return err
+	}
+	logger.Log("patched docker-compose.yml with selected ports")
+
+	project := models.Project{
+		Name:      req.Name,
+		RepoURL:   repo.GetHTMLURL(),
+		Path:      projectDir,
+		ProxyPort: proxyPort,
+		DBPort:    dbPort,
+		Status:    "provisioning",
+	}
+	projectRecord, err := w.upsertProject(ctx, &project)
+	if err != nil {
+		return err
+	}
+
+	logger.Log("starting docker compose stack")
+	if err := runLoggedCommand(ctx, logger, projectDir, nil, "docker", "compose", "up", "--build", "-d"); err != nil {
+		return err
+	}
+
+	hostname := fmt.Sprintf("%s.%s", req.Subdomain, w.cfg.Domain)
+	logger.Logf("configuring tunnel ingress for %s", hostname)
+	if err := w.cloudflareSetup(ctx, hostname, proxyPort); err != nil {
+		return err
+	}
+
+	projectRecord.Status = "running"
+	if err := w.projects.Update(ctx, projectRecord); err != nil {
+		return fmt.Errorf("update project status: %w", err)
+	}
+
+	return nil
+}
+
+func (w *ProjectWorkflows) handleDeployExisting(ctx context.Context, job models.Job, logger jobs.Logger) error {
+	var req DeployExistingRequest
+	if err := json.Unmarshal([]byte(job.Input), &req); err != nil {
+		return fmt.Errorf("parse deploy request: %w", err)
+	}
+	req.Name = strings.ToLower(strings.TrimSpace(req.Name))
+	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
+	if err := ValidateProjectName(req.Name); err != nil {
+		return err
+	}
+	if err := ValidateSubdomain(req.Subdomain); err != nil {
+		return err
+	}
+	if req.Port == 0 {
+		req.Port = 80
+	}
+	if err := ValidatePort(req.Port); err != nil {
+		return err
+	}
+	logger.Logf("using host port %d for ingress", req.Port)
+
+	projectDir, err := projectPath(w.cfg.TemplatesDir, req.Name)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(projectDir); err != nil {
+		return fmt.Errorf("project directory missing: %w", err)
+	}
+	composePath := filepath.Join(projectDir, "docker-compose.yml")
+	if _, err := os.Stat(composePath); err != nil {
+		return fmt.Errorf("docker-compose.yml missing: %w", err)
+	}
+
+	logger.Log("starting docker compose stack")
+	if err := runLoggedCommand(ctx, logger, projectDir, nil, "docker", "compose", "up", "--build", "-d"); err != nil {
+		return err
+	}
+
+	hostname := fmt.Sprintf("%s.%s", req.Subdomain, w.cfg.Domain)
+	logger.Logf("configuring tunnel ingress for %s", hostname)
+	if err := w.cloudflareSetup(ctx, hostname, req.Port); err != nil {
+		return err
+	}
+
+	project := models.Project{
+		Name:      req.Name,
+		Path:      projectDir,
+		ProxyPort: req.Port,
+		Status:    "running",
+	}
+	if _, err := w.upsertProject(ctx, &project); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Job, logger jobs.Logger) error {
+	var req QuickServiceRequest
+	if err := json.Unmarshal([]byte(job.Input), &req); err != nil {
+		return fmt.Errorf("parse quick service request: %w", err)
+	}
+	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
+	if err := ValidateSubdomain(req.Subdomain); err != nil {
+		return err
+	}
+	if err := ValidatePort(req.Port); err != nil {
+		return err
+	}
+	logger.Logf("using local port %d for quick service", req.Port)
+
+	hostname := fmt.Sprintf("%s.%s", req.Subdomain, w.cfg.Domain)
+	logger.Logf("configuring tunnel ingress for %s", hostname)
+	if err := w.cloudflareSetup(ctx, hostname, req.Port); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, hostname string, port int) error {
+	if w.cfg.Domain == "" {
+		return fmt.Errorf("DOMAIN not configured")
+	}
+	if w.cloudfl == nil {
+		return fmt.Errorf("cloudflare client unavailable")
+	}
+
+	if err := w.cloudfl.EnsureDNS(ctx, hostname); err != nil {
+		return err
+	}
+	if err := w.cloudfl.UpdateIngress(hostname, port); err != nil {
+		return err
+	}
+	if err := w.cloudfl.RestartTunnel(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *ProjectWorkflows) upsertProject(ctx context.Context, project *models.Project) (*models.Project, error) {
+	existing, err := w.projects.GetByName(ctx, project.Name)
+	if err == nil && existing != nil {
+		existing.RepoURL = project.RepoURL
+		existing.Path = project.Path
+		existing.ProxyPort = project.ProxyPort
+		existing.DBPort = project.DBPort
+		existing.Status = project.Status
+		if err := w.projects.Update(ctx, existing); err != nil {
+			return nil, err
+		}
+		return existing, nil
+	}
+	if err != nil && err != repository.ErrNotFound {
+		return nil, err
+	}
+	if err := w.projects.Create(ctx, project); err != nil {
+		return nil, err
+	}
+	return project, nil
+}
+
+func projectPath(base, name string) (string, error) {
+	if strings.TrimSpace(base) == "" {
+		return "", fmt.Errorf("TEMPLATES_DIR not configured")
+	}
+	if err := ValidateProjectName(name); err != nil {
+		return "", err
+	}
+	path := filepath.Join(base, name)
+	return path, nil
+}
+
+func findFreePort(start int, reserved map[int]bool) (int, error) {
+	for port := start; port <= 65535; port++ {
+		if reserved[port] {
+			continue
+		}
+		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err != nil {
+			continue
+		}
+		_ = ln.Close()
+		return port, nil
+	}
+	return 0, fmt.Errorf("no free port available from %d", start)
+}
+
+var (
+	proxyPortPattern = regexp.MustCompile(`(?m)^(\s*-\s*["']?)80:80(["']?)\s*$`)
+	dbPortPattern    = regexp.MustCompile(`(?m)^(\s*-\s*["']?)(?:\${DB_PORT:-5432}|5432):5432(["']?)\s*$`)
+)
+
+func patchComposePorts(path string, proxyPort, dbPort int) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read compose file: %w", err)
+	}
+	contents := string(raw)
+	updated := contents
+
+	if proxyPort > 0 {
+		updated = proxyPortPattern.ReplaceAllString(updated, fmt.Sprintf("${1}%d:80${2}", proxyPort))
+	}
+	if dbPort > 0 {
+		updated = dbPortPattern.ReplaceAllString(updated, fmt.Sprintf("${1}%d:5432${2}", dbPort))
+	}
+
+	if updated == contents {
+		return fmt.Errorf("no port mappings updated in compose file")
+	}
+
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		return fmt.Errorf("write compose file: %w", err)
+	}
+
+	return nil
+}
+
+func buildAuthenticatedCloneURL(rawURL, token string) (string, error) {
+	if token == "" {
+		return "", gh.ErrMissingToken
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("parse clone url: %w", err)
+	}
+	parsed.User = url.UserPassword("x-access-token", token)
+	return parsed.String(), nil
+}
+
+func runLoggedCommand(ctx context.Context, logger jobs.Logger, dir string, env []string, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start command: %w", err)
+	}
+
+	done := make(chan error, 2)
+	read := func(r io.Reader) {
+		scanner := bufio.NewScanner(r)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			logger.Log(scanner.Text())
+		}
+		if err := scanner.Err(); err != nil {
+			done <- err
+			return
+		}
+		done <- nil
+	}
+
+	go read(stdout)
+	go read(stderr)
+
+	waitErr := cmd.Wait()
+	err1 := <-done
+	err2 := <-done
+
+	if waitErr != nil {
+		return fmt.Errorf("%s failed: %w", name, waitErr)
+	}
+	if err1 != nil {
+		return err1
+	}
+	if err2 != nil {
+		return err2
+	}
+	return nil
+}
+
+func runQuietCommand(ctx context.Context, logger jobs.Logger, dir string, env []string, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		sanitized := sanitizeGitOutput(string(output))
+		if sanitized != "" {
+			logger.Log(strings.TrimSpace(sanitized))
+		}
+		return fmt.Errorf("%s failed: %w", name, err)
+	}
+	return nil
+}
+
+func sanitizeGitOutput(output string) string {
+	re := regexp.MustCompile(`x-access-token:[^@]+@`)
+	return re.ReplaceAllString(output, "x-access-token:***@")
+}

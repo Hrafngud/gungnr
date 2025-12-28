@@ -138,8 +138,14 @@ const statusTone = (status: string) => {
           {{ job.error }}
         </div>
 
-        <div class="mt-4 text-xs text-neutral-500">
-          Created {{ new Date(job.createdAt).toLocaleString() }}
+        <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-neutral-500">
+          <span>Created {{ new Date(job.createdAt).toLocaleString() }}</span>
+          <RouterLink
+            :to="`/jobs/${job.id}`"
+            class="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-xs font-semibold text-neutral-700 transition hover:-translate-y-0.5"
+          >
+            View log
+          </RouterLink>
         </div>
       </article>
     </div>

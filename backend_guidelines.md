@@ -5,7 +5,7 @@
 - Gin for HTTP APIs.
 - GORM v2 with pgx driver for Postgres.
 - GitHub: `github.com/google/go-github/v62` + `golang.org/x/oauth2`.
-- Cloudflare: `github.com/cloudflare/cloudflare-go`.
+- Cloudflare: `cloudflared` CLI for tunnel ingress updates; `cloudflare-go` for DNS if token is supplied.
 - Docker control: use Docker socket and `docker compose` CLI or Docker client (`github.com/docker/docker/client`).
 - Config: Viper or env-only loader; use `.env` for local overrides.
 - Testing: `net/http/httptest`, `github.com/stretchr/testify`.
@@ -21,7 +21,7 @@
 - `PORT=8080`
 - `DATABASE_URL=postgres://user:pass@host:5432/warp?sslmode=disable`
 - `TEMPLATES_DIR=/templates`
-- `CLOUDFLARED_CONFIG=/home/user/.cloudflared/config.yml`
+- `CLOUDFLARED_CONFIG=~/.cloudflared/config.yml`
 - `CLOUDFLARED_TUNNEL_NAME=sphynx-app`
 - `CLOUDFLARED_CREDENTIALS=/home/user/.cloudflared/xxxx.json`
 - `DOMAIN=sphynx.store`
@@ -31,11 +31,15 @@
 - `GITHUB_CALLBACK_URL=https://panel.yourdomain/callback`
 - `GITHUB_ALLOWED_USERS=user1,user2`
 - `GITHUB_ALLOWED_ORG=your-org`
+- `GITHUB_TOKEN=...`
 - `GITHUB_TEMPLATE_OWNER=Hrafngud`
 - `GITHUB_TEMPLATE_REPO=go-ground`
-- `CLOUDFLARE_API_TOKEN=...`
-- `CLOUDFLARE_ACCOUNT_ID=...`
-- `CLOUDFLARE_ZONE_ID=...`
+- `GITHUB_REPO_OWNER=your-org`
+- `GITHUB_REPO_PRIVATE=true`
+- `CLOUDFLARE_API_TOKEN=...` (optional fallback if UI token not set)
+- `CLOUDFLARE_ACCOUNT_ID=...` (optional fallback)
+- `CLOUDFLARE_ZONE_ID=...` (optional fallback)
+Note: UI-managed settings (domain, GitHub token, Cloudflare token, cloudflared config path) should override env defaults.
 
 ### Data Model (suggested)
 - User: GitHubID (stored as `git_hub_id` by GORM), login, avatar, last_login_at.
@@ -54,6 +58,7 @@
 - Add or update CNAME for `<subdomain>.<domain>`.
 - Keep local `cloudflared` config as the source of ingress rules.
 - Update ingress file safely (preserve catch-all) and restart tunnel.
+- Support a single tunnel at a time and expose tunnel + config preview in the UI.
 
 ### Docker and Host Actions
 - Prefer Docker socket for container control; fall back to `docker compose` CLI if needed.

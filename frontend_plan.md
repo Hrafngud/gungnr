@@ -19,13 +19,16 @@ Status: Replace notes UI with Warp Panel control UI.
 - `/` dashboard view.
 - `/projects` list and deploy flows.
 - `/jobs/:id` detail with log viewer.
-- `/settings` for config/health hints.
+- `/settings` for config/health hints and host integrations.
 
 4) Core Flows
 - Create from template wizard with validation.
 - Deploy existing project flow.
 - Quick local service flow.
 - Job status and log streaming (polling or SSE).
+- Settings UI: base domain, GitHub token, Cloudflare token, cloudflared config path (default to ~/.cloudflared/config.yml).
+- Live cloudflared config preview.
+- Docker services list with quick tunnel forwarding action.
 
 5) UX Polish
 - Toasts for success/error.

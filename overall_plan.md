@@ -6,6 +6,7 @@ Current status: Replace notes CRUD app with Warp Panel web UI and API.
 - Align env variables for backend/frontend and host integrations.
 - Define `.env.example` with GitHub and Cloudflare settings.
 - Ensure Docker, cloudflared, and templates directory access on host.
+- Plan for runtime settings in DB (domain, tokens, cloudflared config path).
 
 2) Backend First
 - Scaffold backend structure and config loader.
@@ -13,11 +14,13 @@ Current status: Replace notes CRUD app with Warp Panel web UI and API.
 - Add integrations for GitHub, Cloudflare, Docker, and cloudflared.
 - Build job runner and persistence models.
 - Add health endpoints for docker and tunnel checks.
+- Add settings endpoints and use them in workflows (domain/token/config path).
 
 3) Frontend Setup
 - Create router, auth store, and base layout.
 - Build project wizard flows and job status pages.
 - Wire API services with auth handling.
+- Add Settings view + host status panels (tunnel, cloudflared config preview, docker services).
 
 4) Dockerization
 - Backend and frontend Dockerfiles (multi-stage).

@@ -10,21 +10,30 @@ import (
 )
 
 type Config struct {
-	AppEnv             string
-	Port               string
-	DatabaseURL        string
-	DBMaxOpenConns     int
-	DBMaxIdleConns     int
-	DBConnMaxLifetime  time.Duration
-	AllowedOrigins     []string
-	SessionSecret      string
-	SessionTTL         time.Duration
-	CookieDomain       string
-	GitHubClientID     string
-	GitHubClientSecret string
-	GitHubCallbackURL  string
-	GitHubAllowedUsers []string
-	GitHubAllowedOrg   string
+	AppEnv              string
+	Port                string
+	DatabaseURL         string
+	DBMaxOpenConns      int
+	DBMaxIdleConns      int
+	DBConnMaxLifetime   time.Duration
+	AllowedOrigins      []string
+	SessionSecret       string
+	SessionTTL          time.Duration
+	CookieDomain        string
+	GitHubClientID      string
+	GitHubClientSecret  string
+	GitHubCallbackURL   string
+	GitHubAllowedUsers  []string
+	GitHubAllowedOrg    string
+	GitHubToken         string
+	GitHubTemplateOwner string
+	GitHubTemplateRepo  string
+	GitHubRepoOwner     string
+	GitHubRepoPrivate   bool
+	TemplatesDir        string
+	Domain              string
+	CloudflaredConfig   string
+	CloudflaredTunnel   string
 }
 
 func Load() (Config, error) {
@@ -45,6 +54,11 @@ func Load() (Config, error) {
 	v.SetDefault("CORS_ALLOWED_ORIGINS", "http://localhost:4173,http://127.0.0.1:4173,http://localhost:5173,http://127.0.0.1:5173")
 	v.SetDefault("SESSION_TTL_HOURS", 12)
 	v.SetDefault("COOKIE_DOMAIN", "")
+	v.SetDefault("TEMPLATES_DIR", "/templates")
+	v.SetDefault("GITHUB_REPO_PRIVATE", true)
+	v.SetDefault("DOMAIN", "")
+	v.SetDefault("CLOUDFLARED_CONFIG", "")
+	v.SetDefault("CLOUDFLARED_TUNNEL_NAME", "")
 
 	v.AutomaticEnv()
 
@@ -56,21 +70,30 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		AppEnv:             v.GetString("APP_ENV"),
-		Port:               v.GetString("PORT"),
-		DatabaseURL:        v.GetString("DATABASE_URL"),
-		DBMaxOpenConns:     v.GetInt("DB_MAX_OPEN_CONNS"),
-		DBMaxIdleConns:     v.GetInt("DB_MAX_IDLE_CONNS"),
-		DBConnMaxLifetime:  time.Duration(v.GetInt("DB_CONN_MAX_LIFETIME_MIN")) * time.Minute,
-		AllowedOrigins:     parseCSV(v.GetString("CORS_ALLOWED_ORIGINS")),
-		SessionSecret:      v.GetString("SESSION_SECRET"),
-		SessionTTL:         time.Duration(v.GetInt("SESSION_TTL_HOURS")) * time.Hour,
-		CookieDomain:       strings.TrimSpace(v.GetString("COOKIE_DOMAIN")),
-		GitHubClientID:     v.GetString("GITHUB_CLIENT_ID"),
-		GitHubClientSecret: v.GetString("GITHUB_CLIENT_SECRET"),
-		GitHubCallbackURL:  v.GetString("GITHUB_CALLBACK_URL"),
-		GitHubAllowedUsers: parseCSV(v.GetString("GITHUB_ALLOWED_USERS")),
-		GitHubAllowedOrg:   v.GetString("GITHUB_ALLOWED_ORG"),
+		AppEnv:              v.GetString("APP_ENV"),
+		Port:                v.GetString("PORT"),
+		DatabaseURL:         v.GetString("DATABASE_URL"),
+		DBMaxOpenConns:      v.GetInt("DB_MAX_OPEN_CONNS"),
+		DBMaxIdleConns:      v.GetInt("DB_MAX_IDLE_CONNS"),
+		DBConnMaxLifetime:   time.Duration(v.GetInt("DB_CONN_MAX_LIFETIME_MIN")) * time.Minute,
+		AllowedOrigins:      parseCSV(v.GetString("CORS_ALLOWED_ORIGINS")),
+		SessionSecret:       v.GetString("SESSION_SECRET"),
+		SessionTTL:          time.Duration(v.GetInt("SESSION_TTL_HOURS")) * time.Hour,
+		CookieDomain:        strings.TrimSpace(v.GetString("COOKIE_DOMAIN")),
+		GitHubClientID:      v.GetString("GITHUB_CLIENT_ID"),
+		GitHubClientSecret:  v.GetString("GITHUB_CLIENT_SECRET"),
+		GitHubCallbackURL:   v.GetString("GITHUB_CALLBACK_URL"),
+		GitHubAllowedUsers:  parseCSV(v.GetString("GITHUB_ALLOWED_USERS")),
+		GitHubAllowedOrg:    v.GetString("GITHUB_ALLOWED_ORG"),
+		GitHubToken:         v.GetString("GITHUB_TOKEN"),
+		GitHubTemplateOwner: v.GetString("GITHUB_TEMPLATE_OWNER"),
+		GitHubTemplateRepo:  v.GetString("GITHUB_TEMPLATE_REPO"),
+		GitHubRepoOwner:     v.GetString("GITHUB_REPO_OWNER"),
+		GitHubRepoPrivate:   v.GetBool("GITHUB_REPO_PRIVATE"),
+		TemplatesDir:        v.GetString("TEMPLATES_DIR"),
+		Domain:              v.GetString("DOMAIN"),
+		CloudflaredConfig:   v.GetString("CLOUDFLARED_CONFIG"),
+		CloudflaredTunnel:   v.GetString("CLOUDFLARED_TUNNEL_NAME"),
 	}
 
 	if cfg.DatabaseURL == "" {
