@@ -1,25 +1,33 @@
-## Go Notes – Project Tracker
+## Warp Panel - Project Tracker
 
-- Scope: Full-stack notes app with Go (Gin + GORM/pgx) backend, Vue 3 + TS + Vite frontend, PostgreSQL, Tailwind v4, Pinia, Axios, Docker Compose for one-command run.
-- Deliverables: CRUD API with clean layering; responsive UI with note list/detail/edit; auth-ready foundations (hashing utilities, structured config); production-ready Dockerfiles + docker-compose.yml.
+- Scope: Web control panel to perform all deploy.sh tasks from a browser. It runs on the host PC (Docker, filesystem, cloudflared access) and is served via Cloudflare Tunnel for remote control.
+- Core flows:
+  - Create new project from a GitHub template, clone locally, patch compose ports, build and run.
+  - Deploy an existing local template project (compose up if needed).
+  - Expose a quick local service (any running port) via tunnel + DNS.
+  - Manage tunnel ingress and DNS for subdomains on the configured zone.
+- Deliverables:
+  - Go API with authenticated GitHub login, Cloudflare and GitHub integrations, job runner, audit logs.
+  - Vue UI for project wizard, status dashboards, and activity logs.
+  - Docker Compose stack with Postgres, API, and web frontend.
 - Tech decisions:
-  - Backend: Gin v1.11+, GORM v2 with pgx/v5 driver, gin-gonic/contrib middleware (CORS/logging), Viper or godotenv for config, golang.org/x/crypto for hashing utilities.
-  - Frontend: Vue 3 + TS + Vite; Tailwind CSS v4 via @tailwindcss/vite; Pinia for state; Axios for HTTP; vue-router for views; optional Headless UI/DaisyUI if needed.
-  - DB: PostgreSQL latest stable; auto-migrations via GORM.
-  - Containers: Separate services for api, web, db; nginx optional if we want reverse proxy.
+  - Backend: Go 1.22+, Gin, GORM + pgx, go-github, cloudflare-go, oauth2.
+  - Frontend: Vue 3 + Vite + TS, Tailwind CSS v4, Pinia, Axios, vue-router.
+  - DB: Postgres for projects, jobs, and audit logs.
+  - Host access: Docker socket bind, templates dir bind, cloudflared config bind.
 - Progress log:
-  - DONE: Scaffolded backend (cmd/internal layers, router with health + CORS, config loader with Viper+godotenv, DB connection stub via pgx/GORM), added bcrypt helpers + test, pulled core Go deps.
-  - DONE: Implemented Note CRUD layers (GORM repo + service validation + Gin controllers/routes), auto-migrate on startup, and added service/handler tests (go test ./... passing).
-- DONE: Bootstrapped frontend foundation (Tailwind v4 plugin wired, Pinia store + Axios client + router scaffold, layout shell + starter views); `npm run build` passing.
-- DONE: Built notes UI (list + detail routes with Pinia-backed create/update/delete, validation, and empty/loading/error states; direct navigation fetches single notes); `npm run build` passing.
-- DONE: Added multi-stage Dockerfiles (Go API + nginx static frontend) and docker-compose stack with Postgres, healthchecks, and shared env defaults (.env.example).
-- TODO: add Makefile/runbook polish for local vs docker workflows and any final QA docs.
+  - TODO: Replace placeholder notes docs with Warp Panel plans and guidelines.
+  - TODO: Implement GitHub OAuth login + allowlist.
+  - TODO: Implement job runner for template creation/deploy/quick-service flows.
+  - TODO: Build UI shell and connect to API.
 
-### Docker / Compose usage
+### Docker / Compose usage (target)
 - Defaults live in `.env.example` (copy to `.env` to override).
-- Build + run: `docker compose up --build` (or `docker-compose up --build` if using the standalone binary).
+- Build + run: `docker compose up --build`.
 - Stop and clean volumes: `docker compose down -v`.
 - Ports: API `http://localhost:8080/healthz`, frontend `http://localhost:4173`, Postgres `localhost:5432`.
 
-### Issues to triage
-- CORS failing in Docker Compose (frontend hitting API returns CORS error). Likely missing allowed origin config for containerized hostnames/ports.
+### Risks to track
+- Security: browser-accessible control panel must strictly restrict who can run host actions.
+- Secrets: GitHub and Cloudflare tokens stored safely (env or encrypted at rest).
+- Safety: job runner must avoid arbitrary command execution and sanitize inputs.

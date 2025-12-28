@@ -1,63 +1,78 @@
 ## Backend Guidelines (Go + Gin + GORM)
 
-### Stack & Versions
-- Go 1.25+ (module already `go-notes`).
-- Gin v1.11+ (high-performance HTTP).
-- GORM v2 (latest) with pgx/v5 (`gorm.io/driver/postgres` + `github.com/jackc/pgx/v5/stdlib`).
-- Middleware: `github.com/gin-gonic/contrib` (CORS/logging) or `github.com/gin-contrib/*` equivalents when needed.
-- Config: `github.com/spf13/viper` (preferred) or `github.com/joho/godotenv` fallback.
-- Security utils: `golang.org/x/crypto/bcrypt` for hashing readiness.
-- Testing: `net/http/httptest`, `github.com/stretchr/testify` for assertions.
+### Stack and Libraries
+- Go 1.22+.
+- Gin for HTTP APIs.
+- GORM v2 with pgx driver for Postgres.
+- GitHub: `github.com/google/go-github/v62` + `golang.org/x/oauth2`.
+- Cloudflare: `github.com/cloudflare/cloudflare-go`.
+- Docker control: use Docker socket and `docker compose` CLI or Docker client (`github.com/docker/docker/client`).
+- Config: Viper or env-only loader; use `.env` for local overrides.
+- Testing: `net/http/httptest`, `github.com/stretchr/testify`.
 
 ### Architecture
-- Layers: models → repositories (DB via GORM) → services (business logic) → controllers (Gin handlers) → routes.
-- Keep DTOs/requests/responses separate from DB models to avoid accidental coupling.
-- Use dependency injection via constructors; avoid global DB/routers except in main wiring.
-- Transactions live in service layer; repositories expose granular operations.
+- Layers: models -> repositories -> services -> controllers -> routes.
+- Separate external integrations into `internal/integrations` (github, cloudflare, docker, cloudflared).
+- Job runner executes long-running tasks with status + logs; avoid blocking HTTP handlers.
+- Avoid arbitrary shell; only allow whitelisted actions with validated inputs.
 
-### Setup (from repo root)
-```bash
-cd backend
-go env -w GOPRIVATE=  # keep default; placeholder if needed
-go get github.com/gin-gonic/gin@latest
-go get gorm.io/gorm@latest gorm.io/driver/postgres@latest github.com/jackc/pgx/v5/stdlib@latest
-go get github.com/gin-gonic/contrib@latest github.com/spf13/viper@latest github.com/joho/godotenv@latest
-go get golang.org/x/crypto@latest github.com/stretchr/testify@latest
-go mod tidy
-```
+### Configuration (env)
+- `APP_ENV=local|prod`
+- `PORT=8080`
+- `DATABASE_URL=postgres://user:pass@host:5432/warp?sslmode=disable`
+- `TEMPLATES_DIR=/templates`
+- `CLOUDFLARED_CONFIG=/home/user/.cloudflared/config.yml`
+- `CLOUDFLARED_TUNNEL_NAME=sphynx-app`
+- `CLOUDFLARED_CREDENTIALS=/home/user/.cloudflared/xxxx.json`
+- `DOMAIN=sphynx.store`
+- `GITHUB_CLIENT_ID=...`
+- `GITHUB_CLIENT_SECRET=...`
+- `GITHUB_CALLBACK_URL=https://panel.yourdomain/callback`
+- `GITHUB_ALLOWED_USERS=user1,user2`
+- `GITHUB_ALLOWED_ORG=your-org`
+- `GITHUB_TEMPLATE_OWNER=Hrafngud`
+- `GITHUB_TEMPLATE_REPO=go-ground`
+- `CLOUDFLARE_API_TOKEN=...`
+- `CLOUDFLARE_ACCOUNT_ID=...`
+- `CLOUDFLARE_ZONE_ID=...`
 
-### Configuration
-- Preferred: `config/` with `config.go` loading via Viper from `.env` and environment variables.
-- Sample env keys:
-  - `APP_ENV=local|prod`
-  - `PORT=8080`
-  - `DATABASE_URL=postgres://user:pass@host:5432/notes?sslmode=disable`
-  - `DB_MAX_OPEN_CONNS=20`, `DB_MAX_IDLE_CONNS=10`, `DB_CONN_MAX_LIFETIME_MIN=30`
-- Boot flow: load config → connect DB (pgx driver) → auto-migrate models → build repositories/services/controllers → start Gin.
+### Data Model (suggested)
+- User: github_id, login, avatar, last_login_at.
+- Project: name, repo_url, path, proxy_port, db_port, status.
+- Deployment: project_id, subdomain, hostname, port, state, last_run_at.
+- Job: type, status, started_at, finished_at, error, log_lines.
+- AuditLog: user_id, action, target, metadata.
 
-### Database & Migrations
-- Use GORM auto-migrate in startup for Note model (id/title/content/timestamps) and future models.
-- Keep `db/migrations.go` wrapper if we need ordered migrations later.
-- Ensure `gorm.Model` or explicit fields for `CreatedAt`, `UpdatedAt`, `DeletedAt` (soft delete optional).
+### GitHub OAuth and API
+- Use OAuth login for UI access. Require allowlist (user or org membership).
+- Store GitHub access token encrypted at rest or in server session (short-lived).
+- Use template repo creation endpoint instead of `gh` CLI.
+
+### Cloudflare Integration
+- Use API token with DNS and Tunnel permissions.
+- Add or update CNAME for `<subdomain>.<domain>`.
+- Keep local `cloudflared` config as the source of ingress rules.
+- Update ingress file safely (preserve catch-all) and restart tunnel.
+
+### Docker and Host Actions
+- Prefer Docker socket for container control; fall back to `docker compose` CLI if needed.
+- Bind mount `TEMPLATES_DIR`, cloudflared config, and credentials into the API container.
+- Validate ports using net listener checks plus Docker port scans.
+- Run long tasks via job queue; provide log streaming to the UI.
 
 ### HTTP API Patterns
-- JSON only; request/response structs with validation.
-- Middlewares: CORS (allow frontend origin), request logging, recovery.
-- Routing: `/api/v1/notes` with CRUD; health at `/healthz`.
-- Error handling: consistent `{"error":"message"}` responses; use `context.AbortWithStatusJSON`.
+- JSON only; request/response DTOs separate from DB models.
+- Routes under `/api/v1/`.
+- Health at `/healthz`; auth-protected routes for actions.
+- Consistent error shape: `{"error":"message"}`.
 
 ### Testing
-- Unit-test services with repository interfaces + fakes.
-- Integration-test handlers with `httptest` and a transient test DB (or SQLite in-memory when behavior matches).
-- Add minimal coverage for create/list/update/delete paths.
-
-### Local Run
-```bash
-cd backend
-go run ./cmd/server
-```
-- Ensure `.env` or exported vars present; log startup info (port/env).
+- Unit-test services with fakes for GitHub/Cloudflare/Docker clients.
+- Integration tests for job flows with mock adapters and temp filesystem.
 
 ### Docker
-- Dockerfile: multi-stage (builder → tiny runtime, e.g., `alpine:3.19`), CGO_ENABLED=0 for static build unless we rely on CGO in pgx (pgx works without CGO).
-- Entrypoint should wait for DB (simple retry script) or rely on Compose healthchecks.
+- Multi-stage Dockerfile for API.
+- Compose should mount:
+  - `/var/run/docker.sock`
+  - templates directory
+  - `~/.cloudflared` or specific files

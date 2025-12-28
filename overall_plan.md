@@ -1,27 +1,30 @@
-## Overall Plan & Dependencies
+## Overall Plan and Dependencies
 
-Current status: Backend and frontend CRUD flows are in place and containerized (API + nginx frontend + Postgres via compose); next focus is docs/polish.
+Current status: Replace notes CRUD app with Warp Panel web UI and API.
 
 1) Foundations
-- Align env variables for backend/frontend Docker; define `.env.example` (API port, DB URL, frontend base URL).
-- Confirm Go/Vue toolchains installed locally.
+- Align env variables for backend/frontend and host integrations.
+- Define `.env.example` with GitHub and Cloudflare settings.
+- Ensure Docker, cloudflared, and templates directory access on host.
 
 2) Backend First
 - Scaffold backend structure and config loader.
-- Add dependencies (Gin, GORM+pgx, Viper, etc.) and implement DB connection + Note model.
-- Build repository/service/controllers + routes; add healthcheck.
-- Write minimal tests; ensure `go test ./...` passes.
+- Implement GitHub OAuth auth + allowlist.
+- Add integrations for GitHub, Cloudflare, Docker, and cloudflared.
+- Build job runner and persistence models.
+- Add health endpoints for docker and tunnel checks.
 
 3) Frontend Setup
-- Install Tailwind v4 plugin, Pinia, Axios, vue-router; wire Vite config.
-- Create layout, router, store, and services; connect to API once backend ready.
+- Create router, auth store, and base layout.
+- Build project wizard flows and job status pages.
+- Wire API services with auth handling.
 
 4) Dockerization
-- Backend Dockerfile (multi-stage), frontend Dockerfile (build → nginx/static).
-- Compose with services: `db` (Postgres), `api`, `web`; set healthchecks and network.
-- Optional nginx reverse proxy for unified hostnames.
+- Backend and frontend Dockerfiles (multi-stage).
+- Compose services: `db`, `api`, `web`.
+- Bind mounts for docker socket, templates dir, and cloudflared config.
 
-5) Polish & Docs
-- Update README/manager.md with run commands.
-- Add Makefile scripts for local dev and docker-compose usage.
-- Final QA: run backend tests, frontend build, compose up check.
+5) Polish and Docs
+- Update runbook and usage instructions.
+- Add Makefile targets for dev and compose.
+- QA: backend tests, frontend build, compose up.
