@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const SessionCookieName = "warp_session"
+
 var (
 	ErrInvalidSession = errors.New("invalid session")
 	ErrExpiredSession = errors.New("session expired")

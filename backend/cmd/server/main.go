@@ -7,6 +7,7 @@ import (
 	"go-notes/internal/config"
 	"go-notes/internal/controller"
 	"go-notes/internal/db"
+	"go-notes/internal/middleware"
 	"go-notes/internal/repository"
 	"go-notes/internal/router"
 	"go-notes/internal/service"
@@ -28,14 +29,24 @@ func main() {
 	}
 
 	userRepo := repository.NewGormUserRepository(gormDB)
+	projectRepo := repository.NewGormProjectRepository(gormDB)
+	jobRepo := repository.NewGormJobRepository(gormDB)
+
 	authService := service.NewAuthService(cfg, userRepo)
+	projectService := service.NewProjectService(projectRepo)
+	jobService := service.NewJobService(jobRepo)
+
 	sessionManager := auth.NewManager(cfg.SessionSecret, cfg.SessionTTL)
 	secureCookie := cfg.AppEnv == "prod"
+	cookieDomain := cfg.CookieDomain
 
 	r := router.NewRouter(router.Dependencies{
 		Health:         controller.NewHealthController(),
-		Auth:           controller.NewAuthController(authService, sessionManager, secureCookie),
+		Auth:           controller.NewAuthController(authService, sessionManager, secureCookie, cookieDomain),
+		Projects:       controller.NewProjectsController(projectService),
+		Jobs:           controller.NewJobsController(jobService),
 		AllowedOrigins: cfg.AllowedOrigins,
+		AuthMiddleware: middleware.AuthRequired(sessionManager),
 	})
 
 	log.Printf("server starting on %s", cfg.Port)
