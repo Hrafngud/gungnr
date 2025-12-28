@@ -38,7 +38,7 @@
 - `CLOUDFLARE_ZONE_ID=...`
 
 ### Data Model (suggested)
-- User: github_id, login, avatar, last_login_at.
+- User: GitHubID (stored as `git_hub_id` by GORM), login, avatar, last_login_at.
 - Project: name, repo_url, path, proxy_port, db_port, status.
 - Deployment: project_id, subdomain, hostname, port, state, last_run_at.
 - Job: type, status, started_at, finished_at, error, log_lines.
