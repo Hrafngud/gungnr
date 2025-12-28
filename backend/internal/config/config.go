@@ -32,6 +32,7 @@ type Config struct {
 	GitHubRepoPrivate   bool
 	TemplatesDir        string
 	Domain              string
+	CloudflareAPIToken  string
 	CloudflaredConfig   string
 	CloudflaredTunnel   string
 }
@@ -57,7 +58,8 @@ func Load() (Config, error) {
 	v.SetDefault("TEMPLATES_DIR", "/templates")
 	v.SetDefault("GITHUB_REPO_PRIVATE", true)
 	v.SetDefault("DOMAIN", "")
-	v.SetDefault("CLOUDFLARED_CONFIG", "")
+	v.SetDefault("CLOUDFLARE_API_TOKEN", "")
+	v.SetDefault("CLOUDFLARED_CONFIG", "~/.cloudflared/config.yml")
 	v.SetDefault("CLOUDFLARED_TUNNEL_NAME", "")
 
 	v.AutomaticEnv()
@@ -92,6 +94,7 @@ func Load() (Config, error) {
 		GitHubRepoPrivate:   v.GetBool("GITHUB_REPO_PRIVATE"),
 		TemplatesDir:        v.GetString("TEMPLATES_DIR"),
 		Domain:              v.GetString("DOMAIN"),
+		CloudflareAPIToken:  v.GetString("CLOUDFLARE_API_TOKEN"),
 		CloudflaredConfig:   v.GetString("CLOUDFLARED_CONFIG"),
 		CloudflaredTunnel:   v.GetString("CLOUDFLARED_TUNNEL_NAME"),
 	}

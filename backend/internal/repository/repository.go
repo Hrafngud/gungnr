@@ -29,3 +29,8 @@ type JobRepository interface {
 	MarkFinished(ctx context.Context, id uint, status string, finishedAt time.Time, errMsg string) error
 	AppendLog(ctx context.Context, id uint, line string) error
 }
+
+type SettingsRepository interface {
+	Get(ctx context.Context) (*models.Settings, error)
+	Save(ctx context.Context, settings *models.Settings) error
+}

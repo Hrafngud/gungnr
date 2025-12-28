@@ -17,10 +17,10 @@
   - Host access: Docker socket bind, templates dir bind, cloudflared config bind.
 - Progress log:
   - TODO: Replace placeholder notes docs with Warp Panel plans and guidelines.
-  - TODO: Add settings persistence + UI for base domain, GitHub token, and cloudflared config path (default to ~/.cloudflared/config.yml).
-  - TODO: Add Cloudflare token input flow in UI and store securely for API calls.
-  - TODO: Surface running Docker services and allow quick tunnel forwarding with subdomains.
-  - TODO: Add tunnel status + cloudflared config preview in the UI.
+  - DONE: Add settings persistence + UI for base domain, GitHub token, Cloudflare token, and cloudflared config path (default to ~/.cloudflared/config.yml).
+  - DONE: Surface running Docker containers and allow quick tunnel forwarding with subdomains.
+  - DONE: Add cloudflared config preview in the Settings UI.
+  - TODO: Add tunnel status health checks and status panel in the UI.
 - DONE: Implement GitHub OAuth login + allowlist scaffolding with session cookies.
 - DONE: Protect `/api/v1` routes with auth middleware and add project/job list placeholders.
 - DONE: Add integrations stubs, job runner scaffold, and Projects/Jobs UI views.

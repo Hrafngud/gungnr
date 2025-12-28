@@ -40,6 +40,9 @@ func (c *Client) EnsureDNS(ctx context.Context, hostname string) error {
 	args = append(args, c.cfg.CloudflaredTunnel, hostname)
 
 	cmd := exec.CommandContext(ctx, "cloudflared", args...)
+	if env := c.commandEnv(); len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("cloudflared dns route failed: %w: %s", err, strings.TrimSpace(string(output)))
@@ -121,6 +124,9 @@ func (c *Client) RestartTunnel(ctx context.Context) error {
 	args = append(args, c.cfg.CloudflaredTunnel)
 
 	cmd := exec.CommandContext(ctx, "cloudflared", args...)
+	if env := c.commandEnv(); len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start cloudflared tunnel: %w", err)
 	}
@@ -128,6 +134,13 @@ func (c *Client) RestartTunnel(ctx context.Context) error {
 		_ = cmd.Process.Release()
 	}
 	return nil
+}
+
+func (c *Client) commandEnv() []string {
+	if strings.TrimSpace(c.cfg.CloudflareAPIToken) == "" {
+		return nil
+	}
+	return []string{fmt.Sprintf("CLOUDFLARE_API_TOKEN=%s", c.cfg.CloudflareAPIToken)}
 }
 
 func writeFileAtomic(path string, data []byte) error {
