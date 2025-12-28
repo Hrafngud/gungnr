@@ -21,6 +21,7 @@ const oauthStateCookie = "warp_oauth_state"
 
 type AuthController struct {
 	service      *service.AuthService
+	audit        *service.AuditService
 	sessions     *auth.Manager
 	secureCookie bool
 	cookieDomain string
@@ -33,9 +34,10 @@ type authUserResponse struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-func NewAuthController(service *service.AuthService, sessions *auth.Manager, secureCookie bool, cookieDomain string) *AuthController {
+func NewAuthController(service *service.AuthService, audit *service.AuditService, sessions *auth.Manager, secureCookie bool, cookieDomain string) *AuthController {
 	return &AuthController{
 		service:      service,
+		audit:        audit,
 		sessions:     sessions,
 		secureCookie: secureCookie,
 		cookieDomain: cookieDomain,
@@ -99,6 +101,10 @@ func (c *AuthController) Callback(ctx *gin.Context) {
 	maxAge := int(time.Until(session.ExpiresAt).Seconds())
 	c.setCookie(ctx, auth.SessionCookieName, value, maxAge)
 
+	_ = c.logAudit(ctx, session, "auth.login", session.Login, map[string]any{
+		"userId": session.UserID,
+	})
+
 	ctx.Redirect(http.StatusFound, "/")
 }
 
@@ -118,6 +124,12 @@ func (c *AuthController) Me(ctx *gin.Context) {
 }
 
 func (c *AuthController) Logout(ctx *gin.Context) {
+	session, _ := c.readSession(ctx)
+	if session.UserID != 0 {
+		_ = c.logAudit(ctx, session, "auth.logout", session.Login, map[string]any{
+			"userId": session.UserID,
+		})
+	}
 	c.clearCookie(ctx, auth.SessionCookieName)
 	ctx.Status(http.StatusNoContent)
 }
@@ -154,6 +166,19 @@ func (c *AuthController) resolveCallbackURL(ctx *gin.Context) string {
 	}
 
 	return configured
+}
+
+func (c *AuthController) logAudit(ctx *gin.Context, session auth.Session, action, target string, metadata map[string]any) error {
+	if c.audit == nil {
+		return nil
+	}
+	return c.audit.Log(ctx.Request.Context(), service.AuditEntry{
+		UserID:    session.UserID,
+		UserLogin: session.Login,
+		Action:    action,
+		Target:    target,
+		Metadata:  metadata,
+	})
 }
 
 func callbackURLFromRequest(ctx *gin.Context, host string) string {

@@ -4,6 +4,7 @@ import DashboardView from '@/views/DashboardView.vue'
 import ProjectsView from '@/views/ProjectsView.vue'
 import JobsView from '@/views/JobsView.vue'
 import JobDetailView from '@/views/JobDetailView.vue'
+import ActivityView from '@/views/ActivityView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 import { useAuthStore } from '@/stores/auth'
 
@@ -40,6 +41,12 @@ const router = createRouter({
       name: 'job-detail',
       component: JobDetailView,
       meta: { title: 'Job log' },
+    },
+    {
+      path: '/activity',
+      name: 'activity',
+      component: ActivityView,
+      meta: { title: 'Activity' },
     },
     {
       path: '/settings',

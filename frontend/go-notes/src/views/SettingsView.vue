@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
+import { healthApi } from '@/services/health'
 import { settingsApi } from '@/services/settings'
 import { hostApi } from '@/services/host'
 import { projectsApi } from '@/services/projects'
 import { apiErrorMessage } from '@/services/api'
 import type { CloudflaredPreview, Settings } from '@/types/settings'
 import type { DockerContainer } from '@/types/host'
+import type { DockerHealth, TunnelHealth } from '@/types/health'
 
 const settingsForm = reactive<Settings>({
   baseDomain: '',
@@ -23,6 +25,10 @@ const success = ref<string | null>(null)
 const preview = ref<CloudflaredPreview | null>(null)
 const previewLoading = ref(false)
 const previewError = ref<string | null>(null)
+
+const dockerHealth = ref<DockerHealth | null>(null)
+const tunnelHealth = ref<TunnelHealth | null>(null)
+const healthLoading = ref(false)
 
 const containers = ref<DockerContainer[]>([])
 const containersLoading = ref(false)
@@ -46,8 +52,23 @@ const statusTone = (status: string) => {
   return 'bg-neutral-100 text-neutral-600'
 }
 
+const healthTone = (status?: string) => {
+  switch (status) {
+    case 'ok':
+      return 'bg-emerald-100 text-emerald-700'
+    case 'warning':
+      return 'bg-amber-100 text-amber-700'
+    case 'missing':
+      return 'bg-neutral-100 text-neutral-600'
+    case 'error':
+      return 'bg-rose-100 text-rose-700'
+    default:
+      return 'bg-neutral-100 text-neutral-600'
+  }
+}
+
 const hostPortsFor = (container: DockerContainer) => {
-  const ports = container.portBindings
+  const ports = (container.portBindings ?? [])
     .filter((binding) => binding.published && binding.hostPort)
     .map((binding) => binding.hostPort)
   return Array.from(new Set(ports))
@@ -116,6 +137,28 @@ const loadPreview = async () => {
   }
 }
 
+const loadHealth = async () => {
+  healthLoading.value = true
+  const [dockerResult, tunnelResult] = await Promise.allSettled([
+    healthApi.docker(),
+    healthApi.tunnel(),
+  ])
+
+  if (dockerResult.status === 'fulfilled') {
+    dockerHealth.value = dockerResult.value.data
+  } else {
+    dockerHealth.value = { status: 'error', detail: apiErrorMessage(dockerResult.reason) }
+  }
+
+  if (tunnelResult.status === 'fulfilled') {
+    tunnelHealth.value = tunnelResult.value.data
+  } else {
+    tunnelHealth.value = { status: 'error', detail: apiErrorMessage(tunnelResult.reason) }
+  }
+
+  healthLoading.value = false
+}
+
 const loadContainers = async () => {
   containersLoading.value = true
   containersError.value = null
@@ -160,7 +203,7 @@ const queueForward = async (container: DockerContainer) => {
 }
 
 onMounted(async () => {
-  await Promise.all([loadSettings(), loadPreview(), loadContainers()])
+  await Promise.all([loadSettings(), loadPreview(), loadHealth(), loadContainers()])
 })
 </script>
 
@@ -198,6 +241,119 @@ onMounted(async () => {
       class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
     >
       {{ success }}
+    </div>
+
+    <div class="space-y-4 rounded-[28px] border border-black/10 bg-white/85 p-6">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p class="text-xs uppercase tracking-[0.3em] text-neutral-500">Status</p>
+          <h2 class="mt-2 text-lg font-semibold text-neutral-900">
+            Host integrations
+          </h2>
+        </div>
+        <button
+          type="button"
+          class="rounded-full border border-black/10 bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-neutral-700 transition hover:-translate-y-0.5"
+          @click="loadHealth"
+        >
+          Refresh status
+        </button>
+      </div>
+
+      <div
+        v-if="healthLoading"
+        class="rounded-2xl border border-dashed border-black/10 bg-white/70 p-4 text-xs text-neutral-500"
+      >
+        Checking host integrations...
+      </div>
+
+      <div v-else class="grid gap-4 md:grid-cols-2">
+        <article
+          class="rounded-[22px] border border-black/10 bg-white/90 p-5 shadow-[0_20px_50px_-45px_rgba(0,0,0,0.45)]"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-xs uppercase tracking-[0.3em] text-neutral-500">
+                Docker
+              </p>
+              <h3 class="mt-2 text-base font-semibold text-neutral-900">
+                Engine status
+              </h3>
+            </div>
+            <span
+              class="rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em]"
+              :class="healthTone(dockerHealth?.status)"
+            >
+              {{ dockerHealth?.status || 'unknown' }}
+            </span>
+          </div>
+
+          <div class="mt-4 space-y-2 text-xs text-neutral-600">
+            <div class="flex items-center justify-between gap-2">
+              <span>Containers</span>
+              <span class="text-neutral-900">
+                {{
+                  dockerHealth && dockerHealth.status === 'ok'
+                    ? dockerHealth.containers
+                    : '—'
+                }}
+              </span>
+            </div>
+          </div>
+
+          <p v-if="dockerHealth?.detail" class="mt-3 text-xs text-neutral-500">
+            {{ dockerHealth.detail }}
+          </p>
+        </article>
+
+        <article
+          class="rounded-[22px] border border-black/10 bg-white/90 p-5 shadow-[0_20px_50px_-45px_rgba(0,0,0,0.45)]"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-xs uppercase tracking-[0.3em] text-neutral-500">
+                Tunnel
+              </p>
+              <h3 class="mt-2 text-base font-semibold text-neutral-900">
+                Cloudflared status
+              </h3>
+            </div>
+            <span
+              class="rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em]"
+              :class="healthTone(tunnelHealth?.status)"
+            >
+              {{ tunnelHealth?.status || 'unknown' }}
+            </span>
+          </div>
+
+          <div class="mt-4 space-y-2 text-xs text-neutral-600">
+            <div class="flex items-center justify-between gap-2">
+              <span>Tunnel</span>
+              <span class="text-neutral-900">
+                {{ tunnelHealth?.tunnel || '—' }}
+              </span>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <span>Connectors</span>
+              <span class="text-neutral-900">
+                {{
+                  tunnelHealth &&
+                  (tunnelHealth.status === 'ok' || tunnelHealth.status === 'warning')
+                    ? tunnelHealth.connections
+                    : '—'
+                }}
+              </span>
+            </div>
+          </div>
+
+          <p v-if="tunnelHealth?.configPath" class="mt-3 text-xs text-neutral-500">
+            {{ tunnelHealth.configPath }}
+          </p>
+          <p v-if="tunnelHealth?.detail" class="mt-2 text-xs text-neutral-500">
+            {{ tunnelHealth.detail }}
+          </p>
+        </article>
+      </div>
     </div>
 
     <div class="grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">

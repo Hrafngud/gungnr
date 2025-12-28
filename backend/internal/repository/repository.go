@@ -34,3 +34,8 @@ type SettingsRepository interface {
 	Get(ctx context.Context) (*models.Settings, error)
 	Save(ctx context.Context, settings *models.Settings) error
 }
+
+type AuditLogRepository interface {
+	List(ctx context.Context, limit int) ([]models.AuditLog, error)
+	Create(ctx context.Context, entry *models.AuditLog) error
+}

@@ -1,21 +1,41 @@
 package controller
 
-import "github.com/gin-gonic/gin"
+import (
+	"net/http"
 
-type HealthController struct{}
+	"github.com/gin-gonic/gin"
 
-func NewHealthController() *HealthController {
-	return &HealthController{}
+	"go-notes/internal/service"
+)
+
+type HealthController struct {
+	service *service.HealthService
+}
+
+func NewHealthController(service *service.HealthService) *HealthController {
+	return &HealthController{service: service}
 }
 
 func (h *HealthController) Register(r *gin.Engine) {
 	r.GET("/healthz", func(ctx *gin.Context) {
-		ctx.JSON(200, gin.H{"status": "ok"})
+		ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
-	r.GET("/health/docker", func(ctx *gin.Context) {
-		ctx.JSON(200, gin.H{"status": "ok", "detail": "stub"})
-	})
-	r.GET("/health/tunnel", func(ctx *gin.Context) {
-		ctx.JSON(200, gin.H{"status": "ok", "detail": "stub"})
-	})
+	r.GET("/health/docker", h.Docker)
+	r.GET("/health/tunnel", h.Tunnel)
+}
+
+func (h *HealthController) Docker(ctx *gin.Context) {
+	if h.service == nil {
+		ctx.JSON(http.StatusOK, gin.H{"status": "error", "detail": "health service unavailable"})
+		return
+	}
+	ctx.JSON(http.StatusOK, h.service.Docker(ctx.Request.Context()))
+}
+
+func (h *HealthController) Tunnel(ctx *gin.Context) {
+	if h.service == nil {
+		ctx.JSON(http.StatusOK, gin.H{"status": "error", "detail": "health service unavailable"})
+		return
+	}
+	ctx.JSON(http.StatusOK, h.service.Tunnel(ctx.Request.Context()))
 }

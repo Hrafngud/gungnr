@@ -25,7 +25,7 @@ const defaultBaseUrl = (() => {
 })()
 
 const envBaseUrl = import.meta.env.VITE_API_BASE_URL
-const resolvedBaseUrl = resolveBaseUrl(envBaseUrl, defaultBaseUrl)
+const resolvedBaseUrl = normalizeBaseUrl(resolveBaseUrl(envBaseUrl, defaultBaseUrl))
 const apiBaseUrl = resolvedBaseUrl.replace(/\/$/, '')
 
 function resolveBaseUrl(envUrl: string | undefined, fallback: string): string {
@@ -40,6 +40,32 @@ function resolveBaseUrl(envUrl: string | undefined, fallback: string): string {
   }
 
   return envUrl
+}
+
+function normalizeBaseUrl(value: string): string {
+  if (typeof window === 'undefined') {
+    return value
+  }
+
+  if (!value.startsWith('http://') && !value.startsWith('https://')) {
+    return value
+  }
+
+  try {
+    const parsed = new URL(value)
+    if (
+      window.location.protocol === 'https:' &&
+      parsed.protocol === 'http:' &&
+      parsed.hostname === window.location.hostname
+    ) {
+      parsed.protocol = 'https:'
+      return parsed.toString()
+    }
+  } catch {
+    return value
+  }
+
+  return value
 }
 
 function isAbsoluteLocalhostUrl(value: string): boolean {

@@ -45,6 +45,15 @@ type Job struct {
 	LogLines   string `gorm:"type:text"`
 }
 
+type AuditLog struct {
+	gorm.Model
+	UserID    uint   `gorm:"index"`
+	UserLogin string `gorm:"size:64"`
+	Action    string `gorm:"size:64;not null"`
+	Target    string `gorm:"size:255"`
+	Metadata  string `gorm:"type:text"`
+}
+
 type Settings struct {
 	gorm.Model
 	BaseDomain            string `gorm:"size:255"`
