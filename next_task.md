@@ -1,6 +1,6 @@
 ## Next Task
 
-Continue the Warp Panel scaffold:
-- Backend: add auth middleware for protecting `/api/v1` routes, and scaffold job runner + `/api/v1/projects` and `/api/v1/jobs` list endpoints (placeholders).
-- Integrations: add GitHub and Cloudflare client stubs under `internal/integrations`.
-- Frontend: add Projects and Jobs views with empty states wired to the new endpoints.
+Build on the scaffold with real workflows:
+- Backend: implement job runner persistence + log streaming, and add create/deploy endpoints for projects (template, existing, quick service).
+- Integrations: wire GitHub template repo creation and Cloudflare DNS + tunnel ingress updates.
+- Frontend: add create-from-template wizard, deploy existing flow, and a job detail/log view.

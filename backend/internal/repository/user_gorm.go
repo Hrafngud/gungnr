@@ -18,7 +18,7 @@ func NewGormUserRepository(db *gorm.DB) *GormUserRepository {
 
 func (r *GormUserRepository) UpsertFromGitHub(githubID int64, login, avatarURL string) (*models.User, error) {
 	var user models.User
-	err := r.db.Where("github_id = ?", githubID).First(&user).Error
+	err := r.db.Where(&models.User{GitHubID: githubID}).First(&user).Error
 	now := time.Now()
 
 	if err != nil {

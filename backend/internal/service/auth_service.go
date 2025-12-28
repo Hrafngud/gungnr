@@ -38,17 +38,19 @@ func NewAuthService(cfg config.Config, userRepo repository.UserRepository) *Auth
 	}
 }
 
-func (s *AuthService) AuthURL(state string) string {
-	return s.oauthConfig.AuthCodeURL(state, oauth2.AccessTypeOnline)
+func (s *AuthService) AuthURL(state, redirectURL string) string {
+	cfg := s.oauthConfigForRedirect(redirectURL)
+	return cfg.AuthCodeURL(state)
 }
 
-func (s *AuthService) Exchange(ctx context.Context, code string) (*models.User, error) {
-	token, err := s.oauthConfig.Exchange(ctx, code)
+func (s *AuthService) Exchange(ctx context.Context, code, redirectURL string) (*models.User, error) {
+	cfg := s.oauthConfigForRedirect(redirectURL)
+	token, err := cfg.Exchange(ctx, code)
 	if err != nil {
 		return nil, fmt.Errorf("exchange token: %w", err)
 	}
 
-	client := github.NewClient(s.oauthConfig.Client(ctx, token))
+	client := github.NewClient(cfg.Client(ctx, token))
 	ghUser, _, err := client.Users.Get(ctx, "")
 	if err != nil {
 		return nil, fmt.Errorf("fetch github user: %w", err)
@@ -72,6 +74,20 @@ func (s *AuthService) Exchange(ctx context.Context, code string) (*models.User, 
 	}
 
 	return user, nil
+}
+
+func (s *AuthService) CallbackURL() string {
+	return s.oauthConfig.RedirectURL
+}
+
+func (s *AuthService) oauthConfigForRedirect(redirectURL string) *oauth2.Config {
+	if redirectURL == "" || redirectURL == s.oauthConfig.RedirectURL {
+		return s.oauthConfig
+	}
+
+	cfg := *s.oauthConfig
+	cfg.RedirectURL = redirectURL
+	return &cfg
 }
 
 func (s *AuthService) isAllowed(ctx context.Context, client *github.Client, login string) (bool, error) {

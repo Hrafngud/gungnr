@@ -4,7 +4,11 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,15 +17,13 @@ import (
 	"go-notes/internal/service"
 )
 
-const (
-	sessionCookieName = "warp_session"
-	oauthStateCookie  = "warp_oauth_state"
-)
+const oauthStateCookie = "warp_oauth_state"
 
 type AuthController struct {
 	service      *service.AuthService
 	sessions     *auth.Manager
 	secureCookie bool
+	cookieDomain string
 }
 
 type authUserResponse struct {
@@ -31,11 +33,12 @@ type authUserResponse struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-func NewAuthController(service *service.AuthService, sessions *auth.Manager, secureCookie bool) *AuthController {
+func NewAuthController(service *service.AuthService, sessions *auth.Manager, secureCookie bool, cookieDomain string) *AuthController {
 	return &AuthController{
 		service:      service,
 		sessions:     sessions,
 		secureCookie: secureCookie,
+		cookieDomain: cookieDomain,
 	}
 }
 
@@ -54,7 +57,8 @@ func (c *AuthController) Login(ctx *gin.Context) {
 	}
 
 	c.setCookie(ctx, oauthStateCookie, state, 300)
-	ctx.Redirect(http.StatusFound, c.service.AuthURL(state))
+	callbackURL := c.resolveCallbackURL(ctx)
+	ctx.Redirect(http.StatusFound, c.service.AuthURL(state, callbackURL))
 }
 
 func (c *AuthController) Callback(ctx *gin.Context) {
@@ -73,7 +77,8 @@ func (c *AuthController) Callback(ctx *gin.Context) {
 
 	c.clearCookie(ctx, oauthStateCookie)
 
-	user, err := c.service.Exchange(ctx, code)
+	callbackURL := c.resolveCallbackURL(ctx)
+	user, err := c.service.Exchange(ctx, code, callbackURL)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrUnauthorized):
@@ -92,7 +97,7 @@ func (c *AuthController) Callback(ctx *gin.Context) {
 	}
 
 	maxAge := int(time.Until(session.ExpiresAt).Seconds())
-	c.setCookie(ctx, sessionCookieName, value, maxAge)
+	c.setCookie(ctx, auth.SessionCookieName, value, maxAge)
 
 	ctx.Redirect(http.StatusFound, "/")
 }
@@ -113,12 +118,12 @@ func (c *AuthController) Me(ctx *gin.Context) {
 }
 
 func (c *AuthController) Logout(ctx *gin.Context) {
-	c.clearCookie(ctx, sessionCookieName)
+	c.clearCookie(ctx, auth.SessionCookieName)
 	ctx.Status(http.StatusNoContent)
 }
 
 func (c *AuthController) readSession(ctx *gin.Context) (auth.Session, error) {
-	value, err := ctx.Cookie(sessionCookieName)
+	value, err := ctx.Cookie(auth.SessionCookieName)
 	if err != nil {
 		return auth.Session{}, err
 	}
@@ -127,12 +132,66 @@ func (c *AuthController) readSession(ctx *gin.Context) (auth.Session, error) {
 
 func (c *AuthController) setCookie(ctx *gin.Context, name, value string, maxAge int) {
 	ctx.SetSameSite(http.SameSiteLaxMode)
-	ctx.SetCookie(name, value, maxAge, "/", "", c.secureCookie, true)
+	ctx.SetCookie(name, value, maxAge, "/", c.cookieDomain, c.secureCookie, true)
 }
 
 func (c *AuthController) clearCookie(ctx *gin.Context, name string) {
 	ctx.SetSameSite(http.SameSiteLaxMode)
-	ctx.SetCookie(name, "", -1, "/", "", c.secureCookie, true)
+	ctx.SetCookie(name, "", -1, "/", c.cookieDomain, c.secureCookie, true)
+}
+
+func (c *AuthController) resolveCallbackURL(ctx *gin.Context) string {
+	configured := c.service.CallbackURL()
+	requestHost := requestHost(ctx)
+
+	if configured == "" {
+		return callbackURLFromRequest(ctx, requestHost)
+	}
+
+	parsed, err := url.Parse(configured)
+	if err == nil && isLocalHost(parsed.Hostname()) && !isLocalHost(requestHost) {
+		return callbackURLFromRequest(ctx, requestHost)
+	}
+
+	return configured
+}
+
+func callbackURLFromRequest(ctx *gin.Context, host string) string {
+	return fmt.Sprintf("%s://%s/auth/callback", requestScheme(ctx), host)
+}
+
+func requestScheme(ctx *gin.Context) string {
+	if proto := ctx.GetHeader("X-Forwarded-Proto"); proto != "" {
+		return strings.TrimSpace(strings.Split(proto, ",")[0])
+	}
+	if ctx.Request.TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
+func requestHost(ctx *gin.Context) string {
+	if forwarded := ctx.GetHeader("X-Forwarded-Host"); forwarded != "" {
+		return strings.TrimSpace(strings.Split(forwarded, ",")[0])
+	}
+	return ctx.Request.Host
+}
+
+func isLocalHost(host string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(hostnameOnly(host)))
+	return normalized == "localhost" || normalized == "127.0.0.1" || normalized == "::1"
+}
+
+func hostnameOnly(host string) string {
+	if host == "" {
+		return ""
+	}
+	if strings.Contains(host, ":") {
+		if parsed, _, err := net.SplitHostPort(host); err == nil {
+			return parsed
+		}
+	}
+	return host
 }
 
 func generateState() (string, error) {

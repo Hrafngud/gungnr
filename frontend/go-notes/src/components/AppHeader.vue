@@ -32,6 +32,21 @@ const auth = useAuthStore()
           Dashboard
         </RouterLink>
         <RouterLink
+          to="/projects"
+          class="rounded-full px-4 py-2 transition hover:bg-black/5"
+          active-class="bg-black/5 text-neutral-900"
+        >
+          Projects
+        </RouterLink>
+        <RouterLink
+          to="/jobs"
+          class="rounded-full px-4 py-2 transition hover:bg-black/5"
+          active-class="bg-black/5 text-neutral-900"
+        >
+          Jobs
+        </RouterLink>
+        <RouterLink
+          v-if="!auth.user"
           to="/login"
           class="rounded-full px-4 py-2 transition hover:bg-black/5"
         >

@@ -18,8 +18,14 @@
 - Progress log:
   - TODO: Replace placeholder notes docs with Warp Panel plans and guidelines.
 - DONE: Implement GitHub OAuth login + allowlist scaffolding with session cookies.
-- TODO: Implement job runner for template creation/deploy/quick-service flows.
-- DONE: Build UI shell and connect to API for `/auth/me`.
+- DONE: Protect `/api/v1` routes with auth middleware and add project/job list placeholders.
+- DONE: Add integrations stubs, job runner scaffold, and Projects/Jobs UI views.
+- DONE: Gate UI routes behind auth (login-only access for unauthenticated users).
+- DONE: Resolve GitHub OAuth callback URLs from the public host when local defaults leak.
+  - DONE: Allow configuring auth cookie domain to avoid invalid OAuth state on cross-subdomain callbacks.
+  - DONE: Fix GitHub user lookup to use the correct GORM column mapping.
+  - TODO: Implement job runner for template creation/deploy/quick-service flows.
+  - DONE: Build UI shell and connect to API for `/auth/me`.
 
 ### Docker / Compose usage (target)
 - Defaults live in `.env.example` (copy to `.env` to override).

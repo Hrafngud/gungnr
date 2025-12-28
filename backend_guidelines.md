@@ -25,6 +25,7 @@
 - `CLOUDFLARED_TUNNEL_NAME=sphynx-app`
 - `CLOUDFLARED_CREDENTIALS=/home/user/.cloudflared/xxxx.json`
 - `DOMAIN=sphynx.store`
+- `COOKIE_DOMAIN=sphynx.store`
 - `GITHUB_CLIENT_ID=...`
 - `GITHUB_CLIENT_SECRET=...`
 - `GITHUB_CALLBACK_URL=https://panel.yourdomain/callback`

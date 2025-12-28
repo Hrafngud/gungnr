@@ -10,11 +10,55 @@ export class ApiError extends Error {
   }
 }
 
-const defaultBaseUrl = 'http://localhost:8080'
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || defaultBaseUrl).replace(
-  /\/$/,
-  '',
-)
+const defaultBaseUrl = (() => {
+  if (typeof window === 'undefined') {
+    return 'http://localhost:8080'
+  }
+
+  const hostname = window.location.hostname
+  const localHosts = new Set(['localhost', '127.0.0.1'])
+  if (localHosts.has(hostname)) {
+    return 'http://localhost:8080'
+  }
+
+  return window.location.origin
+})()
+
+const envBaseUrl = import.meta.env.VITE_API_BASE_URL
+const resolvedBaseUrl = resolveBaseUrl(envBaseUrl, defaultBaseUrl)
+const apiBaseUrl = resolvedBaseUrl.replace(/\/$/, '')
+
+function resolveBaseUrl(envUrl: string | undefined, fallback: string): string {
+  if (!envUrl) return fallback
+
+  if (typeof window === 'undefined') {
+    return envUrl
+  }
+
+  if (isAbsoluteLocalhostUrl(envUrl) && !isLocalHost(window.location.hostname)) {
+    return window.location.origin
+  }
+
+  return envUrl
+}
+
+function isAbsoluteLocalhostUrl(value: string): boolean {
+  if (!value.startsWith('http://') && !value.startsWith('https://')) {
+    return false
+  }
+
+  try {
+    const parsed = new URL(value)
+    return isLocalHost(parsed.hostname)
+  } catch {
+    return false
+  }
+}
+
+function isLocalHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase()
+  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1'
+}
 
 export const api = axios.create({
   baseURL: apiBaseUrl,

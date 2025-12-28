@@ -19,6 +19,7 @@ type Config struct {
 	AllowedOrigins     []string
 	SessionSecret      string
 	SessionTTL         time.Duration
+	CookieDomain       string
 	GitHubClientID     string
 	GitHubClientSecret string
 	GitHubCallbackURL  string
@@ -43,6 +44,7 @@ func Load() (Config, error) {
 	v.SetDefault("DB_CONN_MAX_LIFETIME_MIN", 30)
 	v.SetDefault("CORS_ALLOWED_ORIGINS", "http://localhost:4173,http://127.0.0.1:4173,http://localhost:5173,http://127.0.0.1:5173")
 	v.SetDefault("SESSION_TTL_HOURS", 12)
+	v.SetDefault("COOKIE_DOMAIN", "")
 
 	v.AutomaticEnv()
 
@@ -63,6 +65,7 @@ func Load() (Config, error) {
 		AllowedOrigins:     parseCSV(v.GetString("CORS_ALLOWED_ORIGINS")),
 		SessionSecret:      v.GetString("SESSION_SECRET"),
 		SessionTTL:         time.Duration(v.GetInt("SESSION_TTL_HOURS")) * time.Hour,
+		CookieDomain:       strings.TrimSpace(v.GetString("COOKIE_DOMAIN")),
 		GitHubClientID:     v.GetString("GITHUB_CLIENT_ID"),
 		GitHubClientSecret: v.GetString("GITHUB_CLIENT_SECRET"),
 		GitHubCallbackURL:  v.GetString("GITHUB_CALLBACK_URL"),
