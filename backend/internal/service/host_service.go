@@ -111,7 +111,7 @@ func parseDockerLabels(raw string) map[string]string {
 
 func parseDockerPorts(raw string) []DockerPortBinding {
 	if strings.TrimSpace(raw) == "" {
-		return nil
+		return []DockerPortBinding{}
 	}
 
 	var bindings []DockerPortBinding

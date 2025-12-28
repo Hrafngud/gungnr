@@ -17,10 +17,12 @@
   - Host access: Docker socket bind, templates dir bind, cloudflared config bind.
 - Progress log:
   - TODO: Replace placeholder notes docs with Warp Panel plans and guidelines.
-  - DONE: Add settings persistence + UI for base domain, GitHub token, Cloudflare token, and cloudflared config path (default to ~/.cloudflared/config.yml).
-  - DONE: Surface running Docker containers and allow quick tunnel forwarding with subdomains.
-  - DONE: Add cloudflared config preview in the Settings UI.
-  - TODO: Add tunnel status health checks and status panel in the UI.
+- DONE: Add root README runbook + Makefile; compose smoke test succeeded (warning: buildx plugin missing).
+- DONE: Add settings persistence + UI for base domain, GitHub token, Cloudflare token, and cloudflared config path (default to ~/.cloudflared/config.yml).
+- DONE: Surface running Docker containers and allow quick tunnel forwarding with subdomains.
+- DONE: Add cloudflared config preview in the Settings UI.
+- DONE: Validation pass after Dockerfile arch fix (compose build + end-to-end flows per user).
+- DONE: Add tunnel status health checks and status panel in the UI.
 - DONE: Implement GitHub OAuth login + allowlist scaffolding with session cookies.
 - DONE: Protect `/api/v1` routes with auth middleware and add project/job list placeholders.
 - DONE: Add integrations stubs, job runner scaffold, and Projects/Jobs UI views.
@@ -32,12 +34,14 @@
 - DONE: Wire template creation, deploy existing, and quick service endpoints + UI flows.
 - DONE: Add GitHub template creation + cloudflared DNS/ingress updates in workflows.
 - DONE: Build UI shell and connect to API for `/auth/me`.
+- DONE: Add audit log model, API, and Activity UI for tracking user actions.
+- DONE: Compose smoke test after audit logging (buildx warning persists).
 
 ### Docker / Compose usage (target)
 - Defaults live in `.env.example` (copy to `.env` to override).
 - Build + run: `docker compose up --build`.
 - Stop and clean volumes: `docker compose down -v`.
-- Ports: API `http://localhost:8080/healthz`, frontend `http://localhost:4173`, Postgres `localhost:5432`.
+- Ports: proxy `http://localhost` (80), Postgres `localhost:5432`. API/web ports are internal unless you uncomment mappings in `docker-compose.yml`.
 
 ### Risks to track
 - Security: browser-accessible control panel must strictly restrict who can run host actions.

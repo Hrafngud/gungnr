@@ -1,6 +1,6 @@
 ## Next Task
 
-Validate the updated Warp Panel stack after the Dockerfile arch fix:
-- Run `docker compose up --build`.
-- Verify Settings persistence (domain/GitHub/Cloudflare token/config path), cloudflared preview, and Docker container list.
-- Run template creation, deploy existing, quick service, and container-forward flows end-to-end.
+Add request tracing and structured logging:
+- Add request ID middleware (propagate via response header + context).
+- Include request IDs in API log output for key handlers.
+- Expose request ID on error responses for easier debugging.

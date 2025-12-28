@@ -33,12 +33,16 @@ func main() {
 	projectRepo := repository.NewGormProjectRepository(gormDB)
 	jobRepo := repository.NewGormJobRepository(gormDB)
 	settingsRepo := repository.NewGormSettingsRepository(gormDB)
+	auditRepo := repository.NewGormAuditLogRepository(gormDB)
 
 	authService := service.NewAuthService(cfg, userRepo)
 	jobRunner := jobs.NewRunner(jobRepo)
 	jobService := service.NewJobService(jobRepo, jobRunner)
 	projectService := service.NewProjectService(cfg, projectRepo, jobService)
 	settingsService := service.NewSettingsService(cfg, settingsRepo)
+	auditService := service.NewAuditService(auditRepo)
+	hostService := service.NewHostService()
+	healthService := service.NewHealthService(hostService, settingsService)
 
 	workflows := service.NewProjectWorkflows(cfg, projectRepo, settingsService)
 	workflows.Register(jobRunner)
@@ -48,12 +52,13 @@ func main() {
 	cookieDomain := cfg.CookieDomain
 
 	r := router.NewRouter(router.Dependencies{
-		Health:         controller.NewHealthController(),
-		Auth:           controller.NewAuthController(authService, sessionManager, secureCookie, cookieDomain),
-		Projects:       controller.NewProjectsController(projectService),
+		Health:         controller.NewHealthController(healthService),
+		Auth:           controller.NewAuthController(authService, auditService, sessionManager, secureCookie, cookieDomain),
+		Projects:       controller.NewProjectsController(projectService, auditService),
 		Jobs:           controller.NewJobsController(jobService),
-		Settings:       controller.NewSettingsController(settingsService),
-		Host:           controller.NewHostController(service.NewHostService()),
+		Settings:       controller.NewSettingsController(settingsService, auditService),
+		Host:           controller.NewHostController(hostService),
+		Audit:          controller.NewAuditController(auditService),
 		AllowedOrigins: cfg.AllowedOrigins,
 		AuthMiddleware: middleware.AuthRequired(sessionManager),
 	})

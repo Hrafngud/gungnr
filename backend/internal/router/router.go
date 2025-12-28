@@ -14,6 +14,7 @@ type Dependencies struct {
 	Jobs           *controller.JobsController
 	Settings       *controller.SettingsController
 	Host           *controller.HostController
+	Audit          *controller.AuditController
 	AllowedOrigins []string
 	AuthMiddleware gin.HandlerFunc
 }
@@ -45,6 +46,9 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	}
 	if deps.Host != nil {
 		deps.Host.Register(api)
+	}
+	if deps.Audit != nil {
+		deps.Audit.Register(api)
 	}
 
 	return r

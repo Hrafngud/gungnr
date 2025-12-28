@@ -6,11 +6,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"go-notes/internal/middleware"
 	"go-notes/internal/service"
 )
 
 type ProjectsController struct {
 	service *service.ProjectService
+	audit   *service.AuditService
 }
 
 type projectResponse struct {
@@ -25,8 +27,8 @@ type projectResponse struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-func NewProjectsController(service *service.ProjectService) *ProjectsController {
-	return &ProjectsController{service: service}
+func NewProjectsController(service *service.ProjectService, audit *service.AuditService) *ProjectsController {
+	return &ProjectsController{service: service, audit: audit}
 }
 
 func (c *ProjectsController) Register(r gin.IRoutes) {
@@ -84,6 +86,17 @@ func (c *ProjectsController) CreateFromTemplate(ctx *gin.Context) {
 		return
 	}
 
+	subdomain := req.Subdomain
+	if subdomain == "" {
+		subdomain = req.Name
+	}
+	c.logAudit(ctx, "project.create_template", req.Name, map[string]any{
+		"subdomain": subdomain,
+		"proxyPort": req.ProxyPort,
+		"dbPort":    req.DBPort,
+		"jobId":     job.ID,
+	})
+
 	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
 }
 
@@ -99,6 +112,12 @@ func (c *ProjectsController) DeployExisting(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	c.logAudit(ctx, "project.deploy_existing", req.Name, map[string]any{
+		"subdomain": req.Subdomain,
+		"port":      req.Port,
+		"jobId":     job.ID,
+	})
 
 	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
 }
@@ -116,5 +135,24 @@ func (c *ProjectsController) QuickService(ctx *gin.Context) {
 		return
 	}
 
+	c.logAudit(ctx, "project.quick_service", req.Subdomain, map[string]any{
+		"port":  req.Port,
+		"jobId": job.ID,
+	})
+
 	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
+}
+
+func (c *ProjectsController) logAudit(ctx *gin.Context, action, target string, metadata map[string]any) {
+	if c.audit == nil {
+		return
+	}
+	session, _ := middleware.SessionFromContext(ctx)
+	_ = c.audit.Log(ctx.Request.Context(), service.AuditEntry{
+		UserID:    session.UserID,
+		UserLogin: session.Login,
+		Action:    action,
+		Target:    target,
+		Metadata:  metadata,
+	})
 }
