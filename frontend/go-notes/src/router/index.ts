@@ -1,11 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from '@/views/LoginView.vue'
-import DashboardView from '@/views/DashboardView.vue'
-import ProjectsView from '@/views/ProjectsView.vue'
-import JobsView from '@/views/JobsView.vue'
+import HomeView from '@/views/HomeView.vue'
+import OverviewView from '@/views/OverviewView.vue'
+import HostSettingsView from '@/views/HostSettingsView.vue'
+import NetworkingView from '@/views/NetworkingView.vue'
+import GitHubView from '@/views/GitHubView.vue'
 import JobDetailView from '@/views/JobDetailView.vue'
-import ActivityView from '@/views/ActivityView.vue'
-import SettingsView from '@/views/SettingsView.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const router = createRouter({
@@ -13,28 +13,40 @@ const router = createRouter({
   scrollBehavior: () => ({ top: 0 }),
   routes: [
     {
-      path: '/',
-      name: 'dashboard',
-      component: DashboardView,
-      meta: { title: 'Warp Panel' },
-    },
-    {
       path: '/login',
       name: 'login',
       component: LoginView,
-      meta: { title: 'Sign in' },
+      meta: { title: 'Sign in', layout: 'auth' },
     },
     {
-      path: '/projects',
-      name: 'projects',
-      component: ProjectsView,
-      meta: { title: 'Projects' },
+      path: '/',
+      name: 'home',
+      component: HomeView,
+      meta: { title: 'Home' },
     },
     {
-      path: '/jobs',
-      name: 'jobs',
-      component: JobsView,
-      meta: { title: 'Jobs' },
+      path: '/overview',
+      name: 'overview',
+      component: OverviewView,
+      meta: { title: 'Overview' },
+    },
+    {
+      path: '/host-settings',
+      name: 'host-settings',
+      component: HostSettingsView,
+      meta: { title: 'Host Settings' },
+    },
+    {
+      path: '/networking',
+      name: 'networking',
+      component: NetworkingView,
+      meta: { title: 'Networking' },
+    },
+    {
+      path: '/github',
+      name: 'github',
+      component: GitHubView,
+      meta: { title: 'GitHub' },
     },
     {
       path: '/jobs/:id',
@@ -43,16 +55,20 @@ const router = createRouter({
       meta: { title: 'Job log' },
     },
     {
+      path: '/projects',
+      redirect: '/',
+    },
+    {
+      path: '/jobs',
+      redirect: '/overview',
+    },
+    {
       path: '/activity',
-      name: 'activity',
-      component: ActivityView,
-      meta: { title: 'Activity' },
+      redirect: '/overview',
     },
     {
       path: '/settings',
-      name: 'settings',
-      component: SettingsView,
-      meta: { title: 'Settings' },
+      redirect: '/host-settings',
     },
     {
       path: '/:pathMatch(.*)*',
@@ -70,7 +86,7 @@ router.beforeEach(async (to) => {
 
   if (to.name === 'login') {
     if (auth.isAuthenticated) {
-      return { name: 'dashboard' }
+      return { name: 'home' }
     }
     return true
   }

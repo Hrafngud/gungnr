@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
+import UiBadge from '@/components/ui/UiBadge.vue'
+import UiButton from '@/components/ui/UiButton.vue'
+import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
+import UiListRow from '@/components/ui/UiListRow.vue'
+import UiPanel from '@/components/ui/UiPanel.vue'
+import UiState from '@/components/ui/UiState.vue'
 import { useJobsStore } from '@/stores/jobs'
 import { useAuthStore } from '@/stores/auth'
+
+type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
 const jobsStore = useJobsStore()
 const auth = useAuthStore()
@@ -13,141 +21,152 @@ onMounted(() => {
   }
 })
 
-const statusTone = (status: string) => {
-  if (status === 'completed') return 'bg-emerald-100 text-emerald-700'
-  if (status === 'running') return 'bg-sky-100 text-sky-700'
-  if (status === 'failed') return 'bg-rose-100 text-rose-700'
-  return 'bg-neutral-100 text-neutral-600'
+const statusTone = (status: string): BadgeTone => {
+  if (status === 'completed') return 'ok'
+  if (status === 'running') return 'warn'
+  if (status === 'failed') return 'error'
+  return 'neutral'
 }
 </script>
 
 <template>
-  <section class="space-y-8">
+  <section class="page space-y-8">
     <div class="flex flex-wrap items-center justify-between gap-4">
       <div>
-        <p class="text-xs uppercase tracking-[0.3em] text-neutral-500">
+        <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
           Jobs
         </p>
-        <h1 class="mt-2 text-3xl font-semibold text-neutral-900">
+        <h1 class="mt-2 text-3xl font-semibold text-[color:var(--text)]">
           Automation timeline
         </h1>
-        <p class="mt-2 text-sm text-neutral-600">
+        <p class="mt-2 text-sm text-[color:var(--muted)]">
           Deployment tasks will surface here with status and logs.
         </p>
       </div>
-      <button
-        type="button"
-        class="inline-flex items-center justify-center rounded-2xl border border-black/10 bg-white/80 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5"
+      <UiButton
+        variant="ghost"
+        size="sm"
+        :disabled="jobsStore.loading"
         @click="jobsStore.fetchJobs"
       >
-        Refresh
-      </button>
+        <span class="flex items-center gap-2">
+          <UiInlineSpinner v-if="jobsStore.loading" />
+          Refresh
+        </span>
+      </UiButton>
     </div>
 
-    <div
-      v-if="jobsStore.error"
-      class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
-    >
-      {{ jobsStore.error }}
-    </div>
-
-    <div
-      v-if="jobsStore.loading"
-      class="rounded-[28px] border border-dashed border-black/10 bg-white/70 p-6 text-sm text-neutral-500"
-    >
-      Loading job history from the panel API...
-    </div>
-
-    <div
-      v-else-if="jobsStore.jobs.length === 0"
-      class="grid gap-6 rounded-[28px] border border-black/10 bg-white/80 p-6 lg:grid-cols-[1.05fr,0.95fr]"
+    <UiPanel
+      variant="soft"
+      class="flex flex-wrap items-center justify-between gap-3 p-4 text-xs text-[color:var(--muted)]"
     >
       <div>
-        <h2 class="text-xl font-semibold text-neutral-900">No jobs yet</h2>
-        <p class="mt-2 text-sm text-neutral-600">
+        <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+          Day-to-day guidance
+        </p>
+        <p class="mt-1 text-sm text-[color:var(--muted)]">
+          Run deploys or tunnel changes, then monitor status and open logs to confirm each step.
+        </p>
+      </div>
+      <UiButton :as="RouterLink" to="/" variant="ghost" size="sm">
+        Open quick deploy
+      </UiButton>
+    </UiPanel>
+
+    <UiState v-if="jobsStore.error" tone="error">
+      {{ jobsStore.error }}
+    </UiState>
+
+    <UiState v-else-if="jobsStore.loading" loading>
+      Loading job history from the panel API...
+    </UiState>
+
+    <UiPanel
+      v-else-if="jobsStore.jobs.length === 0"
+      variant="raise"
+      class="grid gap-6 p-6 lg:grid-cols-[1.05fr,0.95fr]"
+    >
+      <div>
+        <h2 class="text-xl font-semibold text-[color:var(--text)]">No jobs yet</h2>
+        <p class="mt-2 text-sm text-[color:var(--muted)]">
           Once you run a template build, deploy, or tunnel update, the job status
           and logs will appear here.
         </p>
-        <div class="mt-4 flex flex-wrap gap-3 text-xs text-neutral-600">
-          <span class="rounded-full border border-black/10 bg-white/70 px-3 py-1">
+        <div class="mt-4 flex flex-wrap gap-3 text-xs text-[color:var(--muted)]">
+          <UiButton as="span" variant="chip" size="chip">
             Template builds
-          </span>
-          <span class="rounded-full border border-black/10 bg-white/70 px-3 py-1">
+          </UiButton>
+          <UiButton as="span" variant="chip" size="chip">
             DNS updates
-          </span>
-          <span class="rounded-full border border-black/10 bg-white/70 px-3 py-1">
+          </UiButton>
+          <UiButton as="span" variant="chip" size="chip">
             Tunnel restarts
-          </span>
+          </UiButton>
         </div>
       </div>
-      <div class="rounded-2xl border border-black/10 bg-white/90 p-4 text-sm text-neutral-600">
-        <p class="font-semibold text-neutral-800">Ready when you are</p>
+      <UiPanel variant="soft" class="p-4 text-sm text-[color:var(--muted)]">
+        <p class="font-semibold text-[color:var(--text)]">Ready when you are</p>
         <p class="mt-2">
           Kick off a deployment flow to populate the timeline.
         </p>
-        <RouterLink
+        <UiButton
           v-if="!auth.user"
+          :as="RouterLink"
           to="/login"
-          class="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-black/10 bg-[color:var(--accent-soft)] px-4 py-2 text-sm font-semibold text-[color:var(--accent-ink)]"
+          variant="primary"
+          size="md"
+          class="mt-4 w-full justify-center"
         >
           Sign in to continue
-        </RouterLink>
-      </div>
-    </div>
+        </UiButton>
+      </UiPanel>
+    </UiPanel>
 
     <div v-else class="space-y-4">
-      <article
+      <UiListRow
         v-for="job in jobsStore.jobs"
         :key="job.id"
-        class="rounded-[24px] border border-black/10 bg-white/90 p-5 shadow-[0_20px_50px_-40px_rgba(0,0,0,0.55)]"
+        as="article"
+        class="space-y-4"
       >
         <div class="flex items-start justify-between gap-3">
           <div>
-            <p class="text-xs uppercase tracking-[0.3em] text-neutral-500">Job</p>
-            <h2 class="mt-1 text-lg font-semibold text-neutral-900">
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Job</p>
+            <h2 class="mt-1 text-lg font-semibold text-[color:var(--text)]">
               {{ job.type }}
             </h2>
           </div>
-          <span
-            class="rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em]"
-            :class="statusTone(job.status)"
-          >
+          <UiBadge :tone="statusTone(job.status)">
             {{ job.status || 'pending' }}
-          </span>
+          </UiBadge>
         </div>
 
-        <div class="mt-4 grid gap-2 text-xs text-neutral-600 sm:grid-cols-2">
+        <div class="mt-4 grid gap-2 text-xs text-[color:var(--muted)] sm:grid-cols-2">
           <div class="flex items-center justify-between">
             <span>Started</span>
-            <span class="font-semibold text-neutral-900">
-              {{ job.startedAt ? new Date(job.startedAt).toLocaleString() : '—' }}
+            <span class="font-semibold text-[color:var(--text)]">
+              {{ job.startedAt ? new Date(job.startedAt).toLocaleString() : 'n/a' }}
             </span>
           </div>
           <div class="flex items-center justify-between">
             <span>Finished</span>
-            <span class="font-semibold text-neutral-900">
-              {{ job.finishedAt ? new Date(job.finishedAt).toLocaleString() : '—' }}
+            <span class="font-semibold text-[color:var(--text)]">
+              {{ job.finishedAt ? new Date(job.finishedAt).toLocaleString() : 'n/a' }}
             </span>
           </div>
         </div>
 
-        <div
-          v-if="job.error"
-          class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700"
-        >
+        <UiState v-if="job.error" tone="error">
           {{ job.error }}
-        </div>
+        </UiState>
 
-        <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-neutral-500">
+        <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-[color:var(--muted)]">
           <span>Created {{ new Date(job.createdAt).toLocaleString() }}</span>
-          <RouterLink
-            :to="`/jobs/${job.id}`"
-            class="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-xs font-semibold text-neutral-700 transition hover:-translate-y-0.5"
-          >
+          <UiButton :as="RouterLink" :to="`/jobs/${job.id}`" variant="ghost" size="sm">
             View log
-          </RouterLink>
+          </UiButton>
         </div>
-      </article>
+      </UiListRow>
     </div>
   </section>
 </template>
