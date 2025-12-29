@@ -18,9 +18,11 @@ Current status: Replace notes CRUD app with Warp Panel web UI and API.
 
 3) Frontend Setup
 - Create router, auth store, and base layout.
-- Build project wizard flows and job status pages.
+- Build component system with variants, loading states, and animations.
+- Build sidebar navigation, top bar, and footer.
+- Implement Home, Overview, Host Settings, Networking, and GitHub pages.
 - Wire API services with auth handling.
-- Add Settings view + host status panels (tunnel, cloudflared config preview, docker services).
+- Add onboarding overlay journey and day-to-day flow polish.
 
 4) Dockerization
 - Backend and frontend Dockerfiles (multi-stage).

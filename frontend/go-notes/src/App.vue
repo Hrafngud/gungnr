@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
-import { RouterView } from 'vue-router'
-import AppHeader from './components/AppHeader.vue'
+import { computed, onMounted } from 'vue'
+import { RouterView, useRoute } from 'vue-router'
+import AppShell from '@/components/AppShell.vue'
+import UiToastStack from '@/components/ui/UiToastStack.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
+const route = useRoute()
+
+const useShell = computed(() => route.meta?.layout !== 'auth')
 
 onMounted(() => {
   auth.fetchUser()
@@ -12,10 +16,13 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen text-neutral-900">
-    <AppHeader />
-    <main class="mx-auto max-w-6xl px-6 pb-16 pt-10">
-      <RouterView />
-    </main>
-  </div>
+  <AppShell v-if="useShell">
+    <RouterView />
+  </AppShell>
+
+  <main v-else class="min-h-screen px-6 py-16">
+    <RouterView />
+  </main>
+
+  <UiToastStack />
 </template>

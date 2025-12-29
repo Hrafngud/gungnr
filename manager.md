@@ -6,9 +6,10 @@
   - Deploy an existing local template project (compose up if needed).
   - Expose a quick local service (any running port) via tunnel + DNS.
   - Manage tunnel ingress and DNS for subdomains on the configured zone.
+  - Guide onboarding with step-by-step hints and links for required API keys.
 - Deliverables:
   - Go API with authenticated GitHub login, Cloudflare and GitHub integrations, job runner, audit logs.
-  - Vue UI for project wizard, status dashboards, and activity logs.
+  - Vue UI with dark zinc skeuomorphic theme, sidebar navigation, and dedicated pages for Home, Overview, Host Settings, Networking, and GitHub config.
   - Docker Compose stack with Postgres, API, and web frontend.
 - Tech decisions:
   - Backend: Go 1.22+, Gin, GORM + pgx, go-github, cloudflared CLI, oauth2.
@@ -17,6 +18,11 @@
   - Host access: Docker socket bind, templates dir bind, cloudflared config bind.
 - Progress log:
   - TODO: Replace placeholder notes docs with Warp Panel plans and guidelines.
+  - TODO: Visual rework for dark zinc skeuomorphic theme, component variants, and standardized animations.
+  - TODO: Rebuild navigation with expandable sidebar, top bar, and footer.
+  - TODO: Split pages into Home, Overview, Host Settings, Networking, and GitHub config.
+  - TODO: Add onboarding overlay journey and day-to-day flow polish.
+  - TODO: Update login to two-column layout and popup GitHub OAuth.
 - DONE: Add root README runbook + Makefile; compose smoke test succeeded (warning: buildx plugin missing).
 - DONE: Add settings persistence + UI for base domain, GitHub token, Cloudflare token, and cloudflared config path (default to ~/.cloudflared/config.yml).
 - DONE: Surface running Docker containers and allow quick tunnel forwarding with subdomains.
@@ -36,6 +42,27 @@
 - DONE: Build UI shell and connect to API for `/auth/me`.
 - DONE: Add audit log model, API, and Activity UI for tracking user actions.
 - DONE: Compose smoke test after audit logging (buildx warning persists).
+- DONE: Apply dark zinc theme tokens and base styles for the frontend refresh.
+- DONE: Replace the header with the new AppShell (sidebar + top bar) navigation.
+- DONE: Introduce the new page map (Home, Overview, Host Settings, Networking, GitHub), add new views, update nav, and redirect legacy routes.
+- DONE: Refactor the Home view to the Host Status + Quick Deploy layout.
+- DONE: Refactor the Overview view to the host snapshot layout with container highlights, job summary, and recent activity; restyle Jobs/Activity panels to the dark zinc variants.
+- DONE: Refactor the Host Settings view to the dark zinc tokens and AppShell layout.
+- DONE: Refactor the Networking view to the dark zinc tokens and AppShell layout.
+- DONE: Refactor the GitHub view to the dark zinc tokens and AppShell layout.
+- DONE: Introduce base UI components (Button, Input, Select, Toggle, Panel, Badge) and refactor Home to use them.
+- DONE: Migrate the Overview view to base UI components with shared state blocks.
+- DONE: Add ListRow, Tooltip, and Modal/Sheet base components plus a shared loading state pattern.
+- DONE: Migrate Jobs and Activity views to base components + UiState blocks; update Host Settings, Networking, and GitHub with UiState/UiListRow and shared loading indicators.
+- DONE: Flatten the UI to a zinc monochrome palette (remove gradients/glass), simplify Home host status layout, and align login + job log styling.
+- DONE: Add popup GitHub OAuth flow with /auth/me polling for the login view.
+- DONE: Redirect to the panel after successful GitHub OAuth login.
+- DONE: Add toast notifications and standardized inline feedback for Host Settings and Home deploy forms.
+- DONE: Add onboarding overlays for Home + Host Settings with API key links, plus day-to-day guidance callouts for quick deploy and recent activity.
+- DONE: Extend onboarding overlays to Networking and GitHub with refresh + token guidance.
+- DONE: Add day-to-day guidance callouts in Jobs and Activity, and introduce turquoise accent/status colors for indicators.
+- NOTE: Compose smoke test still blocked; docker daemon access denied in sandbox when running `docker compose up --build` (run manually on host).
+- NOTE: Frontend smoke test blocked; `npm run build` failed because `vue-tsc` is not available (install deps locally).
 
 ### Docker / Compose usage (target)
 - Defaults live in `.env.example` (copy to `.env` to override).

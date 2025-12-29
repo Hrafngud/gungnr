@@ -29,35 +29,35 @@ const auth = useAuthStore()
           class="rounded-full px-4 py-2 transition hover:bg-black/5"
           active-class="bg-black/5 text-neutral-900"
         >
-          Dashboard
+          Home
         </RouterLink>
         <RouterLink
-          to="/projects"
+          to="/overview"
           class="rounded-full px-4 py-2 transition hover:bg-black/5"
           active-class="bg-black/5 text-neutral-900"
         >
-          Projects
+          Overview
         </RouterLink>
         <RouterLink
-          to="/jobs"
+          to="/host-settings"
           class="rounded-full px-4 py-2 transition hover:bg-black/5"
           active-class="bg-black/5 text-neutral-900"
         >
-          Jobs
+          Host Settings
         </RouterLink>
         <RouterLink
-          to="/activity"
+          to="/networking"
           class="rounded-full px-4 py-2 transition hover:bg-black/5"
           active-class="bg-black/5 text-neutral-900"
         >
-          Activity
+          Networking
         </RouterLink>
         <RouterLink
-          to="/settings"
+          to="/github"
           class="rounded-full px-4 py-2 transition hover:bg-black/5"
           active-class="bg-black/5 text-neutral-900"
         >
-          Settings
+          GitHub
         </RouterLink>
         <RouterLink
           v-if="!auth.user"

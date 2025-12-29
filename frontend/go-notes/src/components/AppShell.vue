@@ -1,0 +1,182 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+import NavIcon from '@/components/NavIcon.vue'
+
+type NavItem = {
+  label: string
+  to: string
+  icon: 'home' | 'overview' | 'host' | 'network' | 'github'
+  helper: string
+}
+
+const navItems: NavItem[] = [
+  {
+    label: 'Home',
+    to: '/',
+    icon: 'home',
+    helper: 'Quick deploy',
+  },
+  {
+    label: 'Overview',
+    to: '/overview',
+    icon: 'overview',
+    helper: 'Jobs and activity',
+  },
+  {
+    label: 'Host Settings',
+    to: '/host-settings',
+    icon: 'host',
+    helper: 'Runtime config',
+  },
+  {
+    label: 'Networking',
+    to: '/networking',
+    icon: 'network',
+    helper: 'Tunnel health',
+  },
+  {
+    label: 'GitHub',
+    to: '/github',
+    icon: 'github',
+    helper: 'Templates',
+  },
+]
+
+const route = useRoute()
+const auth = useAuthStore()
+
+const pageTitle = computed(() => {
+  const title = route.meta?.title as string | undefined
+  return title ?? 'Warp Panel'
+})
+
+const isActive = (to: string) => {
+  if (to === '/') return route.path === '/'
+  return route.path.startsWith(to)
+}
+</script>
+
+<template>
+  <div class="min-h-screen text-[color:var(--text)]">
+    <div class="flex">
+      <aside
+        class="sticky top-0 hidden h-screen w-72 flex-col gap-6 border-r border-[color:var(--border)] bg-[color:var(--surface)] px-6 py-8 lg:flex"
+      >
+        <div class="flex items-center gap-3">
+          <div class="grid h-12 w-12 place-items-center rounded-2xl bg-[color:var(--surface-3)] text-lg font-semibold text-[color:var(--accent-ink)]">
+            WP
+          </div>
+          <div>
+            <p class="text-xs uppercase tracking-[0.35em] text-[color:var(--muted-2)]">
+              Warp Panel
+            </p>
+            <p class="text-sm font-semibold text-[color:var(--text)]">
+              Host control surface
+            </p>
+          </div>
+        </div>
+
+        <nav class="space-y-2">
+          <RouterLink
+            v-for="item in navItems"
+            :key="item.to"
+            :to="item.to"
+            class="group flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-semibold transition"
+            :class="isActive(item.to)
+              ? 'bg-[color:var(--surface-2)] text-[color:var(--text)]'
+              : 'text-[color:var(--muted)] hover:bg-[color:var(--surface-2)]'"
+          >
+            <NavIcon
+              :name="item.icon"
+              class="h-4 w-4 text-[color:var(--accent-ink)]"
+            />
+            <div>
+              <p class="text-sm">{{ item.label }}</p>
+              <p class="text-[11px] font-medium text-[color:var(--muted-2)]">
+                {{ item.helper }}
+              </p>
+            </div>
+          </RouterLink>
+        </nav>
+
+        <div class="mt-auto space-y-3 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-2)] p-4 text-xs text-[color:var(--muted)]">
+          <p class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+            Session
+          </p>
+          <div v-if="auth.user" class="flex items-center gap-3">
+            <img
+              :src="auth.user.avatarUrl"
+              :alt="auth.user.login"
+              class="h-9 w-9 rounded-xl object-cover"
+            />
+            <div>
+              <p class="text-sm font-semibold text-[color:var(--text)]">
+                @{{ auth.user.login }}
+              </p>
+              <p class="text-[11px] text-[color:var(--muted-2)]">
+                Session active
+              </p>
+            </div>
+          </div>
+          <p v-else class="text-[color:var(--muted-2)]">
+            Sign in to unlock deploy actions.
+          </p>
+        </div>
+      </aside>
+
+      <div class="min-h-screen flex-1">
+        <header class="sticky top-0 z-20 border-b border-[color:var(--border)] bg-[color:var(--bg-soft)] px-6 py-4">
+          <div class="mx-auto flex w-full max-w-6xl items-center justify-between">
+            <div>
+              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                {{ pageTitle }}
+              </p>
+              <h1 class="text-lg font-semibold text-[color:var(--text)]">
+                Warp Panel
+              </h1>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="badge status-neutral">Host ready</span>
+              <button
+                v-if="auth.user"
+                type="button"
+                class="btn btn-ghost px-4 py-2 text-xs font-semibold"
+                @click="auth.logout"
+              >
+                Sign out
+              </button>
+              <RouterLink
+                v-else
+                to="/login"
+                class="btn btn-primary px-4 py-2 text-xs font-semibold"
+              >
+                Sign in
+              </RouterLink>
+            </div>
+          </div>
+
+          <nav class="mx-auto mt-4 flex w-full max-w-6xl gap-2 overflow-x-auto pb-2 lg:hidden">
+            <RouterLink
+              v-for="item in navItems"
+              :key="`mobile-${item.to}`"
+              :to="item.to"
+              class="flex shrink-0 items-center gap-2 rounded-full border border-[color:var(--border)] px-3 py-1 text-xs font-semibold"
+              :class="isActive(item.to)
+                ? 'bg-[color:var(--surface-2)] text-[color:var(--text)]'
+                : 'text-[color:var(--muted)]'"
+            >
+              <NavIcon :name="item.icon" class="h-3.5 w-3.5" />
+              {{ item.label }}
+            </RouterLink>
+          </nav>
+        </header>
+
+        <main class="mx-auto w-full max-w-6xl px-6 pb-16 pt-8">
+          <slot />
+        </main>
+      </div>
+    </div>
+  </div>
+</template>

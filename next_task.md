@@ -1,6 +1,40 @@
 ## Next Task
 
-Add request tracing and structured logging:
-- Add request ID middleware (propagate via response header + context).
-- Include request IDs in API log output for key handlers.
-- Expose request ID on error responses for easier debugging.
+Frontend refactor (step 1 complete):
+- DONE: Apply the dark zinc skeuomorphic theme tokens and base styles.
+- DONE: Replace the header with the new shell (sidebar + top bar) navigation.
+- DONE: Introduce the new page map (Home, Overview, Host Settings, Networking, GitHub) and update routing.
+- DONE: Refactor the Home view to match the planned Host Status + Quick Deploy layout.
+- DONE: Refactor the Overview view to match the planned in-depth host snapshot layout.
+  - DONE: Expand with container list highlights, job timeline summary, resource snapshot placeholders, and recent activity.
+  - DONE: Restyle Jobs and Activity panels to the dark zinc tokens/variants and AppShell conventions.
+- DONE: Refactor the Host Settings view to the dark zinc tokens and AppShell layout.
+  - DONE: Restyle host integrations, settings forms, and container lists to use the new panel, badge, and button variants.
+  - DONE: Verify GitHub OAuth login flow works (popup auth + /auth/me) so the panel is accessible after login.
+- DONE: Refactor the Networking view to the dark zinc tokens and AppShell layout.
+  - DONE: Restyle tunnel status, ingress preview, and refresh actions to use the new panel, badge, and button variants.
+- DONE: Ensure successful login redirects to the panel after GitHub OAuth.
+- DONE: Refactor the GitHub view to the dark zinc tokens and AppShell layout.
+  - DONE: Restyle token status, templates, and refresh actions to use the new panel, badge, and button variants.
+- DONE: Begin step 2 (Reusable Component System).
+  - DONE: Introduce base UI components (Button, Input, Select, Toggle, Card/Panel, Badge/Status).
+  - DONE: Migrate at least one view (start with Home) to use the new base components.
+- DONE: Continue step 2 (Reusable Component System).
+  - DONE: Migrate the Overview view to the new base components.
+  - DONE: Add the remaining base components (ListRow, Tooltip, Modal/Sheet) and wire in a shared loading state pattern.
+- DONE: Continue step 2 (Reusable Component System).
+  - DONE: Migrate Jobs and Activity list views to the base components + shared UiState blocks.
+  - DONE: Update Host Settings, Networking, and GitHub views to use UiState/UiListRow where applicable.
+  - DONE: Add a lightweight shared skeleton/inline spinner pattern for page-level loading.
+- DONE: Finish step 2 (Reusable Component System).
+  - DONE: Add toast system + inline feedback patterns for actions.
+  - DONE: Standardize success/error surfacing on form submissions (Host Settings, Home deploy flows).
+- DONE: Begin step 6 (Journeys).
+  - DONE: Add onboarding overlay flow with highlights + API key links (Home + Host Settings).
+  - DONE: Add day-to-day guidance callouts for quick deploy and recent activity.
+- DONE: Continue step 6 (Journeys).
+  - DONE: Extend onboarding overlays to Networking and GitHub.
+  - DONE: Add day-to-day guidance callouts in Jobs and Activity views.
+- NEXT: Begin step 7 (Data and Integration).
+  - Wire GitHub template catalog + allowlist data once API endpoints are ready.
+  - Expand Networking with DNS record and Cloudflare health data when available.
