@@ -26,7 +26,7 @@ const defaultBaseUrl = (() => {
 
 const envBaseUrl = import.meta.env.VITE_API_BASE_URL
 const resolvedBaseUrl = normalizeBaseUrl(resolveBaseUrl(envBaseUrl, defaultBaseUrl))
-const apiBaseUrl = resolvedBaseUrl.replace(/\/$/, '')
+const apiBaseUrl = normalizeBrowserBaseUrl(resolvedBaseUrl).replace(/\/$/, '')
 
 function resolveBaseUrl(envUrl: string | undefined, fallback: string): string {
   if (!envUrl) return fallback
@@ -53,16 +53,38 @@ function normalizeBaseUrl(value: string): string {
 
   try {
     const parsed = new URL(value)
-    if (
-      window.location.protocol === 'https:' &&
-      parsed.protocol === 'http:' &&
-      parsed.hostname === window.location.hostname
-    ) {
+    if (window.location.protocol === 'https:' && parsed.protocol === 'http:') {
       parsed.protocol = 'https:'
       return parsed.toString()
     }
   } catch {
     return value
+  }
+
+  return value
+}
+
+function normalizeBrowserBaseUrl(value: string): string {
+  if (typeof window === 'undefined') {
+    return value
+  }
+
+  if (window.location.protocol !== 'https:') {
+    return value
+  }
+
+  if (!value || value === '/') {
+    return window.location.origin
+  }
+
+  if (value.startsWith('http://')) {
+    try {
+      const parsed = new URL(value)
+      parsed.protocol = 'https:'
+      return parsed.toString()
+    } catch {
+      return window.location.origin
+    }
   }
 
   return value

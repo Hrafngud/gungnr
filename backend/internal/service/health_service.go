@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"go-notes/internal/integrations/cloudflare"
 )
 
 type DockerHealth struct {
@@ -66,6 +69,37 @@ func (s *HealthService) Tunnel(ctx context.Context) TunnelHealth {
 		return TunnelHealth{Status: "error", Detail: err.Error()}
 	}
 
+	if strings.TrimSpace(cfg.CloudflareAPIToken) != "" &&
+		strings.TrimSpace(cfg.CloudflareAccountID) != "" &&
+		strings.TrimSpace(cfg.CloudflaredTunnel) != "" {
+		client := cloudflare.NewClient(cfg)
+		info, err := client.TunnelStatus(ctx)
+		if err != nil {
+			return TunnelHealth{Status: "error", Detail: err.Error()}
+		}
+
+		status := "ok"
+		detail := fmt.Sprintf("Tunnel %s", info.Status)
+		if info.Status == "" || strings.EqualFold(info.Status, "inactive") {
+			status = "warning"
+			detail = "Tunnel inactive"
+		}
+		if info.Connections == 0 {
+			status = "warning"
+			if detail == "" {
+				detail = "No active connectors reported"
+			}
+		}
+
+		return TunnelHealth{
+			Status:      status,
+			Detail:      detail,
+			Tunnel:      info.Name,
+			Connections: info.Connections,
+			ConfigPath:  strings.TrimSpace(cfg.CloudflaredConfig),
+		}
+	}
+
 	configPath := strings.TrimSpace(cfg.CloudflaredConfig)
 	if configPath == "" {
 		return TunnelHealth{Status: "missing", Detail: "cloudflared config path is not set"}
@@ -103,6 +137,10 @@ func (s *HealthService) Tunnel(ctx context.Context) TunnelHealth {
 	checkCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
 	defer cancel()
 
+	if info.OriginCert == "" {
+		info.OriginCert = findOriginCert(configPath)
+	}
+
 	args := []string{"tunnel"}
 	if configPath != "" {
 		args = append(args, "--config", configPath)
@@ -125,6 +163,14 @@ func (s *HealthService) Tunnel(ctx context.Context) TunnelHealth {
 		detail := compactOutput(output)
 		if detail == "" {
 			detail = err.Error()
+		}
+		if strings.Contains(detail, "Cannot determine default origin certificate path") {
+			return TunnelHealth{
+				Status:     "missing",
+				Detail:     "Cloudflared origin cert is missing. Set origincert in config.yml or mount cert.pem.",
+				Tunnel:     tunnelName,
+				ConfigPath: configPath,
+			}
 		}
 		return TunnelHealth{
 			Status:     "error",
@@ -188,11 +234,11 @@ func readCloudflaredConfig(path string) (cloudflaredConfigInfo, error) {
 			if info.Tunnel == "" {
 				info.Tunnel = value
 			}
-		case "credentials-file":
+		case "credentials-file", "credential-file":
 			if info.CredentialsFile == "" {
 				info.CredentialsFile = expandUserPath(value)
 			}
-		case "origincert":
+		case "origincert", "origin-cert":
 			if info.OriginCert == "" {
 				info.OriginCert = expandUserPath(value)
 			}
@@ -201,6 +247,16 @@ func readCloudflaredConfig(path string) (cloudflaredConfigInfo, error) {
 
 	if err := scanner.Err(); err != nil {
 		return info, err
+	}
+
+	if info.CredentialsFile == "" && info.Tunnel != "" {
+		candidate := filepath.Join(filepath.Dir(path), info.Tunnel+".json")
+		if _, err := os.Stat(candidate); err == nil {
+			info.CredentialsFile = candidate
+		}
+	}
+	if info.OriginCert == "" {
+		info.OriginCert = findOriginCert(path)
 	}
 	return info, nil
 }
@@ -219,8 +275,39 @@ func parseCloudflaredConfigLine(line string) (string, string, bool) {
 	if key == "" || value == "" {
 		return "", "", false
 	}
+	if hash := strings.Index(value, "#"); hash != -1 {
+		value = strings.TrimSpace(value[:hash])
+	}
 	value = strings.Trim(value, "\"'")
 	return key, value, true
+}
+
+func findOriginCert(configPath string) string {
+	candidates := []string{}
+	if configPath != "" {
+		candidates = append(candidates, filepath.Join(filepath.Dir(configPath), "cert.pem"))
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(home, ".cloudflared", "cert.pem"),
+			filepath.Join(home, ".cloudflare-warp", "cert.pem"),
+			filepath.Join(home, "cloudflare-warp", "cert.pem"),
+		)
+	}
+	candidates = append(candidates,
+		filepath.Join(string(filepath.Separator), "etc", "cloudflared", "cert.pem"),
+		filepath.Join(string(filepath.Separator), "usr", "local", "etc", "cloudflared", "cert.pem"),
+	)
+
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func compactOutput(output []byte) string {

@@ -2,6 +2,8 @@ export interface Settings {
   baseDomain: string
   githubToken: string
   cloudflareToken: string
+  cloudflareAccountId: string
+  cloudflareZoneId: string
   cloudflaredConfigPath: string
 }
 

@@ -37,6 +37,8 @@
 - `GITHUB_REPO_OWNER=your-org`
 - `GITHUB_REPO_PRIVATE=true`
 - `CLOUDFLARE_API_TOKEN=...` (optional fallback if UI token not set)
+- `CLOUDFLARE_ACCOUNT_ID=...` (required for API-managed tunnel updates)
+- `CLOUDFLARE_ZONE_ID=...` (required for API-managed tunnel updates)
 - `CLOUDFLARE_ACCOUNT_ID=...` (optional fallback)
 - `CLOUDFLARE_ZONE_ID=...` (optional fallback)
 Note: UI-managed settings (domain, GitHub token, Cloudflare token, cloudflared config path) should override env defaults.

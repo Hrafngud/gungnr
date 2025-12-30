@@ -1,6 +1,6 @@
 ## Frontend Plan
 
-Status: Step 1 complete (theme tokens + AppShell). Page map + routing update complete. View refactor complete (Home, Overview, Host Settings, Networking, GitHub done). Step 2 complete (base components, shared state blocks, toasts, inline feedback). Step 6 complete (onboarding overlays + day-to-day guidance).
+Status: Step 1 complete (theme tokens + AppShell). Page map + routing update complete. View refactor complete (Home, Overview, Host Settings, Networking, GitHub done). Step 2 complete (base components, shared state blocks, toasts, inline feedback). Step 6 complete (onboarding overlays + day-to-day guidance). Step 7 complete (GitHub catalog + Networking data panels).
 
 1) Visual Identity and Theme System
 - Define design tokens (zinc palette, accent, borders, shadows, radii, spacing).

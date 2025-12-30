@@ -35,6 +35,11 @@ Frontend refactor (step 1 complete):
 - DONE: Continue step 6 (Journeys).
   - DONE: Extend onboarding overlays to Networking and GitHub.
   - DONE: Add day-to-day guidance callouts in Jobs and Activity views.
-- NEXT: Begin step 7 (Data and Integration).
-  - Wire GitHub template catalog + allowlist data once API endpoints are ready.
-  - Expand Networking with DNS record and Cloudflare health data when available.
+- DONE: Begin step 7 (Data and Integration).
+  - DONE: Wire GitHub template catalog + allowlist data once API endpoints are ready.
+  - DONE: Expand Networking with DNS record and Cloudflare health data when available.
+- NEXT: Begin step 8 (Testing and Quality).
+  - Run `npm run build` in `frontend/go-notes`.
+  - Run `docker compose up --build` and verify UI/API (including Cloudflared status + Jobs list/stream).
+  - Confirm mixed-content is resolved: ensure `VITE_API_BASE_URL=/` and rebuild the web container so HTTPS requests stay on `https://`.
+  - Investigate Cloudflare API error: "Authentication error (code 10000)" and resolve token/account/zone configuration.

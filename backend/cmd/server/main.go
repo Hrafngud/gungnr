@@ -40,6 +40,7 @@ func main() {
 	jobService := service.NewJobService(jobRepo, jobRunner)
 	projectService := service.NewProjectService(cfg, projectRepo, jobService)
 	settingsService := service.NewSettingsService(cfg, settingsRepo)
+	githubService := service.NewGitHubService(cfg, settingsService)
 	auditService := service.NewAuditService(auditRepo)
 	hostService := service.NewHostService()
 	healthService := service.NewHealthService(hostService, settingsService)
@@ -59,6 +60,7 @@ func main() {
 		Settings:       controller.NewSettingsController(settingsService, auditService),
 		Host:           controller.NewHostController(hostService),
 		Audit:          controller.NewAuditController(auditService),
+		GitHub:         controller.NewGitHubController(githubService),
 		AllowedOrigins: cfg.AllowedOrigins,
 		AuthMiddleware: middleware.AuthRequired(sessionManager),
 	})

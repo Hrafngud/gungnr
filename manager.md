@@ -61,8 +61,15 @@
 - DONE: Add onboarding overlays for Home + Host Settings with API key links, plus day-to-day guidance callouts for quick deploy and recent activity.
 - DONE: Extend onboarding overlays to Networking and GitHub with refresh + token guidance.
 - DONE: Add day-to-day guidance callouts in Jobs and Activity, and introduce turquoise accent/status colors for indicators.
+- DONE: Add GitHub catalog endpoint (token/template/allowlist summary) and wire GitHub view to real data.
+- DONE: Expand Networking with ingress-derived DNS list and Cloudflare readiness panel.
+- DONE: Harden tunnel health checks with origin cert discovery + clearer missing-cert feedback.
+- DONE: Tune nginx SSE proxy settings for job log streaming.
+- DONE: Force HTTPS API base URL when the panel is served over HTTPS to prevent mixed-content blocks.
+- DONE: Move tunnel DNS + ingress updates to Cloudflare API and add account/zone settings for jobs.
 - NOTE: Compose smoke test still blocked; docker daemon access denied in sandbox when running `docker compose up --build` (run manually on host).
 - NOTE: Frontend smoke test blocked; `npm run build` failed because `vue-tsc` is not available (install deps locally).
+- NOTE: User will run smoke tests locally.
 
 ### Docker / Compose usage (target)
 - Defaults live in `.env.example` (copy to `.env` to override).

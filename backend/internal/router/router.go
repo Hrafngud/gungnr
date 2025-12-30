@@ -15,6 +15,7 @@ type Dependencies struct {
 	Settings       *controller.SettingsController
 	Host           *controller.HostController
 	Audit          *controller.AuditController
+	GitHub         *controller.GitHubController
 	AllowedOrigins []string
 	AuthMiddleware gin.HandlerFunc
 }
@@ -49,6 +50,9 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	}
 	if deps.Audit != nil {
 		deps.Audit.Register(api)
+	}
+	if deps.GitHub != nil {
+		deps.GitHub.Register(api)
 	}
 
 	return r

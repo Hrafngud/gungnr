@@ -9,14 +9,14 @@ import UiOnboardingOverlay from '@/components/ui/UiOnboardingOverlay.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiSkeleton from '@/components/ui/UiSkeleton.vue'
 import UiState from '@/components/ui/UiState.vue'
-import { settingsApi } from '@/services/settings'
+import { githubApi } from '@/services/github'
 import { apiErrorMessage } from '@/services/api'
-import type { Settings } from '@/types/settings'
+import type { GitHubCatalog } from '@/types/github'
 import type { OnboardingStep } from '@/types/onboarding'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
-const settings = ref<Settings | null>(null)
+const catalog = ref<GitHubCatalog | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 const onboardingKey = 'warp-panel-onboarding-github'
@@ -50,11 +50,15 @@ const onboardingSteps: OnboardingStep[] = [
   },
 ]
 
-const hasToken = computed(() => Boolean(settings.value?.githubToken))
+const hasToken = computed(() => Boolean(catalog.value?.tokenConfigured))
+const templateConfigured = computed(() => Boolean(catalog.value?.template.configured))
+const allowlistMode = computed(() => catalog.value?.allowlist.mode ?? 'none')
+const allowlistUsers = computed(() => catalog.value?.allowlist.users ?? [])
+const allowlistOrg = computed(() => catalog.value?.allowlist.org ?? '')
 
 const tokenStatus = computed(() => {
-  if (loading.value && !settings.value) return 'Checking'
-  if (!settings.value) return 'Unknown'
+  if (loading.value && !catalog.value) return 'Checking'
+  if (!catalog.value) return 'Unknown'
   return hasToken.value ? 'Configured' : 'Missing'
 })
 
@@ -65,23 +69,73 @@ const tokenTone = computed<BadgeTone>(() => {
 })
 
 const templateStatus = computed(() => {
-  if (loading.value && !settings.value) return 'Checking'
+  if (loading.value && !catalog.value) return 'Checking'
+  if (!catalog.value) return 'Unknown'
   if (!hasToken.value) return 'Needs token'
-  return 'Awaiting sync'
+  if (!templateConfigured.value) return 'Not configured'
+  return 'Ready'
 })
 
 const templateTone = computed<BadgeTone>(() => {
-  if (templateStatus.value === 'Awaiting sync') return 'neutral'
-  if (templateStatus.value === 'Needs token') return 'warn'
+  if (templateStatus.value === 'Ready') return 'ok'
+  if (templateStatus.value === 'Needs token' || templateStatus.value === 'Not configured') {
+    return 'warn'
+  }
   return 'neutral'
 })
 
-const loadSettings = async () => {
+const templateSyncLabel = computed(() => {
+  if (!hasToken.value) return 'Waiting'
+  if (!templateConfigured.value) return 'Needs template'
+  return 'Ready'
+})
+
+const allowlistLabel = computed(() => {
+  if (!catalog.value) return 'Unknown'
+  switch (allowlistMode.value) {
+    case 'users':
+      return `Users (${allowlistUsers.value.length})`
+    case 'org':
+      return allowlistOrg.value ? `Org: ${allowlistOrg.value}` : 'Org allowlist'
+    default:
+      return 'Not configured'
+  }
+})
+
+const allowlistUsersLabel = computed(() => {
+  if (allowlistUsers.value.length === 0) return 'None'
+  const limit = 3
+  const head = allowlistUsers.value.slice(0, limit).join(', ')
+  if (allowlistUsers.value.length > limit) {
+    return `${head} +${allowlistUsers.value.length - limit} more`
+  }
+  return head
+})
+
+const templateSource = computed(() => {
+  if (!catalog.value?.template.configured) return 'Not configured'
+  const owner = catalog.value.template.owner
+  const repo = catalog.value.template.repo
+  if (!owner || !repo) return 'Not configured'
+  return `${owner}/${repo}`
+})
+
+const templateTargetOwner = computed(() => {
+  if (!catalog.value?.template.configured) return '--'
+  return catalog.value.template.targetOwner || '--'
+})
+
+const templateVisibility = computed(() => {
+  if (!catalog.value?.template.configured) return '--'
+  return catalog.value.template.private ? 'Private' : 'Public'
+})
+
+const loadCatalog = async () => {
   loading.value = true
   error.value = null
   try {
-    const { data } = await settingsApi.get()
-    settings.value = data.settings
+    const { data } = await githubApi.catalog()
+    catalog.value = data.catalog
   } catch (err) {
     error.value = apiErrorMessage(err)
   } finally {
@@ -101,7 +155,7 @@ const markOnboardingComplete = () => {
 }
 
 onMounted(() => {
-  loadSettings()
+  loadCatalog()
   if (typeof window !== 'undefined') {
     const seen = window.localStorage.getItem(onboardingKey)
     if (seen !== 'done') {
@@ -129,7 +183,7 @@ onMounted(() => {
         <UiButton variant="ghost" size="sm" @click="startOnboarding">
           View guide
         </UiButton>
-        <UiButton variant="ghost" size="sm" :disabled="loading" @click="loadSettings">
+        <UiButton variant="ghost" size="sm" :disabled="loading" @click="loadCatalog">
           <span class="flex items-center gap-2">
             <UiInlineSpinner v-if="loading" />
             Refresh status
@@ -166,7 +220,7 @@ onMounted(() => {
           available stack catalog.
         </p>
 
-        <UiPanel v-if="loading && !settings" variant="soft" class="space-y-3 p-4">
+        <UiPanel v-if="loading && !catalog" variant="soft" class="space-y-3 p-4">
           <UiSkeleton class="h-3 w-32" />
           <UiSkeleton class="h-3 w-full" />
           <UiSkeleton class="h-3 w-2/3" />
@@ -182,13 +236,31 @@ onMounted(() => {
           <UiListRow class="flex items-center justify-between gap-2">
             <span>Template sync</span>
             <span class="text-[color:var(--text)]">
-              {{ hasToken ? 'Ready' : 'Waiting' }}
+              {{ templateSyncLabel }}
             </span>
           </UiListRow>
           <UiListRow class="flex items-center justify-between gap-2">
-            <span>Allowlist checks</span>
+            <span>Allowlist mode</span>
             <span class="text-[color:var(--text)]">
-              Pending API
+              {{ allowlistLabel }}
+            </span>
+          </UiListRow>
+          <UiListRow
+            v-if="allowlistMode === 'users'"
+            class="flex items-center justify-between gap-2"
+          >
+            <span>Allowed users</span>
+            <span class="text-[color:var(--text)]">
+              {{ allowlistUsersLabel }}
+            </span>
+          </UiListRow>
+          <UiListRow
+            v-else-if="allowlistMode === 'org'"
+            class="flex items-center justify-between gap-2"
+          >
+            <span>Allowed org</span>
+            <span class="text-[color:var(--text)]">
+              {{ allowlistOrg || '--' }}
             </span>
           </UiListRow>
         </div>
@@ -210,32 +282,33 @@ onMounted(() => {
         </div>
 
         <p class="text-sm text-[color:var(--muted)]">
-          Template repositories and allowlist visibility will appear here once
-          the GitHub catalog sync is live.
+          Template repositories and destination ownership are pulled from the
+          panel configuration.
         </p>
 
-        <div v-if="loading && !settings" class="space-y-3">
+        <div v-if="loading && !catalog" class="space-y-3">
           <UiSkeleton variant="block" class="h-16" />
           <UiSkeleton variant="block" class="h-16" />
         </div>
 
-        <div v-else class="grid gap-3">
-          <UiListRow class="space-y-2 text-xs text-[color:var(--muted)]">
-            <p class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Template sources
-            </p>
-            <p>
-              Waiting on the template inventory feed from the panel API.
-            </p>
+        <div v-else class="space-y-3 text-xs text-[color:var(--muted)]">
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Template repo</span>
+            <span class="text-[color:var(--text)]">
+              {{ templateSource }}
+            </span>
           </UiListRow>
-
-          <UiListRow class="space-y-2 text-xs text-[color:var(--muted)]">
-            <p class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Allowlist status
-            </p>
-            <p>
-              No allowlist records loaded yet.
-            </p>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Target owner</span>
+            <span class="text-[color:var(--text)]">
+              {{ templateTargetOwner }}
+            </span>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Visibility</span>
+            <span class="text-[color:var(--text)]">
+              {{ templateVisibility }}
+            </span>
           </UiListRow>
         </div>
       </UiPanel>

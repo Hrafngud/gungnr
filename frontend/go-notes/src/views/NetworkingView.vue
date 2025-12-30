@@ -10,7 +10,7 @@ import UiState from '@/components/ui/UiState.vue'
 import { healthApi } from '@/services/health'
 import { settingsApi } from '@/services/settings'
 import { apiErrorMessage } from '@/services/api'
-import type { CloudflaredPreview } from '@/types/settings'
+import type { CloudflaredPreview, Settings } from '@/types/settings'
 import type { TunnelHealth } from '@/types/health'
 import type { OnboardingStep } from '@/types/onboarding'
 
@@ -23,6 +23,9 @@ const healthError = ref<string | null>(null)
 const preview = ref<CloudflaredPreview | null>(null)
 const previewLoading = ref(false)
 const previewError = ref<string | null>(null)
+const settings = ref<Settings | null>(null)
+const settingsLoading = ref(false)
+const settingsError = ref<string | null>(null)
 const onboardingKey = 'warp-panel-onboarding-networking'
 const onboardingOpen = ref(false)
 const onboardingStep = ref(0)
@@ -55,6 +58,15 @@ const onboardingSteps: OnboardingStep[] = [
 ]
 
 const hasPreview = computed(() => Boolean(preview.value?.contents))
+const cloudflareTokenConfigured = computed(() => Boolean(settings.value?.cloudflareToken))
+const baseDomainLabel = computed(() => settings.value?.baseDomain || 'Not set')
+
+type IngressRoute = {
+  hostname: string
+  service: string
+}
+
+const ingressRoutes = computed(() => parseIngressRoutes(preview.value?.contents ?? ''))
 
 const healthTone = (status?: string): BadgeTone => {
   switch (status) {
@@ -99,6 +111,20 @@ const loadPreview = async () => {
   }
 }
 
+const loadSettings = async () => {
+  settingsLoading.value = true
+  settingsError.value = null
+  try {
+    const { data } = await settingsApi.get()
+    settings.value = data.settings
+  } catch (err) {
+    settingsError.value = apiErrorMessage(err)
+    settings.value = null
+  } finally {
+    settingsLoading.value = false
+  }
+}
+
 const startOnboarding = () => {
   onboardingStep.value = 0
   onboardingOpen.value = true
@@ -111,7 +137,7 @@ const markOnboardingComplete = () => {
 }
 
 onMounted(async () => {
-  await Promise.all([loadHealth(), loadPreview()])
+  await Promise.all([loadHealth(), loadPreview(), loadSettings()])
   if (typeof window !== 'undefined') {
     const seen = window.localStorage.getItem(onboardingKey)
     if (seen !== 'done') {
@@ -119,6 +145,43 @@ onMounted(async () => {
     }
   }
 })
+
+function parseIngressRoutes(contents: string): IngressRoute[] {
+  if (!contents) return []
+  const routes: IngressRoute[] = []
+  const lines = contents.split('\n')
+  let current: IngressRoute | null = null
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim()
+    if (trimmed.startsWith('- hostname:')) {
+      if (current?.hostname && current.service) {
+        routes.push(current)
+      }
+      const hostname = trimmed.replace('- hostname:', '').trim()
+      current = hostname ? { hostname, service: '' } : null
+      continue
+    }
+    if (trimmed.startsWith('hostname:')) {
+      if (current?.hostname && current.service) {
+        routes.push(current)
+      }
+      const hostname = trimmed.replace('hostname:', '').trim()
+      current = hostname ? { hostname, service: '' } : null
+      continue
+    }
+    if (trimmed.startsWith('service:') && current) {
+      const service = trimmed.replace('service:', '').trim()
+      current.service = service
+    }
+  }
+
+  if (current?.hostname && current.service) {
+    routes.push(current)
+  }
+
+  return routes
+}
 </script>
 
 <template>
@@ -238,6 +301,98 @@ onMounted(async () => {
         <UiState v-else>
           Cloudflared config not loaded yet.
         </UiState>
+      </UiPanel>
+    </div>
+
+    <div class="grid gap-6 lg:grid-cols-[1fr,1fr]">
+      <UiPanel as="article" class="space-y-4 p-6">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              DNS
+            </p>
+            <h2 class="mt-2 text-base font-semibold text-[color:var(--text)]">
+              Expected DNS records
+            </h2>
+          </div>
+          <UiBadge :tone="ingressRoutes.length > 0 ? 'ok' : 'neutral'">
+            {{ ingressRoutes.length > 0 ? `${ingressRoutes.length} routes` : 'No routes' }}
+          </UiBadge>
+        </div>
+
+        <p class="text-xs text-[color:var(--muted)]">
+          Based on ingress rules in {{ baseDomainLabel }}.
+        </p>
+
+        <UiState v-if="previewLoading" loading>
+          Parsing ingress rules...
+        </UiState>
+
+        <UiState v-else-if="previewError" tone="error">
+          {{ previewError }}
+        </UiState>
+
+        <UiState v-else-if="ingressRoutes.length === 0">
+          No ingress hostnames found yet.
+        </UiState>
+
+        <div v-else class="space-y-3 text-xs text-[color:var(--muted)]">
+          <UiListRow v-for="route in ingressRoutes" :key="route.hostname" class="space-y-2">
+            <p class="text-[color:var(--text)]">
+              {{ route.hostname }}
+            </p>
+            <p>Service: {{ route.service }}</p>
+          </UiListRow>
+        </div>
+      </UiPanel>
+
+      <UiPanel as="article" variant="raise" class="space-y-4 p-6">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              Cloudflare
+            </p>
+            <h2 class="mt-2 text-base font-semibold text-[color:var(--text)]">
+              API readiness
+            </h2>
+          </div>
+          <UiBadge :tone="cloudflareTokenConfigured ? 'ok' : 'warn'">
+            {{ cloudflareTokenConfigured ? 'Token set' : 'Token missing' }}
+          </UiBadge>
+        </div>
+
+        <p class="text-xs text-[color:var(--muted)]">
+          Cloudflare credentials power DNS automation and tunnel routing updates.
+        </p>
+
+        <UiState v-if="settingsLoading" loading>
+          Loading Cloudflare settings...
+        </UiState>
+
+        <UiState v-else-if="settingsError" tone="error">
+          {{ settingsError }}
+        </UiState>
+
+        <div v-else class="space-y-3 text-xs text-[color:var(--muted)]">
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Base domain</span>
+            <span class="text-[color:var(--text)]">
+              {{ baseDomainLabel }}
+            </span>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>API token</span>
+            <span class="text-[color:var(--text)]">
+              {{ cloudflareTokenConfigured ? 'Configured' : 'Missing' }}
+            </span>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Tunnel name</span>
+            <span class="text-[color:var(--text)]">
+              {{ tunnelHealth?.tunnel || '--' }}
+            </span>
+          </UiListRow>
+        </div>
       </UiPanel>
     </div>
 
