@@ -267,6 +267,49 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
         <p v-if="tunnelHealth?.detail" class="text-xs text-[color:var(--muted)]">
           {{ tunnelHealth.detail }}
         </p>
+        <div
+          v-if="tunnelHealth?.diagnostics"
+          class="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)]/80 p-3 text-[11px] text-[color:var(--muted)]"
+        >
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Account ID</span>
+            <span class="text-[color:var(--text)]">
+              {{ tunnelHealth.diagnostics.accountId || '—' }}
+            </span>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Zone ID</span>
+            <span class="text-[color:var(--text)]">
+              {{ tunnelHealth.diagnostics.zoneId || '—' }}
+            </span>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Tunnel ref</span>
+            <span class="text-[color:var(--text)]">
+              {{
+                tunnelHealth.diagnostics.tunnel
+                  ? `${tunnelHealth.diagnostics.tunnel} (${tunnelHealth.diagnostics.tunnelRefType || 'unknown'})`
+                  : '—'
+              }}
+            </span>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Token set</span>
+            <span class="text-[color:var(--text)]">
+              {{ tunnelHealth.diagnostics.tokenSet ? 'yes' : 'no' }}
+            </span>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Source</span>
+            <span class="text-[color:var(--text)]">
+              {{
+                tunnelHealth.diagnostics.sources
+                  ? `acct=${tunnelHealth.diagnostics.sources.cloudflareAccountId}, zone=${tunnelHealth.diagnostics.sources.cloudflareZoneId}, token=${tunnelHealth.diagnostics.sources.cloudflareToken}`
+                  : '—'
+              }}
+            </span>
+          </UiListRow>
+        </div>
       </UiPanel>
 
       <UiPanel as="article" variant="raise" class="space-y-4 p-6" data-onboard="network-ingress">
@@ -363,6 +406,10 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
 
         <p class="text-xs text-[color:var(--muted)]">
           Cloudflare credentials power DNS automation and tunnel routing updates.
+        </p>
+        <p class="text-xs text-[color:var(--muted)]">
+          Use a Cloudflare API token with Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit for the
+          configured account and zone.
         </p>
 
         <UiState v-if="settingsLoading" loading>

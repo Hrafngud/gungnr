@@ -37,5 +37,13 @@ func (h *HealthController) Tunnel(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"status": "error", "detail": "health service unavailable"})
 		return
 	}
-	ctx.JSON(http.StatusOK, h.service.Tunnel(ctx.Request.Context()))
+	health := h.service.Tunnel(ctx.Request.Context())
+	status := http.StatusOK
+	switch health.Status {
+	case "missing":
+		status = http.StatusFailedDependency
+	case "error":
+		status = http.StatusBadGateway
+	}
+	ctx.JSON(status, health)
 }

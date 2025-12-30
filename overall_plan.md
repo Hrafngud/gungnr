@@ -33,3 +33,7 @@ Current status: Replace notes CRUD app with Warp Panel web UI and API.
 - Update runbook and usage instructions.
 - Add Makefile targets for dev and compose.
 - QA: backend tests, frontend build, compose up.
+
+6) Observability
+- Add live container logs screen for all running containers (not just deploy jobs).
+- Provide filtering by container name and stream logs via SSE or WebSocket.

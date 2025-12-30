@@ -51,3 +51,6 @@ Status: Step 1 complete (theme tokens + AppShell). Page map + routing update com
 
 9) Docker/Build
 - Build static assets and serve via nginx in production container.
+
+10) Observability
+- Add a live logs screen to stream all running container logs with filters and pause/resume.

@@ -52,6 +52,7 @@ Status: Replace notes CRUD with Warp Panel API, job runner, and integrations.
 10) Observability
 - Structured logs with request IDs.
 - Audit log for every deploy action.
+- Add streaming endpoint for live container logs (all running containers, filterable by name/ID).
 
 11) Dockerization
 - Multi-stage Dockerfile for API.

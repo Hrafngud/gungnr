@@ -67,9 +67,20 @@
 - DONE: Tune nginx SSE proxy settings for job log streaming.
 - DONE: Force HTTPS API base URL when the panel is served over HTTPS to prevent mixed-content blocks.
 - DONE: Move tunnel DNS + ingress updates to Cloudflare API and add account/zone settings for jobs.
-- NOTE: Compose smoke test still blocked; docker daemon access denied in sandbox when running `docker compose up --build` (run manually on host).
+- DONE: Add Cloudflare token scope guidance (UI + README) and clarify auth errors for invalid tokens.
+- DONE: Improve Cloudflare tunnel error logging with remote-managed tunnel guidance.
+- DONE: Added tunnel health diagnostics (account/zone/tunnel sources) and return non-200 status codes for tunnel health errors.
+- DONE: Add live container logs screen for all running containers (not just deploy jobs).
+- DONE: Add copy logs action, collapsible sidebar controls, and enhanced container log details.
+- DONE: Improve external API error logging for Cloudflare/GitHub responses with response metadata and payload summaries.
+- DONE: Capture GitHub error response body snippets for clearer API failure logs.
+- DONE: Improve GitHub OAuth error logging with response status/body details for token exchange and user/org checks.
+- DONE: Compose smoke test run locally; buildx plugin warning persists.
 - NOTE: Frontend smoke test blocked; `npm run build` failed because `vue-tsc` is not available (install deps locally).
 - NOTE: User will run smoke tests locally.
+- NOTE: Cloudflare API auth error code 10000 persists in `/health/tunnel` despite valid token claims; likely settings mismatch (DB overrides env) or account/zone mismatch.
+- NOTE: Added cloudflared docker service with tunnel token; uses host networking so API-ingress `http://localhost:<port>` routes work inside the tunnel container (Linux hosts).
+- NOTE: `docker compose up --build` completed; `cloudflared` container exited with "Provided Tunnel token is not valid" when the token is unset/invalid.
 
 ### Docker / Compose usage (target)
 - Defaults live in `.env.example` (copy to `.env` to override).

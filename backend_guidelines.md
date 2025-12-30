@@ -5,7 +5,7 @@
 - Gin for HTTP APIs.
 - GORM v2 with pgx driver for Postgres.
 - GitHub: `github.com/google/go-github/v62` + `golang.org/x/oauth2`.
-- Cloudflare: `cloudflared` CLI for tunnel ingress updates; `cloudflare-go` for DNS if token is supplied.
+- Cloudflare: API-based DNS + tunnel config for remote-managed tunnels; `cloudflared` CLI for tunnel status and local config preview.
 - Docker control: use Docker socket and `docker compose` CLI or Docker client (`github.com/docker/docker/client`).
 - Config: Viper or env-only loader; use `.env` for local overrides.
 - Testing: `net/http/httptest`, `github.com/stretchr/testify`.
@@ -24,6 +24,7 @@
 - `CLOUDFLARED_CONFIG=~/.cloudflared/config.yml`
 - `CLOUDFLARED_TUNNEL_NAME=sphynx-app`
 - `CLOUDFLARED_CREDENTIALS=/home/user/.cloudflared/xxxx.json`
+- `CLOUDFLARED_TUNNEL_TOKEN=...` (used when running cloudflared via Docker)
 - `DOMAIN=sphynx.store`
 - `COOKIE_DOMAIN=sphynx.store`
 - `GITHUB_CLIENT_ID=...`
@@ -58,8 +59,8 @@ Note: UI-managed settings (domain, GitHub token, Cloudflare token, cloudflared c
 ### Cloudflare Integration
 - Use API token with DNS and Tunnel permissions.
 - Add or update CNAME for `<subdomain>.<domain>`.
-- Keep local `cloudflared` config as the source of ingress rules.
-- Update ingress file safely (preserve catch-all) and restart tunnel.
+- Prefer remote-managed tunnels (`config_src=cloudflare`) for ingress updates via API.
+- If a tunnel is locally managed, update config.yml safely (preserve catch-all) and restart tunnel.
 - Support a single tunnel at a time and expose tunnel + config preview in the UI.
 
 ### Docker and Host Actions

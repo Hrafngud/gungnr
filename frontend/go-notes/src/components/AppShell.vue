@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import NavIcon from '@/components/NavIcon.vue'
@@ -7,7 +7,7 @@ import NavIcon from '@/components/NavIcon.vue'
 type NavItem = {
   label: string
   to: string
-  icon: 'home' | 'overview' | 'host' | 'network' | 'github'
+  icon: 'home' | 'overview' | 'logs' | 'host' | 'network' | 'github'
   helper: string
 }
 
@@ -23,6 +23,12 @@ const navItems: NavItem[] = [
     to: '/overview',
     icon: 'overview',
     helper: 'Jobs and activity',
+  },
+  {
+    label: 'Logs',
+    to: '/logs',
+    icon: 'logs',
+    helper: 'Container output',
   },
   {
     label: 'Host Settings',
@@ -46,6 +52,32 @@ const navItems: NavItem[] = [
 
 const route = useRoute()
 const auth = useAuthStore()
+const SIDEBAR_KEY = 'warp-panel.sidebar'
+const sidebarMode = ref<'expanded' | 'collapsed' | 'hidden'>('expanded')
+
+const isSidebarCollapsed = computed(() => sidebarMode.value === 'collapsed')
+const isSidebarHidden = computed(() => sidebarMode.value === 'hidden')
+
+const toggleCollapse = () => {
+  sidebarMode.value = isSidebarCollapsed.value ? 'expanded' : 'collapsed'
+}
+
+const toggleHidden = () => {
+  sidebarMode.value = isSidebarHidden.value ? 'expanded' : 'hidden'
+}
+
+onMounted(() => {
+  if (typeof window === 'undefined') return
+  const stored = window.localStorage.getItem(SIDEBAR_KEY)
+  if (stored === 'expanded' || stored === 'collapsed' || stored === 'hidden') {
+    sidebarMode.value = stored
+  }
+})
+
+watch(sidebarMode, (value) => {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(SIDEBAR_KEY, value)
+})
 
 const pageTitle = computed(() => {
   const title = route.meta?.title as string | undefined
@@ -62,13 +94,17 @@ const isActive = (to: string) => {
   <div class="min-h-screen text-[color:var(--text)]">
     <div class="flex">
       <aside
-        class="sticky top-0 hidden h-screen w-72 flex-col gap-6 border-r border-[color:var(--border)] bg-[color:var(--surface)] px-6 py-8 lg:flex"
+        class="sticky top-0 hidden h-screen flex-col gap-6 border-r border-[color:var(--border)] bg-[color:var(--surface)] py-8 lg:flex"
+        :class="[
+          isSidebarHidden ? 'lg:hidden' : 'lg:flex',
+          isSidebarCollapsed ? 'w-20 px-3' : 'w-72 px-6',
+        ]"
       >
         <div class="flex items-center gap-3">
           <div class="grid h-12 w-12 place-items-center rounded-2xl bg-[color:var(--surface-3)] text-lg font-semibold text-[color:var(--accent-ink)]">
             WP
           </div>
-          <div>
+          <div v-if="!isSidebarCollapsed">
             <p class="text-xs uppercase tracking-[0.35em] text-[color:var(--muted-2)]">
               Warp Panel
             </p>
@@ -84,15 +120,19 @@ const isActive = (to: string) => {
             :key="item.to"
             :to="item.to"
             class="group flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-semibold transition"
-            :class="isActive(item.to)
-              ? 'bg-[color:var(--surface-2)] text-[color:var(--text)]'
-              : 'text-[color:var(--muted)] hover:bg-[color:var(--surface-2)]'"
+            :title="isSidebarCollapsed ? item.label : undefined"
+            :class="[
+              isActive(item.to)
+                ? 'bg-[color:var(--surface-2)] text-[color:var(--text)]'
+                : 'text-[color:var(--muted)] hover:bg-[color:var(--surface-2)]',
+              isSidebarCollapsed ? 'justify-center' : '',
+            ]"
           >
             <NavIcon
               :name="item.icon"
               class="h-4 w-4 text-[color:var(--accent-ink)]"
             />
-            <div>
+            <div v-if="!isSidebarCollapsed">
               <p class="text-sm">{{ item.label }}</p>
               <p class="text-[11px] font-medium text-[color:var(--muted-2)]">
                 {{ item.helper }}
@@ -101,32 +141,65 @@ const isActive = (to: string) => {
           </RouterLink>
         </nav>
 
-        <div class="mt-auto space-y-3 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-2)] p-4 text-xs text-[color:var(--muted)]">
-          <p class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-            Session
-          </p>
-          <div v-if="auth.user" class="flex items-center gap-3">
-            <img
-              :src="auth.user.avatarUrl"
-              :alt="auth.user.login"
-              class="h-9 w-9 rounded-xl object-cover"
-            />
-            <div>
-              <p class="text-sm font-semibold text-[color:var(--text)]">
-                @{{ auth.user.login }}
-              </p>
-              <p class="text-[11px] text-[color:var(--muted-2)]">
-                Session active
-              </p>
+        <div class="mt-auto space-y-3">
+          <div
+            class="space-y-3 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-2)] p-4 text-xs text-[color:var(--muted)]"
+            :class="isSidebarCollapsed ? 'p-3' : 'p-4'"
+          >
+            <p v-if="!isSidebarCollapsed" class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              Session
+            </p>
+            <div v-if="auth.user" class="flex items-center gap-3">
+              <img
+                :src="auth.user.avatarUrl"
+                :alt="auth.user.login"
+                class="h-9 w-9 rounded-xl object-cover"
+              />
+              <div v-if="!isSidebarCollapsed">
+                <p class="text-sm font-semibold text-[color:var(--text)]">
+                  @{{ auth.user.login }}
+                </p>
+                <p class="text-[11px] text-[color:var(--muted-2)]">
+                  Session active
+                </p>
+              </div>
             </div>
+            <p v-else-if="!isSidebarCollapsed" class="text-[color:var(--muted-2)]">
+              Sign in to unlock deploy actions.
+            </p>
           </div>
-          <p v-else class="text-[color:var(--muted-2)]">
-            Sign in to unlock deploy actions.
-          </p>
+
+          <div class="grid gap-2">
+            <button
+              type="button"
+              class="btn btn-ghost flex w-full items-center justify-center px-3 py-2 text-[11px] font-semibold"
+              :title="isSidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'"
+              :disabled="isSidebarHidden"
+              @click="toggleCollapse"
+            >
+              {{ isSidebarCollapsed ? 'Expand' : 'Collapse nav' }}
+            </button>
+            <button
+              type="button"
+              class="btn btn-ghost flex w-full items-center justify-center px-3 py-2 text-[11px] font-semibold"
+              :title="isSidebarHidden ? 'Show navigation' : 'Hide navigation'"
+              @click="toggleHidden"
+            >
+              {{ isSidebarHidden ? 'Show nav' : 'Hide nav' }}
+            </button>
+          </div>
         </div>
       </aside>
 
       <div class="min-h-screen flex-1">
+        <button
+          v-if="isSidebarHidden"
+          type="button"
+          class="btn btn-ghost fixed left-4 top-24 z-30 hidden items-center gap-2 px-3 py-2 text-[11px] font-semibold lg:flex"
+          @click="toggleHidden"
+        >
+          Show nav
+        </button>
         <header class="sticky top-0 z-20 border-b border-[color:var(--border)] bg-[color:var(--bg-soft)] px-6 py-4">
           <div class="mx-auto flex w-full max-w-6xl items-center justify-between">
             <div>
@@ -138,6 +211,23 @@ const isActive = (to: string) => {
               </h1>
             </div>
             <div class="flex items-center gap-3">
+              <div class="hidden items-center gap-2 lg:flex">
+                <button
+                  type="button"
+                  class="btn btn-ghost px-3 py-2 text-[11px] font-semibold"
+                  @click="toggleCollapse"
+                  :disabled="isSidebarHidden"
+                >
+                  {{ isSidebarCollapsed ? 'Expand nav' : 'Collapse nav' }}
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-ghost px-3 py-2 text-[11px] font-semibold"
+                  @click="toggleHidden"
+                >
+                  {{ isSidebarHidden ? 'Show nav' : 'Hide nav' }}
+                </button>
+              </div>
               <span class="badge status-neutral">Host ready</span>
               <button
                 v-if="auth.user"

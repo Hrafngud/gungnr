@@ -258,12 +258,15 @@ func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, logger jobs.Logg
 		return fmt.Errorf("cloudflare client unavailable")
 	}
 
+	logger.Logf("cloudflare settings: account_id=%s zone_id=%s tunnel=%s domain=%s", describeSetting(cfg.CloudflareAccountID), describeSetting(cfg.CloudflareZoneID), describeSetting(cfg.CloudflaredTunnel), describeSetting(cfg.Domain))
 	logger.Log("updating Cloudflare DNS record")
 	if err := cloudfl.EnsureDNS(ctx, hostname); err != nil {
+		logger.Logf("cloudflare dns error: %v", err)
 		return fmt.Errorf("cloudflare dns: %w", err)
 	}
 	logger.Log("updating Cloudflare tunnel ingress")
 	if err := cloudfl.UpdateIngress(ctx, hostname, port); err != nil {
+		logger.Logf("cloudflare ingress error: %v", err)
 		return fmt.Errorf("cloudflare ingress: %w", err)
 	}
 	return nil
@@ -300,6 +303,14 @@ func projectPath(base, name string) (string, error) {
 	}
 	path := filepath.Join(base, name)
 	return path, nil
+}
+
+func describeSetting(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "<unset>"
+	}
+	return trimmed
 }
 
 func findFreePort(start int, reserved map[int]bool) (int, error) {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,6 +21,7 @@ var (
 	ErrMissingZoneID    = errors.New("CLOUDFLARE_ZONE_ID is required")
 	ErrMissingTunnel    = errors.New("CLOUDFLARED_TUNNEL_NAME is required")
 	ErrMissingHostname  = errors.New("hostname is required")
+	ErrTunnelNotRemote  = errors.New("tunnel is locally managed; remote configuration updates require config_src=cloudflare")
 )
 
 const apiBaseURL = "https://api.cloudflare.com/client/v4"
@@ -61,7 +63,7 @@ func (c *Client) EnsureDNS(ctx context.Context, hostname string) error {
 		return err
 	}
 
-	record, err := c.findDNSRecord(ctx, hostname)
+	record, err := c.selectDNSRecord(ctx, hostname)
 	if err != nil {
 		return err
 	}
@@ -100,6 +102,10 @@ func (c *Client) UpdateIngress(ctx context.Context, hostname string, port int) e
 
 	tunnelID, err := c.resolveTunnelID(ctx)
 	if err != nil {
+		return err
+	}
+
+	if err := c.ensureRemoteManaged(ctx, tunnelID); err != nil {
 		return err
 	}
 
@@ -194,8 +200,11 @@ func (c *Client) getTunnelConfig(ctx context.Context, tunnelID string) (tunnelCo
 		Ingress: []map[string]any{},
 	}
 
-	rawConfig, ok := result["config"].(map[string]any)
-	if ok {
+	rawConfig := result
+	if nested, ok := result["config"].(map[string]any); ok {
+		rawConfig = nested
+	}
+	if rawConfig != nil {
 		config.Raw = rawConfig
 		if ingress, ok := rawConfig["ingress"]; ok {
 			config.Ingress = coerceIngress(ingress)
@@ -208,7 +217,16 @@ func (c *Client) getTunnelConfig(ctx context.Context, tunnelID string) (tunnelCo
 func (c *Client) updateTunnelConfig(ctx context.Context, tunnelID string, config tunnelConfig) error {
 	payload := map[string]any{}
 	if config.Raw != nil {
-		payload = config.Raw
+		if originRequest, ok := config.Raw["originRequest"]; ok {
+			payload["originRequest"] = originRequest
+		} else if originRequest, ok := config.Raw["origin_request"]; ok {
+			payload["originRequest"] = originRequest
+		}
+		if warpRouting, ok := config.Raw["warpRouting"]; ok {
+			payload["warpRouting"] = warpRouting
+		} else if warpRouting, ok := config.Raw["warp_routing"]; ok {
+			payload["warpRouting"] = warpRouting
+		}
 	}
 	payload["ingress"] = config.Ingress
 
@@ -234,7 +252,6 @@ type dnsRecordRequest struct {
 
 func (c *Client) findDNSRecord(ctx context.Context, hostname string) (*dnsRecord, error) {
 	query := url.Values{}
-	query.Set("type", "CNAME")
 	query.Set("name", hostname)
 
 	path := fmt.Sprintf("/zones/%s/dns_records?%s", c.cfg.CloudflareZoneID, query.Encode())
@@ -248,6 +265,45 @@ func (c *Client) findDNSRecord(ctx context.Context, hostname string) (*dnsRecord
 	return &result[0], nil
 }
 
+func (c *Client) selectDNSRecord(ctx context.Context, hostname string) (*dnsRecord, error) {
+	records, err := c.listDNSRecordsByName(ctx, hostname)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, nil
+	}
+
+	cnameIndex := -1
+	for i, record := range records {
+		if strings.EqualFold(record.Type, "CNAME") {
+			if cnameIndex != -1 {
+				return nil, fmt.Errorf("multiple CNAME records exist for %s; remove duplicates before continuing", hostname)
+			}
+			cnameIndex = i
+		}
+	}
+	if cnameIndex != -1 {
+		return &records[cnameIndex], nil
+	}
+	if len(records) == 1 {
+		return &records[0], nil
+	}
+	return nil, fmt.Errorf("multiple DNS records exist for %s (%s); remove conflicting records before creating a CNAME", hostname, describeDNSRecords(records))
+}
+
+func (c *Client) listDNSRecordsByName(ctx context.Context, hostname string) ([]dnsRecord, error) {
+	query := url.Values{}
+	query.Set("name", hostname)
+
+	path := fmt.Sprintf("/zones/%s/dns_records?%s", c.cfg.CloudflareZoneID, query.Encode())
+	var result []dnsRecord
+	if err := c.do(ctx, http.MethodGet, path, nil, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (c *Client) createDNSRecord(ctx context.Context, req dnsRecordRequest) error {
 	path := fmt.Sprintf("/zones/%s/dns_records", c.cfg.CloudflareZoneID)
 	return c.do(ctx, http.MethodPost, path, req, nil)
@@ -259,10 +315,12 @@ func (c *Client) updateDNSRecord(ctx context.Context, id string, req dnsRecordRe
 }
 
 type tunnelInfo struct {
-	ID          string        `json:"id"`
-	Name        string        `json:"name"`
-	Status      string        `json:"status"`
-	Connections []interface{} `json:"connections"`
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	Status       string        `json:"status"`
+	Connections  []interface{} `json:"connections"`
+	ConfigSrc    string        `json:"config_src"`
+	RemoteConfig *bool         `json:"remote_config"`
 }
 
 type apiError struct {
@@ -291,6 +349,7 @@ func (c *Client) do(ctx context.Context, method, path string, payload any, out a
 		return fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.cfg.CloudflareAPIToken)
 
 	resp, err := c.client.Do(req)
@@ -299,13 +358,29 @@ func (c *Client) do(ctx context.Context, method, path string, payload any, out a
 	}
 	defer resp.Body.Close()
 
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read cloudflare response: %w", err)
+	}
+
 	var wrapper apiResponse[json.RawMessage]
-	if err := json.NewDecoder(resp.Body).Decode(&wrapper); err != nil {
-		return fmt.Errorf("decode cloudflare response: %w", err)
+	if err := json.Unmarshal(rawBody, &wrapper); err != nil {
+		return fmt.Errorf("decode cloudflare response (status %d): %w; body=%s", resp.StatusCode, err, compactBody(rawBody))
 	}
 
 	if !wrapper.Success {
-		return fmt.Errorf("cloudflare api error: %s", describeErrors(wrapper.Errors))
+		return fmt.Errorf("cloudflare api error (%s %s) status=%d%s: %s%s",
+			method,
+			path,
+			resp.StatusCode,
+			formatCFRay(resp),
+			describeErrors(wrapper.Errors),
+			formatCFBody(rawBody),
+		)
+	}
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("cloudflare api http %d%s%s", resp.StatusCode, formatCFRay(resp), formatCFBody(rawBody))
 	}
 
 	if out == nil {
@@ -323,11 +398,71 @@ func describeErrors(errors []apiError) string {
 	if len(errors) == 0 {
 		return "unknown error"
 	}
-	first := errors[0]
-	if first.Code == 0 {
-		return first.Message
+	var parts []string
+	for i, entry := range errors {
+		if i >= 3 {
+			parts = append(parts, fmt.Sprintf("and %d more", len(errors)-i))
+			break
+		}
+		message := entry.Message
+		if message == "" {
+			message = "cloudflare api error"
+		}
+		if entry.Code != 0 {
+			message = fmt.Sprintf("%s (code %d)", message, entry.Code)
+		}
+		parts = append(parts, message)
 	}
-	return fmt.Sprintf("%s (code %d)", first.Message, first.Code)
+	desc := strings.Join(parts, "; ")
+	if errors[0].Code == 10000 || errors[0].Code == 10001 {
+		return fmt.Sprintf("%s. Check that the account ID, zone ID, and tunnel name/ID all belong to the same Cloudflare account as the token; 10000 often indicates an account/tunnel mismatch even when the token itself is valid.", desc)
+	}
+	return desc
+}
+
+func describeDNSRecords(records []dnsRecord) string {
+	var types []string
+	for _, record := range records {
+		if record.Type == "" {
+			continue
+		}
+		types = append(types, record.Type)
+	}
+	if len(types) == 0 {
+		return "unknown types"
+	}
+	return strings.Join(types, ", ")
+}
+
+func compactBody(raw []byte) string {
+	const maxLen = 600
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return "<empty>"
+	}
+	if len(trimmed) > maxLen {
+		return trimmed[:maxLen] + "..."
+	}
+	return trimmed
+}
+
+func formatCFBody(raw []byte) string {
+	body := compactBody(raw)
+	if body == "" || body == "<empty>" {
+		return ""
+	}
+	return fmt.Sprintf("; response=%s", body)
+}
+
+func formatCFRay(resp *http.Response) string {
+	if resp == nil {
+		return ""
+	}
+	ray := strings.TrimSpace(resp.Header.Get("CF-RAY"))
+	if ray == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (cf-ray %s)", ray)
 }
 
 func coerceIngress(value any) []map[string]any {
@@ -411,4 +546,57 @@ func looksLikeUUID(value string) bool {
 		}
 	}
 	return true
+}
+
+func (c *Client) ensureRemoteManaged(ctx context.Context, tunnelID string) error {
+	info, err := c.getTunnelInfo(ctx, tunnelID)
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(info.ConfigSrc, "local") {
+		return fmt.Errorf("tunnel %s is locally managed (config_src=%s, remote_config=%s); Cloudflare API updates require config_src=cloudflare: %w",
+			describeTunnelName(info, tunnelID), describeConfigSrc(info.ConfigSrc), describeRemoteConfig(info.RemoteConfig), ErrTunnelNotRemote)
+	}
+	if strings.EqualFold(info.ConfigSrc, "cloudflare") {
+		return nil
+	}
+	if info.RemoteConfig != nil && !*info.RemoteConfig {
+		return fmt.Errorf("tunnel %s is locally managed (config_src=%s, remote_config=%s); Cloudflare API updates require config_src=cloudflare: %w",
+			describeTunnelName(info, tunnelID), describeConfigSrc(info.ConfigSrc), describeRemoteConfig(info.RemoteConfig), ErrTunnelNotRemote)
+	}
+	return nil
+}
+
+func (c *Client) getTunnelInfo(ctx context.Context, tunnelID string) (tunnelInfo, error) {
+	path := fmt.Sprintf("/accounts/%s/cfd_tunnel/%s", c.cfg.CloudflareAccountID, tunnelID)
+	var result tunnelInfo
+	if err := c.do(ctx, http.MethodGet, path, nil, &result); err != nil {
+		return tunnelInfo{}, err
+	}
+	return result, nil
+}
+
+func describeTunnelName(info tunnelInfo, fallback string) string {
+	if strings.TrimSpace(info.Name) != "" {
+		return info.Name
+	}
+	return fallback
+}
+
+func describeConfigSrc(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "unknown"
+	}
+	return trimmed
+}
+
+func describeRemoteConfig(value *bool) string {
+	if value == nil {
+		return "unknown"
+	}
+	if *value {
+		return "true"
+	}
+	return "false"
 }

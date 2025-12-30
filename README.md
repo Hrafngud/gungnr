@@ -12,7 +12,8 @@ serves a web UI behind an nginx proxy.
 
 ## Requirements
 - Docker + Docker Compose v2.
-- cloudflared config and credentials on the host.
+- cloudflared config and credentials on the host (if running locally).
+- Cloudflare Tunnel token (if running cloudflared via Docker).
 - GitHub OAuth app for login.
 - Optional GitHub token for template creation.
 - Optional Cloudflare API token for DNS automation.
@@ -22,6 +23,10 @@ serves a web UI behind an nginx proxy.
 2) Ensure the templates and cloudflared directories exist on the host.
 3) Start the stack: `make up`.
 4) Open `http://localhost` (or the tunnel hostname) and login via GitHub.
+
+If you run the `cloudflared` container, set `CLOUDFLARED_TUNNEL_TOKEN`. The
+compose service uses host networking so tunnel ingress rules that target
+`http://localhost:<port>` continue to work (Linux hosts).
 
 ## Environment configuration
 Required for login:
@@ -39,14 +44,21 @@ Host integration defaults:
 - `CLOUDFLARED_CONFIG` (path to config.yml inside the container, mounted from
   host)
 - `DOMAIN`, `CLOUDFLARED_TUNNEL_NAME`, `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARED_TUNNEL_TOKEN` (used by the cloudflared container)
 - `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID` (required for API-managed tunnels)
+- `VITE_API_BASE_URL=/` when building the web container so the UI uses same-origin HTTPS.
 
 Note: Settings in the UI (domain, GitHub token, Cloudflare token, cloudflared
 config path) override env defaults.
+Cloudflare tokens should be API tokens (not global API keys) with
+Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit for the configured account and
+zone.
 
 If you are managing ingress via the Cloudflare API, ensure the tunnel is
-remote-managed (`config_src=cloudflare`) and `cloudflared` is running on the
-host with a tunnel token.
+remote-managed (`config_src=cloudflare`) and `cloudflared` is running with a
+tunnel token (locally or via the compose service).
+Locally managed tunnels (`config_src=local`) cannot be updated via the
+Cloudflare API; use a remote-managed tunnel created in the Cloudflare UI or API.
 
 ## Common commands
 - `make up` (foreground)

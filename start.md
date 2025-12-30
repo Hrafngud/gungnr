@@ -12,7 +12,8 @@ next_task.md: Current task.
 Process:
 Read all .md files before coding.
 Execute next_task.md fully.
-Test thoroughly: run docker compose up --build, verify functionality, fix errors.
+Test thoroughly: run docker build for backend/frontend images (and/or docker compose up --build), verify functionality, fix errors.
 Only mark task complete if build and app work perfectly.
 Document changes, decisions, and results in relevant .md files.
 Update next_task.md with the next pending task.
+Next task: Improve API error logging in the backend so external API responses are clearly captured for internal backend calls.

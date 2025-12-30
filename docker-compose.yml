@@ -101,6 +101,14 @@ services:
     networks:
       - app-network
 
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARED_TUNNEL_TOKEN}"]
+    network_mode: "host"
+    depends_on:
+      - proxy
+    restart: unless-stopped
+
 networks:
   app-network:
     driver: bridge

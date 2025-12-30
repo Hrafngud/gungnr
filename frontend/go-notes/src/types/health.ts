@@ -12,4 +12,25 @@ export interface TunnelHealth {
   tunnel?: string
   connections?: number
   configPath?: string
+  diagnostics?: TunnelDiagnostics
+}
+
+export interface TunnelDiagnostics {
+  accountId?: string
+  zoneId?: string
+  tunnel?: string
+  domain?: string
+  configPath?: string
+  tokenSet?: boolean
+  tunnelRefType?: string
+  sources?: SettingsSources
+}
+
+export interface SettingsSources {
+  baseDomain?: string
+  githubToken?: string
+  cloudflareToken?: string
+  cloudflareAccountId?: string
+  cloudflareZoneId?: string
+  cloudflaredConfigPath?: string
 }

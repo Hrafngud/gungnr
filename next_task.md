@@ -38,8 +38,27 @@ Frontend refactor (step 1 complete):
 - DONE: Begin step 7 (Data and Integration).
   - DONE: Wire GitHub template catalog + allowlist data once API endpoints are ready.
   - DONE: Expand Networking with DNS record and Cloudflare health data when available.
-- NEXT: Begin step 8 (Testing and Quality).
-  - Run `npm run build` in `frontend/go-notes`.
-  - Run `docker compose up --build` and verify UI/API (including Cloudflared status + Jobs list/stream).
-  - Confirm mixed-content is resolved: ensure `VITE_API_BASE_URL=/` and rebuild the web container so HTTPS requests stay on `https://`.
-  - Investigate Cloudflare API error: "Authentication error (code 10000)" and resolve token/account/zone configuration.
+- NEXT: Roll back cloudflared tunnel guidance to recommend host-installed `cloudflared` service for single-host, remote-managed tunnels.
+  - Update backend/UI copy and docs to steer operators to `cloudflared service install <token>` and confirm tunnel health from the Cloudflare dashboard.
+  - Keep the Docker-based tunnel option as a secondary, explicitly optional path (for fully Dockerized hosts).
+  - Emphasize that tunnel setup on the host is manual by the operator; the panel should instruct and provide links only.
+  - Add UI help buttons that open a modal with step-by-step guidance and external links (Cloudflare/GitHub token docs, tunnel creation, token retrieval).
+- NEXT: Confirm mixed-content is resolved by ensuring `VITE_API_BASE_URL=/` and rebuilding the web container for HTTPS.
+  - DONE: Add Cloudflare API token scope guidance to UI + README, and enrich auth error messaging for code 10000/10001.
+  - DONE: Clarify remote-managed tunnel requirement and improve Cloudflare error logging in the API.
+  - DONE: Add tunnel health diagnostics payload and return non-200 status codes for tunnel errors.
+  - DONE: Add live container logs screen for all running containers (not just deploy jobs).
+  - DONE: Add copy logs action, expand/collapse sidebar controls, and enhanced container log details.
+  - DONE: Run `npm run build` in `frontend/go-notes`.
+  - DONE: Run `docker compose up --build` (buildx plugin warning persists; stack started and healthy).
+  - TODO: Confirm mixed-content is resolved: ensure `VITE_API_BASE_URL=/` and rebuild the web container so HTTPS requests stay on `https://` (Dockerfile default updated; rebuild still required).
+  - TODO: Validate Cloudflare API token/account/zone setup with a token scoped to Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit.
+  - TODO: Resolve persistent Cloudflare API auth error (code 10000) by verifying UI-stored settings vs env and confirming the account/zone IDs match the token scope.
+  - TODO: Confirm `cloudflared` tunnel token flow in compose (`CLOUDFLARED_TUNNEL_TOKEN`) and document host-network requirement for ingress to `localhost` (keep as optional, non-primary path).
+- DONE: Improve external API error logging for Cloudflare/GitHub responses with status/request IDs and response payload summaries.
+- DONE: Capture GitHub error response body snippets for clearer API failure logs.
+- DONE: Improve GitHub OAuth error logging to include response status/body details for token exchange and user/org checks.
+
+## Notes
+- `docker compose up --build` failed locally due to Docker socket permission (`/var/run/docker.sock` connect: operation not permitted).
+- Retest after GitHub logging changes still blocked by Docker socket permission.

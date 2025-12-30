@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -36,6 +37,12 @@ type HostService struct{}
 
 func NewHostService() *HostService {
 	return &HostService{}
+}
+
+type ContainerLogsOptions struct {
+	Tail       int
+	Follow     bool
+	Timestamps bool
 }
 
 func (s *HostService) ListContainers(ctx context.Context) ([]DockerContainer, error) {
@@ -77,6 +84,30 @@ func (s *HostService) ListContainers(ctx context.Context) ([]DockerContainer, er
 	}
 
 	return containers, nil
+}
+
+func (s *HostService) StartContainerLogs(ctx context.Context, container string, opts ContainerLogsOptions) (*exec.Cmd, io.ReadCloser, error) {
+	args := []string{"logs"}
+	if opts.Follow {
+		args = append(args, "-f")
+	}
+	if opts.Timestamps {
+		args = append(args, "--timestamps")
+	}
+	if opts.Tail > 0 {
+		args = append(args, "--tail", strconv.Itoa(opts.Tail))
+	}
+	args = append(args, container)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("attach docker logs: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, nil, fmt.Errorf("start docker logs: %w", err)
+	}
+	return cmd, stdout, nil
 }
 
 type dockerPSLine struct {
