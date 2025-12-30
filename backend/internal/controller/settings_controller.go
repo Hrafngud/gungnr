@@ -50,6 +50,8 @@ func (c *SettingsController) Update(ctx *gin.Context) {
 		"baseDomain":            req.BaseDomain,
 		"githubTokenSet":        req.GitHubToken != "",
 		"cloudflareTokenSet":    req.CloudflareToken != "",
+		"cloudflareAccountId":   req.CloudflareAccountID,
+		"cloudflareZoneId":      req.CloudflareZoneID,
 		"cloudflaredConfigPath": req.CloudflaredConfigPath,
 	})
 

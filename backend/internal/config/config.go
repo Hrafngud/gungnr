@@ -33,6 +33,8 @@ type Config struct {
 	TemplatesDir        string
 	Domain              string
 	CloudflareAPIToken  string
+	CloudflareAccountID string
+	CloudflareZoneID    string
 	CloudflaredConfig   string
 	CloudflaredTunnel   string
 }
@@ -59,6 +61,8 @@ func Load() (Config, error) {
 	v.SetDefault("GITHUB_REPO_PRIVATE", true)
 	v.SetDefault("DOMAIN", "")
 	v.SetDefault("CLOUDFLARE_API_TOKEN", "")
+	v.SetDefault("CLOUDFLARE_ACCOUNT_ID", "")
+	v.SetDefault("CLOUDFLARE_ZONE_ID", "")
 	v.SetDefault("CLOUDFLARED_CONFIG", "~/.cloudflared/config.yml")
 	v.SetDefault("CLOUDFLARED_TUNNEL_NAME", "")
 
@@ -95,6 +99,8 @@ func Load() (Config, error) {
 		TemplatesDir:        v.GetString("TEMPLATES_DIR"),
 		Domain:              v.GetString("DOMAIN"),
 		CloudflareAPIToken:  v.GetString("CLOUDFLARE_API_TOKEN"),
+		CloudflareAccountID: v.GetString("CLOUDFLARE_ACCOUNT_ID"),
+		CloudflareZoneID:    v.GetString("CLOUDFLARE_ZONE_ID"),
 		CloudflaredConfig:   v.GetString("CLOUDFLARED_CONFIG"),
 		CloudflaredTunnel:   v.GetString("CLOUDFLARED_TUNNEL_NAME"),
 	}

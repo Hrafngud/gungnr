@@ -18,6 +18,8 @@ type SettingsPayload struct {
 	BaseDomain            string `json:"baseDomain"`
 	GitHubToken           string `json:"githubToken"`
 	CloudflareToken       string `json:"cloudflareToken"`
+	CloudflareAccountID   string `json:"cloudflareAccountId"`
+	CloudflareZoneID      string `json:"cloudflareZoneId"`
 	CloudflaredConfigPath string `json:"cloudflaredConfigPath"`
 }
 
@@ -55,6 +57,8 @@ func (s *SettingsService) Update(ctx context.Context, input SettingsPayload) (Se
 	stored.BaseDomain = strings.TrimSpace(input.BaseDomain)
 	stored.GitHubToken = strings.TrimSpace(input.GitHubToken)
 	stored.CloudflareToken = strings.TrimSpace(input.CloudflareToken)
+	stored.CloudflareAccountID = strings.TrimSpace(input.CloudflareAccountID)
+	stored.CloudflareZoneID = strings.TrimSpace(input.CloudflareZoneID)
 	stored.CloudflaredConfigPath = strings.TrimSpace(input.CloudflaredConfigPath)
 
 	if err := s.repo.Save(ctx, stored); err != nil {
@@ -78,6 +82,12 @@ func (s *SettingsService) ResolveConfig(ctx context.Context) (config.Config, err
 	}
 	if settings.CloudflareToken != "" {
 		cfg.CloudflareAPIToken = settings.CloudflareToken
+	}
+	if settings.CloudflareAccountID != "" {
+		cfg.CloudflareAccountID = settings.CloudflareAccountID
+	}
+	if settings.CloudflareZoneID != "" {
+		cfg.CloudflareZoneID = settings.CloudflareZoneID
 	}
 	if settings.CloudflaredConfigPath != "" {
 		cfg.CloudflaredConfig = settings.CloudflaredConfigPath
@@ -110,6 +120,8 @@ func (s *SettingsService) resolve(stored *models.Settings) SettingsPayload {
 	baseDomain := strings.TrimSpace(s.cfg.Domain)
 	githubToken := strings.TrimSpace(s.cfg.GitHubToken)
 	cloudflareToken := strings.TrimSpace(s.cfg.CloudflareAPIToken)
+	cloudflareAccountID := strings.TrimSpace(s.cfg.CloudflareAccountID)
+	cloudflareZoneID := strings.TrimSpace(s.cfg.CloudflareZoneID)
 	cloudflaredConfigPath := strings.TrimSpace(s.cfg.CloudflaredConfig)
 	if cloudflaredConfigPath == "" {
 		cloudflaredConfigPath = defaultCloudflaredConfigPath
@@ -125,6 +137,12 @@ func (s *SettingsService) resolve(stored *models.Settings) SettingsPayload {
 		if strings.TrimSpace(stored.CloudflareToken) != "" {
 			cloudflareToken = strings.TrimSpace(stored.CloudflareToken)
 		}
+		if strings.TrimSpace(stored.CloudflareAccountID) != "" {
+			cloudflareAccountID = strings.TrimSpace(stored.CloudflareAccountID)
+		}
+		if strings.TrimSpace(stored.CloudflareZoneID) != "" {
+			cloudflareZoneID = strings.TrimSpace(stored.CloudflareZoneID)
+		}
 		if strings.TrimSpace(stored.CloudflaredConfigPath) != "" {
 			cloudflaredConfigPath = strings.TrimSpace(stored.CloudflaredConfigPath)
 		}
@@ -134,6 +152,8 @@ func (s *SettingsService) resolve(stored *models.Settings) SettingsPayload {
 		BaseDomain:            baseDomain,
 		GitHubToken:           githubToken,
 		CloudflareToken:       cloudflareToken,
+		CloudflareAccountID:   cloudflareAccountID,
+		CloudflareZoneID:      cloudflareZoneID,
 		CloudflaredConfigPath: expandUserPath(cloudflaredConfigPath),
 	}
 }

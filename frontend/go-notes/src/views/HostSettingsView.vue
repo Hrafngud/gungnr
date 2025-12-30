@@ -28,6 +28,8 @@ const settingsForm = reactive<Settings>({
   baseDomain: '',
   githubToken: '',
   cloudflareToken: '',
+  cloudflareAccountId: '',
+  cloudflareZoneId: '',
   cloudflaredConfigPath: '',
 })
 
@@ -486,6 +488,30 @@ onMounted(async () => {
                 v-model="settingsForm.cloudflareToken"
                 type="password"
                 placeholder="cf_••••••"
+                :disabled="loading"
+              />
+            </label>
+
+            <label class="grid gap-2">
+              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                Cloudflare account ID
+              </span>
+              <UiInput
+                v-model="settingsForm.cloudflareAccountId"
+                type="text"
+                placeholder="Account ID"
+                :disabled="loading"
+              />
+            </label>
+
+            <label class="grid gap-2">
+              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                Cloudflare zone ID
+              </span>
+              <UiInput
+                v-model="settingsForm.cloudflareZoneId"
+                type="text"
+                placeholder="Zone ID"
                 :disabled="loading"
               />
             </label>

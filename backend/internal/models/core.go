@@ -59,5 +59,7 @@ type Settings struct {
 	BaseDomain            string `gorm:"size:255"`
 	GitHubToken           string `gorm:"type:text"`
 	CloudflareToken       string `gorm:"type:text"`
+	CloudflareAccountID   string `gorm:"size:255"`
+	CloudflareZoneID      string `gorm:"size:255"`
 	CloudflaredConfigPath string `gorm:"size:512"`
 }

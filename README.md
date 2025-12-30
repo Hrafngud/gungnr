@@ -39,9 +39,14 @@ Host integration defaults:
 - `CLOUDFLARED_CONFIG` (path to config.yml inside the container, mounted from
   host)
 - `DOMAIN`, `CLOUDFLARED_TUNNEL_NAME`, `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID` (required for API-managed tunnels)
 
 Note: Settings in the UI (domain, GitHub token, Cloudflare token, cloudflared
 config path) override env defaults.
+
+If you are managing ingress via the Cloudflare API, ensure the tunnel is
+remote-managed (`config_src=cloudflare`) and `cloudflared` is running on the
+host with a tunnel token.
 
 ## Common commands
 - `make up` (foreground)

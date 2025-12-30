@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"go-notes/internal/config"
@@ -71,7 +72,7 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	if _, err := os.Stat(projectDir); err == nil {
 		return fmt.Errorf("project already exists at %s", projectDir)
 	}
-	if err := os.MkdirAll(w.cfg.TemplatesDir, 0o755); err != nil {
+	if err := os.MkdirAll(runtimeCfg.TemplatesDir, 0o755); err != nil {
 		return fmt.Errorf("create templates dir: %w", err)
 	}
 
@@ -102,6 +103,7 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	proxyPort := req.ProxyPort
 	dbPort := req.DBPort
 	reserved := map[int]bool{}
+	addDockerReservedPorts(ctx, reserved)
 	if proxyPort == 0 {
 		proxyPort, err = findFreePort(80, reserved)
 		if err != nil {
@@ -144,7 +146,7 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	hostname := fmt.Sprintf("%s.%s", req.Subdomain, runtimeCfg.Domain)
 	logger.Logf("configuring tunnel ingress for %s", hostname)
 	cloudflareClient := cloudflare.NewClient(runtimeCfg)
-	if err := w.cloudflareSetup(ctx, runtimeCfg, cloudflareClient, hostname, proxyPort); err != nil {
+	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, hostname, proxyPort); err != nil {
 		return err
 	}
 
@@ -202,7 +204,7 @@ func (w *ProjectWorkflows) handleDeployExisting(ctx context.Context, job models.
 	hostname := fmt.Sprintf("%s.%s", req.Subdomain, runtimeCfg.Domain)
 	logger.Logf("configuring tunnel ingress for %s", hostname)
 	cloudflareClient := cloudflare.NewClient(runtimeCfg)
-	if err := w.cloudflareSetup(ctx, runtimeCfg, cloudflareClient, hostname, req.Port); err != nil {
+	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, hostname, req.Port); err != nil {
 		return err
 	}
 
@@ -241,14 +243,14 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 	hostname := fmt.Sprintf("%s.%s", req.Subdomain, runtimeCfg.Domain)
 	logger.Logf("configuring tunnel ingress for %s", hostname)
 	cloudflareClient := cloudflare.NewClient(runtimeCfg)
-	if err := w.cloudflareSetup(ctx, runtimeCfg, cloudflareClient, hostname, req.Port); err != nil {
+	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, hostname, req.Port); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, cfg config.Config, cloudfl *cloudflare.Client, hostname string, port int) error {
+func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, logger jobs.Logger, cfg config.Config, cloudfl *cloudflare.Client, hostname string, port int) error {
 	if cfg.Domain == "" {
 		return fmt.Errorf("DOMAIN not configured")
 	}
@@ -256,14 +258,13 @@ func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, cfg config.Confi
 		return fmt.Errorf("cloudflare client unavailable")
 	}
 
+	logger.Log("updating Cloudflare DNS record")
 	if err := cloudfl.EnsureDNS(ctx, hostname); err != nil {
-		return err
+		return fmt.Errorf("cloudflare dns: %w", err)
 	}
-	if err := cloudfl.UpdateIngress(hostname, port); err != nil {
-		return err
-	}
-	if err := cloudfl.RestartTunnel(ctx); err != nil {
-		return err
+	logger.Log("updating Cloudflare tunnel ingress")
+	if err := cloudfl.UpdateIngress(ctx, hostname, port); err != nil {
+		return fmt.Errorf("cloudflare ingress: %w", err)
 	}
 	return nil
 }
@@ -314,6 +315,53 @@ func findFreePort(start int, reserved map[int]bool) (int, error) {
 		return port, nil
 	}
 	return 0, fmt.Errorf("no free port available from %d", start)
+}
+
+func addDockerReservedPorts(ctx context.Context, reserved map[int]bool) {
+	ports, err := listDockerPublishedPorts(ctx)
+	if err != nil {
+		return
+	}
+	for _, port := range ports {
+		reserved[port] = true
+	}
+}
+
+func listDockerPublishedPorts(ctx context.Context) ([]int, error) {
+	cmd := exec.CommandContext(ctx, "docker", "ps", "--format", "{{.Ports}}")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, err
+	}
+	return parsePublishedPorts(string(output)), nil
+}
+
+func parsePublishedPorts(raw string) []int {
+	seen := map[int]bool{}
+	lines := strings.Split(raw, "\n")
+	for _, line := range lines {
+		for _, segment := range strings.Split(line, ",") {
+			segment = strings.TrimSpace(segment)
+			if !strings.Contains(segment, "->") {
+				continue
+			}
+			parts := strings.SplitN(segment, "->", 2)
+			host := strings.TrimSpace(parts[0])
+			if idx := strings.LastIndex(host, ":"); idx != -1 {
+				host = host[idx+1:]
+			}
+			port, err := strconv.Atoi(strings.TrimSpace(host))
+			if err != nil || port < 1 || port > 65535 {
+				continue
+			}
+			seen[port] = true
+		}
+	}
+	ports := make([]int, 0, len(seen))
+	for port := range seen {
+		ports = append(ports, port)
+	}
+	return ports
 }
 
 var (
