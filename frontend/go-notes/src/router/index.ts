@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from '@/views/LoginView.vue'
 import HomeView from '@/views/HomeView.vue'
 import OverviewView from '@/views/OverviewView.vue'
+import ContainerLogsView from '@/views/ContainerLogsView.vue'
 import HostSettingsView from '@/views/HostSettingsView.vue'
 import NetworkingView from '@/views/NetworkingView.vue'
 import GitHubView from '@/views/GitHubView.vue'
@@ -29,6 +30,12 @@ const router = createRouter({
       name: 'overview',
       component: OverviewView,
       meta: { title: 'Overview' },
+    },
+    {
+      path: '/logs',
+      name: 'logs',
+      component: ContainerLogsView,
+      meta: { title: 'Container Logs' },
     },
     {
       path: '/host-settings',

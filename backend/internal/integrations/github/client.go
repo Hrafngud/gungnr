@@ -1,9 +1,14 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
 
 	"go-notes/internal/config"
 
@@ -12,6 +17,8 @@ import (
 )
 
 var ErrMissingToken = errors.New("GITHUB_TOKEN is required")
+
+const responseBodyHeader = "X-Warp-Response-Body"
 
 type Client struct {
 	cfg config.Config
@@ -22,7 +29,8 @@ func NewClient(cfg config.Config) *Client {
 	var api *gogithub.Client
 	if cfg.GitHubToken != "" {
 		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: cfg.GitHubToken})
-		api = gogithub.NewClient(oauth2.NewClient(context.Background(), ts))
+		httpClient := WrapHTTPClient(oauth2.NewClient(context.Background(), ts))
+		api = gogithub.NewClient(httpClient)
 	}
 	return &Client{cfg: cfg, api: api}
 }
@@ -48,8 +56,142 @@ func (c *Client) CreateRepoFromTemplate(ctx context.Context, name string) (*gogi
 
 	repo, _, err := c.api.Repositories.CreateFromTemplate(ctx, c.cfg.GitHubTemplateOwner, c.cfg.GitHubTemplateRepo, req)
 	if err != nil {
-		return nil, fmt.Errorf("create repo from template: %w", err)
+		detail := FormatError(err)
+		if detail == "" {
+			return nil, fmt.Errorf("create repo from template: %w", err)
+		}
+		return nil, fmt.Errorf("create repo from template: %w; %s", err, detail)
 	}
 
 	return repo, nil
+}
+
+func FormatError(err error) string {
+	return formatGitHubError(err)
+}
+
+func formatGitHubError(err error) string {
+	switch typed := err.(type) {
+	case *gogithub.RateLimitError:
+		return fmt.Sprintf("github rate limit exceeded: %s%s", strings.TrimSpace(typed.Message), formatGitHubResponseMeta(typed.Response))
+	case *gogithub.AbuseRateLimitError:
+		retry := ""
+		if typed.RetryAfter != nil && *typed.RetryAfter > 0 {
+			retry = fmt.Sprintf(" retry_after=%s", typed.RetryAfter.Round(time.Second))
+		}
+		return fmt.Sprintf("github abuse detection triggered: %s%s%s", strings.TrimSpace(typed.Message), retry, formatGitHubResponseMeta(typed.Response))
+	case *gogithub.AcceptedError:
+		return "github request accepted but still processing"
+	case *gogithub.ErrorResponse:
+		message := strings.TrimSpace(typed.Message)
+		if message == "" {
+			message = "github api error"
+		}
+		errs := formatGitHubErrors(typed.Errors)
+		docs := ""
+		if typed.DocumentationURL != "" {
+			docs = fmt.Sprintf(" docs=%s", typed.DocumentationURL)
+		}
+		return fmt.Sprintf("%s%s%s%s", message, errs, docs, formatGitHubResponseMeta(typed.Response))
+	default:
+		return ""
+	}
+}
+
+func formatGitHubErrors(errors []gogithub.Error) string {
+	if len(errors) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(errors))
+	for i, entry := range errors {
+		if i >= 3 {
+			parts = append(parts, fmt.Sprintf("and %d more", len(errors)-i))
+			break
+		}
+		fragment := strings.TrimSpace(entry.Message)
+		if fragment == "" {
+			fragment = entry.Code
+		}
+		if entry.Resource != "" || entry.Field != "" {
+			fragment = fmt.Sprintf("%s (%s.%s)", fragment, entry.Resource, entry.Field)
+		}
+		parts = append(parts, fragment)
+	}
+	return fmt.Sprintf("; errors=%s", strings.Join(parts, "; "))
+}
+
+func formatGitHubResponseMeta(resp *http.Response) string {
+	if resp == nil {
+		return ""
+	}
+	status := strings.TrimSpace(resp.Status)
+	if status == "" {
+		status = fmt.Sprintf("%d", resp.StatusCode)
+	}
+	requestID := strings.TrimSpace(resp.Header.Get("X-GitHub-Request-Id"))
+	if requestID == "" {
+		requestID = strings.TrimSpace(resp.Header.Get("X-Request-Id"))
+	}
+	meta := fmt.Sprintf(" status=%s", status)
+	if requestID != "" {
+		meta = fmt.Sprintf("%s request_id=%s", meta, requestID)
+	}
+	body := strings.TrimSpace(resp.Header.Get(responseBodyHeader))
+	if body != "" {
+		meta = fmt.Sprintf("%s response=%s", meta, body)
+	}
+	return fmt.Sprintf(" (%s)", strings.TrimSpace(meta))
+}
+
+func WrapHTTPClient(client *http.Client) *http.Client {
+	if client == nil {
+		return nil
+	}
+	base := client.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	if _, ok := base.(*responseCaptureTransport); ok {
+		return client
+	}
+	client.Transport = &responseCaptureTransport{base: base}
+	return client
+}
+
+type responseCaptureTransport struct {
+	base http.RoundTripper
+}
+
+func (t *responseCaptureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err != nil || resp == nil || resp.Body == nil {
+		return resp, err
+	}
+	if resp.StatusCode < http.StatusBadRequest {
+		return resp, err
+	}
+	raw, readErr := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(raw))
+	if readErr == nil {
+		body := compactBodySnippet(raw)
+		if body != "" {
+			resp.Header.Set(responseBodyHeader, body)
+		}
+	}
+	return resp, err
+}
+
+func compactBodySnippet(raw []byte) string {
+	const maxLen = 600
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return ""
+	}
+	trimmed = strings.ReplaceAll(trimmed, "\r", " ")
+	trimmed = strings.ReplaceAll(trimmed, "\n", " ")
+	if len(trimmed) > maxLen {
+		return trimmed[:maxLen] + "..."
+	}
+	return trimmed
 }

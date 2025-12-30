@@ -23,6 +23,15 @@ type SettingsPayload struct {
 	CloudflaredConfigPath string `json:"cloudflaredConfigPath"`
 }
 
+type SettingsSources struct {
+	BaseDomain            string `json:"baseDomain"`
+	GitHubToken           string `json:"githubToken"`
+	CloudflareToken       string `json:"cloudflareToken"`
+	CloudflareAccountID   string `json:"cloudflareAccountId"`
+	CloudflareZoneID      string `json:"cloudflareZoneId"`
+	CloudflaredConfigPath string `json:"cloudflaredConfigPath"`
+}
+
 type CloudflaredPreview struct {
 	Path     string `json:"path"`
 	Contents string `json:"contents"`
@@ -93,6 +102,73 @@ func (s *SettingsService) ResolveConfig(ctx context.Context) (config.Config, err
 		cfg.CloudflaredConfig = settings.CloudflaredConfigPath
 	}
 	return cfg, nil
+}
+
+func (s *SettingsService) ResolveConfigWithSources(ctx context.Context) (config.Config, SettingsSources, error) {
+	stored, err := s.repo.Get(ctx)
+	if err != nil && err != repository.ErrNotFound {
+		return config.Config{}, SettingsSources{}, err
+	}
+
+	cfg := s.cfg
+	sources := SettingsSources{
+		BaseDomain:            sourceFromValue(cfg.Domain, "env"),
+		GitHubToken:           sourceFromValue(cfg.GitHubToken, "env"),
+		CloudflareToken:       sourceFromValue(cfg.CloudflareAPIToken, "env"),
+		CloudflareAccountID:   sourceFromValue(cfg.CloudflareAccountID, "env"),
+		CloudflareZoneID:      sourceFromValue(cfg.CloudflareZoneID, "env"),
+		CloudflaredConfigPath: sourceFromValue(cfg.CloudflaredConfig, "env"),
+	}
+
+	if stored != nil {
+		if strings.TrimSpace(stored.BaseDomain) != "" {
+			cfg.Domain = strings.TrimSpace(stored.BaseDomain)
+			sources.BaseDomain = "settings"
+		} else if sources.BaseDomain == "" {
+			sources.BaseDomain = "unset"
+		}
+		if strings.TrimSpace(stored.GitHubToken) != "" {
+			cfg.GitHubToken = strings.TrimSpace(stored.GitHubToken)
+			sources.GitHubToken = "settings"
+		} else if sources.GitHubToken == "" {
+			sources.GitHubToken = "unset"
+		}
+		if strings.TrimSpace(stored.CloudflareToken) != "" {
+			cfg.CloudflareAPIToken = strings.TrimSpace(stored.CloudflareToken)
+			sources.CloudflareToken = "settings"
+		} else if sources.CloudflareToken == "" {
+			sources.CloudflareToken = "unset"
+		}
+		if strings.TrimSpace(stored.CloudflareAccountID) != "" {
+			cfg.CloudflareAccountID = strings.TrimSpace(stored.CloudflareAccountID)
+			sources.CloudflareAccountID = "settings"
+		} else if sources.CloudflareAccountID == "" {
+			sources.CloudflareAccountID = "unset"
+		}
+		if strings.TrimSpace(stored.CloudflareZoneID) != "" {
+			cfg.CloudflareZoneID = strings.TrimSpace(stored.CloudflareZoneID)
+			sources.CloudflareZoneID = "settings"
+		} else if sources.CloudflareZoneID == "" {
+			sources.CloudflareZoneID = "unset"
+		}
+		if strings.TrimSpace(stored.CloudflaredConfigPath) != "" {
+			cfg.CloudflaredConfig = strings.TrimSpace(stored.CloudflaredConfigPath)
+			sources.CloudflaredConfigPath = "settings"
+		} else if sources.CloudflaredConfigPath == "" {
+			sources.CloudflaredConfigPath = "unset"
+		}
+	}
+
+	if strings.TrimSpace(cfg.CloudflaredConfig) == "" {
+		cfg.CloudflaredConfig = defaultCloudflaredConfigPath
+		if sources.CloudflaredConfigPath == "" {
+			sources.CloudflaredConfigPath = "default"
+		}
+	}
+	cfg.CloudflaredConfig = expandUserPath(cfg.CloudflaredConfig)
+
+	sources = normalizeSources(sources)
+	return cfg, sources, nil
 }
 
 func (s *SettingsService) CloudflaredPreview(ctx context.Context) (CloudflaredPreview, error) {
@@ -178,4 +254,33 @@ func expandUserPath(input string) string {
 		return filepath.Join(home, strings.TrimPrefix(trimmed, "~/"))
 	}
 	return trimmed
+}
+
+func sourceFromValue(value, source string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	return source
+}
+
+func normalizeSources(input SettingsSources) SettingsSources {
+	if input.BaseDomain == "" {
+		input.BaseDomain = "unset"
+	}
+	if input.GitHubToken == "" {
+		input.GitHubToken = "unset"
+	}
+	if input.CloudflareToken == "" {
+		input.CloudflareToken = "unset"
+	}
+	if input.CloudflareAccountID == "" {
+		input.CloudflareAccountID = "unset"
+	}
+	if input.CloudflareZoneID == "" {
+		input.CloudflareZoneID = "unset"
+	}
+	if input.CloudflaredConfigPath == "" {
+		input.CloudflaredConfigPath = "unset"
+	}
+	return input
 }

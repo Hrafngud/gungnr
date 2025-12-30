@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"go-notes/internal/config"
+	ghintegration "go-notes/internal/integrations/github"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
 
@@ -47,13 +49,14 @@ func (s *AuthService) Exchange(ctx context.Context, code, redirectURL string) (*
 	cfg := s.oauthConfigForRedirect(redirectURL)
 	token, err := cfg.Exchange(ctx, code)
 	if err != nil {
-		return nil, fmt.Errorf("exchange token: %w", err)
+		return nil, fmt.Errorf("exchange token: %w%s", err, formatOAuthError(err))
 	}
 
-	client := github.NewClient(cfg.Client(ctx, token))
+	httpClient := ghintegration.WrapHTTPClient(cfg.Client(ctx, token))
+	client := github.NewClient(httpClient)
 	ghUser, _, err := client.Users.Get(ctx, "")
 	if err != nil {
-		return nil, fmt.Errorf("fetch github user: %w", err)
+		return nil, formatGitHubClientError("fetch github user", err)
 	}
 
 	if ghUser == nil || ghUser.ID == nil || ghUser.Login == nil {
@@ -108,8 +111,48 @@ func (s *AuthService) isAllowed(ctx context.Context, client *github.Client, logi
 
 	ok, _, err := client.Organizations.IsMember(ctx, s.cfg.GitHubAllowedOrg, login)
 	if err != nil {
-		return false, fmt.Errorf("check org membership: %w", err)
+		return false, formatGitHubClientError("check org membership", err)
 	}
 
 	return ok, nil
+}
+
+func formatGitHubClientError(action string, err error) error {
+	detail := ghintegration.FormatError(err)
+	if detail == "" {
+		return fmt.Errorf("%s: %w", action, err)
+	}
+	return fmt.Errorf("%s: %w; %s", action, err, detail)
+}
+
+func formatOAuthError(err error) string {
+	var retrieveErr *oauth2.RetrieveError
+	if !errors.As(err, &retrieveErr) {
+		return ""
+	}
+	status := ""
+	if retrieveErr.Response != nil {
+		status = retrieveErr.Response.Status
+		if status == "" && retrieveErr.Response.StatusCode != 0 {
+			status = fmt.Sprintf("%d", retrieveErr.Response.StatusCode)
+		}
+	}
+	body := strings.TrimSpace(string(retrieveErr.Body))
+	if len(body) > 600 {
+		body = body[:600] + "..."
+	}
+	meta := ""
+	if status != "" {
+		meta = fmt.Sprintf(" status=%s", status)
+	}
+	if body != "" {
+		if meta != "" {
+			meta = meta + " "
+		}
+		meta = fmt.Sprintf("%sresponse=%s", meta, body)
+	}
+	if meta == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (%s)", strings.TrimSpace(meta))
 }

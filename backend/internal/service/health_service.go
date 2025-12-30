@@ -22,11 +22,23 @@ type DockerHealth struct {
 }
 
 type TunnelHealth struct {
-	Status      string `json:"status"`
-	Detail      string `json:"detail,omitempty"`
-	Tunnel      string `json:"tunnel,omitempty"`
-	Connections int    `json:"connections"`
-	ConfigPath  string `json:"configPath,omitempty"`
+	Status      string             `json:"status"`
+	Detail      string             `json:"detail,omitempty"`
+	Tunnel      string             `json:"tunnel,omitempty"`
+	Connections int                `json:"connections"`
+	ConfigPath  string             `json:"configPath,omitempty"`
+	Diagnostics *TunnelDiagnostics `json:"diagnostics,omitempty"`
+}
+
+type TunnelDiagnostics struct {
+	AccountID     string          `json:"accountId,omitempty"`
+	ZoneID        string          `json:"zoneId,omitempty"`
+	Tunnel        string          `json:"tunnel,omitempty"`
+	Domain        string          `json:"domain,omitempty"`
+	ConfigPath    string          `json:"configPath,omitempty"`
+	TokenSet      bool            `json:"tokenSet,omitempty"`
+	TunnelRefType string          `json:"tunnelRefType,omitempty"`
+	Sources       SettingsSources `json:"sources,omitempty"`
 }
 
 type HealthService struct {
@@ -64,9 +76,20 @@ func (s *HealthService) Tunnel(ctx context.Context) TunnelHealth {
 		return TunnelHealth{Status: "error", Detail: "settings service unavailable"}
 	}
 
-	cfg, err := s.settings.ResolveConfig(ctx)
+	cfg, sources, err := s.settings.ResolveConfigWithSources(ctx)
 	if err != nil {
 		return TunnelHealth{Status: "error", Detail: err.Error()}
+	}
+
+	diagnostics := &TunnelDiagnostics{
+		AccountID:     strings.TrimSpace(cfg.CloudflareAccountID),
+		ZoneID:        strings.TrimSpace(cfg.CloudflareZoneID),
+		Tunnel:        strings.TrimSpace(cfg.CloudflaredTunnel),
+		Domain:        strings.TrimSpace(cfg.Domain),
+		ConfigPath:    strings.TrimSpace(cfg.CloudflaredConfig),
+		TokenSet:      strings.TrimSpace(cfg.CloudflareAPIToken) != "",
+		TunnelRefType: tunnelRefType(cfg.CloudflaredTunnel),
+		Sources:       sources,
 	}
 
 	if strings.TrimSpace(cfg.CloudflareAPIToken) != "" &&
@@ -75,7 +98,13 @@ func (s *HealthService) Tunnel(ctx context.Context) TunnelHealth {
 		client := cloudflare.NewClient(cfg)
 		info, err := client.TunnelStatus(ctx)
 		if err != nil {
-			return TunnelHealth{Status: "error", Detail: err.Error()}
+			status := "error"
+			detail := err.Error()
+			if errors.Is(err, cloudflare.ErrTunnelNotRemote) {
+				status = "warning"
+				detail = "Tunnel is locally managed; Cloudflare API checks require a remote-managed tunnel (config_src=cloudflare)."
+			}
+			return TunnelHealth{Status: status, Detail: detail, Diagnostics: diagnostics}
 		}
 
 		status := "ok"
@@ -97,12 +126,13 @@ func (s *HealthService) Tunnel(ctx context.Context) TunnelHealth {
 			Tunnel:      info.Name,
 			Connections: info.Connections,
 			ConfigPath:  strings.TrimSpace(cfg.CloudflaredConfig),
+			Diagnostics: diagnostics,
 		}
 	}
 
 	configPath := strings.TrimSpace(cfg.CloudflaredConfig)
 	if configPath == "" {
-		return TunnelHealth{Status: "missing", Detail: "cloudflared config path is not set"}
+		return TunnelHealth{Status: "missing", Detail: "cloudflared config path is not set", Diagnostics: diagnostics}
 	}
 	configPath = expandUserPath(configPath)
 
@@ -110,15 +140,17 @@ func (s *HealthService) Tunnel(ctx context.Context) TunnelHealth {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return TunnelHealth{
-				Status:     "missing",
-				Detail:     fmt.Sprintf("cloudflared config not found at %s", configPath),
-				ConfigPath: configPath,
+				Status:      "missing",
+				Detail:      fmt.Sprintf("cloudflared config not found at %s", configPath),
+				ConfigPath:  configPath,
+				Diagnostics: diagnostics,
 			}
 		}
 		return TunnelHealth{
-			Status:     "error",
-			Detail:     fmt.Sprintf("read cloudflared config: %v", err),
-			ConfigPath: configPath,
+			Status:      "error",
+			Detail:      fmt.Sprintf("read cloudflared config: %v", err),
+			ConfigPath:  configPath,
+			Diagnostics: diagnostics,
 		}
 	}
 
@@ -128,9 +160,10 @@ func (s *HealthService) Tunnel(ctx context.Context) TunnelHealth {
 	}
 	if tunnelName == "" {
 		return TunnelHealth{
-			Status:     "missing",
-			Detail:     "cloudflared tunnel name is not set",
-			ConfigPath: configPath,
+			Status:      "missing",
+			Detail:      "cloudflared tunnel name is not set",
+			ConfigPath:  configPath,
+			Diagnostics: diagnostics,
 		}
 	}
 
@@ -166,17 +199,19 @@ func (s *HealthService) Tunnel(ctx context.Context) TunnelHealth {
 		}
 		if strings.Contains(detail, "Cannot determine default origin certificate path") {
 			return TunnelHealth{
-				Status:     "missing",
-				Detail:     "Cloudflared origin cert is missing. Set origincert in config.yml or mount cert.pem.",
-				Tunnel:     tunnelName,
-				ConfigPath: configPath,
+				Status:      "missing",
+				Detail:      "Cloudflared origin cert is missing. Set origincert in config.yml or mount cert.pem.",
+				Tunnel:      tunnelName,
+				ConfigPath:  configPath,
+				Diagnostics: diagnostics,
 			}
 		}
 		return TunnelHealth{
-			Status:     "error",
-			Detail:     detail,
-			Tunnel:     tunnelName,
-			ConfigPath: configPath,
+			Status:      "error",
+			Detail:      detail,
+			Tunnel:      tunnelName,
+			ConfigPath:  configPath,
+			Diagnostics: diagnostics,
 		}
 	}
 
@@ -207,6 +242,7 @@ func (s *HealthService) Tunnel(ctx context.Context) TunnelHealth {
 		Tunnel:      tunnelName,
 		Connections: connections,
 		ConfigPath:  configPath,
+		Diagnostics: diagnostics,
 	}
 }
 
@@ -337,4 +373,35 @@ func countConnections(payload interface{}) int {
 		}
 	}
 	return 0
+}
+
+func tunnelRefType(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	if looksLikeUUID(trimmed) {
+		return "id"
+	}
+	return "name"
+}
+
+func looksLikeUUID(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	for i, ch := range value {
+		switch {
+		case ch >= '0' && ch <= '9':
+		case ch >= 'a' && ch <= 'f':
+		case ch >= 'A' && ch <= 'F':
+		case ch == '-':
+		default:
+			return false
+		}
+		if (i == 8 || i == 13 || i == 18 || i == 23) && ch != '-' {
+			return false
+		}
+	}
+	return true
 }

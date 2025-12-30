@@ -3,5 +3,8 @@ import type { DockerHealth, TunnelHealth } from '@/types/health'
 
 export const healthApi = {
   docker: () => api.get<DockerHealth>('/health/docker'),
-  tunnel: () => api.get<TunnelHealth>('/health/tunnel'),
+  tunnel: () =>
+    api.get<TunnelHealth>('/health/tunnel', {
+      validateStatus: () => true,
+    }),
 }

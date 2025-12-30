@@ -1,5 +1,5 @@
 <script setup lang="ts">
-type IconName = 'home' | 'overview' | 'host' | 'network' | 'github' | 'activity'
+type IconName = 'home' | 'overview' | 'host' | 'network' | 'github' | 'activity' | 'logs'
 
 const props = defineProps<{
   name: IconName
@@ -40,6 +40,11 @@ const paths: Record<IconName, string[]> = {
   ],
   activity: [
     'M4 12h4l2-6l4 12l2-6h4',
+  ],
+  logs: [
+    'M4 6h16v12H4z',
+    'M7 10l2 2l-2 2',
+    'M11 14h6',
   ],
 }
 </script>

@@ -515,6 +515,11 @@ onMounted(async () => {
                 :disabled="loading"
               />
             </label>
+
+            <p class="text-xs text-[color:var(--muted)]">
+              Use a Cloudflare API token (not a global API key) with Account:Cloudflare Tunnel:Edit
+              and Zone:DNS:Edit for the configured account and zone.
+            </p>
           </div>
 
           <label class="grid gap-2" data-onboard="host-cloudflared-config">
