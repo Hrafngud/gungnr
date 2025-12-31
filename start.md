@@ -1,4 +1,5 @@
 Workflow: Build a Dockerized "Warp Panel" web UI to perform all deploy.sh tasks from a browser.
+deploy.sh is reference-only; do not modify it. The UI must mirror its CLI behavior (local tunnel setup + deploy flows) before any advanced automation.
 Stack: Go backend + Vue 3 TS frontend + PostgreSQL, fully containerized via docker compose.
 The app runs on the host PC and controls local resources (Docker, filesystem, cloudflared).
 It is also accessible remotely via the existing Cloudflare tunnel.
@@ -12,8 +13,7 @@ next_task.md: Current task.
 Process:
 Read all .md files before coding.
 Execute next_task.md fully.
-Test thoroughly: run docker build for backend/frontend images (and/or docker compose up --build), verify functionality, fix errors.
-Only mark task complete if build and app work perfectly.
+Testing is handled by the user. Do not assign testing/verification as "Next up" tasks unless explicitly requested.
 Document changes, decisions, and results in relevant .md files.
 Update next_task.md with the next pending task.
-Next task: Improve API error logging in the backend so external API responses are clearly captured for internal backend calls.
+Next task: Diagnose Cloudflare integration failure (`/tunnels` -> 502 Bad Gateway) when spawning jobs.

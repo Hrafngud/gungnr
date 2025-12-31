@@ -23,10 +23,12 @@
 - `TEMPLATES_DIR=/templates`
 - `CLOUDFLARED_CONFIG=~/.cloudflared/config.yml`
 - `CLOUDFLARED_TUNNEL_NAME=sphynx-app`
+- `CLOUDFLARE_TUNNEL_ID=...` (tunnel UUID fallback when name lookups fail)
 - `CLOUDFLARED_CREDENTIALS=/home/user/.cloudflared/xxxx.json`
-- `CLOUDFLARED_TUNNEL_TOKEN=...` (used when running cloudflared via Docker)
 - `DOMAIN=sphynx.store`
 - `COOKIE_DOMAIN=sphynx.store`
+- `ADMIN_LOGIN=admin`
+- `ADMIN_PASSWORD=secret`
 - `GITHUB_CLIENT_ID=...`
 - `GITHUB_CLIENT_SECRET=...`
 - `GITHUB_CALLBACK_URL=https://panel.yourdomain/callback`
@@ -50,6 +52,7 @@ Note: UI-managed settings (domain, GitHub token, Cloudflare token, cloudflared c
 - Deployment: project_id, subdomain, hostname, port, state, last_run_at.
 - Job: type, status, started_at, finished_at, error, log_lines.
 - AuditLog: user_id, action, target, metadata.
+- OnboardingState: user_id, completed_at, dismissed_steps (JSON or bool flags).
 
 ### GitHub OAuth and API
 - Use OAuth login for UI access. Require allowlist (user or org membership).
@@ -57,11 +60,13 @@ Note: UI-managed settings (domain, GitHub token, Cloudflare token, cloudflared c
 - Use template repo creation endpoint instead of `gh` CLI.
 
 ### Cloudflare Integration
-- Use API token with DNS and Tunnel permissions.
-- Add or update CNAME for `<subdomain>.<domain>`.
-- Prefer remote-managed tunnels (`config_src=cloudflare`) for ingress updates via API.
-- If a tunnel is locally managed, update config.yml safely (preserve catch-all) and restart tunnel.
-- Support a single tunnel at a time and expose tunnel + config preview in the UI.
+- Primary path: host-installed `cloudflared` service with local `~/.cloudflared/config.yml`.
+- `deploy.sh` is reference-only; do not modify it. The UI should mirror its CLI behavior before advanced automation.
+- Add DNS records via `cloudflared tunnel route dns <UUID|NAME> <hostname>` (requires `cert.pem`).
+- Update local `config.yml` ingress rules (insert after `ingress:`) and always keep a catch-all rule (`http_status:404`).
+- Restart the host service after updates (`systemctl restart cloudflared`); validate with `cloudflared tunnel ingress validate`.
+- Prefer host-worker execution (`deploy.sh` worker) so the API container does not edit tunnel state directly.
+- Keep API-managed remote tunnels optional and explicitly non-primary.
 
 ### Docker and Host Actions
 - Prefer Docker socket for container control; fall back to `docker compose` CLI if needed.

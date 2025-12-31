@@ -1,6 +1,7 @@
 package cloudflare
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -9,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,6 +39,22 @@ type TunnelStatus struct {
 	Name        string
 	Status      string
 	Connections int
+}
+
+type TokenStatus struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
+type ZoneInfo struct {
+	ID      string      `json:"id"`
+	Name    string      `json:"name"`
+	Account ZoneAccount `json:"account"`
+}
+
+type ZoneAccount struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 func NewClient(cfg config.Config) *Client {
@@ -144,6 +163,32 @@ func (c *Client) TunnelStatus(ctx context.Context) (TunnelStatus, error) {
 	}, nil
 }
 
+func (c *Client) VerifyToken(ctx context.Context) (TokenStatus, error) {
+	if err := c.ensureToken(); err != nil {
+		return TokenStatus{}, err
+	}
+	var result TokenStatus
+	if err := c.do(ctx, http.MethodGet, "/user/tokens/verify", nil, &result); err != nil {
+		return TokenStatus{}, err
+	}
+	return result, nil
+}
+
+func (c *Client) Zone(ctx context.Context, zoneID string) (ZoneInfo, error) {
+	if err := c.ensureToken(); err != nil {
+		return ZoneInfo{}, err
+	}
+	if strings.TrimSpace(zoneID) == "" {
+		return ZoneInfo{}, ErrMissingZoneID
+	}
+	path := fmt.Sprintf("/zones/%s", strings.TrimSpace(zoneID))
+	var result ZoneInfo
+	if err := c.do(ctx, http.MethodGet, path, nil, &result); err != nil {
+		return ZoneInfo{}, err
+	}
+	return result, nil
+}
+
 func (c *Client) ensureAuth() error {
 	if strings.TrimSpace(c.cfg.CloudflareAPIToken) == "" {
 		return ErrMissingToken
@@ -151,19 +196,34 @@ func (c *Client) ensureAuth() error {
 	if strings.TrimSpace(c.cfg.CloudflareAccountID) == "" {
 		return ErrMissingAccountID
 	}
-	if strings.TrimSpace(c.cfg.CloudflaredTunnel) == "" {
-		return ErrMissingTunnel
+	return nil
+}
+
+func (c *Client) ensureToken() error {
+	if strings.TrimSpace(c.cfg.CloudflareAPIToken) == "" {
+		return ErrMissingToken
 	}
 	return nil
 }
 
 func (c *Client) resolveTunnelID(ctx context.Context) (string, error) {
 	raw := strings.TrimSpace(c.cfg.CloudflaredTunnel)
-	if raw == "" {
-		return "", ErrMissingTunnel
-	}
+	fallbackID := strings.TrimSpace(c.cfg.CloudflareTunnelID)
 	if looksLikeUUID(raw) {
 		return raw, nil
+	}
+	configID, configErr := c.tunnelIDFromConfig()
+	if looksLikeUUID(configID) {
+		return configID, nil
+	}
+	if raw == "" {
+		if looksLikeUUID(fallbackID) {
+			return fallbackID, nil
+		}
+		if configErr != nil {
+			return "", fmt.Errorf("cloudflared tunnel name is not set and config read failed: %w", configErr)
+		}
+		return "", ErrMissingTunnel
 	}
 
 	path := fmt.Sprintf("/accounts/%s/cfd_tunnel", c.cfg.CloudflareAccountID)
@@ -173,6 +233,9 @@ func (c *Client) resolveTunnelID(ctx context.Context) (string, error) {
 
 	var result []tunnelInfo
 	if err := c.do(ctx, http.MethodGet, path, nil, &result); err != nil {
+		if looksLikeUUID(fallbackID) {
+			return fallbackID, nil
+		}
 		return "", err
 	}
 	for _, tunnel := range result {
@@ -180,7 +243,17 @@ func (c *Client) resolveTunnelID(ctx context.Context) (string, error) {
 			return tunnel.ID, nil
 		}
 	}
+	if looksLikeUUID(fallbackID) {
+		return fallbackID, nil
+	}
+	if configErr != nil {
+		return "", fmt.Errorf("tunnel %q not found in Cloudflare account (config read failed: %v)", raw, configErr)
+	}
 	return "", fmt.Errorf("tunnel %q not found in Cloudflare account", raw)
+}
+
+func (c *Client) TunnelIDFromConfig() (string, error) {
+	return c.tunnelIDFromConfig()
 }
 
 type tunnelConfig struct {
@@ -248,21 +321,6 @@ type dnsRecordRequest struct {
 	Name    string `json:"name"`
 	Content string `json:"content"`
 	Proxied bool   `json:"proxied"`
-}
-
-func (c *Client) findDNSRecord(ctx context.Context, hostname string) (*dnsRecord, error) {
-	query := url.Values{}
-	query.Set("name", hostname)
-
-	path := fmt.Sprintf("/zones/%s/dns_records?%s", c.cfg.CloudflareZoneID, query.Encode())
-	var result []dnsRecord
-	if err := c.do(ctx, http.MethodGet, path, nil, &result); err != nil {
-		return nil, err
-	}
-	if len(result) == 0 {
-		return nil, nil
-	}
-	return &result[0], nil
 }
 
 func (c *Client) selectDNSRecord(ctx context.Context, hostname string) (*dnsRecord, error) {
@@ -363,9 +421,25 @@ func (c *Client) do(ctx context.Context, method, path string, payload any, out a
 		return fmt.Errorf("read cloudflare response: %w", err)
 	}
 
+	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	trimmedBody := bytes.TrimSpace(rawBody)
+	if len(trimmedBody) == 0 {
+		return fmt.Errorf("cloudflare api empty response (%s %s) status=%d%s", method, path, resp.StatusCode, formatCFRay(resp))
+	}
+	if trimmedBody[0] != '{' {
+		return fmt.Errorf("cloudflare api non-json response (%s %s) status=%d%s; content-type=%s; body=%s",
+			method,
+			path,
+			resp.StatusCode,
+			formatCFRay(resp),
+			contentType,
+			compactBody(rawBody),
+		)
+	}
+
 	var wrapper apiResponse[json.RawMessage]
 	if err := json.Unmarshal(rawBody, &wrapper); err != nil {
-		return fmt.Errorf("decode cloudflare response (status %d): %w; body=%s", resp.StatusCode, err, compactBody(rawBody))
+		return fmt.Errorf("decode cloudflare response (status %d)%s: %w; body=%s", resp.StatusCode, formatCFRay(resp), err, compactBody(rawBody))
 	}
 
 	if !wrapper.Success {
@@ -599,4 +673,110 @@ func describeRemoteConfig(value *bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func (c *Client) tunnelIDFromConfig() (string, error) {
+	path := strings.TrimSpace(c.cfg.CloudflaredConfig)
+	if path == "" {
+		return "", nil
+	}
+	path = expandUserPath(path)
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+
+	var credentialsFile string
+	scanner := bufio.NewScanner(strings.NewReader(string(raw)))
+	for scanner.Scan() {
+		key, value, ok := parseCloudflaredConfigLine(scanner.Text())
+		if !ok {
+			continue
+		}
+		if key == "tunnel" {
+			if looksLikeUUID(value) {
+				return value, nil
+			}
+			continue
+		}
+		if key == "credentials-file" || key == "credential-file" {
+			if credentialsFile == "" {
+				credentialsFile = expandUserPath(value)
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	if credentialsFile != "" {
+		if id := tunnelIDFromCredentialsFile(credentialsFile); looksLikeUUID(id) {
+			return id, nil
+		}
+		base := strings.TrimSuffix(filepath.Base(credentialsFile), filepath.Ext(credentialsFile))
+		if looksLikeUUID(base) {
+			return base, nil
+		}
+	}
+	return "", nil
+}
+
+func parseCloudflaredConfigLine(line string) (string, string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return "", "", false
+	}
+	parts := strings.SplitN(trimmed, ":", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	key := strings.TrimSpace(parts[0])
+	value := strings.TrimSpace(parts[1])
+	if key == "" || value == "" {
+		return "", "", false
+	}
+	if hash := strings.Index(value, "#"); hash != -1 {
+		value = strings.TrimSpace(value[:hash])
+	}
+	value = strings.Trim(value, "\"'")
+	return key, value, true
+}
+
+func expandUserPath(input string) string {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return ""
+	}
+	if trimmed == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return trimmed
+		}
+		return home
+	}
+	if strings.HasPrefix(trimmed, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return trimmed
+		}
+		return filepath.Join(home, strings.TrimPrefix(trimmed, "~/"))
+	}
+	return trimmed
+}
+
+func tunnelIDFromCredentialsFile(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	for _, key := range []string{"TunnelID", "tunnel_id", "tunnelID"} {
+		if value, ok := payload[key].(string); ok && looksLikeUUID(value) {
+			return value
+		}
+	}
+	return ""
 }

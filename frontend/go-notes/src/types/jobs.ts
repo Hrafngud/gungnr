@@ -11,3 +11,15 @@ export interface Job {
 export interface JobDetail extends Job {
   logLines: string[]
 }
+
+export interface HostDeployRequest<T = unknown> {
+  jobType: string
+  payload: T
+}
+
+export interface HostDeployResponse {
+  job: Job
+  token: string
+  expiresAt?: string | null
+  action: string
+}

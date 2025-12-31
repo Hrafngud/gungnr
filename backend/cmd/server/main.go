@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"time"
 
 	"go-notes/internal/auth"
 	"go-notes/internal/config"
@@ -34,13 +35,17 @@ func main() {
 	jobRepo := repository.NewGormJobRepository(gormDB)
 	settingsRepo := repository.NewGormSettingsRepository(gormDB)
 	auditRepo := repository.NewGormAuditLogRepository(gormDB)
+	onboardingRepo := repository.NewGormOnboardingRepository(gormDB)
 
 	authService := service.NewAuthService(cfg, userRepo)
 	jobRunner := jobs.NewRunner(jobRepo)
 	jobService := service.NewJobService(jobRepo, jobRunner)
+	hostJobService := service.NewHostJobService(jobRepo, 30*time.Minute)
 	projectService := service.NewProjectService(cfg, projectRepo, jobService)
 	settingsService := service.NewSettingsService(cfg, settingsRepo)
+	onboardingService := service.NewOnboardingService(onboardingRepo)
 	githubService := service.NewGitHubService(cfg, settingsService)
+	cloudflareService := service.NewCloudflareService(settingsService)
 	auditService := service.NewAuditService(auditRepo)
 	hostService := service.NewHostService()
 	healthService := service.NewHealthService(hostService, settingsService)
@@ -57,10 +62,13 @@ func main() {
 		Auth:           controller.NewAuthController(authService, auditService, sessionManager, secureCookie, cookieDomain),
 		Projects:       controller.NewProjectsController(projectService, auditService),
 		Jobs:           controller.NewJobsController(jobService),
+		HostJobs:       controller.NewHostJobsController(hostJobService, auditService),
 		Settings:       controller.NewSettingsController(settingsService, auditService),
+		Onboarding:     controller.NewOnboardingController(onboardingService, auditService),
 		Host:           controller.NewHostController(hostService),
 		Audit:          controller.NewAuditController(auditService),
 		GitHub:         controller.NewGitHubController(githubService),
+		Cloudflare:     controller.NewCloudflareController(cloudflareService),
 		AllowedOrigins: cfg.AllowedOrigins,
 		AuthMiddleware: middleware.AuthRequired(sessionManager),
 	})

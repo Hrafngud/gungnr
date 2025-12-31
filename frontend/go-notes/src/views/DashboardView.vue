@@ -30,7 +30,7 @@ const greeting = computed(() => {
         </h1>
         <p class="mt-3 max-w-2xl text-sm text-neutral-600">
           This dashboard will soon orchestrate template creation, local service
-          exposure, and cloudflared ingress updates. For now it verifies your GitHub
+          exposure, and host cloudflared service updates. For now it verifies your GitHub
           session and surfaces the next tasks.
         </p>
       </div>

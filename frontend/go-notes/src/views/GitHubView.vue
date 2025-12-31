@@ -11,6 +11,7 @@ import UiSkeleton from '@/components/ui/UiSkeleton.vue'
 import UiState from '@/components/ui/UiState.vue'
 import { githubApi } from '@/services/github'
 import { apiErrorMessage } from '@/services/api'
+import { useOnboardingStore } from '@/stores/onboarding'
 import type { GitHubCatalog } from '@/types/github'
 import type { OnboardingStep } from '@/types/onboarding'
 
@@ -19,9 +20,9 @@ type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 const catalog = ref<GitHubCatalog | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
-const onboardingKey = 'warp-panel-onboarding-github'
 const onboardingOpen = ref(false)
 const onboardingStep = ref(0)
+const onboardingStore = useOnboardingStore()
 
 const onboardingSteps: OnboardingStep[] = [
   {
@@ -149,18 +150,14 @@ const startOnboarding = () => {
 }
 
 const markOnboardingComplete = () => {
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(onboardingKey, 'done')
-  }
+  onboardingStore.updateState({ github: true })
 }
 
-onMounted(() => {
+onMounted(async () => {
   loadCatalog()
-  if (typeof window !== 'undefined') {
-    const seen = window.localStorage.getItem(onboardingKey)
-    if (seen !== 'done') {
-      onboardingOpen.value = true
-    }
+  await onboardingStore.fetchState()
+  if (!onboardingStore.state.github) {
+    onboardingOpen.value = true
   }
 })
 </script>

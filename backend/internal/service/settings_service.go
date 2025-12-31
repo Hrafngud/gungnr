@@ -20,6 +20,7 @@ type SettingsPayload struct {
 	CloudflareToken       string `json:"cloudflareToken"`
 	CloudflareAccountID   string `json:"cloudflareAccountId"`
 	CloudflareZoneID      string `json:"cloudflareZoneId"`
+	CloudflaredTunnel     string `json:"cloudflaredTunnel"`
 	CloudflaredConfigPath string `json:"cloudflaredConfigPath"`
 }
 
@@ -29,6 +30,7 @@ type SettingsSources struct {
 	CloudflareToken       string `json:"cloudflareToken"`
 	CloudflareAccountID   string `json:"cloudflareAccountId"`
 	CloudflareZoneID      string `json:"cloudflareZoneId"`
+	CloudflaredTunnel     string `json:"cloudflaredTunnel"`
 	CloudflaredConfigPath string `json:"cloudflaredConfigPath"`
 }
 
@@ -68,6 +70,7 @@ func (s *SettingsService) Update(ctx context.Context, input SettingsPayload) (Se
 	stored.CloudflareToken = strings.TrimSpace(input.CloudflareToken)
 	stored.CloudflareAccountID = strings.TrimSpace(input.CloudflareAccountID)
 	stored.CloudflareZoneID = strings.TrimSpace(input.CloudflareZoneID)
+	stored.CloudflaredTunnel = strings.TrimSpace(input.CloudflaredTunnel)
 	stored.CloudflaredConfigPath = strings.TrimSpace(input.CloudflaredConfigPath)
 
 	if err := s.repo.Save(ctx, stored); err != nil {
@@ -98,6 +101,9 @@ func (s *SettingsService) ResolveConfig(ctx context.Context) (config.Config, err
 	if settings.CloudflareZoneID != "" {
 		cfg.CloudflareZoneID = settings.CloudflareZoneID
 	}
+	if settings.CloudflaredTunnel != "" {
+		cfg.CloudflaredTunnel = settings.CloudflaredTunnel
+	}
 	if settings.CloudflaredConfigPath != "" {
 		cfg.CloudflaredConfig = settings.CloudflaredConfigPath
 	}
@@ -117,6 +123,7 @@ func (s *SettingsService) ResolveConfigWithSources(ctx context.Context) (config.
 		CloudflareToken:       sourceFromValue(cfg.CloudflareAPIToken, "env"),
 		CloudflareAccountID:   sourceFromValue(cfg.CloudflareAccountID, "env"),
 		CloudflareZoneID:      sourceFromValue(cfg.CloudflareZoneID, "env"),
+		CloudflaredTunnel:     sourceFromValue(cfg.CloudflaredTunnel, "env"),
 		CloudflaredConfigPath: sourceFromValue(cfg.CloudflaredConfig, "env"),
 	}
 
@@ -150,6 +157,12 @@ func (s *SettingsService) ResolveConfigWithSources(ctx context.Context) (config.
 			sources.CloudflareZoneID = "settings"
 		} else if sources.CloudflareZoneID == "" {
 			sources.CloudflareZoneID = "unset"
+		}
+		if strings.TrimSpace(stored.CloudflaredTunnel) != "" {
+			cfg.CloudflaredTunnel = strings.TrimSpace(stored.CloudflaredTunnel)
+			sources.CloudflaredTunnel = "settings"
+		} else if sources.CloudflaredTunnel == "" {
+			sources.CloudflaredTunnel = "unset"
 		}
 		if strings.TrimSpace(stored.CloudflaredConfigPath) != "" {
 			cfg.CloudflaredConfig = strings.TrimSpace(stored.CloudflaredConfigPath)
@@ -198,6 +211,7 @@ func (s *SettingsService) resolve(stored *models.Settings) SettingsPayload {
 	cloudflareToken := strings.TrimSpace(s.cfg.CloudflareAPIToken)
 	cloudflareAccountID := strings.TrimSpace(s.cfg.CloudflareAccountID)
 	cloudflareZoneID := strings.TrimSpace(s.cfg.CloudflareZoneID)
+	cloudflaredTunnel := strings.TrimSpace(s.cfg.CloudflaredTunnel)
 	cloudflaredConfigPath := strings.TrimSpace(s.cfg.CloudflaredConfig)
 	if cloudflaredConfigPath == "" {
 		cloudflaredConfigPath = defaultCloudflaredConfigPath
@@ -219,6 +233,9 @@ func (s *SettingsService) resolve(stored *models.Settings) SettingsPayload {
 		if strings.TrimSpace(stored.CloudflareZoneID) != "" {
 			cloudflareZoneID = strings.TrimSpace(stored.CloudflareZoneID)
 		}
+		if strings.TrimSpace(stored.CloudflaredTunnel) != "" {
+			cloudflaredTunnel = strings.TrimSpace(stored.CloudflaredTunnel)
+		}
 		if strings.TrimSpace(stored.CloudflaredConfigPath) != "" {
 			cloudflaredConfigPath = strings.TrimSpace(stored.CloudflaredConfigPath)
 		}
@@ -230,6 +247,7 @@ func (s *SettingsService) resolve(stored *models.Settings) SettingsPayload {
 		CloudflareToken:       cloudflareToken,
 		CloudflareAccountID:   cloudflareAccountID,
 		CloudflareZoneID:      cloudflareZoneID,
+		CloudflaredTunnel:     cloudflaredTunnel,
 		CloudflaredConfigPath: expandUserPath(cloudflaredConfigPath),
 	}
 }
@@ -278,6 +296,9 @@ func normalizeSources(input SettingsSources) SettingsSources {
 	}
 	if input.CloudflareZoneID == "" {
 		input.CloudflareZoneID = "unset"
+	}
+	if input.CloudflaredTunnel == "" {
+		input.CloudflaredTunnel = "unset"
 	}
 	if input.CloudflaredConfigPath == "" {
 		input.CloudflaredConfigPath = "unset"

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -12,14 +13,7 @@ const sessionContextKey = "session"
 
 func AuthRequired(sessions *auth.Manager) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		value, err := ctx.Cookie(auth.SessionCookieName)
-		if err != nil {
-			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
-			ctx.Abort()
-			return
-		}
-
-		session, err := sessions.Decode(value)
+		session, err := ReadSession(ctx, sessions)
 		if err != nil {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
 			ctx.Abort()
@@ -29,6 +23,39 @@ func AuthRequired(sessions *auth.Manager) gin.HandlerFunc {
 		ctx.Set(sessionContextKey, session)
 		ctx.Next()
 	}
+}
+
+func ReadSession(ctx *gin.Context, sessions *auth.Manager) (auth.Session, error) {
+	session, err := readSessionFromCookie(ctx, sessions)
+	if err == nil {
+		return session, nil
+	}
+
+	token := bearerToken(ctx.GetHeader("Authorization"))
+	if token == "" {
+		return auth.Session{}, err
+	}
+
+	return sessions.Decode(token)
+}
+
+func readSessionFromCookie(ctx *gin.Context, sessions *auth.Manager) (auth.Session, error) {
+	value, err := ctx.Cookie(auth.SessionCookieName)
+	if err != nil {
+		return auth.Session{}, err
+	}
+	return sessions.Decode(value)
+}
+
+func bearerToken(header string) string {
+	if header == "" {
+		return ""
+	}
+	parts := strings.Fields(header)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
 }
 
 func SessionFromContext(ctx *gin.Context) (auth.Session, bool) {

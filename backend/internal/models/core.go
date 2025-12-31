@@ -36,13 +36,17 @@ type Deployment struct {
 
 type Job struct {
 	gorm.Model
-	Type       string `gorm:"size:64;not null"`
-	Status     string `gorm:"size:32;not null"`
-	StartedAt  *time.Time
-	FinishedAt *time.Time
-	Error      string `gorm:"type:text"`
-	Input      string `gorm:"type:text"`
-	LogLines   string `gorm:"type:text"`
+	Type               string `gorm:"size:64;not null"`
+	Status             string `gorm:"size:32;not null"`
+	StartedAt          *time.Time
+	FinishedAt         *time.Time
+	Error              string `gorm:"type:text"`
+	Input              string `gorm:"type:text"`
+	LogLines           string `gorm:"type:text"`
+	HostToken          string `gorm:"size:64;index"`
+	HostTokenExpiresAt *time.Time
+	HostTokenClaimedAt *time.Time
+	HostTokenUsedAt    *time.Time
 }
 
 type AuditLog struct {
@@ -61,5 +65,15 @@ type Settings struct {
 	CloudflareToken       string `gorm:"type:text"`
 	CloudflareAccountID   string `gorm:"size:255"`
 	CloudflareZoneID      string `gorm:"size:255"`
+	CloudflaredTunnel     string `gorm:"size:255"`
 	CloudflaredConfigPath string `gorm:"size:512"`
+}
+
+type OnboardingState struct {
+	gorm.Model
+	UserID       uint `gorm:"uniqueIndex"`
+	Home         bool
+	HostSettings bool
+	Networking   bool
+	GitHub       bool
 }

@@ -1,0 +1,3 @@
+./auth.go
+./middleware.go
+./middleware_test.go

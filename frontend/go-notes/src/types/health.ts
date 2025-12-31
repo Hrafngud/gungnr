@@ -15,6 +15,8 @@ export interface TunnelHealth {
   diagnostics?: TunnelDiagnostics
 }
 
+import type { SettingsSources } from '@/types/settings'
+
 export interface TunnelDiagnostics {
   accountId?: string
   zoneId?: string
@@ -24,13 +26,4 @@ export interface TunnelDiagnostics {
   tokenSet?: boolean
   tunnelRefType?: string
   sources?: SettingsSources
-}
-
-export interface SettingsSources {
-  baseDomain?: string
-  githubToken?: string
-  cloudflareToken?: string
-  cloudflareAccountId?: string
-  cloudflareZoneId?: string
-  cloudflaredConfigPath?: string
 }

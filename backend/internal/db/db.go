@@ -46,5 +46,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.Job{},
 		&models.AuditLog{},
 		&models.Settings{},
+		&models.OnboardingState{},
 	)
 }

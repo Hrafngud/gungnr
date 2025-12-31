@@ -11,13 +11,16 @@ import UiOnboardingOverlay from '@/components/ui/UiOnboardingOverlay.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiState from '@/components/ui/UiState.vue'
+import HostCommandModal from '@/components/host/HostCommandModal.vue'
 import { healthApi } from '@/services/health'
 import { settingsApi } from '@/services/settings'
 import { hostApi } from '@/services/host'
-import { projectsApi } from '@/services/projects'
+import { hostJobsApi } from '@/services/hostJobs'
 import { apiErrorMessage } from '@/services/api'
 import { useToastStore } from '@/stores/toasts'
-import type { CloudflaredPreview, Settings } from '@/types/settings'
+import { useOnboardingStore } from '@/stores/onboarding'
+import { useHostWorker } from '@/composables/useHostWorker'
+import type { CloudflaredPreview, Settings, SettingsSources } from '@/types/settings'
 import type { OnboardingStep } from '@/types/onboarding'
 import type { DockerContainer } from '@/types/host'
 import type { DockerHealth, TunnelHealth } from '@/types/health'
@@ -30,10 +33,26 @@ const settingsForm = reactive<Settings>({
   cloudflareToken: '',
   cloudflareAccountId: '',
   cloudflareZoneId: '',
+  cloudflaredTunnel: '',
   cloudflaredConfigPath: '',
 })
 
+const settingsSources = ref<SettingsSources | null>(null)
+const cloudflaredTunnelName = ref<string | null>(null)
+
 const toastStore = useToastStore()
+const onboardingStore = useOnboardingStore()
+const hostWorker = useHostWorker()
+const {
+  modalOpen: hostModalOpen,
+  command: hostCommand,
+  action: hostAction,
+  job: hostJob,
+  logs: hostLogs,
+  error: hostError,
+  expiresAt: hostExpiresAt,
+  polling: hostPolling,
+} = hostWorker
 
 const loading = ref(false)
 const saving = ref(false)
@@ -43,7 +62,6 @@ const success = ref<string | null>(null)
 const preview = ref<CloudflaredPreview | null>(null)
 const previewLoading = ref(false)
 const previewError = ref<string | null>(null)
-const onboardingKey = 'warp-panel-onboarding-host'
 const onboardingOpen = ref(false)
 const onboardingStep = ref(0)
 
@@ -69,7 +87,7 @@ const onboardingSteps: OnboardingStep[] = [
   {
     id: 'integrations',
     title: 'Verify host integrations',
-    description: 'Confirm Docker and cloudflared connectivity before enabling automation.',
+    description: 'Confirm Docker and the host cloudflared service before enabling automation.',
     target: "[data-onboard='host-integrations']",
   },
   {
@@ -91,7 +109,7 @@ const onboardingSteps: OnboardingStep[] = [
   {
     id: 'cloudflared-config',
     title: 'Point to cloudflared config',
-    description: 'Use the active config.yml so Warp Panel can update ingress safely.',
+    description: 'Use the active config.yml from the host service so Warp Panel can update ingress safely.',
     target: "[data-onboard='host-cloudflared-config']",
     links: [
       {
@@ -134,6 +152,12 @@ const hostPortsFor = (container: DockerContainer) => {
   return Array.from(new Set(ports))
 }
 
+const portOptionsFor = (container: DockerContainer) =>
+  hostPortsFor(container).map((port) => ({
+    value: port.toString(),
+    label: port.toString(),
+  }))
+
 const ensureForwardState = (container: DockerContainer) => {
   if (!forwardTargets[container.id]) {
     const ports = hostPortsFor(container)
@@ -159,6 +183,8 @@ const loadSettings = async () => {
   try {
     const { data } = await settingsApi.get()
     Object.assign(settingsForm, data.settings)
+    settingsSources.value = data.sources ?? null
+    cloudflaredTunnelName.value = data.cloudflaredTunnelName ?? null
   } catch (err) {
     error.value = apiErrorMessage(err)
   } finally {
@@ -174,6 +200,8 @@ const saveSettings = async () => {
   try {
     const { data } = await settingsApi.update({ ...settingsForm })
     Object.assign(settingsForm, data.settings)
+    settingsSources.value = data.sources ?? null
+    cloudflaredTunnelName.value = data.cloudflaredTunnelName ?? null
     success.value = 'Settings saved.'
     toastStore.success('Settings saved.', 'Settings updated')
     await loadPreview()
@@ -253,12 +281,13 @@ const queueForward = async (container: DockerContainer) => {
 
   state.loading = true
   try {
-    const { data } = await projectsApi.quickService({
-      subdomain: state.subdomain,
-      port,
+    const { data } = await hostJobsApi.createHostDeploy({
+      jobType: 'quick_service',
+      payload: { subdomain: state.subdomain, port },
     })
     state.jobId = data.job.id
     toastStore.success('Forward queued.', 'Tunnel forwarding')
+    await hostWorker.openWithHostDeploy(data)
   } catch (err) {
     const message = apiErrorMessage(err)
     state.error = message
@@ -274,18 +303,14 @@ const startOnboarding = () => {
 }
 
 const markOnboardingComplete = () => {
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(onboardingKey, 'done')
-  }
+  onboardingStore.updateState({ hostSettings: true })
 }
 
 onMounted(async () => {
   await Promise.all([loadSettings(), loadPreview(), loadHealth(), loadContainers()])
-  if (typeof window !== 'undefined') {
-    const seen = window.localStorage.getItem(onboardingKey)
-    if (seen !== 'done') {
-      onboardingOpen.value = true
-    }
+  await onboardingStore.fetchState()
+  if (!onboardingStore.state.hostSettings) {
+    onboardingOpen.value = true
   }
 })
 </script>
@@ -341,7 +366,7 @@ onMounted(async () => {
             Host integrations
           </h2>
           <p class="mt-2 text-sm text-[color:var(--muted)]">
-            Keep Docker and cloudflared connectivity ready for automation.
+            Keep Docker and the host cloudflared service ready for automation.
           </p>
         </div>
         <UiButton
@@ -516,10 +541,64 @@ onMounted(async () => {
               />
             </label>
 
+            <label class="grid gap-2">
+              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                Cloudflared tunnel (name or ID)
+              </span>
+              <UiInput
+                v-model="settingsForm.cloudflaredTunnel"
+                type="text"
+                placeholder="Tunnel name or UUID"
+                :disabled="loading"
+              />
+            </label>
+
             <p class="text-xs text-[color:var(--muted)]">
               Use a Cloudflare API token (not a global API key) with Account:Cloudflare Tunnel:Edit
               and Zone:DNS:Edit for the configured account and zone.
             </p>
+
+            <div
+              v-if="settingsSources || cloudflaredTunnelName"
+              class="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)]/80 p-3 text-[11px] text-[color:var(--muted)]"
+            >
+              <UiListRow class="flex items-center justify-between gap-2">
+                <span>Tunnel ref (resolved)</span>
+                <span class="text-[color:var(--text)]">
+                  {{ cloudflaredTunnelName || '—' }}
+                </span>
+              </UiListRow>
+              <UiListRow class="flex items-center justify-between gap-2">
+                <span>Tunnel source</span>
+                <span class="text-[color:var(--text)]">
+                  {{ settingsSources?.cloudflaredTunnel || 'unset' }}
+                </span>
+              </UiListRow>
+              <UiListRow class="flex items-center justify-between gap-2">
+                <span>Account ID source</span>
+                <span class="text-[color:var(--text)]">
+                  {{ settingsSources?.cloudflareAccountId || 'unset' }}
+                </span>
+              </UiListRow>
+              <UiListRow class="flex items-center justify-between gap-2">
+                <span>Zone ID source</span>
+                <span class="text-[color:var(--text)]">
+                  {{ settingsSources?.cloudflareZoneId || 'unset' }}
+                </span>
+              </UiListRow>
+              <UiListRow class="flex items-center justify-between gap-2">
+                <span>Token source</span>
+                <span class="text-[color:var(--text)]">
+                  {{ settingsSources?.cloudflareToken || 'unset' }}
+                </span>
+              </UiListRow>
+              <UiListRow class="flex items-center justify-between gap-2">
+                <span>Config path source</span>
+                <span class="text-[color:var(--text)]">
+                  {{ settingsSources?.cloudflaredConfigPath || 'unset' }}
+                </span>
+              </UiListRow>
+            </div>
           </div>
 
           <label class="grid gap-2" data-onboard="host-cloudflared-config">
@@ -687,16 +766,9 @@ onMounted(async () => {
               <UiSelect
                 v-model="forwardStateFor(container).port"
                 :disabled="forwardStateFor(container).loading"
-              >
-                <option value="">Select port</option>
-                <option
-                  v-for="port in hostPortsFor(container)"
-                  :key="port"
-                  :value="port"
-                >
-                  {{ port }}
-                </option>
-              </UiSelect>
+                placeholder="Select port"
+                :options="portOptionsFor(container)"
+              />
             </div>
 
             <div class="flex flex-wrap items-center gap-3">
@@ -741,6 +813,17 @@ onMounted(async () => {
       :steps="onboardingSteps"
       @finish="markOnboardingComplete"
       @skip="markOnboardingComplete"
+    />
+
+    <HostCommandModal
+      v-model="hostModalOpen"
+      :command="hostCommand"
+      :action="hostAction"
+      :job="hostJob"
+      :logs="hostLogs"
+      :error="hostError"
+      :expires-at="hostExpiresAt"
+      :polling="hostPolling"
     />
   </section>
 </template>

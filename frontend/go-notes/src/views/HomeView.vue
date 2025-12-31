@@ -9,17 +9,24 @@ import UiListRow from '@/components/ui/UiListRow.vue'
 import UiOnboardingOverlay from '@/components/ui/UiOnboardingOverlay.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
+import HostCommandModal from '@/components/host/HostCommandModal.vue'
 import { useProjectsStore } from '@/stores/projects'
 import { useJobsStore } from '@/stores/jobs'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toasts'
+import { useOnboardingStore } from '@/stores/onboarding'
 import { projectsApi } from '@/services/projects'
+import { hostJobsApi } from '@/services/hostJobs'
 import { healthApi } from '@/services/health'
 import { settingsApi } from '@/services/settings'
+import { githubApi } from '@/services/github'
 import { apiErrorMessage } from '@/services/api'
+import { useHostWorker } from '@/composables/useHostWorker'
+import { isPendingJob } from '@/utils/jobStatus'
 import type { LocalProject } from '@/types/projects'
 import type { DockerHealth, TunnelHealth } from '@/types/health'
 import type { Settings } from '@/types/settings'
+import type { GitHubCatalog } from '@/types/github'
 import type { OnboardingStep } from '@/types/onboarding'
 
 type QueueState = {
@@ -30,10 +37,33 @@ type QueueState = {
 }
 
 type ServicePreset = {
+  id: string
   name: string
   subdomain: string
   port: number
   description: string
+  repoLabel: string
+  repoUrl: string
+}
+
+type ServiceCard = {
+  id: string
+  name: string
+  description: string
+  subdomain?: string
+  port?: number
+  repoLabel: string
+  repoUrl: string
+  kind: 'custom' | 'preset'
+}
+
+type TemplateCardId = 'create' | 'existing'
+
+type TemplateCard = {
+  id: TemplateCardId
+  title: string
+  description: string
+  actionLabel: string
 }
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
@@ -42,6 +72,18 @@ const projectsStore = useProjectsStore()
 const jobsStore = useJobsStore()
 const auth = useAuthStore()
 const toastStore = useToastStore()
+const onboardingStore = useOnboardingStore()
+const hostWorker = useHostWorker()
+const {
+  modalOpen: hostModalOpen,
+  command: hostCommand,
+  action: hostAction,
+  job: hostJob,
+  logs: hostLogs,
+  error: hostError,
+  expiresAt: hostExpiresAt,
+  polling: hostPolling,
+} = hostWorker
 
 const machineName = ref('')
 const dockerHealth = ref<DockerHealth | null>(null)
@@ -49,13 +91,14 @@ const tunnelHealth = ref<TunnelHealth | null>(null)
 const settings = ref<Settings | null>(null)
 const hostLoading = ref(false)
 const settingsError = ref<string | null>(null)
-const onboardingKey = 'warp-panel-onboarding-home'
 const onboardingOpen = ref(false)
 const onboardingStep = ref(0)
 
 const localProjects = ref<LocalProject[]>([])
 const localLoading = ref(false)
 const localError = ref<string | null>(null)
+const catalog = ref<GitHubCatalog | null>(null)
+const catalogError = ref<string | null>(null)
 
 const templateState = reactive<QueueState>({
   loading: false,
@@ -98,42 +141,98 @@ const quickForm = reactive({
 
 const servicePresets: ServicePreset[] = [
   {
+    id: 'excalidraw',
     name: 'Excalidraw',
     subdomain: 'draw',
     port: 5000,
     description: 'Whiteboard collaboration',
+    repoLabel: 'excalidraw/excalidraw',
+    repoUrl: 'https://github.com/excalidraw/excalidraw',
   },
   {
+    id: 'openwebui',
     name: 'OpenWebUI',
     subdomain: 'openwebui',
     port: 3000,
     description: 'LLM web interface',
+    repoLabel: 'open-webui/open-webui',
+    repoUrl: 'https://github.com/open-webui/open-webui',
   },
   {
+    id: 'ollama',
     name: 'Ollama',
     subdomain: 'ollama',
     port: 11434,
     description: 'Local model runtime',
+    repoLabel: 'ollama/ollama',
+    repoUrl: 'https://github.com/ollama/ollama',
   },
   {
+    id: 'redis',
     name: 'Redis',
     subdomain: 'redis',
     port: 6379,
     description: 'Cache + queue store',
+    repoLabel: 'redis/redis',
+    repoUrl: 'https://github.com/redis/redis',
   },
   {
+    id: 'postgres',
     name: 'Postgres',
     subdomain: 'postgres',
     port: 5432,
     description: 'Database service',
+    repoLabel: 'postgres/postgres',
+    repoUrl: 'https://github.com/postgres/postgres',
   },
 ]
+
+const templateCards: TemplateCard[] = [
+  {
+    id: 'create',
+    title: 'Create from template',
+    description: 'Create a new repo from the approved template source.',
+    actionLabel: 'Configure template',
+  },
+  {
+    id: 'existing',
+    title: 'Deploy existing',
+    description: 'Launch a local template folder with new ingress.',
+    actionLabel: 'Configure deploy',
+  },
+]
+
+const customServiceCard: ServiceCard = {
+  id: 'custom',
+  name: 'Custom service',
+  description: 'Forward any local port through the host tunnel.',
+  repoLabel: 'cloudflare/cloudflared',
+  repoUrl: 'https://github.com/cloudflare/cloudflared',
+  kind: 'custom',
+}
+
+const serviceCards = computed<ServiceCard[]>(() => [
+  customServiceCard,
+  ...servicePresets.map((preset) => ({
+    id: preset.id,
+    name: preset.name,
+    description: preset.description,
+    subdomain: preset.subdomain,
+    port: preset.port,
+    repoLabel: preset.repoLabel,
+    repoUrl: preset.repoUrl,
+    kind: 'preset' as const,
+  })),
+])
+
+const selectedTemplateCard = ref<TemplateCardId | null>(null)
+const selectedServiceCard = ref<string | null>(null)
 
 const onboardingSteps: OnboardingStep[] = [
   {
     id: 'host-status',
     title: 'Check host readiness',
-    description: 'Confirm Docker and the tunnel are healthy before queuing deploys.',
+    description: 'Confirm Docker and the host cloudflared service are healthy before queuing deploys.',
     target: "[data-onboard='home-status']",
   },
   {
@@ -145,7 +244,7 @@ const onboardingSteps: OnboardingStep[] = [
   {
     id: 'finish-setup',
     title: 'Finish host setup',
-    description: 'Complete Host Settings to unlock DNS automation and full tunnel control.',
+    description: 'Complete Host Settings to connect the host tunnel service and DNS automation.',
     target: "[data-onboard='home-onboarding']",
   },
 ]
@@ -160,7 +259,7 @@ const jobCounts = computed(() => {
     failed: 0,
   }
   jobsStore.jobs.forEach((job) => {
-    if (job.status === 'pending') counts.pending += 1
+    if (isPendingJob(job.status)) counts.pending += 1
     else if (job.status === 'running') counts.running += 1
     else if (job.status === 'completed') counts.completed += 1
     else if (job.status === 'failed') counts.failed += 1
@@ -195,6 +294,24 @@ const lastServiceTime = computed(() => {
 })
 
 const domainLabel = computed(() => settings.value?.baseDomain || 'n/a')
+const templateRepoLabel = computed(() => {
+  if (catalogError.value) return 'Template source unavailable'
+  if (!catalog.value?.template?.configured) return 'Template source not configured'
+  const owner = catalog.value.template.owner
+  const repo = catalog.value.template.repo
+  if (!owner || !repo) return 'Template source not configured'
+  return `${owner}/${repo}`
+})
+const templateRepoUrl = computed(() => {
+  if (!catalog.value?.template?.configured) return ''
+  const owner = catalog.value.template.owner
+  const repo = catalog.value.template.repo
+  if (!owner || !repo) return ''
+  return `https://github.com/${owner}/${repo}`
+})
+const selectedService = computed(() =>
+  serviceCards.value.find((card) => card.id === selectedServiceCard.value) ?? null,
+)
 
 const healthTone = (status?: string): BadgeTone => {
   switch (status) {
@@ -276,9 +393,26 @@ const loadLocalProjects = async () => {
   }
 }
 
+const loadCatalog = async () => {
+  if (!isAuthenticated.value) {
+    catalog.value = null
+    catalogError.value = null
+    return
+  }
+  catalogError.value = null
+  try {
+    const { data } = await githubApi.catalog()
+    catalog.value = data.catalog
+  } catch (err) {
+    catalog.value = null
+    catalogError.value = apiErrorMessage(err)
+  }
+}
+
 const refreshAll = async () => {
   await Promise.allSettled([
     loadHostStatus(),
+    loadCatalog(),
     jobsStore.fetchJobs(),
     projectsStore.fetchProjects(),
   ])
@@ -301,15 +435,19 @@ const submitTemplate = async () => {
 
   templateState.loading = true
   try {
-    const { data } = await projectsApi.createFromTemplate({
-      name: templateForm.name,
-      subdomain: templateForm.subdomain || undefined,
-      proxyPort,
-      dbPort,
+    const { data } = await hostJobsApi.createHostDeploy({
+      jobType: 'create_template',
+      payload: {
+        name: templateForm.name,
+        subdomain: templateForm.subdomain || undefined,
+        proxyPort,
+        dbPort,
+      },
     })
     templateState.jobId = data.job.id
-    templateState.success = 'Template job queued.'
+    templateState.success = 'Template job queued. Run the host worker to continue.'
     toastStore.success('Template job queued.', 'Template queued')
+    await hostWorker.openWithHostDeploy(data)
     await refreshAll()
   } catch (err) {
     const message = apiErrorMessage(err)
@@ -336,14 +474,18 @@ const submitExisting = async () => {
 
   existingState.loading = true
   try {
-    const { data } = await projectsApi.deployExisting({
-      name: existingForm.name,
-      subdomain: existingForm.subdomain,
-      port,
+    const { data } = await hostJobsApi.createHostDeploy({
+      jobType: 'deploy_existing',
+      payload: {
+        name: existingForm.name,
+        subdomain: existingForm.subdomain,
+        port,
+      },
     })
     existingState.jobId = data.job.id
-    existingState.success = 'Deployment queued.'
+    existingState.success = 'Deployment queued. Run the host worker to continue.'
     toastStore.success('Deployment queued.', 'Deploy job queued')
+    await hostWorker.openWithHostDeploy(data)
     await refreshAll()
   } catch (err) {
     const message = apiErrorMessage(err)
@@ -370,13 +512,17 @@ const submitQuick = async () => {
 
   quickState.loading = true
   try {
-    const { data } = await projectsApi.quickService({
-      subdomain: quickForm.subdomain,
-      port,
+    const { data } = await hostJobsApi.createHostDeploy({
+      jobType: 'quick_service',
+      payload: {
+        subdomain: quickForm.subdomain,
+        port,
+      },
     })
     quickState.jobId = data.job.id
-    quickState.success = 'Service forward queued.'
+    quickState.success = 'Service forward queued. Run the host worker to continue.'
     toastStore.success('Service forward queued.', 'Forward queued')
+    await hostWorker.openWithHostDeploy(data)
     await refreshAll()
   } catch (err) {
     const message = apiErrorMessage(err)
@@ -387,9 +533,33 @@ const submitQuick = async () => {
   }
 }
 
-const applyPreset = (preset: ServicePreset) => {
-  quickForm.subdomain = preset.subdomain
-  quickForm.port = preset.port.toString()
+const selectTemplateCard = async (id: TemplateCardId) => {
+  if (selectedTemplateCard.value === id) {
+    selectedTemplateCard.value = null
+    return
+  }
+  selectedTemplateCard.value = id
+  resetState(templateState)
+  resetState(existingState)
+  if (id === 'existing' && localProjects.value.length === 0 && !localLoading.value) {
+    await loadLocalProjects()
+  }
+}
+
+const selectServiceCard = (card: ServiceCard) => {
+  if (selectedServiceCard.value === card.id) {
+    selectedServiceCard.value = null
+    return
+  }
+  selectedServiceCard.value = card.id
+  resetState(quickState)
+  if (card.kind === 'custom') {
+    quickForm.subdomain = ''
+    quickForm.port = ''
+    return
+  }
+  quickForm.subdomain = card.subdomain ?? ''
+  quickForm.port = typeof card.port === 'number' ? card.port.toString() : ''
 }
 
 const startOnboarding = () => {
@@ -398,12 +568,10 @@ const startOnboarding = () => {
 }
 
 const markOnboardingComplete = () => {
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(onboardingKey, 'done')
-  }
+  onboardingStore.updateState({ home: true })
 }
 
-onMounted(() => {
+onMounted(async () => {
   if (!projectsStore.initialized) {
     projectsStore.fetchProjects()
   }
@@ -413,18 +581,24 @@ onMounted(() => {
   loadHostStatus()
   if (typeof window !== 'undefined') {
     machineName.value = window.location.hostname || 'localhost'
-    const seen = window.localStorage.getItem(onboardingKey)
-    if (seen !== 'done') {
-      onboardingOpen.value = true
-    }
+  }
+  await onboardingStore.fetchState()
+  if (!onboardingStore.state.home) {
+    onboardingOpen.value = true
   }
 })
 
 watch(
   () => auth.user,
   (value) => {
-    if (value && localProjects.value.length === 0 && !localLoading.value) {
-      loadLocalProjects()
+    if (value) {
+      if (localProjects.value.length === 0 && !localLoading.value) {
+        loadLocalProjects()
+      }
+      loadCatalog()
+    } else {
+      catalog.value = null
+      catalogError.value = null
     }
   },
   { immediate: true },
@@ -596,7 +770,7 @@ watch(
             <UiBadge tone="neutral">Primary</UiBadge>
           </div>
           <p class="text-xs text-[color:var(--muted)]">
-            Used for new subdomains and tunnel ingress.
+            Used for new subdomains and host tunnel ingress.
           </p>
         </UiListRow>
 
@@ -624,7 +798,7 @@ watch(
             Onboarding
           </p>
           <p class="mt-1 text-sm text-[color:var(--muted)]">
-            Finish host setup to unlock tunnel automation and DNS updates.
+            Finish host setup to unlock host tunnel automation and DNS updates.
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
@@ -648,7 +822,7 @@ watch(
             Launch templates and services
           </h2>
           <p class="mt-2 text-sm text-[color:var(--muted)]">
-            Queue new stacks or forward local services through the active tunnel.
+            Queue new stacks or forward local services through the host cloudflared service. Run the host worker when prompted.
           </p>
         </div>
       </div>
@@ -658,7 +832,7 @@ watch(
         variant="soft"
         class="flex flex-wrap items-center justify-between gap-4 p-4 text-sm text-[color:var(--muted)]"
       >
-        <span>Sign in to queue deploy jobs and tunnel actions.</span>
+        <span>Sign in to queue deploy jobs and host tunnel actions.</span>
         <UiButton :as="RouterLink" to="/login" variant="primary">
           Sign in
         </UiButton>
@@ -673,7 +847,7 @@ watch(
             Day-to-day flow
           </p>
           <p class="mt-1 text-sm text-[color:var(--muted)]">
-            Queue a template or service forward, then confirm progress in Jobs and Activity.
+            Queue a template or service forward, run the host worker, then confirm progress in Jobs and Activity.
           </p>
         </div>
         <UiButton :as="RouterLink" to="/overview" variant="ghost" size="sm">
@@ -700,11 +874,85 @@ watch(
             </UiButton>
           </div>
 
-          <UiPanel as="form" variant="soft" class="space-y-4 p-4" @submit.prevent="submitTemplate">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Create from template
-              </p>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <UiPanel
+              v-for="card in templateCards"
+              :key="card.id"
+              :variant="selectedTemplateCard === card.id ? 'raise' : 'soft'"
+              class="flex h-full flex-col gap-4 p-4 text-left transition"
+              :class="selectedTemplateCard === card.id ? 'border-[color:var(--accent)]' : ''"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                    Template
+                  </p>
+                  <h4 class="mt-2 text-base font-semibold text-[color:var(--text)]">
+                    {{ card.title }}
+                  </h4>
+                  <p class="mt-2 text-xs text-[color:var(--muted)]">
+                    {{ card.description }}
+                  </p>
+                </div>
+                <UiBadge :tone="selectedTemplateCard === card.id ? 'ok' : 'neutral'">
+                  {{ selectedTemplateCard === card.id ? 'Selected' : 'Ready' }}
+                </UiBadge>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-[color:var(--muted)]">
+                <svg
+                  class="h-3.5 w-3.5 text-[color:var(--muted-2)]"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M10 13a5 5 0 0 1 0-7l2-2a5 5 0 0 1 7 7l-2 2" />
+                  <path d="M14 11a5 5 0 0 1 0 7l-2 2a5 5 0 0 1-7-7l2-2" />
+                </svg>
+                <a
+                  v-if="templateRepoUrl"
+                  :href="templateRepoUrl"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="text-[color:var(--text)] transition hover:text-[color:var(--accent-ink)]"
+                >
+                  {{ templateRepoLabel }}
+                </a>
+                <span v-else>{{ templateRepoLabel }}</span>
+              </div>
+              <UiButton
+                type="button"
+                variant="ghost"
+                size="sm"
+                @click="selectTemplateCard(card.id)"
+              >
+                {{ selectedTemplateCard === card.id ? 'Hide form' : card.actionLabel }}
+              </UiButton>
+            </UiPanel>
+          </div>
+
+          <UiPanel
+            v-if="selectedTemplateCard === 'create'"
+            as="form"
+            variant="soft"
+            class="space-y-4 p-4"
+            @submit.prevent="submitTemplate"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Create from template
+                </p>
+                <p class="mt-1 text-xs text-[color:var(--muted)]">
+                  Template source: {{ templateRepoLabel }}
+                </p>
+              </div>
+              <UiButton type="button" variant="ghost" size="xs" @click="selectedTemplateCard = null">
+                Back to cards
+              </UiButton>
             </div>
             <label class="grid gap-2 text-sm">
               <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
@@ -779,19 +1027,30 @@ watch(
             </div>
           </UiPanel>
 
-          <UiPanel as="form" variant="soft" class="space-y-4 p-4" @submit.prevent="submitExisting">
+          <UiPanel
+            v-if="selectedTemplateCard === 'existing'"
+            as="form"
+            variant="soft"
+            class="space-y-4 p-4"
+            @submit.prevent="submitExisting"
+          >
             <div class="flex flex-wrap items-center justify-between gap-3">
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Deploy existing
-              </p>
-              <UiButton
-                type="button"
-                variant="ghost"
-                size="xs"
-                @click="loadLocalProjects"
-              >
-                Refresh list
-              </UiButton>
+              <div>
+                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Deploy existing
+                </p>
+                <p class="mt-1 text-xs text-[color:var(--muted)]">
+                  Use a local template folder and assign a new subdomain.
+                </p>
+              </div>
+              <div class="flex items-center gap-2">
+                <UiButton type="button" variant="ghost" size="xs" @click="selectedTemplateCard = null">
+                  Back to cards
+                </UiButton>
+                <UiButton type="button" variant="ghost" size="xs" @click="loadLocalProjects">
+                  Refresh list
+                </UiButton>
+              </div>
             </div>
 
             <label class="grid gap-2 text-sm">
@@ -876,11 +1135,92 @@ watch(
               Quick tunnel forwards
             </h3>
             <p class="mt-2 text-sm text-[color:var(--muted)]">
-              Expose a running port through the Cloudflare tunnel instantly.
+              Expose a running port through the host tunnel service instantly.
             </p>
           </div>
 
-          <UiPanel as="form" variant="soft" class="space-y-4 p-4" @submit.prevent="submitQuick">
+          <div class="grid gap-4 sm:grid-cols-2">
+            <UiPanel
+              v-for="card in serviceCards"
+              :key="card.id"
+              :variant="selectedServiceCard === card.id ? 'raise' : 'soft'"
+              class="flex h-full flex-col gap-4 p-4 text-left transition"
+              :class="selectedServiceCard === card.id ? 'border-[color:var(--accent)]' : ''"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                    Service
+                  </p>
+                  <h4 class="mt-2 text-base font-semibold text-[color:var(--text)]">
+                    {{ card.name }}
+                  </h4>
+                  <p class="mt-2 text-xs text-[color:var(--muted)]">
+                    {{ card.description }}
+                  </p>
+                </div>
+                <UiBadge :tone="selectedServiceCard === card.id ? 'ok' : 'neutral'">
+                  {{ selectedServiceCard === card.id ? 'Selected' : card.kind === 'custom' ? 'Custom' : 'Preset' }}
+                </UiBadge>
+              </div>
+              <div class="flex flex-wrap items-center gap-2 text-xs text-[color:var(--muted)]">
+                <span v-if="card.subdomain">subdomain: {{ card.subdomain }}</span>
+                <span v-if="card.port">port: {{ card.port }}</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-[color:var(--muted)]">
+                <svg
+                  class="h-3.5 w-3.5 text-[color:var(--muted-2)]"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M10 13a5 5 0 0 1 0-7l2-2a5 5 0 0 1 7 7l-2 2" />
+                  <path d="M14 11a5 5 0 0 1 0 7l-2 2a5 5 0 0 1-7-7l2-2" />
+                </svg>
+                <a
+                  :href="card.repoUrl"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="text-[color:var(--text)] transition hover:text-[color:var(--accent-ink)]"
+                >
+                  {{ card.repoLabel }}
+                </a>
+              </div>
+              <UiButton
+                type="button"
+                variant="ghost"
+                size="sm"
+                @click="selectServiceCard(card)"
+              >
+                {{ selectedServiceCard === card.id ? 'Hide form' : 'Select service' }}
+              </UiButton>
+            </UiPanel>
+          </div>
+
+          <UiPanel
+            v-if="selectedService"
+            as="form"
+            variant="soft"
+            class="space-y-4 p-4"
+            @submit.prevent="submitQuick"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Forward {{ selectedService.name }}
+                </p>
+                <p class="mt-1 text-xs text-[color:var(--muted)]">
+                  {{ selectedService.description }}
+                </p>
+              </div>
+              <UiButton type="button" variant="ghost" size="xs" @click="selectedServiceCard = null">
+                Back to cards
+              </UiButton>
+            </div>
             <label class="grid gap-2 text-sm">
               <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                 Subdomain
@@ -929,31 +1269,6 @@ watch(
               </UiButton>
             </div>
           </UiPanel>
-
-          <UiPanel variant="soft" class="space-y-3 p-4">
-            <div class="flex items-center justify-between gap-2">
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Presets
-              </p>
-              <UiBadge tone="neutral">Ports</UiBadge>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <UiButton
-                v-for="preset in servicePresets"
-                :key="preset.name"
-                type="button"
-                variant="chip"
-                size="chip"
-                class="text-[color:var(--text)]"
-                @click="applyPreset(preset)"
-              >
-                {{ preset.name }} - {{ preset.port }}
-              </UiButton>
-            </div>
-            <p class="text-xs text-[color:var(--muted)]">
-              Click a preset to prefill the subdomain and port.
-            </p>
-          </UiPanel>
         </UiPanel>
       </div>
     </section>
@@ -965,5 +1280,16 @@ watch(
     :steps="onboardingSteps"
     @finish="markOnboardingComplete"
     @skip="markOnboardingComplete"
+  />
+
+  <HostCommandModal
+    v-model="hostModalOpen"
+    :command="hostCommand"
+    :action="hostAction"
+    :job="hostJob"
+    :logs="hostLogs"
+    :error="hostError"
+    :expires-at="hostExpiresAt"
+    :polling="hostPolling"
   />
 </template>

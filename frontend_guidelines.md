@@ -21,7 +21,8 @@
 - Icon set: Iconoir.
 
 ### Layout and Navigation
-- Sidebar-based navigation with expand/collapse behavior.
+- Sidebar-based navigation with expand/collapse behavior (icon-only collapsed state).
+- Sidebar toggle control lives in the sidebar only (remove top-bar toggle).
 - Top bar for session controls and quick host status.
 - Footer with product info and helpful links.
 
@@ -29,6 +30,7 @@
 - Unauthenticated users see only the login page.
 - Login layout: two columns, brief product description on the left, GitHub auth button on the right.
 - GitHub auth uses a popup window rather than full-page redirect.
+- Auto-redirect to the app when `/auth/me` succeeds (do not leave the user on the login screen).
 
 ### Pages and Responsibilities
 - Home: Host Status (containers count, jobs status, machine name, tunnel name, domain, last service deployed, onboarding CTA) and Quick Deploy (Templates + Services).
@@ -38,17 +40,21 @@
 - GitHub: token status, allowlist, and template availability.
 
 ### UX Requirements
+- `deploy.sh` is reference-only; do not modify it. The UI should mirror its CLI behavior before advanced automation.
 - Standardized component variants (buttons, cards, badges, inputs).
 - Standardized loading state (page skeletons + inline spinners).
 - Standardized form and info display pages via composables with states (loading, empty, error, ready).
 - Onboarding journey with overlay highlights and step-by-step guidance, including API key links.
 - Day-to-day journey focused on quick deploy, status checks, and recent activity.
+- Use a custom Select component (no native `<select>` in the UI).
+- Present Templates and Services as card grids with clear deploy actions and repo links; only show deploy forms when a card is selected.
 
 ### UI/UX Notes
 - Clear success/error toasts for each action.
 - Loading and empty states for lists and job logs.
 - Form validation with helpful hints for ports and subdomains.
  - Standardized animations (page load, staggered reveals, modal transitions).
+- Prefer wide content layouts: minimize horizontal padding/margins so main panels use more of the viewport.
 
 ### Testing and Quality
 - Smoke test with `npm run build`.

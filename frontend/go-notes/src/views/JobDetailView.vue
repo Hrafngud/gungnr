@@ -7,9 +7,8 @@ import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
 import { jobsApi } from '@/services/jobs'
 import { apiErrorMessage, getApiBaseUrl } from '@/services/api'
+import { jobStatusLabel, jobStatusTone } from '@/utils/jobStatus'
 import type { JobDetail } from '@/types/jobs'
-
-type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
 const route = useRoute()
 const job = ref<JobDetail | null>(null)
@@ -20,13 +19,6 @@ const connected = ref(false)
 let source: EventSource | null = null
 
 const jobId = Number(route.params.id)
-
-const statusTone = (status: string): BadgeTone => {
-  if (status === 'completed') return 'ok'
-  if (status === 'running') return 'warn'
-  if (status === 'failed') return 'error'
-  return 'neutral'
-}
 
 const fetchJob = async () => {
   if (!Number.isFinite(jobId)) {
@@ -135,8 +127,8 @@ onBeforeUnmount(() => {
               {{ job.type }}
             </h2>
           </div>
-          <UiBadge :tone="statusTone(job.status)">
-            {{ job.status || 'pending' }}
+          <UiBadge :tone="jobStatusTone(job.status)">
+            {{ jobStatusLabel(job.status) }}
           </UiBadge>
         </div>
 

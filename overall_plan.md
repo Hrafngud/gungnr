@@ -7,6 +7,9 @@ Current status: Replace notes CRUD app with Warp Panel web UI and API.
 - Define `.env.example` with GitHub and Cloudflare settings.
 - Ensure Docker, cloudflared, and templates directory access on host.
 - Plan for runtime settings in DB (domain, tokens, cloudflared config path).
+- Decide host-installed `cloudflared` service as the only tunnel path (no compose cloudflared container).
+- Establish a host-worker handoff model (`deploy.sh` worker + API token) so tunnel edits happen on the host.
+- Treat `deploy.sh` as reference-only; do not modify it. The UI should first mirror its CLI behavior before advanced automation.
 
 2) Backend First
 - Scaffold backend structure and config loader.
@@ -15,6 +18,8 @@ Current status: Replace notes CRUD app with Warp Panel web UI and API.
 - Build job runner and persistence models.
 - Add health endpoints for docker and tunnel checks.
 - Add settings endpoints and use them in workflows (domain/token/config path).
+- Add host-worker job type + one-time token endpoints to hand off deploys to the host.
+- Persist onboarding state per user to avoid repeated overlays.
 
 3) Frontend Setup
 - Create router, auth store, and base layout.
@@ -23,6 +28,12 @@ Current status: Replace notes CRUD app with Warp Panel web UI and API.
 - Implement Home, Overview, Host Settings, Networking, and GitHub pages.
 - Wire API services with auth handling.
 - Add onboarding overlay journey and day-to-day flow polish.
+- Improve sidebar collapse UX (icon-only, toggle in sidebar only).
+- Replace native selects with a universal custom Select component.
+- Reduce horizontal padding/margins to maximize content width.
+- Fix login page layout and auto-redirect on `/auth/me` success.
+- Refactor Home Quick Deploy into card grids for Templates/Services with repo links and deploy actions.
+- Add a responsive top bar to the logs screen so controls fit on all widths.
 
 4) Dockerization
 - Backend and frontend Dockerfiles (multi-stage).

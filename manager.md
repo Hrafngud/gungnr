@@ -1,6 +1,7 @@
 ## Warp Panel - Project Tracker
 
 - Scope: Web control panel to perform all deploy.sh tasks from a browser. It runs on the host PC (Docker, filesystem, cloudflared access) and is served via Cloudflare Tunnel for remote control.
+- Principle: `deploy.sh` is reference-only; do not modify it. The UI must reproduce its CLI behavior before advanced setups.
 - Core flows:
   - Create new project from a GitHub template, clone locally, patch compose ports, build and run.
   - Deploy an existing local template project (compose up if needed).
@@ -17,6 +18,16 @@
   - DB: Postgres for projects, jobs, and audit logs.
   - Host access: Docker socket bind, templates dir bind, cloudflared config bind.
 - Progress log:
+  - DONE: Use host-installed `cloudflared` service as the only tunnel path; removed the compose cloudflared container.
+  - TODO: Implement host-worker handoff (API job + one-time token + `deploy.sh` worker) so tunnel edits happen on the host.
+  - TODO: Update UI copy and help modals to instruct host operators on tunnel setup and host command execution.
+  - TODO: Persist onboarding state in the backend so overlays do not reappear.
+  - TODO: Redesign sidebar collapse UX (icon-only, control in sidebar only).
+  - TODO: Increase main content width by reducing horizontal padding/margins.
+  - TODO: Replace native selects with a universal custom Select component.
+  - TODO: Fix login flow to auto-redirect on `/auth/me` success.
+  - TODO: Update login page layout to the two-column design.
+  - TODO: Refactor Home Quick Deploy into card grids for Templates/Services; show deploy forms only when selected.
   - TODO: Replace placeholder notes docs with Warp Panel plans and guidelines.
   - TODO: Visual rework for dark zinc skeuomorphic theme, component variants, and standardized animations.
   - TODO: Rebuild navigation with expandable sidebar, top bar, and footer.
@@ -37,6 +48,7 @@
   - DONE: Allow configuring auth cookie domain to avoid invalid OAuth state on cross-subdomain callbacks.
   - DONE: Fix GitHub user lookup to use the correct GORM column mapping.
 - DONE: Implement job runner persistence, workflow handlers, and job log streaming.
+- DONE: Add host-worker job type with one-time tokens plus host fetch/log/complete endpoints.
 - DONE: Wire template creation, deploy existing, and quick service endpoints + UI flows.
 - DONE: Add GitHub template creation + cloudflared DNS/ingress updates in workflows.
 - DONE: Build UI shell and connect to API for `/auth/me`.
@@ -63,6 +75,8 @@
 - DONE: Add day-to-day guidance callouts in Jobs and Activity, and introduce turquoise accent/status colors for indicators.
 - DONE: Add GitHub catalog endpoint (token/template/allowlist summary) and wire GitHub view to real data.
 - DONE: Expand Networking with ingress-derived DNS list and Cloudflare readiness panel.
+- DONE: Add host worker command modal (copy + polling) and route deploy actions through `/jobs/host-deploy`.
+- DONE: Surface `pending_host` status in job badges/counts and replace native selects with the custom UiSelect.
 - DONE: Harden tunnel health checks with origin cert discovery + clearer missing-cert feedback.
 - DONE: Tune nginx SSE proxy settings for job log streaming.
 - DONE: Force HTTPS API base URL when the panel is served over HTTPS to prevent mixed-content blocks.
@@ -71,6 +85,7 @@
 - DONE: Improve Cloudflare tunnel error logging with remote-managed tunnel guidance.
 - DONE: Added tunnel health diagnostics (account/zone/tunnel sources) and return non-200 status codes for tunnel health errors.
 - DONE: Add live container logs screen for all running containers (not just deploy jobs).
+- DONE: Add a responsive top bar on the logs screen so controls fit at all widths.
 - DONE: Add copy logs action, collapsible sidebar controls, and enhanced container log details.
 - DONE: Improve external API error logging for Cloudflare/GitHub responses with response metadata and payload summaries.
 - DONE: Capture GitHub error response body snippets for clearer API failure logs.
@@ -79,8 +94,8 @@
 - NOTE: Frontend smoke test blocked; `npm run build` failed because `vue-tsc` is not available (install deps locally).
 - NOTE: User will run smoke tests locally.
 - NOTE: Cloudflare API auth error code 10000 persists in `/health/tunnel` despite valid token claims; likely settings mismatch (DB overrides env) or account/zone mismatch.
-- NOTE: Added cloudflared docker service with tunnel token; uses host networking so API-ingress `http://localhost:<port>` routes work inside the tunnel container (Linux hosts).
-- NOTE: `docker compose up --build` completed; `cloudflared` container exited with "Provided Tunnel token is not valid" when the token is unset/invalid.
+- NOTE: `docker compose up --build` completed; buildx plugin warning persists.
+- NOTE: Cloudflare docs confirm `config.yml` ingress rules must end with a catch-all rule, and DNS records can be created via `cloudflared tunnel route dns` (requires cert.pem).
 
 ### Docker / Compose usage (target)
 - Defaults live in `.env.example` (copy to `.env` to override).

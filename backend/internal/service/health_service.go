@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -98,6 +99,7 @@ func (s *HealthService) Tunnel(ctx context.Context) TunnelHealth {
 		client := cloudflare.NewClient(cfg)
 		info, err := client.TunnelStatus(ctx)
 		if err != nil {
+			logTunnelHealthError("cloudflare api", err, diagnostics)
 			status := "error"
 			detail := err.Error()
 			if errors.Is(err, cloudflare.ErrTunnelNotRemote) {
@@ -132,6 +134,7 @@ func (s *HealthService) Tunnel(ctx context.Context) TunnelHealth {
 
 	configPath := strings.TrimSpace(cfg.CloudflaredConfig)
 	if configPath == "" {
+		logTunnelHealthError("cloudflared config", errors.New("cloudflared config path is not set"), diagnostics)
 		return TunnelHealth{Status: "missing", Detail: "cloudflared config path is not set", Diagnostics: diagnostics}
 	}
 	configPath = expandUserPath(configPath)
@@ -139,6 +142,7 @@ func (s *HealthService) Tunnel(ctx context.Context) TunnelHealth {
 	info, err := readCloudflaredConfig(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			logTunnelHealthError("cloudflared config", err, diagnostics)
 			return TunnelHealth{
 				Status:      "missing",
 				Detail:      fmt.Sprintf("cloudflared config not found at %s", configPath),
@@ -146,6 +150,7 @@ func (s *HealthService) Tunnel(ctx context.Context) TunnelHealth {
 				Diagnostics: diagnostics,
 			}
 		}
+		logTunnelHealthError("cloudflared config", err, diagnostics)
 		return TunnelHealth{
 			Status:      "error",
 			Detail:      fmt.Sprintf("read cloudflared config: %v", err),
@@ -159,6 +164,7 @@ func (s *HealthService) Tunnel(ctx context.Context) TunnelHealth {
 		tunnelName = info.Tunnel
 	}
 	if tunnelName == "" {
+		logTunnelHealthError("cloudflared config", errors.New("cloudflared tunnel name is not set"), diagnostics)
 		return TunnelHealth{
 			Status:      "missing",
 			Detail:      "cloudflared tunnel name is not set",
@@ -197,6 +203,7 @@ func (s *HealthService) Tunnel(ctx context.Context) TunnelHealth {
 		if detail == "" {
 			detail = err.Error()
 		}
+		logTunnelHealthCommandError(detail, tunnelName, configPath, info.CredentialsFile, info.OriginCert)
 		if strings.Contains(detail, "Cannot determine default origin certificate path") {
 			return TunnelHealth{
 				Status:      "missing",
@@ -404,4 +411,41 @@ func looksLikeUUID(value string) bool {
 		}
 	}
 	return true
+}
+
+func logTunnelHealthError(scope string, err error, diagnostics *TunnelDiagnostics) {
+	if err == nil {
+		return
+	}
+	if diagnostics == nil {
+		log.Printf("tunnel health %s error: %v", scope, err)
+		return
+	}
+	log.Printf(
+		"tunnel health %s error: %v (acct=%s zone=%s tunnel=%s ref=%s domain=%s config=%s token=%t sources=acct:%s zone:%s token:%s config:%s)",
+		scope,
+		err,
+		diagnostics.AccountID,
+		diagnostics.ZoneID,
+		diagnostics.Tunnel,
+		diagnostics.TunnelRefType,
+		diagnostics.Domain,
+		diagnostics.ConfigPath,
+		diagnostics.TokenSet,
+		diagnostics.Sources.CloudflareAccountID,
+		diagnostics.Sources.CloudflareZoneID,
+		diagnostics.Sources.CloudflareToken,
+		diagnostics.Sources.CloudflaredConfigPath,
+	)
+}
+
+func logTunnelHealthCommandError(detail, tunnel, configPath, credentialsFile, originCert string) {
+	log.Printf(
+		"tunnel health cloudflared info error: %s (tunnel=%s config=%s creds=%s origincert=%s)",
+		detail,
+		tunnel,
+		configPath,
+		credentialsFile,
+		originCert,
+	)
 }
