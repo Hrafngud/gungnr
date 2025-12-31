@@ -19,7 +19,8 @@
   - Host access: Docker socket bind, templates dir bind, cloudflared config bind.
 - Progress log:
   - DONE: Use host-installed `cloudflared` service as the only tunnel path; removed the compose cloudflared container.
-  - TODO: Implement host-worker handoff (API job + one-time token + `deploy.sh` worker) so tunnel edits happen on the host.
+  - DONE: Implement API Docker runner (socket-based) to run containers/compose directly from jobs.
+  - DONE: Cloudflare DNS/ingress updates confirmed healthy; focus shifts to Docker runner UX and retiring host-worker flow.
   - TODO: Update UI copy and help modals to instruct host operators on tunnel setup and host command execution.
   - TODO: Persist onboarding state in the backend so overlays do not reappear.
   - TODO: Redesign sidebar collapse UX (icon-only, control in sidebar only).
@@ -49,6 +50,7 @@
   - DONE: Fix GitHub user lookup to use the correct GORM column mapping.
 - DONE: Implement job runner persistence, workflow handlers, and job log streaming.
 - DONE: Add host-worker job type with one-time tokens plus host fetch/log/complete endpoints.
+- NOTE: Decision shift - prefer API-run Docker socket runner (Option A) and treat host worker flow as legacy.
 - DONE: Wire template creation, deploy existing, and quick service endpoints + UI flows.
 - DONE: Add GitHub template creation + cloudflared DNS/ingress updates in workflows.
 - DONE: Build UI shell and connect to API for `/auth/me`.
@@ -90,6 +92,8 @@
 - DONE: Improve external API error logging for Cloudflare/GitHub responses with response metadata and payload summaries.
 - DONE: Capture GitHub error response body snippets for clearer API failure logs.
 - DONE: Improve GitHub OAuth error logging with response status/body details for token exchange and user/org checks.
+- DONE: Retire host-worker UI flow (remove host command modal and pending_host labels) and add quick-service image/container port inputs with hints.
+- DONE: Remove host-worker backend endpoints/job type and normalize pending_host to pending in job responses.
 - DONE: Compose smoke test run locally; buildx plugin warning persists.
 - NOTE: Frontend smoke test blocked; `npm run build` failed because `vue-tsc` is not available (install deps locally).
 - NOTE: User will run smoke tests locally.

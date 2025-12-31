@@ -65,7 +65,7 @@ Note: UI-managed settings (domain, GitHub token, Cloudflare token, cloudflared c
 - Add DNS records via `cloudflared tunnel route dns <UUID|NAME> <hostname>` (requires `cert.pem`).
 - Update local `config.yml` ingress rules (insert after `ingress:`) and always keep a catch-all rule (`http_status:404`).
 - Restart the host service after updates (`systemctl restart cloudflared`); validate with `cloudflared tunnel ingress validate`.
-- Prefer host-worker execution (`deploy.sh` worker) so the API container does not edit tunnel state directly.
+- Prefer API-run Docker socket execution for deploy actions; host-worker flow is removed.
 - Keep API-managed remote tunnels optional and explicitly non-primary.
 
 ### Docker and Host Actions

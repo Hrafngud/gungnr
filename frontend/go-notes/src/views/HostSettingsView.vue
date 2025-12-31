@@ -11,15 +11,13 @@ import UiOnboardingOverlay from '@/components/ui/UiOnboardingOverlay.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiState from '@/components/ui/UiState.vue'
-import HostCommandModal from '@/components/host/HostCommandModal.vue'
 import { healthApi } from '@/services/health'
 import { settingsApi } from '@/services/settings'
 import { hostApi } from '@/services/host'
-import { hostJobsApi } from '@/services/hostJobs'
+import { projectsApi } from '@/services/projects'
 import { apiErrorMessage } from '@/services/api'
 import { useToastStore } from '@/stores/toasts'
 import { useOnboardingStore } from '@/stores/onboarding'
-import { useHostWorker } from '@/composables/useHostWorker'
 import type { CloudflaredPreview, Settings, SettingsSources } from '@/types/settings'
 import type { OnboardingStep } from '@/types/onboarding'
 import type { DockerContainer } from '@/types/host'
@@ -42,17 +40,6 @@ const cloudflaredTunnelName = ref<string | null>(null)
 
 const toastStore = useToastStore()
 const onboardingStore = useOnboardingStore()
-const hostWorker = useHostWorker()
-const {
-  modalOpen: hostModalOpen,
-  command: hostCommand,
-  action: hostAction,
-  job: hostJob,
-  logs: hostLogs,
-  error: hostError,
-  expiresAt: hostExpiresAt,
-  polling: hostPolling,
-} = hostWorker
 
 const loading = ref(false)
 const saving = ref(false)
@@ -281,13 +268,9 @@ const queueForward = async (container: DockerContainer) => {
 
   state.loading = true
   try {
-    const { data } = await hostJobsApi.createHostDeploy({
-      jobType: 'quick_service',
-      payload: { subdomain: state.subdomain, port },
-    })
+    const { data } = await projectsApi.quickService({ subdomain: state.subdomain, port })
     state.jobId = data.job.id
     toastStore.success('Forward queued.', 'Tunnel forwarding')
-    await hostWorker.openWithHostDeploy(data)
   } catch (err) {
     const message = apiErrorMessage(err)
     state.error = message
@@ -813,17 +796,6 @@ onMounted(async () => {
       :steps="onboardingSteps"
       @finish="markOnboardingComplete"
       @skip="markOnboardingComplete"
-    />
-
-    <HostCommandModal
-      v-model="hostModalOpen"
-      :command="hostCommand"
-      :action="hostAction"
-      :job="hostJob"
-      :logs="hostLogs"
-      :error="hostError"
-      :expires-at="hostExpiresAt"
-      :polling="hostPolling"
     />
   </section>
 </template>

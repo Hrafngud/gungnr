@@ -105,8 +105,8 @@ onBeforeUnmount(() => {
           Follow along as the workflow updates the local stack and tunnel.
         </p>
       </div>
-      <UiButton :as="RouterLink" to="/overview" variant="ghost" size="sm">
-        Back to overview
+      <UiButton :as="RouterLink" to="/jobs" variant="ghost" size="sm">
+        Back to jobs
       </UiButton>
     </div>
 

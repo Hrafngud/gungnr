@@ -6,6 +6,7 @@ import ContainerLogsView from '@/views/ContainerLogsView.vue'
 import HostSettingsView from '@/views/HostSettingsView.vue'
 import NetworkingView from '@/views/NetworkingView.vue'
 import GitHubView from '@/views/GitHubView.vue'
+import JobsView from '@/views/JobsView.vue'
 import JobDetailView from '@/views/JobDetailView.vue'
 import { useAuthStore } from '@/stores/auth'
 
@@ -30,6 +31,12 @@ const router = createRouter({
       name: 'overview',
       component: OverviewView,
       meta: { title: 'Overview' },
+    },
+    {
+      path: '/jobs',
+      name: 'jobs',
+      component: JobsView,
+      meta: { title: 'Jobs' },
     },
     {
       path: '/logs',
@@ -64,10 +71,6 @@ const router = createRouter({
     {
       path: '/projects',
       redirect: '/',
-    },
-    {
-      path: '/jobs',
-      redirect: '/overview',
     },
     {
       path: '/activity',

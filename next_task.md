@@ -1,8 +1,8 @@
 ## Next Task
 
-Host-first cloudflared worker migration (new priority):
-- Goal: Make host-installed `cloudflared` service + `deploy.sh` worker the primary tunnel path; remove the dockerized tunnel container from compose.
-- Core idea: The API never edits tunnel state directly. It issues a one-time token and the host runs `deploy.sh` in worker mode to update DNS + config.yml + restart the service.
+Docker runner via API (new priority):
+- Goal: Run `docker run` / `docker compose up` directly from the API on the host via the Docker socket, then update Cloudflare ingress.
+- Core idea: Authenticated API jobs execute Docker locally (no host worker), then reuse existing Cloudflare setup for DNS/ingress.
 
 Cloudflare docs references (reviewed):
 - Run as a service (Linux): https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/as-a-service/linux/
@@ -18,75 +18,45 @@ Progress tracking rules (mandatory for each new Codex session):
 - Do not list testing or verification as a "Next up" task; the user handles testing and feedback.
 
 Task breakdown (checklist):
-- [x] CF-1: Align docs and UI copy to host-installed `cloudflared` service as primary path.
-- [x] CF-2: Add host-worker job type in backend (one-time token issuance + host fetch/log endpoints).
-- [x] CF-3: Update `deploy.sh` into a non-interactive worker mode (`deploy.sh worker --token <token>`).
-- [x] CF-4: Add UI modal for host command + copy-to-clipboard + status polling.
-- [x] CF-5: Ensure job states include `pending_host` and surface that state in UI.
-- [x] CF-6: Add validation steps in worker (ingress validate + rule match) before restart.
-- [x] CF-7: Manual verification checklist executed and recorded.
-- [x] UI-1: Persist onboarding state in the backend to avoid reappearing overlays.
-- [x] UI-2: Redesign sidebar collapse UX (icon-only, toggle in sidebar only).
-- [x] UI-3: Reduce horizontal padding/margins to maximize content width.
-- [x] UI-4: Implement a universal custom Select component and replace native selects.
-- [x] UI-5: Improve login layout (true two-column layout).
-- [x] UI-6: Fix login flow to auto-redirect on `/auth/me` success.
-- [x] UI-7: Refactor Home Quick Deploy into card grids for Templates and Services.
-- [x] UI-8: Show deploy forms only when a card is selected (reduce clutter).
-- [x] UI-9: Add a responsive top bar on the logs screen so controls fit at all widths.
+- [x] DR-1: Mount Docker socket into the API container and ensure `docker` CLI is available.
+- [x] DR-2: Add Docker runner service to execute `docker run` and `docker compose up` with input validation.
+- [x] DR-3: Add job types (`docker_run`, `docker_compose_up`) and wire into job runner.
+- [x] DR-4: Update quick service workflow to run container first, then Cloudflare ingress.
+- [x] DR-5: Update template deploy workflow to run compose first, then Cloudflare ingress.
+- [x] DR-6: Infer container name from image when not specified (e.g., `excalidraw/excalidraw` -> `excalidraw`).
+- [x] DR-7: Add simple collision checks (port in use, container name already exists).
+- [x] DOC-1: Document Docker runner approach and update runbook notes in README/plan docs.
+- [x] HW-1: Remove host-worker backend endpoints/services/job type.
+- [x] HW-2: Drop `pending_host` status handling and normalize legacy job statuses in API responses.
+- [x] DOC-2: Update backend docs/guidelines to remove host-worker flow references.
 
 Detailed execution plan for the next assistant:
-- Step 1: Re-read Cloudflare docs and confirm local-managed tunnel requirements.
-- Step 2: Backend changes
-  - Add new job type `host_deploy` with `pending_host` default status.
-  - Add `host_job_tokens` table or reuse Jobs with token/expiry fields.
-  - Add endpoints:
-    - `POST /api/v1/jobs/host-deploy` -> create job + one-time token.
-    - `GET /api/v1/host/jobs/:token` -> return job payload for worker.
-    - `POST /api/v1/host/jobs/:token/logs` -> append log lines.
-    - `POST /api/v1/host/jobs/:token/complete` -> mark job success/failure.
-  - Ensure tokens are single-use with TTL and are revoked on completion.
-  - Add audit log entries for host-worker runs.
-- Step 3: `deploy.sh` worker mode
-  - Add `worker` subcommand that:
-    - Fetches job payload from API using the one-time token.
-    - Runs existing deploy logic non-interactively.
-    - Updates config.yml ingress rules (insert after `ingress:`) with a lock.
-    - Verifies catch-all (`http_status:404`) is still present.
-    - Runs `cloudflared tunnel ingress validate` and optional `ingress rule`.
-    - Restarts `cloudflared` via `systemctl restart cloudflared` (fallback to direct `cloudflared tunnel run` if systemd missing).
-    - Streams logs back to API and marks completion.
-  - Make worker output deterministic and machine-readable for UI (prefix with `[worker]` or JSON lines).
-- Step 4: UI changes
-  - Show modal after deploy request with the exact host command.
-  - Provide copy-to-clipboard and a "waiting for host" status.
-  - Poll job status and display worker logs.
-  - Add help modal linking to Cloudflare docs for tunnel setup and service install.
+- Step 1: Backend changes
+  - Add job types `docker_run` and `docker_compose_up`.
+  - Add a Docker runner service (CLI-based for now) that:
+    - Validates ports (range + availability).
+    - Infers container name from image if not provided.
+    - Runs `docker run -d -p host:container --name ... --restart unless-stopped`.
+    - Runs `docker compose up --build -d` for template projects.
+    - Logs stdout/stderr into job logs.
+  - Add collision handling: if container name exists, return a clear error.
+- Step 2: Workflow wiring
+  - Quick service workflow:
+    - Run container first (image + container port + assigned host port).
+    - Reuse existing Cloudflare DNS/ingress update.
+  - Template deploy workflow:
+    - Run compose in project directory.
+    - Reuse existing Cloudflare DNS/ingress update with proxy port.
+- Step 3: Docker socket + image availability
+  - Mount `/var/run/docker.sock` into API container.
+  - Ensure the API image includes the `docker` CLI.
+  - Add a short health check or error message if Docker is unavailable.
+- Step 4: UI adjustments (minimal)
+  - Keep quick service UI as-is for now.
+  - Add optional image/container port fields later (default to Excalidraw with port 80 if omitted).
 - Step 5: Verification checklist (user-run; do not repeat unless asked)
-  - Run a deploy; check DNS record created and ingress updated.
-  - Validate `config.yml` catch-all remains intact.
-  - Confirm tunnel health in Cloudflare dashboard.
- - Step 6: Onboarding state (backend + frontend)
-   - Add `onboarding_state` storage per user (table or JSON field) with flags for each overlay step.
-   - Add endpoints: `GET /api/v1/onboarding` and `PATCH /api/v1/onboarding`.
-   - Update UI onboarding overlay logic to read/write state so it never reappears after completion.
- - Step 7: Sidebar UX + layout width
-   - Remove top-bar toggle; move collapse control into the sidebar.
-   - Implement icon-only collapsed state with tooltips for clarity.
-   - Reduce global horizontal padding/margins in layout containers and main panels.
- - Step 8: Universal Select component
-   - Add a base Select with custom dropdown, keyboard support, and consistent styling.
-   - Replace all native selects across Host Settings, Networking, GitHub, and deploy forms.
- - Step 9: Login improvements
-   - Ensure two-column layout is used at all breakpoints where space permits.
-   - Fix `/auth/me` polling so a successful response triggers redirect to the app.
- - Step 10: Home Quick Deploy cards
-   - Replace Templates/Services forms with card grids.
-   - Each card shows name, GitHub repo link (icon + URL), and a deploy action.
-   - Clicking deploy opens the form or drawer for that card only.
- - Step 11: Logs screen top bar
-   - Add a responsive top bar containing filters, pause/resume, and copy actions.
-   - Ensure controls wrap or collapse cleanly on smaller screens.
+  - Start a quick service job and confirm container is running.
+  - Confirm Cloudflare ingress update points to the selected host port.
 
 Iteration log (append each session):
 - 2025-12-30: Added host-worker job type, token issuance, host fetch/log/complete endpoints, and router wiring; status includes `pending_host`. Tests: `GOCACHE=./.gocache go test ./...` failed in `backend/internal/middleware/middleware_test.go` (expected CORS origin vs `*`). | blockers: none | next up: CF-3 worker mode, UI-1 onboarding persistence, UI-2/UI-3 layout updates
@@ -110,17 +80,23 @@ Iteration log (append each session):
 - 2025-12-31: Exposed `ADMIN_LOGIN`/`ADMIN_PASSWORD` in compose env so the API container can issue `/test-token`. Tests not run (user handled). | blockers: none | next up: review Cloudflare preflight output and tunnel ref alignment
 - 2025-12-31: Live API debug via https://warp.sphynx.store (bearer token). `/healthz` OK; `/health/docker` OK (4 containers). `/health/tunnel` returns Cloudflare 502 text response (no JSON). `/api/v1/cloudflare/preflight` shows token OK, zone OK, account mismatch for the zone, and tunnel ref is a name (warn). `/api/v1/host/docker` lists healthy api/web/proxy/db containers. `/api/v1/jobs` has pending `host_deploy` jobs (host worker not run) and older failures (Cloudflare auth 10000, missing compose). `/api/v1/settings/cloudflared/preview` path `/home/zalmo/.cloudflared/config.yml` includes 13 hostnames with catch-all 404; `warp.sphynx.store` -> `http://localhost:80`. DNS resolves `warp.sphynx.store` to Cloudflare IPs. | blockers: Cloudflare account ID mismatch; tunnel ref still name; `/health/tunnel` 502 | next up: align account ID with zone, set tunnel UUID in settings, re-check `/health/tunnel`, run host worker for pending jobs
 - 2025-12-31: Added `CLOUDFLARE_TUNNEL_ID` env fallback for tunnel ID resolution to bypass `/tunnels` 502s, surfaced it in preflight resolution, and documented the new env in compose/docs. Tests not run. | blockers: none | next up: surface tunnel ID fallback in settings diagnostics, add log annotation when fallback is used
+- 2025-12-31: Shifted plan to API-run Docker socket runner for `docker run`/`compose up` and updated planning docs; host-worker flow now legacy. Tests not run. | blockers: none | next up: DR-1 socket mount, DR-2 Docker runner service
+- 2025-12-31: Added Docker runner service + job types, wired workflows to run Docker before Cloudflare updates, and documented the API-runner approach. Tests not run. | blockers: none | next up: retire host-worker UI flow, add optional quick-service image/port fields, clean up pending_host labels
+- 2025-12-31: Cloudflare DNS/ingress updates confirmed healthy by user; focus shifts to Docker runner execution on the host (socket mount + docker CLI already in API image). Updated next steps to align with Docker UX. Tests not run. | blockers: none | next up: retire host-worker UI flow, add quick-service image/port inputs, add quick-service hints
+- 2025-12-31: Updated start/manager docs to reflect Docker runner focus and de-prioritize Cloudflare troubleshooting. Tests not run. | blockers: none | next up: retire host-worker UI flow and finish Docker quick-service UX
+- 2025-12-31: Retired host-worker UI flow (removed host command modal/composable/service and pending_host labels), added quick-service image/container port inputs with hints and preset defaults. Tests not run. | blockers: none | next up: remove host-worker backend endpoints/job type, drop pending_host status in API
+- 2025-12-31: Removed host-worker backend endpoints/services/job type, normalized pending_host to pending in job API responses, and updated backend docs (README/plans/guidelines). Tests not run. | blockers: none | next up: decide on legacy host-deploy data cleanup
 - YYYY-MM-DD: <what was done> | <blockers> | <next up>
 
 Next up (keep this short):
-- 1) Surface `CLOUDFLARE_TUNNEL_ID` in settings diagnostics/UI so operators can see the fallback source.
-- 2) Add an explicit log annotation when tunnel name lookup fails and the env tunnel ID fallback is used.
+- 1) Decide whether to migrate/drop legacy host-worker job token columns and repository methods.
+- 2) Identify any leftover `host_deploy` jobs in the DB and mark/clean them if needed.
 
 Notes for next assistant:
 - Do not assign testing or verification as next tasks; the user will run checks and provide feedback.
 - `cloudflared` is installed on the host; do not re-check service installation unless the user asks.
-- Host-deploy UI now calls `POST /api/v1/jobs/host-deploy` (Home template/deploy/quick + Host Settings forward) and opens a modal with the host command; the modal polls `/api/v1/jobs/:id` for status + log lines and links to the full job log.
-- Job status labels now normalize `pending_host` to "waiting for host" and count it as pending in Home/Overview; see `frontend/go-notes/src/utils/jobStatus.ts`.
+- Plan update: replace host-worker flow with API-run Docker jobs; remove host command modal for Docker jobs.
+- Job API responses normalize legacy `pending_host` to `pending`.
 - Custom UiSelect is no longer a native `<select>`; it now uses `options` + `placeholder`. Replace any new native selects with `UiSelect` props.
 
 Frontend refactor (step 1 complete):

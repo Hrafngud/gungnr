@@ -1,6 +1,6 @@
 ## Backend Plan
 
-Status: Replace notes CRUD with Warp Panel API, job runner, and integrations.
+Status: Replace notes CRUD with Warp Panel API, job runner, and integrations (API-run Docker runner in place).
 
 1) Scaffolding
 - Create folders: `cmd/server`, `internal/config`, `internal/db`, `internal/models`, `internal/repository`, `internal/service`, `internal/controller`, `internal/router`, `internal/middleware`, `internal/integrations`, `internal/jobs`.
@@ -28,26 +28,28 @@ Status: Replace notes CRUD with Warp Panel API, job runner, and integrations.
 
 6) Integrations
 - GitHub: create repo from template, list repos, clone.
-- Docker: check port usage, `docker compose up --build -d`, `docker compose ps`.
+- Docker: API-runner via socket for `docker run` (quick service) and `docker compose up` (templates).
+- Docker: check port usage, container name collisions, and expose container logs.
 - Cloudflare: host-first DNS via `cloudflared tunnel route dns`; keep API-managed ingress optional.
 - Cloudflared: local config preview + validation; update config.yml and restart host service safely.
   - Tunnel status: surface active tunnel and ingress entries.
   - Optional Docker tunnel path only for fully containerized hosts.
 
-7) Host Worker Handoff
-- Issue one-time host tokens for deploy jobs.
-- Provide host endpoints to fetch job payload and stream logs back.
-- Store token TTL + revocation in DB.
-- Track job state transitions: `pending_host` -> `running` -> `success|failed`.
+7) Docker Runner Jobs
+- Add job types: `docker_run`, `docker_compose_up`.
+- Quick service: run container first, then update tunnel ingress to the selected port.
+- Template deploy: `docker compose up --build -d`, then update ingress to proxy port.
+- Infer container name from image (e.g., `excalidraw/excalidraw` -> `excalidraw`).
+- Ensure container reuse rules (restart or replace on name collision).
+- API now invokes Docker via the host socket; host-worker flow is removed.
 
 8) Job Runner
 - Queue jobs with type + input.
 - Run tasks asynchronously with log streaming.
 - Record status and errors in DB.
-- Support a "waiting for host" state for host-executed jobs.
+- Support docker runner job lifecycle with clear logs.
 
 9) API Endpoints
-- Host worker: `/api/v1/host/jobs/:token`, `/api/v1/host/jobs/:token/logs`, `/api/v1/host/jobs/:token/complete`.
 - Auth: `/auth/login`, `/auth/callback`, `/auth/me`, `/auth/logout`.
 - Projects: list, create-from-template, deploy-existing, quick-service.
 - Jobs: list, get status, get logs.
@@ -64,7 +66,6 @@ Status: Replace notes CRUD with Warp Panel API, job runner, and integrations.
 - Structured logs with request IDs.
 - Audit log for every deploy action.
 - Add streaming endpoint for live container logs (all running containers, filterable by name/ID).
-- Capture host-worker log events in job log stream.
 
 12) Dockerization
 - Multi-stage Dockerfile for API.

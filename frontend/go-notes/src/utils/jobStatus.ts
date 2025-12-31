@@ -15,8 +15,6 @@ export const jobStatusTone = (status?: string): JobBadgeTone => {
 
 export const jobStatusLabel = (status?: string): string => {
   switch ((status || '').toLowerCase()) {
-    case 'pending_host':
-      return 'waiting for host'
     case 'pending':
       return 'queued'
     case 'running':
@@ -33,7 +31,7 @@ export const jobStatusLabel = (status?: string): string => {
 }
 
 export const isPendingJob = (status?: string): boolean =>
-  status === 'pending' || status === 'pending_host'
+  status === 'pending'
 
 export const jobActionLabel = (action?: string): string => {
   switch ((action || '').toLowerCase()) {
@@ -44,6 +42,6 @@ export const jobActionLabel = (action?: string): string => {
     case 'quick_service':
       return 'Quick service'
     default:
-      return action ? action.replace(/_/g, ' ') : 'Host deploy'
+      return action ? action.replace(/_/g, ' ') : 'Deploy'
   }
 }

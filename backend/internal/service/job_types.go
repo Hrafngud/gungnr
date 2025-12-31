@@ -4,5 +4,6 @@ const (
 	JobTypeCreateTemplate = "create_template"
 	JobTypeDeployExisting = "deploy_existing"
 	JobTypeQuickService   = "quick_service"
-	JobTypeHostDeploy     = "host_deploy"
+	JobTypeDockerRun      = "docker_run"
+	JobTypeDockerCompose  = "docker_compose_up"
 )

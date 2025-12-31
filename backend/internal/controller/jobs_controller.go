@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"go-notes/internal/models"
+	"go-notes/internal/repository"
 	"go-notes/internal/service"
 )
 
@@ -26,6 +28,8 @@ func (c *JobsController) Register(r gin.IRoutes) {
 	r.GET("/jobs", c.List)
 	r.GET("/jobs/:id", c.Get)
 	r.GET("/jobs/:id/stream", c.Stream)
+	r.POST("/jobs/:id/stop", c.Stop)
+	r.POST("/jobs/:id/retry", c.Retry)
 }
 
 func (c *JobsController) List(ctx *gin.Context) {
@@ -65,6 +69,64 @@ func (c *JobsController) Get(ctx *gin.Context) {
 		jobResponse: newJobResponse(*job),
 		LogLines:    c.service.LogLines(job),
 	})
+}
+
+type stopJobRequest struct {
+	Error string `json:"error"`
+}
+
+func (c *JobsController) Stop(ctx *gin.Context) {
+	id, err := parseUintParam(ctx.Param("id"))
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid job id"})
+		return
+	}
+
+	var req stopJobRequest
+	if ctx.Request.ContentLength > 0 {
+		if err := ctx.ShouldBindJSON(&req); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+	}
+
+	job, err := c.service.Stop(ctx.Request.Context(), id, req.Error)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrJobAlreadyFinished), errors.Is(err, service.ErrJobRunning), errors.Is(err, service.ErrJobNotStoppable):
+			ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		case errors.Is(err, repository.ErrNotFound):
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		default:
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to stop job"})
+		}
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"job": newJobResponse(*job)})
+}
+
+func (c *JobsController) Retry(ctx *gin.Context) {
+	id, err := parseUintParam(ctx.Param("id"))
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid job id"})
+		return
+	}
+
+	job, err := c.service.Retry(ctx.Request.Context(), id)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrJobAlreadyFinished), errors.Is(err, service.ErrJobRunning), errors.Is(err, service.ErrJobNotRetryable):
+			ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		case errors.Is(err, repository.ErrNotFound):
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		default:
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retry job"})
+		}
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"job": newJobResponse(*job)})
 }
 
 func (c *JobsController) Stream(ctx *gin.Context) {

@@ -8,7 +8,7 @@ Current status: Replace notes CRUD app with Warp Panel web UI and API.
 - Ensure Docker, cloudflared, and templates directory access on host.
 - Plan for runtime settings in DB (domain, tokens, cloudflared config path).
 - Decide host-installed `cloudflared` service as the only tunnel path (no compose cloudflared container).
-- Establish a host-worker handoff model (`deploy.sh` worker + API token) so tunnel edits happen on the host.
+- Adopt an API-run Docker runner via socket for container operations (no host worker).
 - Treat `deploy.sh` as reference-only; do not modify it. The UI should first mirror its CLI behavior before advanced automation.
 
 2) Backend First
@@ -18,7 +18,7 @@ Current status: Replace notes CRUD app with Warp Panel web UI and API.
 - Build job runner and persistence models.
 - Add health endpoints for docker and tunnel checks.
 - Add settings endpoints and use them in workflows (domain/token/config path).
-- Add host-worker job type + one-time token endpoints to hand off deploys to the host.
+- Add Docker runner job types for `docker run` and `docker compose` from the API.
 - Persist onboarding state per user to avoid repeated overlays.
 
 3) Frontend Setup

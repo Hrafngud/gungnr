@@ -12,7 +12,6 @@ type Dependencies struct {
 	Auth           *controller.AuthController
 	Projects       *controller.ProjectsController
 	Jobs           *controller.JobsController
-	HostJobs       *controller.HostJobsController
 	Settings       *controller.SettingsController
 	Onboarding     *controller.OnboardingController
 	Host           *controller.HostController
@@ -36,9 +35,6 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	}
 
 	api := r.Group("/api/v1")
-	if deps.HostJobs != nil {
-		deps.HostJobs.RegisterPublic(api)
-	}
 
 	authed := api
 	if deps.AuthMiddleware != nil {
@@ -50,9 +46,6 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	}
 	if deps.Jobs != nil {
 		deps.Jobs.Register(authed)
-	}
-	if deps.HostJobs != nil {
-		deps.HostJobs.RegisterAuthed(authed)
 	}
 	if deps.Settings != nil {
 		deps.Settings.Register(authed)

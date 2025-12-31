@@ -48,7 +48,6 @@ Status: Step 1 complete (theme tokens + AppShell). Page map + routing update com
 7) Data and Integration
 - Axios base URL and auth handling (401 -> login).
 - Map new pages to existing settings/health APIs and add any missing endpoints as needed.
-- Add host-worker flow UI: after deploy requests, show a modal with the exact host command, copy-to-clipboard, and status polling.
 - Add help modals with Cloudflare tunnel setup steps and links to the official docs (config.yml, route dns, run as a service).
 - Auto-redirect from login when `/auth/me` succeeds to avoid stuck login state.
 

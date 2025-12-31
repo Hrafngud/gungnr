@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"time"
 
 	"go-notes/internal/auth"
 	"go-notes/internal/config"
@@ -40,7 +39,6 @@ func main() {
 	authService := service.NewAuthService(cfg, userRepo)
 	jobRunner := jobs.NewRunner(jobRepo)
 	jobService := service.NewJobService(jobRepo, jobRunner)
-	hostJobService := service.NewHostJobService(jobRepo, 30*time.Minute)
 	projectService := service.NewProjectService(cfg, projectRepo, jobService)
 	settingsService := service.NewSettingsService(cfg, settingsRepo)
 	onboardingService := service.NewOnboardingService(onboardingRepo)
@@ -49,9 +47,12 @@ func main() {
 	auditService := service.NewAuditService(auditRepo)
 	hostService := service.NewHostService()
 	healthService := service.NewHealthService(hostService, settingsService)
+	dockerRunner := service.NewDockerRunner()
 
-	workflows := service.NewProjectWorkflows(cfg, projectRepo, settingsService)
+	workflows := service.NewProjectWorkflows(cfg, projectRepo, settingsService, dockerRunner)
 	workflows.Register(jobRunner)
+	dockerWorkflows := service.NewDockerWorkflows(dockerRunner)
+	dockerWorkflows.Register(jobRunner)
 
 	sessionManager := auth.NewManager(cfg.SessionSecret, cfg.SessionTTL)
 	secureCookie := cfg.AppEnv == "prod"
@@ -62,7 +63,6 @@ func main() {
 		Auth:           controller.NewAuthController(authService, auditService, sessionManager, secureCookie, cookieDomain),
 		Projects:       controller.NewProjectsController(projectService, auditService),
 		Jobs:           controller.NewJobsController(jobService),
-		HostJobs:       controller.NewHostJobsController(hostJobService, auditService),
 		Settings:       controller.NewSettingsController(settingsService, auditService),
 		Onboarding:     controller.NewOnboardingController(onboardingService, auditService),
 		Host:           controller.NewHostController(hostService),

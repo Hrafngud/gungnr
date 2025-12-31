@@ -13,6 +13,11 @@ export const projectsApi = {
   }) => api.post<{ job: Job }>('/api/v1/projects/template', payload),
   deployExisting: (payload: { name: string; subdomain: string; port?: number }) =>
     api.post<{ job: Job }>('/api/v1/projects/existing', payload),
-  quickService: (payload: { subdomain: string; port: number }) =>
+  quickService: (payload: {
+    subdomain: string
+    port: number
+    image?: string
+    containerPort?: number
+  }) =>
     api.post<{ job: Job }>('/api/v1/projects/quick', payload),
 }
