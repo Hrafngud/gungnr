@@ -7,10 +7,13 @@ import UiListRow from '@/components/ui/UiListRow.vue'
 import UiOnboardingOverlay from '@/components/ui/UiOnboardingOverlay.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
+import { cloudflareApi } from '@/services/cloudflare'
 import { healthApi } from '@/services/health'
 import { settingsApi } from '@/services/settings'
 import { apiErrorMessage } from '@/services/api'
-import type { CloudflaredPreview, Settings } from '@/types/settings'
+import { useOnboardingStore } from '@/stores/onboarding'
+import type { CloudflarePreflight } from '@/types/cloudflare'
+import type { CloudflaredPreview, Settings, SettingsSources } from '@/types/settings'
 import type { TunnelHealth } from '@/types/health'
 import type { OnboardingStep } from '@/types/onboarding'
 
@@ -24,17 +27,22 @@ const preview = ref<CloudflaredPreview | null>(null)
 const previewLoading = ref(false)
 const previewError = ref<string | null>(null)
 const settings = ref<Settings | null>(null)
+const settingsSources = ref<SettingsSources | null>(null)
+const cloudflaredTunnelName = ref<string | null>(null)
 const settingsLoading = ref(false)
 const settingsError = ref<string | null>(null)
-const onboardingKey = 'warp-panel-onboarding-networking'
+const preflight = ref<CloudflarePreflight | null>(null)
+const preflightLoading = ref(false)
+const preflightError = ref<string | null>(null)
 const onboardingOpen = ref(false)
 const onboardingStep = ref(0)
+const onboardingStore = useOnboardingStore()
 
 const onboardingSteps: OnboardingStep[] = [
   {
     id: 'tunnel-health',
     title: 'Verify tunnel health',
-    description: 'Confirm cloudflared reports a healthy connection and active connectors.',
+    description: 'Confirm the host cloudflared service reports a healthy connection and active connectors.',
     target: "[data-onboard='network-tunnel']",
   },
   {
@@ -83,6 +91,23 @@ const healthTone = (status?: string): BadgeTone => {
   }
 }
 
+const preflightTone = (status?: string): BadgeTone => {
+  switch (status) {
+    case 'ok':
+      return 'ok'
+    case 'warning':
+      return 'warn'
+    case 'missing':
+      return 'neutral'
+    case 'error':
+      return 'error'
+    case 'skipped':
+      return 'neutral'
+    default:
+      return 'neutral'
+  }
+}
+
 const loadHealth = async () => {
   healthLoading.value = true
   healthError.value = null
@@ -117,11 +142,27 @@ const loadSettings = async () => {
   try {
     const { data } = await settingsApi.get()
     settings.value = data.settings
+    settingsSources.value = data.sources ?? null
+    cloudflaredTunnelName.value = data.cloudflaredTunnelName ?? null
   } catch (err) {
     settingsError.value = apiErrorMessage(err)
     settings.value = null
   } finally {
     settingsLoading.value = false
+  }
+}
+
+const loadPreflight = async () => {
+  preflightLoading.value = true
+  preflightError.value = null
+  try {
+    const { data } = await cloudflareApi.preflight()
+    preflight.value = data
+  } catch (err) {
+    preflightError.value = apiErrorMessage(err)
+    preflight.value = null
+  } finally {
+    preflightLoading.value = false
   }
 }
 
@@ -131,18 +172,14 @@ const startOnboarding = () => {
 }
 
 const markOnboardingComplete = () => {
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(onboardingKey, 'done')
-  }
+  onboardingStore.updateState({ networking: true })
 }
 
 onMounted(async () => {
-  await Promise.all([loadHealth(), loadPreview(), loadSettings()])
-  if (typeof window !== 'undefined') {
-    const seen = window.localStorage.getItem(onboardingKey)
-    if (seen !== 'done') {
-      onboardingOpen.value = true
-    }
+  await Promise.all([loadHealth(), loadPreview(), loadSettings(), loadPreflight()])
+  await onboardingStore.fetchState()
+  if (!onboardingStore.state.networking) {
+    onboardingOpen.value = true
   }
 })
 
@@ -195,7 +232,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
           Tunnel and DNS
         </h1>
         <p class="mt-2 text-sm text-[color:var(--muted)]">
-          Monitor cloudflared connectivity and the active ingress configuration.
+          Monitor the host cloudflared service and the active ingress configuration.
         </p>
       </div>
       <div class="flex flex-wrap gap-3" data-onboard="network-actions">
@@ -310,6 +347,47 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
             </span>
           </UiListRow>
         </div>
+        <div
+          v-else-if="settingsSources || cloudflaredTunnelName"
+          class="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)]/80 p-3 text-[11px] text-[color:var(--muted)]"
+        >
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Tunnel ref (resolved)</span>
+            <span class="text-[color:var(--text)]">
+              {{ cloudflaredTunnelName || '—' }}
+            </span>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Tunnel source</span>
+            <span class="text-[color:var(--text)]">
+              {{ settingsSources?.cloudflaredTunnel || 'unset' }}
+            </span>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Account ID source</span>
+            <span class="text-[color:var(--text)]">
+              {{ settingsSources?.cloudflareAccountId || 'unset' }}
+            </span>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Zone ID source</span>
+            <span class="text-[color:var(--text)]">
+              {{ settingsSources?.cloudflareZoneId || 'unset' }}
+            </span>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Token source</span>
+            <span class="text-[color:var(--text)]">
+              {{ settingsSources?.cloudflareToken || 'unset' }}
+            </span>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Config path source</span>
+            <span class="text-[color:var(--text)]">
+              {{ settingsSources?.cloudflaredConfigPath || 'unset' }}
+            </span>
+          </UiListRow>
+        </div>
       </UiPanel>
 
       <UiPanel as="article" variant="raise" class="space-y-4 p-6" data-onboard="network-ingress">
@@ -399,13 +477,26 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
               API readiness
             </h2>
           </div>
-          <UiBadge :tone="cloudflareTokenConfigured ? 'ok' : 'warn'">
-            {{ cloudflareTokenConfigured ? 'Token set' : 'Token missing' }}
-          </UiBadge>
+          <div class="flex items-center gap-2">
+            <UiBadge :tone="cloudflareTokenConfigured ? 'ok' : 'warn'">
+              {{ cloudflareTokenConfigured ? 'Token set' : 'Token missing' }}
+            </UiBadge>
+            <UiButton
+              variant="ghost"
+              size="xs"
+              :disabled="preflightLoading"
+              @click="loadPreflight"
+            >
+              <span class="flex items-center gap-2">
+                <UiInlineSpinner v-if="preflightLoading" />
+                Run preflight
+              </span>
+            </UiButton>
+          </div>
         </div>
 
         <p class="text-xs text-[color:var(--muted)]">
-          Cloudflare credentials power DNS automation and tunnel routing updates.
+          Cloudflare credentials power DNS automation for the host-managed tunnel.
         </p>
         <p class="text-xs text-[color:var(--muted)]">
           Use a Cloudflare API token with Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit for the
@@ -439,6 +530,63 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
               {{ tunnelHealth?.tunnel || '--' }}
             </span>
           </UiListRow>
+        </div>
+
+        <UiState v-if="preflightLoading" loading>
+          Running Cloudflare preflight...
+        </UiState>
+
+        <UiState v-else-if="preflightError" tone="error">
+          {{ preflightError }}
+        </UiState>
+
+        <div v-else-if="preflight" class="space-y-3 text-xs text-[color:var(--muted)]">
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Token check</span>
+            <UiBadge :tone="preflightTone(preflight.token.status)">
+              {{ preflight.token.status }}
+            </UiBadge>
+          </UiListRow>
+          <p v-if="preflight.token.detail" class="text-[color:var(--muted)]">
+            {{ preflight.token.detail }}
+          </p>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Account check</span>
+            <UiBadge :tone="preflightTone(preflight.account.status)">
+              {{ preflight.account.status }}
+            </UiBadge>
+          </UiListRow>
+          <p v-if="preflight.account.detail" class="text-[color:var(--muted)]">
+            {{ preflight.account.detail }}
+          </p>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Zone check</span>
+            <UiBadge :tone="preflightTone(preflight.zone.status)">
+              {{ preflight.zone.status }}
+            </UiBadge>
+          </UiListRow>
+          <p v-if="preflight.zone.detail" class="text-[color:var(--muted)]">
+            {{ preflight.zone.detail }}
+          </p>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Tunnel ref</span>
+            <span class="text-[color:var(--text)]">
+              {{
+                preflight.tunnelRef
+                  ? `${preflight.tunnelRef} (${preflight.tunnelRefType || 'unknown'})`
+                  : '--'
+              }}
+            </span>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Tunnel check</span>
+            <UiBadge :tone="preflightTone(preflight.tunnel.status)">
+              {{ preflight.tunnel.status }}
+            </UiBadge>
+          </UiListRow>
+          <p v-if="preflight.tunnel.detail" class="text-[color:var(--muted)]">
+            {{ preflight.tunnel.detail }}
+          </p>
         </div>
       </UiPanel>
     </div>

@@ -11,6 +11,7 @@ import { useJobsStore } from '@/stores/jobs'
 import { useAuditStore } from '@/stores/audit'
 import { hostApi } from '@/services/host'
 import { apiErrorMessage } from '@/services/api'
+import { isPendingJob, jobStatusLabel, jobStatusTone } from '@/utils/jobStatus'
 import type { DockerContainer } from '@/types/host'
 
 type SnapshotItem = {
@@ -63,7 +64,7 @@ const jobCounts = computed(() => {
     failed: 0,
   }
   jobsStore.jobs.forEach((job) => {
-    if (job.status === 'pending') counts.pending += 1
+    if (isPendingJob(job.status)) counts.pending += 1
     else if (job.status === 'running') counts.running += 1
     else if (job.status === 'completed') counts.completed += 1
     else if (job.status === 'failed') counts.failed += 1
@@ -72,13 +73,6 @@ const jobCounts = computed(() => {
 })
 
 const latestJob = computed(() => jobsStore.jobs[0] ?? null)
-
-const statusTone = (status?: string): BadgeTone => {
-  if (status === 'completed') return 'ok'
-  if (status === 'running') return 'warn'
-  if (status === 'failed') return 'error'
-  return 'neutral'
-}
 
 const containerTone = (status: string): BadgeTone => {
   const normalized = status.toLowerCase()
@@ -390,8 +384,8 @@ onMounted(() => {
                     {{ job.error ? 'Attention required' : 'Automation update' }}
                   </p>
                 </div>
-                <UiBadge :tone="statusTone(job.status)">
-                  {{ job.status || 'pending' }}
+                <UiBadge :tone="jobStatusTone(job.status)">
+                  {{ jobStatusLabel(job.status) }}
                 </UiBadge>
               </div>
               <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-[color:var(--muted)]">

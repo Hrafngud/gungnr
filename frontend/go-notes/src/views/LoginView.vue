@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
@@ -9,6 +9,7 @@ const loginHref = computed(() => auth.loginUrl())
 const popup = ref<Window | null>(null)
 const pollHandle = ref<number | null>(null)
 const waitingForAuth = ref(false)
+const redirecting = ref(false)
 
 const stopPolling = () => {
   if (pollHandle.value !== null) {
@@ -27,10 +28,7 @@ const pollForAuth = async () => {
 
   await auth.fetchUser()
   if (auth.user) {
-    popup.value.close()
-    popup.value = null
-    stopPolling()
-    await router.replace({ name: 'home' })
+    await redirectHome()
     return
   }
 
@@ -58,49 +56,88 @@ const openLoginPopup = () => {
   pollForAuth()
 }
 
+const redirectHome = async () => {
+  if (!auth.user || redirecting.value) return
+  redirecting.value = true
+  stopPolling()
+  if (popup.value && !popup.value.closed) {
+    popup.value.close()
+  }
+  popup.value = null
+  await router.replace({ name: 'home' })
+}
+
+onMounted(() => {
+  if (!auth.initialized && !auth.loading) {
+    auth.fetchUser()
+  }
+})
+
+watch(
+  () => auth.user,
+  (value) => {
+    if (value) {
+      redirectHome()
+    }
+  },
+  { immediate: true },
+)
+
 onBeforeUnmount(() => {
   stopPolling()
 })
 </script>
 
 <template>
-  <section class="grid items-center gap-10 lg:grid-cols-[1.15fr,0.85fr]">
-    <div class="space-y-6">
-      <div class="inline-flex items-center gap-2 rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-1 text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-        Warp Panel
+  <section class="grid items-stretch gap-8 lg:grid-cols-[1.15fr,0.85fr]">
+    <div class="flex flex-col justify-between gap-8 rounded-3xl border border-[color:var(--border)] bg-[color:var(--surface-2)] p-8">
+      <div class="space-y-6">
+        <div class="inline-flex items-center gap-2 rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-1 text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+          Warp Panel
+        </div>
+        <h1 class="text-4xl font-semibold leading-tight text-[color:var(--text)] sm:text-5xl">
+          Orchestrate deployments, tunnels, and ports without touching the terminal.
+        </h1>
+        <p class="max-w-xl text-base text-[color:var(--muted)] sm:text-lg">
+          Sign in with GitHub to unlock your deploy queue, tunnel routing, and template
+          workflows. Access is restricted to approved users or org members.
+        </p>
       </div>
-      <h1 class="text-4xl font-semibold leading-tight text-[color:var(--text)] sm:text-5xl">
-        Orchestrate deployments, tunnels, and ports without touching the terminal.
-      </h1>
-      <p class="max-w-xl text-base text-[color:var(--muted)] sm:text-lg">
-        Sign in with GitHub to unlock your deploy queue, tunnel routing, and template
-        workflows. Access is restricted to approved users or org members.
-      </p>
-      <div class="flex flex-wrap gap-3 text-sm text-[color:var(--muted)]">
-        <span class="rounded-full border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-1">GitHub OAuth</span>
-        <span class="rounded-full border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-1">Session cookies</span>
-        <span class="rounded-full border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-1">No CLI required</span>
+      <div class="grid gap-3 text-sm text-[color:var(--muted)] sm:grid-cols-3">
+        <span class="rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-1 text-center">
+          GitHub OAuth
+        </span>
+        <span class="rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-1 text-center">
+          Session cookies
+        </span>
+        <span class="rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-1 text-center">
+          No CLI required
+        </span>
       </div>
     </div>
 
-    <div class="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-6">
-      <h2 class="text-xl font-semibold text-[color:var(--text)]">Connect your account</h2>
-      <p class="mt-2 text-sm text-[color:var(--muted)]">
-        We only request read access to confirm your identity and org membership.
-      </p>
-      <a
-        class="btn btn-primary mt-6 inline-flex w-full items-center justify-center gap-2 px-4 py-3 text-sm font-semibold"
-        :href="loginHref"
-        @click.prevent="openLoginPopup"
-      >
-        Continue with GitHub
-      </a>
-      <p v-if="waitingForAuth" class="mt-3 text-xs text-[color:var(--muted-2)]">
-        Waiting for GitHub to finish signing you in...
-      </p>
-      <p class="mt-4 text-xs text-[color:var(--muted-2)]">
-        Need access? Ask the panel owner to add you to the allowlist or org.
-      </p>
+    <div class="flex flex-col justify-between gap-6 rounded-3xl border border-[color:var(--border)] bg-[color:var(--surface)] p-6">
+      <div>
+        <h2 class="text-xl font-semibold text-[color:var(--text)]">Connect your account</h2>
+        <p class="mt-2 text-sm text-[color:var(--muted)]">
+          We only request read access to confirm your identity and org membership.
+        </p>
+      </div>
+      <div>
+        <a
+          class="btn btn-primary inline-flex w-full items-center justify-center gap-2 px-4 py-3 text-sm font-semibold"
+          :href="loginHref"
+          @click.prevent="openLoginPopup"
+        >
+          Continue with GitHub
+        </a>
+        <p v-if="waitingForAuth" class="mt-3 text-xs text-[color:var(--muted-2)]">
+          Waiting for GitHub to finish signing you in...
+        </p>
+        <p class="mt-4 text-xs text-[color:var(--muted-2)]">
+          Need access? Ask the panel owner to add you to the allowlist or org.
+        </p>
+      </div>
     </div>
   </section>
 </template>

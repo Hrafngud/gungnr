@@ -25,8 +25,11 @@ type JobRepository interface {
 	List(ctx context.Context) ([]models.Job, error)
 	Create(ctx context.Context, job *models.Job) error
 	Get(ctx context.Context, id uint) (*models.Job, error)
+	GetByHostToken(ctx context.Context, token string) (*models.Job, error)
 	MarkRunning(ctx context.Context, id uint, startedAt time.Time) error
 	MarkFinished(ctx context.Context, id uint, status string, finishedAt time.Time, errMsg string) error
+	MarkHostTokenClaimed(ctx context.Context, id uint, claimedAt time.Time) error
+	MarkHostTokenUsed(ctx context.Context, id uint, usedAt time.Time) error
 	AppendLog(ctx context.Context, id uint, line string) error
 }
 
@@ -38,4 +41,9 @@ type SettingsRepository interface {
 type AuditLogRepository interface {
 	List(ctx context.Context, limit int) ([]models.AuditLog, error)
 	Create(ctx context.Context, entry *models.AuditLog) error
+}
+
+type OnboardingRepository interface {
+	GetByUser(ctx context.Context, userID uint) (*models.OnboardingState, error)
+	Save(ctx context.Context, state *models.OnboardingState) error
 }

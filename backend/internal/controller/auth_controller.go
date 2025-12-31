@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"go-notes/internal/auth"
+	"go-notes/internal/middleware"
 	"go-notes/internal/service"
 )
 
@@ -34,6 +35,18 @@ type authUserResponse struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
+type testTokenRequest struct {
+	Login    string `json:"login"`
+	Password string `json:"password"`
+}
+
+type testTokenResponse struct {
+	Token     string           `json:"token"`
+	TokenType string           `json:"tokenType"`
+	ExpiresAt time.Time        `json:"expiresAt"`
+	User      authUserResponse `json:"user"`
+}
+
 func NewAuthController(service *service.AuthService, audit *service.AuditService, sessions *auth.Manager, secureCookie bool, cookieDomain string) *AuthController {
 	return &AuthController{
 		service:      service,
@@ -49,6 +62,7 @@ func (c *AuthController) Register(r *gin.Engine) {
 	r.GET("/auth/callback", c.Callback)
 	r.GET("/auth/me", c.Me)
 	r.POST("/auth/logout", c.Logout)
+	r.POST("/test-token", c.TestToken)
 }
 
 func (c *AuthController) Login(ctx *gin.Context) {
@@ -134,12 +148,52 @@ func (c *AuthController) Logout(ctx *gin.Context) {
 	ctx.Status(http.StatusNoContent)
 }
 
-func (c *AuthController) readSession(ctx *gin.Context) (auth.Session, error) {
-	value, err := ctx.Cookie(auth.SessionCookieName)
-	if err != nil {
-		return auth.Session{}, err
+func (c *AuthController) TestToken(ctx *gin.Context) {
+	var req testTokenRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
 	}
-	return c.sessions.Decode(value)
+
+	user, err := c.service.AuthenticateAdmin(ctx.Request.Context(), req.Login, req.Password)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAdminAuthDisabled):
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "test token disabled"})
+		case errors.Is(err, service.ErrUnauthorized):
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		default:
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
+		}
+		return
+	}
+
+	session := c.sessions.NewSession(user.ID, user.Login, user.AvatarURL)
+	value, err := c.sessions.Encode(session)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
+		return
+	}
+
+	_ = c.logAudit(ctx, session, "auth.test_token", session.Login, map[string]any{
+		"userId": session.UserID,
+	})
+
+	ctx.JSON(http.StatusOK, testTokenResponse{
+		Token:     value,
+		TokenType: "Bearer",
+		ExpiresAt: session.ExpiresAt,
+		User: authUserResponse{
+			ID:        session.UserID,
+			Login:     session.Login,
+			AvatarURL: session.AvatarURL,
+			ExpiresAt: session.ExpiresAt,
+		},
+	})
+}
+
+func (c *AuthController) readSession(ctx *gin.Context) (auth.Session, error) {
+	return middleware.ReadSession(ctx, c.sessions)
 }
 
 func (c *AuthController) setCookie(ctx *gin.Context, name, value string, maxAge int) {

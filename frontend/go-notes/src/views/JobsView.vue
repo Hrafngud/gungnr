@@ -9,8 +9,7 @@ import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
 import { useJobsStore } from '@/stores/jobs'
 import { useAuthStore } from '@/stores/auth'
-
-type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
+import { jobStatusLabel, jobStatusTone } from '@/utils/jobStatus'
 
 const jobsStore = useJobsStore()
 const auth = useAuthStore()
@@ -21,12 +20,6 @@ onMounted(() => {
   }
 })
 
-const statusTone = (status: string): BadgeTone => {
-  if (status === 'completed') return 'ok'
-  if (status === 'running') return 'warn'
-  if (status === 'failed') return 'error'
-  return 'neutral'
-}
 </script>
 
 <template>
@@ -136,8 +129,8 @@ const statusTone = (status: string): BadgeTone => {
               {{ job.type }}
             </h2>
           </div>
-          <UiBadge :tone="statusTone(job.status)">
-            {{ job.status || 'pending' }}
+          <UiBadge :tone="jobStatusTone(job.status)">
+            {{ jobStatusLabel(job.status) }}
           </UiBadge>
         </div>
 

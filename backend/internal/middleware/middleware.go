@@ -17,7 +17,8 @@ func DefaultCORSConfig(allowedOrigins []string) cors.Config {
 	}
 
 	if len(allowedOrigins) == 0 || slices.Contains(allowedOrigins, "*") {
-		cfg.AllowAllOrigins = true
+		// Echo the request origin while allowing any host; avoids '*' with credentials.
+		cfg.AllowOriginFunc = func(_ string) bool { return true }
 	} else {
 		cfg.AllowOrigins = allowedOrigins
 	}

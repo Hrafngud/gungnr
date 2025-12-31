@@ -52,6 +52,13 @@ const filteredContainers = computed(() => {
   })
 })
 
+const containerOptions = computed(() =>
+  filteredContainers.value.map((container) => ({
+    value: container.name,
+    label: container.name,
+  })),
+)
+
 const filteredLines = computed(() => {
   const needle = filterQuery.value.trim().toLowerCase()
   if (!needle) return logLines.value
@@ -328,16 +335,12 @@ onBeforeUnmount(() => {
             v-model="containerFilter"
             placeholder="Filter containers"
           />
-          <UiSelect v-model="selectedContainer" class="w-full">
-            <option value="" disabled>Select a container</option>
-            <option
-              v-for="container in filteredContainers"
-              :key="container.id"
-              :value="container.name"
-            >
-              {{ container.name }}
-            </option>
-          </UiSelect>
+          <UiSelect
+            v-model="selectedContainer"
+            class="w-full"
+            placeholder="Select a container"
+            :options="containerOptions"
+          />
 
           <div class="space-y-2">
             <UiListRow
@@ -367,39 +370,16 @@ onBeforeUnmount(() => {
       </UiPanel>
 
       <UiPanel class="flex h-full flex-col gap-4 p-4">
-        <div class="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Live output
-            </p>
-            <h2 class="mt-1 text-lg font-semibold text-[color:var(--text)]">
-              {{ selectedInfo?.name || 'Select a container' }}
-            </h2>
-            <p class="text-xs text-[color:var(--muted)]">
-              {{ selectedInfo?.service || 'No compose service detected' }}
-            </p>
-          </div>
-          <div class="flex flex-wrap items-center gap-2 text-xs">
-            <UiBadge :tone="streamBadge.tone">
-              {{ streamBadge.label }}
-            </UiBadge>
-            <UiButton
-              variant="ghost"
-              size="sm"
-              :disabled="!hasSelection || streamState === 'paused'"
-              @click="pauseStream"
-            >
-              Pause
-            </UiButton>
-            <UiButton
-              variant="ghost"
-              size="sm"
-              :disabled="!hasSelection || streamState !== 'paused'"
-              @click="resumeStream"
-            >
-              Resume
-            </UiButton>
-          </div>
+        <div>
+          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+            Live output
+          </p>
+          <h2 class="mt-1 text-lg font-semibold text-[color:var(--text)]">
+            {{ selectedInfo?.name || 'Select a container' }}
+          </h2>
+          <p class="text-xs text-[color:var(--muted)]">
+            {{ selectedInfo?.service || 'No compose service detected' }}
+          </p>
         </div>
 
         <UiPanel v-if="selectedInfo" variant="soft" class="grid gap-3 p-4 text-xs text-[color:var(--muted)] md:grid-cols-3">
@@ -422,8 +402,42 @@ onBeforeUnmount(() => {
 
         <UiPanel
           variant="soft"
-          class="flex flex-wrap items-center gap-4 p-3 text-xs text-[color:var(--muted)]"
+          class="flex flex-wrap items-center gap-3 p-3 text-xs text-[color:var(--muted)]"
         >
+          <div class="flex flex-wrap items-center gap-2">
+            <UiBadge :tone="streamBadge.tone">
+              {{ streamBadge.label }}
+            </UiBadge>
+            <span class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              Stream
+            </span>
+            <span class="text-[color:var(--muted-2)]">·</span>
+            <span>{{ filteredLines.length }} lines · tail {{ tailValue }}</span>
+            <span v-if="streamState === 'connecting'" class="flex items-center gap-2">
+              <UiInlineSpinner />
+              Connecting...
+            </span>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <UiButton
+              variant="ghost"
+              size="xs"
+              :disabled="!hasSelection || streamState === 'paused'"
+              @click="pauseStream"
+            >
+              Pause
+            </UiButton>
+            <UiButton
+              variant="ghost"
+              size="xs"
+              :disabled="!hasSelection || streamState !== 'paused'"
+              @click="resumeStream"
+            >
+              Resume
+            </UiButton>
+          </div>
+
           <label class="flex items-center gap-2">
             <span>Tail</span>
             <UiInput
@@ -438,6 +452,14 @@ onBeforeUnmount(() => {
           <UiToggle v-model="showTimestamps">Timestamps</UiToggle>
           <div class="min-w-[180px] flex-1">
             <UiInput v-model="filterQuery" placeholder="Filter log lines" />
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <UiButton variant="ghost" size="xs" :disabled="!hasSelection" @click="clearLogs">
+              Clear
+            </UiButton>
+            <UiButton variant="ghost" size="xs" :disabled="!hasSelection || !hasLogs" @click="copyLogs">
+              Copy to clipboard
+            </UiButton>
           </div>
         </UiPanel>
 
@@ -454,23 +476,6 @@ onBeforeUnmount(() => {
           variant="raise"
           class="flex-1 overflow-hidden"
         >
-          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--border)] px-4 py-2 text-xs text-[color:var(--muted)]">
-            <div class="flex items-center gap-3">
-              <p>{{ filteredLines.length }} lines · tail {{ tailValue }}</p>
-              <p v-if="streamState === 'connecting'" class="flex items-center gap-2">
-                <UiInlineSpinner />
-                Connecting...
-              </p>
-            </div>
-            <div class="flex flex-wrap items-center gap-2">
-              <UiButton variant="ghost" size="xs" :disabled="!hasSelection" @click="clearLogs">
-                Clear
-              </UiButton>
-              <UiButton variant="ghost" size="xs" :disabled="!hasSelection || !hasLogs" @click="copyLogs">
-                Copy to clipboard
-              </UiButton>
-            </div>
-          </div>
           <div
             ref="logViewport"
             class="max-h-[60vh] overflow-auto px-4 py-3 font-mono text-xs leading-relaxed text-[color:var(--text)]"

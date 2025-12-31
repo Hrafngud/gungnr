@@ -2,12 +2,19 @@ package controller
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"go-notes/internal/middleware"
 	"go-notes/internal/service"
 )
+
+type SettingsResponse struct {
+	Settings              service.SettingsPayload `json:"settings"`
+	Sources               service.SettingsSources `json:"sources,omitempty"`
+	CloudflaredTunnelName string                  `json:"cloudflaredTunnelName,omitempty"`
+}
 
 type SettingsController struct {
 	service *service.SettingsService
@@ -30,7 +37,12 @@ func (c *SettingsController) Get(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load settings"})
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"settings": settings})
+	response, err := c.buildResponse(ctx, settings)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load settings sources"})
+		return
+	}
+	ctx.JSON(http.StatusOK, response)
 }
 
 func (c *SettingsController) Update(ctx *gin.Context) {
@@ -52,10 +64,17 @@ func (c *SettingsController) Update(ctx *gin.Context) {
 		"cloudflareTokenSet":    req.CloudflareToken != "",
 		"cloudflareAccountId":   req.CloudflareAccountID,
 		"cloudflareZoneId":      req.CloudflareZoneID,
+		"cloudflaredTunnel":     req.CloudflaredTunnel,
 		"cloudflaredConfigPath": req.CloudflaredConfigPath,
 	})
 
-	ctx.JSON(http.StatusOK, gin.H{"settings": settings})
+	response, err := c.buildResponse(ctx, settings)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load settings sources"})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, response)
 }
 
 func (c *SettingsController) CloudflaredPreview(ctx *gin.Context) {
@@ -80,4 +99,16 @@ func (c *SettingsController) logAudit(ctx *gin.Context, action, target string, m
 		Target:    target,
 		Metadata:  metadata,
 	})
+}
+
+func (c *SettingsController) buildResponse(ctx *gin.Context, settings service.SettingsPayload) (SettingsResponse, error) {
+	cfg, sources, err := c.service.ResolveConfigWithSources(ctx.Request.Context())
+	if err != nil {
+		return SettingsResponse{}, err
+	}
+	return SettingsResponse{
+		Settings:              settings,
+		Sources:               sources,
+		CloudflaredTunnelName: strings.TrimSpace(cfg.CloudflaredTunnel),
+	}, nil
 }

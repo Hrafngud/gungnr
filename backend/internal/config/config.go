@@ -20,6 +20,8 @@ type Config struct {
 	SessionSecret       string
 	SessionTTL          time.Duration
 	CookieDomain        string
+	AdminLogin          string
+	AdminPassword       string
 	GitHubClientID      string
 	GitHubClientSecret  string
 	GitHubCallbackURL   string
@@ -35,6 +37,7 @@ type Config struct {
 	CloudflareAPIToken  string
 	CloudflareAccountID string
 	CloudflareZoneID    string
+	CloudflareTunnelID  string
 	CloudflaredConfig   string
 	CloudflaredTunnel   string
 }
@@ -57,12 +60,15 @@ func Load() (Config, error) {
 	v.SetDefault("CORS_ALLOWED_ORIGINS", "http://localhost:4173,http://127.0.0.1:4173,http://localhost:5173,http://127.0.0.1:5173")
 	v.SetDefault("SESSION_TTL_HOURS", 12)
 	v.SetDefault("COOKIE_DOMAIN", "")
+	v.SetDefault("ADMIN_LOGIN", "")
+	v.SetDefault("ADMIN_PASSWORD", "")
 	v.SetDefault("TEMPLATES_DIR", "/templates")
 	v.SetDefault("GITHUB_REPO_PRIVATE", true)
 	v.SetDefault("DOMAIN", "")
 	v.SetDefault("CLOUDFLARE_API_TOKEN", "")
 	v.SetDefault("CLOUDFLARE_ACCOUNT_ID", "")
 	v.SetDefault("CLOUDFLARE_ZONE_ID", "")
+	v.SetDefault("CLOUDFLARE_TUNNEL_ID", "")
 	v.SetDefault("CLOUDFLARED_CONFIG", "~/.cloudflared/config.yml")
 	v.SetDefault("CLOUDFLARED_TUNNEL_NAME", "")
 
@@ -86,6 +92,8 @@ func Load() (Config, error) {
 		SessionSecret:       v.GetString("SESSION_SECRET"),
 		SessionTTL:          time.Duration(v.GetInt("SESSION_TTL_HOURS")) * time.Hour,
 		CookieDomain:        strings.TrimSpace(v.GetString("COOKIE_DOMAIN")),
+		AdminLogin:          v.GetString("ADMIN_LOGIN"),
+		AdminPassword:       v.GetString("ADMIN_PASSWORD"),
 		GitHubClientID:      v.GetString("GITHUB_CLIENT_ID"),
 		GitHubClientSecret:  v.GetString("GITHUB_CLIENT_SECRET"),
 		GitHubCallbackURL:   v.GetString("GITHUB_CALLBACK_URL"),
@@ -101,6 +109,7 @@ func Load() (Config, error) {
 		CloudflareAPIToken:  v.GetString("CLOUDFLARE_API_TOKEN"),
 		CloudflareAccountID: v.GetString("CLOUDFLARE_ACCOUNT_ID"),
 		CloudflareZoneID:    v.GetString("CLOUDFLARE_ZONE_ID"),
+		CloudflareTunnelID:  v.GetString("CLOUDFLARE_TUNNEL_ID"),
 		CloudflaredConfig:   v.GetString("CLOUDFLARED_CONFIG"),
 		CloudflaredTunnel:   v.GetString("CLOUDFLARED_TUNNEL_NAME"),
 	}

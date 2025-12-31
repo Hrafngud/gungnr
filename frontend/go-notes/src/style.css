@@ -167,6 +167,98 @@ h3 {
   box-shadow: none;
 }
 
+.select-root {
+  position: relative;
+  width: 100%;
+}
+
+.select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  cursor: pointer;
+}
+
+.select-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.select-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.select-placeholder {
+  color: var(--muted);
+}
+
+.select-caret {
+  width: 14px;
+  height: 14px;
+  color: var(--muted-2);
+  flex-shrink: 0;
+}
+
+.select-menu {
+  position: absolute;
+  z-index: 40;
+  width: 100%;
+  margin-top: 0.5rem;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: 0.35rem;
+  max-height: 14rem;
+  overflow: auto;
+}
+
+.select-option {
+  width: 100%;
+  text-align: left;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.8rem;
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+}
+
+.select-option:disabled {
+  cursor: not-allowed;
+  color: var(--muted-2);
+}
+
+.select-option-active,
+.select-option:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
+.select-option-selected {
+  border-color: var(--border);
+  background: var(--surface-3);
+}
+
+.select-empty {
+  padding: 0.5rem 0.65rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.select-fade-enter-active,
+.select-fade-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.select-fade-enter-from,
+.select-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
 .select {
   appearance: none;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 20 20' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 8 10 12 14 8'/></svg>");

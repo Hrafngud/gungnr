@@ -61,7 +61,7 @@ update_tunnel_config() {
     next
   }
   { print }
-  ' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+  ' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv -f "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
 
   # Verify catch-all still exists
   if ! grep -q "service: http_status:404" "$CONFIG_FILE"; then

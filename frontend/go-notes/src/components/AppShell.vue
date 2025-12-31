@@ -175,17 +175,33 @@ const isActive = (to: string) => {
               class="btn btn-ghost flex w-full items-center justify-center px-3 py-2 text-[11px] font-semibold"
               :title="isSidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'"
               :disabled="isSidebarHidden"
+              :aria-label="isSidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'"
               @click="toggleCollapse"
             >
-              {{ isSidebarCollapsed ? 'Expand' : 'Collapse nav' }}
+              <span
+                v-if="isSidebarCollapsed"
+                aria-hidden="true"
+                class="text-lg leading-none"
+              >
+                >>
+              </span>
+              <span v-else>Collapse nav</span>
             </button>
             <button
               type="button"
               class="btn btn-ghost flex w-full items-center justify-center px-3 py-2 text-[11px] font-semibold"
               :title="isSidebarHidden ? 'Show navigation' : 'Hide navigation'"
+              :aria-label="isSidebarHidden ? 'Show navigation' : 'Hide navigation'"
               @click="toggleHidden"
             >
-              {{ isSidebarHidden ? 'Show nav' : 'Hide nav' }}
+              <span
+                v-if="isSidebarCollapsed"
+                aria-hidden="true"
+                class="text-lg leading-none"
+              >
+                {{ isSidebarHidden ? '>>' : 'x' }}
+              </span>
+              <span v-else>{{ isSidebarHidden ? 'Show nav' : 'Hide nav' }}</span>
             </button>
           </div>
         </div>
@@ -200,8 +216,8 @@ const isActive = (to: string) => {
         >
           Show nav
         </button>
-        <header class="sticky top-0 z-20 border-b border-[color:var(--border)] bg-[color:var(--bg-soft)] px-6 py-4">
-          <div class="mx-auto flex w-full max-w-6xl items-center justify-between">
+        <header class="sticky top-0 z-20 border-b border-[color:var(--border)] bg-[color:var(--bg-soft)] px-4 py-4">
+          <div class="mx-auto flex w-full max-w-7xl items-center justify-between">
             <div>
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                 {{ pageTitle }}
@@ -211,23 +227,6 @@ const isActive = (to: string) => {
               </h1>
             </div>
             <div class="flex items-center gap-3">
-              <div class="hidden items-center gap-2 lg:flex">
-                <button
-                  type="button"
-                  class="btn btn-ghost px-3 py-2 text-[11px] font-semibold"
-                  @click="toggleCollapse"
-                  :disabled="isSidebarHidden"
-                >
-                  {{ isSidebarCollapsed ? 'Expand nav' : 'Collapse nav' }}
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-ghost px-3 py-2 text-[11px] font-semibold"
-                  @click="toggleHidden"
-                >
-                  {{ isSidebarHidden ? 'Show nav' : 'Hide nav' }}
-                </button>
-              </div>
               <span class="badge status-neutral">Host ready</span>
               <button
                 v-if="auth.user"
@@ -247,7 +246,7 @@ const isActive = (to: string) => {
             </div>
           </div>
 
-          <nav class="mx-auto mt-4 flex w-full max-w-6xl gap-2 overflow-x-auto pb-2 lg:hidden">
+          <nav class="mx-auto mt-4 flex w-full max-w-7xl gap-2 overflow-x-auto pb-2 lg:hidden">
             <RouterLink
               v-for="item in navItems"
               :key="`mobile-${item.to}`"
@@ -263,7 +262,7 @@ const isActive = (to: string) => {
           </nav>
         </header>
 
-        <main class="mx-auto w-full max-w-6xl px-6 pb-16 pt-8">
+        <main class="mx-auto w-full max-w-7xl px-4 pb-16 pt-8 sm:px-5">
           <slot />
         </main>
       </div>

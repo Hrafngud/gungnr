@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"strings"
@@ -17,7 +18,8 @@ import (
 )
 
 var (
-	ErrUnauthorized = errors.New("unauthorized")
+	ErrUnauthorized      = errors.New("unauthorized")
+	ErrAdminAuthDisabled = errors.New("admin auth disabled")
 )
 
 type AuthService struct {
@@ -43,6 +45,29 @@ func NewAuthService(cfg config.Config, userRepo repository.UserRepository) *Auth
 func (s *AuthService) AuthURL(state, redirectURL string) string {
 	cfg := s.oauthConfigForRedirect(redirectURL)
 	return cfg.AuthCodeURL(state)
+}
+
+func (s *AuthService) AuthenticateAdmin(ctx context.Context, login, password string) (*models.User, error) {
+	adminLogin := strings.TrimSpace(s.cfg.AdminLogin)
+	adminPassword := strings.TrimSpace(s.cfg.AdminPassword)
+	if adminLogin == "" || adminPassword == "" {
+		return nil, ErrAdminAuthDisabled
+	}
+
+	inputLogin := strings.TrimSpace(login)
+	inputPassword := strings.TrimSpace(password)
+	loginMatch := subtle.ConstantTimeCompare([]byte(inputLogin), []byte(adminLogin)) == 1
+	passwordMatch := subtle.ConstantTimeCompare([]byte(inputPassword), []byte(adminPassword)) == 1
+	if !loginMatch || !passwordMatch {
+		return nil, ErrUnauthorized
+	}
+
+	user, err := s.userRepo.UpsertFromGitHub(-1, adminLogin, "")
+	if err != nil {
+		return nil, fmt.Errorf("upsert admin user: %w", err)
+	}
+
+	return user, nil
 }
 
 func (s *AuthService) Exchange(ctx context.Context, code, redirectURL string) (*models.User, error) {
