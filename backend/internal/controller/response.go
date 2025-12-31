@@ -20,10 +20,17 @@ func newJobResponse(job models.Job) jobResponse {
 	return jobResponse{
 		ID:         job.ID,
 		Type:       job.Type,
-		Status:     job.Status,
+		Status:     normalizeJobStatus(job.Status),
 		StartedAt:  job.StartedAt,
 		FinishedAt: job.FinishedAt,
 		Error:      job.Error,
 		CreatedAt:  job.CreatedAt,
 	}
+}
+
+func normalizeJobStatus(status string) string {
+	if status == "pending_host" {
+		return "pending"
+	}
+	return status
 }

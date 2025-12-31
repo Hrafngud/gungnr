@@ -46,8 +46,11 @@ type DeployExistingRequest struct {
 }
 
 type QuickServiceRequest struct {
-	Subdomain string `json:"subdomain"`
-	Port      int    `json:"port"`
+	Subdomain     string `json:"subdomain"`
+	Port          int    `json:"port"`
+	Image         string `json:"image,omitempty"`
+	ContainerPort int    `json:"containerPort,omitempty"`
+	ContainerName string `json:"containerName,omitempty"`
 }
 
 func (s *ProjectService) ListLocal(ctx context.Context) ([]LocalProject, error) {
@@ -128,6 +131,22 @@ func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceReque
 	}
 	if err := ValidatePort(req.Port); err != nil {
 		return nil, err
+	}
+	req.Image = strings.TrimSpace(req.Image)
+	req.ContainerName = strings.TrimSpace(req.ContainerName)
+	if req.Image == "" {
+		req.Image = defaultQuickServiceImage
+	}
+	if req.ContainerPort == 0 {
+		req.ContainerPort = defaultQuickServiceContainerPort
+	}
+	if err := ValidatePort(req.ContainerPort); err != nil {
+		return nil, err
+	}
+	if req.ContainerName != "" {
+		if err := validateContainerName(req.ContainerName); err != nil {
+			return nil, err
+		}
 	}
 	return s.jobs.Create(ctx, JobTypeQuickService, req)
 }

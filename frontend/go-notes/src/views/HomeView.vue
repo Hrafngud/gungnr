@@ -9,19 +9,16 @@ import UiListRow from '@/components/ui/UiListRow.vue'
 import UiOnboardingOverlay from '@/components/ui/UiOnboardingOverlay.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
-import HostCommandModal from '@/components/host/HostCommandModal.vue'
 import { useProjectsStore } from '@/stores/projects'
 import { useJobsStore } from '@/stores/jobs'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toasts'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { projectsApi } from '@/services/projects'
-import { hostJobsApi } from '@/services/hostJobs'
 import { healthApi } from '@/services/health'
 import { settingsApi } from '@/services/settings'
 import { githubApi } from '@/services/github'
 import { apiErrorMessage } from '@/services/api'
-import { useHostWorker } from '@/composables/useHostWorker'
 import { isPendingJob } from '@/utils/jobStatus'
 import type { LocalProject } from '@/types/projects'
 import type { DockerHealth, TunnelHealth } from '@/types/health'
@@ -41,6 +38,8 @@ type ServicePreset = {
   name: string
   subdomain: string
   port: number
+  image: string
+  containerPort: number
   description: string
   repoLabel: string
   repoUrl: string
@@ -52,6 +51,8 @@ type ServiceCard = {
   description: string
   subdomain?: string
   port?: number
+  image?: string
+  containerPort?: number
   repoLabel: string
   repoUrl: string
   kind: 'custom' | 'preset'
@@ -73,17 +74,6 @@ const jobsStore = useJobsStore()
 const auth = useAuthStore()
 const toastStore = useToastStore()
 const onboardingStore = useOnboardingStore()
-const hostWorker = useHostWorker()
-const {
-  modalOpen: hostModalOpen,
-  command: hostCommand,
-  action: hostAction,
-  job: hostJob,
-  logs: hostLogs,
-  error: hostError,
-  expiresAt: hostExpiresAt,
-  polling: hostPolling,
-} = hostWorker
 
 const machineName = ref('')
 const dockerHealth = ref<DockerHealth | null>(null)
@@ -137,6 +127,8 @@ const existingForm = reactive({
 const quickForm = reactive({
   subdomain: '',
   port: '',
+  image: '',
+  containerPort: '',
 })
 
 const servicePresets: ServicePreset[] = [
@@ -145,6 +137,8 @@ const servicePresets: ServicePreset[] = [
     name: 'Excalidraw',
     subdomain: 'draw',
     port: 5000,
+    image: 'excalidraw/excalidraw:latest',
+    containerPort: 80,
     description: 'Whiteboard collaboration',
     repoLabel: 'excalidraw/excalidraw',
     repoUrl: 'https://github.com/excalidraw/excalidraw',
@@ -154,6 +148,8 @@ const servicePresets: ServicePreset[] = [
     name: 'OpenWebUI',
     subdomain: 'openwebui',
     port: 3000,
+    image: 'ghcr.io/open-webui/open-webui:main',
+    containerPort: 8080,
     description: 'LLM web interface',
     repoLabel: 'open-webui/open-webui',
     repoUrl: 'https://github.com/open-webui/open-webui',
@@ -163,6 +159,8 @@ const servicePresets: ServicePreset[] = [
     name: 'Ollama',
     subdomain: 'ollama',
     port: 11434,
+    image: 'ollama/ollama:latest',
+    containerPort: 11434,
     description: 'Local model runtime',
     repoLabel: 'ollama/ollama',
     repoUrl: 'https://github.com/ollama/ollama',
@@ -172,6 +170,8 @@ const servicePresets: ServicePreset[] = [
     name: 'Redis',
     subdomain: 'redis',
     port: 6379,
+    image: 'redis:latest',
+    containerPort: 6379,
     description: 'Cache + queue store',
     repoLabel: 'redis/redis',
     repoUrl: 'https://github.com/redis/redis',
@@ -181,6 +181,8 @@ const servicePresets: ServicePreset[] = [
     name: 'Postgres',
     subdomain: 'postgres',
     port: 5432,
+    image: 'postgres:latest',
+    containerPort: 5432,
     description: 'Database service',
     repoLabel: 'postgres/postgres',
     repoUrl: 'https://github.com/postgres/postgres',
@@ -219,6 +221,8 @@ const serviceCards = computed<ServiceCard[]>(() => [
     description: preset.description,
     subdomain: preset.subdomain,
     port: preset.port,
+    image: preset.image,
+    containerPort: preset.containerPort,
     repoLabel: preset.repoLabel,
     repoUrl: preset.repoUrl,
     kind: 'preset' as const,
@@ -435,19 +439,15 @@ const submitTemplate = async () => {
 
   templateState.loading = true
   try {
-    const { data } = await hostJobsApi.createHostDeploy({
-      jobType: 'create_template',
-      payload: {
-        name: templateForm.name,
-        subdomain: templateForm.subdomain || undefined,
-        proxyPort,
-        dbPort,
-      },
+    const { data } = await projectsApi.createFromTemplate({
+      name: templateForm.name,
+      subdomain: templateForm.subdomain || undefined,
+      proxyPort,
+      dbPort,
     })
     templateState.jobId = data.job.id
-    templateState.success = 'Template job queued. Run the host worker to continue.'
+    templateState.success = 'Template job queued. Automation started.'
     toastStore.success('Template job queued.', 'Template queued')
-    await hostWorker.openWithHostDeploy(data)
     await refreshAll()
   } catch (err) {
     const message = apiErrorMessage(err)
@@ -474,18 +474,14 @@ const submitExisting = async () => {
 
   existingState.loading = true
   try {
-    const { data } = await hostJobsApi.createHostDeploy({
-      jobType: 'deploy_existing',
-      payload: {
-        name: existingForm.name,
-        subdomain: existingForm.subdomain,
-        port,
-      },
+    const { data } = await projectsApi.deployExisting({
+      name: existingForm.name,
+      subdomain: existingForm.subdomain,
+      port,
     })
     existingState.jobId = data.job.id
-    existingState.success = 'Deployment queued. Run the host worker to continue.'
+    existingState.success = 'Deployment queued. Automation started.'
     toastStore.success('Deployment queued.', 'Deploy job queued')
-    await hostWorker.openWithHostDeploy(data)
     await refreshAll()
   } catch (err) {
     const message = apiErrorMessage(err)
@@ -509,20 +505,24 @@ const submitQuick = async () => {
     quickState.error = 'Port must be numeric.'
     return
   }
+  const containerPort = parsePort(quickForm.containerPort, false)
+  if (containerPort === null) {
+    quickState.error = 'Container port must be numeric.'
+    return
+  }
+  const image = quickForm.image.trim()
 
   quickState.loading = true
   try {
-    const { data } = await hostJobsApi.createHostDeploy({
-      jobType: 'quick_service',
-      payload: {
-        subdomain: quickForm.subdomain,
-        port,
-      },
+    const { data } = await projectsApi.quickService({
+      subdomain: quickForm.subdomain,
+      port,
+      image: image ? image : undefined,
+      containerPort: containerPort ?? undefined,
     })
     quickState.jobId = data.job.id
-    quickState.success = 'Service forward queued. Run the host worker to continue.'
+    quickState.success = 'Service forward queued. Automation started.'
     toastStore.success('Service forward queued.', 'Forward queued')
-    await hostWorker.openWithHostDeploy(data)
     await refreshAll()
   } catch (err) {
     const message = apiErrorMessage(err)
@@ -556,10 +556,15 @@ const selectServiceCard = (card: ServiceCard) => {
   if (card.kind === 'custom') {
     quickForm.subdomain = ''
     quickForm.port = ''
+    quickForm.image = ''
+    quickForm.containerPort = ''
     return
   }
   quickForm.subdomain = card.subdomain ?? ''
   quickForm.port = typeof card.port === 'number' ? card.port.toString() : ''
+  quickForm.image = card.image ?? ''
+  quickForm.containerPort =
+    typeof card.containerPort === 'number' ? card.containerPort.toString() : ''
 }
 
 const startOnboarding = () => {
@@ -822,7 +827,7 @@ watch(
             Launch templates and services
           </h2>
           <p class="mt-2 text-sm text-[color:var(--muted)]">
-            Queue new stacks or forward local services through the host cloudflared service. Run the host worker when prompted.
+            Queue new stacks or forward local services through the host cloudflared service. Jobs start automatically after queueing.
           </p>
         </div>
       </div>
@@ -847,7 +852,7 @@ watch(
             Day-to-day flow
           </p>
           <p class="mt-1 text-sm text-[color:var(--muted)]">
-            Queue a template or service forward, run the host worker, then confirm progress in Jobs and Activity.
+            Queue a template or service forward, then confirm progress in Jobs and Activity.
           </p>
         </div>
         <UiButton :as="RouterLink" to="/overview" variant="ghost" size="sm">
@@ -1242,6 +1247,37 @@ watch(
                 placeholder="5173"
                 :disabled="quickState.loading"
               />
+              <p class="text-xs text-[color:var(--muted)]">
+                Host port exposed by Docker on this machine.
+              </p>
+            </label>
+            <label class="grid gap-2 text-sm">
+              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                Container image (optional)
+              </span>
+              <UiInput
+                v-model="quickForm.image"
+                type="text"
+                placeholder="excalidraw/excalidraw:latest"
+                :disabled="quickState.loading"
+              />
+              <p class="text-xs text-[color:var(--muted)]">
+                Leave blank to use the default image.
+              </p>
+            </label>
+            <label class="grid gap-2 text-sm">
+              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                Container port (optional)
+              </span>
+              <UiInput
+                v-model="quickForm.containerPort"
+                type="text"
+                placeholder="80"
+                :disabled="quickState.loading"
+              />
+              <p class="text-xs text-[color:var(--muted)]">
+                Port inside the container (default 80). Host port maps to this.
+              </p>
             </label>
 
             <UiInlineFeedback v-if="quickState.error" tone="error">
@@ -1280,16 +1316,5 @@ watch(
     :steps="onboardingSteps"
     @finish="markOnboardingComplete"
     @skip="markOnboardingComplete"
-  />
-
-  <HostCommandModal
-    v-model="hostModalOpen"
-    :command="hostCommand"
-    :action="hostAction"
-    :job="hostJob"
-    :logs="hostLogs"
-    :error="hostError"
-    :expires-at="hostExpiresAt"
-    :polling="hostPolling"
   />
 </template>

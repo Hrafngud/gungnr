@@ -12,7 +12,7 @@ Important: Do not edit `deploy.sh`. It is reference-only; the UI must mirror its
 - Vue 3 UI served by nginx.
 - Single nginx proxy on port 80 routes /, /api, and /auth.
 - `cloudflared` runs on the host as a system service (primary path).
-- Deploy actions are handed off to a host worker (`deploy.sh`) rather than the API container.
+- Deploy actions run inside the API container via the Docker socket (no host-worker flow).
 - `deploy.sh` is reference-only; do not modify it. The UI must reproduce its CLI behavior before any advanced automation.
 
 ## Requirements
@@ -24,8 +24,9 @@ Important: Do not edit `deploy.sh`. It is reference-only; the UI must mirror its
 
 ## Recommended tunnel setup (host-installed)
 This project assumes a locally-managed tunnel with `cloudflared` running as a system
-service on the host. This is the primary path; the panel never edits tunnel state
-from the API container, and the host worker applies changes instead.
+service on the host. This is the primary path; the panel updates DNS/ingress via
+the Cloudflare API when configured, but tunnel setup and service management stay
+on the host.
 
 1) Install `cloudflared` on the host.
    - Follow the official install guide for your OS:
@@ -60,8 +61,8 @@ from the API container, and the host worker applies changes instead.
 2) Ensure the templates and cloudflared directories exist on the host.
 3) Start the stack: `make up`.
 4) Open `http://localhost` (or the tunnel hostname) and login via GitHub.
-5) When you deploy, the UI will show a host command to run; execute it on the host
-   to perform the deploy, update `config.yml`, and restart the host service.
+5) When you deploy, the API executes Docker commands over the host socket and then
+   applies Cloudflare DNS/ingress updates.
 
 ## Environment configuration
 Required for login:
@@ -116,7 +117,8 @@ Use the returned token as `Authorization: Bearer <token>` for `/api/v1/*` routes
   and deploys it.
 - Deploy existing: select a local template project, set a subdomain, and start
   compose.
-- Quick local service: provide a subdomain and a running local port.
+- Quick local service: provide a subdomain and host port (defaults to running an
+  Excalidraw container on port 80).
 - Activity: review the audit timeline of user actions in the Activity view.
 
 ## Local development (optional)

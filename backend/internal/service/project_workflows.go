@@ -24,16 +24,18 @@ import (
 )
 
 type ProjectWorkflows struct {
-	cfg      config.Config
-	projects repository.ProjectRepository
-	settings *SettingsService
+	cfg          config.Config
+	projects     repository.ProjectRepository
+	settings     *SettingsService
+	dockerRunner *DockerRunner
 }
 
-func NewProjectWorkflows(cfg config.Config, projects repository.ProjectRepository, settings *SettingsService) *ProjectWorkflows {
+func NewProjectWorkflows(cfg config.Config, projects repository.ProjectRepository, settings *SettingsService, dockerRunner *DockerRunner) *ProjectWorkflows {
 	return &ProjectWorkflows{
-		cfg:      cfg,
-		projects: projects,
-		settings: settings,
+		cfg:          cfg,
+		projects:     projects,
+		settings:     settings,
+		dockerRunner: dockerRunner,
 	}
 }
 
@@ -139,7 +141,7 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	}
 
 	logger.Log("starting docker compose stack")
-	if err := runLoggedCommand(ctx, logger, projectDir, nil, "docker", "compose", "up", "--build", "-d"); err != nil {
+	if err := w.runCompose(ctx, logger, projectDir); err != nil {
 		return err
 	}
 
@@ -197,7 +199,7 @@ func (w *ProjectWorkflows) handleDeployExisting(ctx context.Context, job models.
 	}
 
 	logger.Log("starting docker compose stack")
-	if err := runLoggedCommand(ctx, logger, projectDir, nil, "docker", "compose", "up", "--build", "-d"); err != nil {
+	if err := w.runCompose(ctx, logger, projectDir); err != nil {
 		return err
 	}
 
@@ -233,11 +235,31 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 	if err := ValidatePort(req.Port); err != nil {
 		return err
 	}
-	logger.Logf("using local port %d for quick service", req.Port)
+	req.Image = strings.TrimSpace(req.Image)
+	req.ContainerName = strings.TrimSpace(req.ContainerName)
+	if req.Image == "" {
+		req.Image = defaultQuickServiceImage
+	}
+	if req.ContainerPort == 0 {
+		req.ContainerPort = defaultQuickServiceContainerPort
+	}
+	if err := ValidatePort(req.ContainerPort); err != nil {
+		return err
+	}
+	if req.ContainerName != "" {
+		if err := validateContainerName(req.ContainerName); err != nil {
+			return err
+		}
+	}
+	logger.Logf("using host port %d for quick service", req.Port)
 
 	runtimeCfg, err := w.settings.ResolveConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
+	}
+
+	if err := w.runContainer(ctx, logger, req); err != nil {
+		return err
 	}
 
 	hostname := fmt.Sprintf("%s.%s", req.Subdomain, runtimeCfg.Domain)
@@ -248,6 +270,26 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 	}
 
 	return nil
+}
+
+func (w *ProjectWorkflows) runCompose(ctx context.Context, logger jobs.Logger, projectDir string) error {
+	if w.dockerRunner == nil {
+		return fmt.Errorf("docker runner unavailable")
+	}
+	return w.dockerRunner.ComposeUp(ctx, logger, DockerComposeRequest{ProjectDir: projectDir})
+}
+
+func (w *ProjectWorkflows) runContainer(ctx context.Context, logger jobs.Logger, req QuickServiceRequest) error {
+	if w.dockerRunner == nil {
+		return fmt.Errorf("docker runner unavailable")
+	}
+	dockerReq := DockerRunRequest{
+		Image:         req.Image,
+		HostPort:      req.Port,
+		ContainerPort: req.ContainerPort,
+		ContainerName: req.ContainerName,
+	}
+	return w.dockerRunner.RunContainer(ctx, logger, dockerReq)
 }
 
 func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, logger jobs.Logger, cfg config.Config, cloudfl *cloudflare.Client, hostname string, port int) error {

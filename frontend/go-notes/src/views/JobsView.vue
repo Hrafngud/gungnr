@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
@@ -7,18 +7,59 @@ import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
+import { jobsApi } from '@/services/jobs'
+import { apiErrorMessage } from '@/services/api'
 import { useJobsStore } from '@/stores/jobs'
 import { useAuthStore } from '@/stores/auth'
-import { jobStatusLabel, jobStatusTone } from '@/utils/jobStatus'
+import { useToastStore } from '@/stores/toasts'
+import { isPendingJob, jobStatusLabel, jobStatusTone } from '@/utils/jobStatus'
+import type { Job } from '@/types/jobs'
 
 const jobsStore = useJobsStore()
 const auth = useAuthStore()
+const toastStore = useToastStore()
+const stopping = ref<Record<number, boolean>>({})
+const retrying = ref<Record<number, boolean>>({})
 
 onMounted(() => {
   if (!jobsStore.initialized) {
     jobsStore.fetchJobs()
   }
 })
+
+const stopJob = async (job: Job) => {
+  if (!isPendingJob(job.status)) return
+  if (typeof window !== 'undefined') {
+    const confirmed = window.confirm('Mark this job as failed?')
+    if (!confirmed) return
+  }
+  stopping.value[job.id] = true
+  try {
+    await jobsApi.stop(job.id, { error: 'manually stopped' })
+    toastStore.warn('Job marked failed.', 'Job stopped')
+    await jobsStore.fetchJobs()
+  } catch (err) {
+    const message = apiErrorMessage(err)
+    toastStore.error(message, 'Stop failed')
+  } finally {
+    stopping.value[job.id] = false
+  }
+}
+
+const retryJob = async (job: Job) => {
+  if (job.status !== 'failed') return
+  retrying.value[job.id] = true
+  try {
+    await jobsApi.retry(job.id)
+    toastStore.success('Job retry queued.', 'Job retried')
+    await jobsStore.fetchJobs()
+  } catch (err) {
+    const message = apiErrorMessage(err)
+    toastStore.error(message, 'Retry failed')
+  } finally {
+    retrying.value[job.id] = false
+  }
+}
 
 </script>
 
@@ -155,9 +196,35 @@ onMounted(() => {
 
         <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-[color:var(--muted)]">
           <span>Created {{ new Date(job.createdAt).toLocaleString() }}</span>
-          <UiButton :as="RouterLink" :to="`/jobs/${job.id}`" variant="ghost" size="sm">
-            View log
-          </UiButton>
+          <div class="flex flex-wrap items-center gap-2">
+            <UiButton
+              v-if="isPendingJob(job.status)"
+              variant="ghost"
+              size="sm"
+              :disabled="stopping[job.id]"
+              @click="stopJob(job)"
+            >
+              <span class="flex items-center gap-2">
+                <UiInlineSpinner v-if="stopping[job.id]" />
+                Mark failed
+              </span>
+            </UiButton>
+            <UiButton
+              v-if="job.status === 'failed'"
+              variant="ghost"
+              size="sm"
+              :disabled="retrying[job.id]"
+              @click="retryJob(job)"
+            >
+              <span class="flex items-center gap-2">
+                <UiInlineSpinner v-if="retrying[job.id]" />
+                Retry
+              </span>
+            </UiButton>
+            <UiButton :as="RouterLink" :to="`/jobs/${job.id}`" variant="ghost" size="sm">
+              View log
+            </UiButton>
+          </div>
         </div>
       </UiListRow>
     </div>

@@ -7,7 +7,7 @@ import NavIcon from '@/components/NavIcon.vue'
 type NavItem = {
   label: string
   to: string
-  icon: 'home' | 'overview' | 'logs' | 'host' | 'network' | 'github'
+  icon: 'home' | 'overview' | 'activity' | 'logs' | 'host' | 'network' | 'github'
   helper: string
 }
 
@@ -23,6 +23,12 @@ const navItems: NavItem[] = [
     to: '/overview',
     icon: 'overview',
     helper: 'Jobs and activity',
+  },
+  {
+    label: 'Jobs',
+    to: '/jobs',
+    icon: 'activity',
+    helper: 'Status + logs',
   },
   {
     label: 'Logs',
