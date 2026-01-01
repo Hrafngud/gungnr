@@ -1,10 +1,18 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+
 type IconName = 'home' | 'overview' | 'host' | 'network' | 'github' | 'activity' | 'logs'
 
 const props = defineProps<{
   name: IconName
   class?: string
 }>()
+
+const fontawesomeIcons: Partial<Record<IconName, [string, string]>> = {
+  github: ['fab', 'github'],
+}
+
+const faIcon = computed(() => fontawesomeIcons[props.name])
 
 const paths: Record<IconName, string[]> = {
   home: [
@@ -50,7 +58,14 @@ const paths: Record<IconName, string[]> = {
 </script>
 
 <template>
+  <FontAwesomeIcon
+    v-if="faIcon"
+    :icon="faIcon"
+    :class="props.class"
+    aria-hidden="true"
+  />
   <svg
+    v-else
     :class="props.class"
     viewBox="0 0 24 24"
     fill="none"

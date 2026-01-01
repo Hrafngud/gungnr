@@ -89,10 +89,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="grid items-stretch gap-8 lg:grid-cols-[1.15fr,0.85fr]">
-    <div class="flex flex-col justify-between gap-8 rounded-3xl border border-[color:var(--border)] bg-[color:var(--surface-2)] p-8">
+  <section class="grid min-h-screen w-full lg:grid-cols-2">
+    <div class="flex flex-col justify-center gap-10 bg-[color:var(--surface-3)] px-8 py-16 sm:px-12">
       <div class="space-y-6">
-        <div class="inline-flex items-center gap-2 rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-1 text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+        <div class="inline-flex items-center gap-2 rounded-full border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-1 text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
           Warp Panel
         </div>
         <h1 class="text-4xl font-semibold leading-tight text-[color:var(--text)] sm:text-5xl">
@@ -104,39 +104,41 @@ onBeforeUnmount(() => {
         </p>
       </div>
       <div class="grid gap-3 text-sm text-[color:var(--muted)] sm:grid-cols-3">
-        <span class="rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-1 text-center">
+        <span class="rounded-full border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-1 text-center">
           GitHub OAuth
         </span>
-        <span class="rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-1 text-center">
+        <span class="rounded-full border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-1 text-center">
           Session cookies
         </span>
-        <span class="rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-1 text-center">
+        <span class="rounded-full border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-1 text-center">
           No CLI required
         </span>
       </div>
     </div>
 
-    <div class="flex flex-col justify-between gap-6 rounded-3xl border border-[color:var(--border)] bg-[color:var(--surface)] p-6">
-      <div>
-        <h2 class="text-xl font-semibold text-[color:var(--text)]">Connect your account</h2>
-        <p class="mt-2 text-sm text-[color:var(--muted)]">
-          We only request read access to confirm your identity and org membership.
-        </p>
-      </div>
-      <div>
-        <a
-          class="btn btn-primary inline-flex w-full items-center justify-center gap-2 px-4 py-3 text-sm font-semibold"
-          :href="loginHref"
-          @click.prevent="openLoginPopup"
-        >
-          Continue with GitHub
-        </a>
-        <p v-if="waitingForAuth" class="mt-3 text-xs text-[color:var(--muted-2)]">
-          Waiting for GitHub to finish signing you in...
-        </p>
-        <p class="mt-4 text-xs text-[color:var(--muted-2)]">
-          Need access? Ask the panel owner to add you to the allowlist or org.
-        </p>
+    <div class="flex flex-col justify-center gap-10 border-[color:var(--border)] bg-[color:var(--surface)] px-8 py-16 sm:px-12 lg:border-l">
+      <div class="mx-auto flex w-full max-w-md flex-col gap-6">
+        <div>
+          <h2 class="text-xl font-semibold text-[color:var(--text)]">Connect your account</h2>
+          <p class="mt-2 text-sm text-[color:var(--muted)]">
+            We only request read access to confirm your identity and org membership.
+          </p>
+        </div>
+        <div>
+          <a
+            class="btn btn-primary inline-flex w-full items-center justify-center gap-2 px-4 py-3 text-sm font-semibold"
+            :href="loginHref"
+            @click.prevent="openLoginPopup"
+          >
+            Continue with GitHub
+          </a>
+          <p v-if="waitingForAuth" class="mt-3 text-xs text-[color:var(--muted-2)]">
+            Waiting for GitHub to finish signing you in...
+          </p>
+          <p class="mt-4 text-xs text-[color:var(--muted-2)]">
+            Need access? Ask the panel owner to add you to the allowlist or org.
+          </p>
+        </div>
       </div>
     </div>
   </section>
