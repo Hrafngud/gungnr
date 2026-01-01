@@ -86,6 +86,7 @@ Iteration log (append each session):
 - 2025-12-31: Updated start/manager docs to reflect Docker runner focus and de-prioritize Cloudflare troubleshooting. Tests not run. | blockers: none | next up: retire host-worker UI flow and finish Docker quick-service UX
 - 2025-12-31: Retired host-worker UI flow (removed host command modal/composable/service and pending_host labels), added quick-service image/container port inputs with hints and preset defaults. Tests not run. | blockers: none | next up: remove host-worker backend endpoints/job type, drop pending_host status in API
 - 2025-12-31: Removed host-worker backend endpoints/services/job type, normalized pending_host to pending in job API responses, and updated backend docs (README/plans/guidelines). Tests not run. | blockers: none | next up: decide on legacy host-deploy data cleanup
+- 2026-01-01: Updated login view to a full-height, two-column layout with contrasting backgrounds and centered auth CTA. Tests not run. | blockers: none | next up: decide on legacy host-deploy data cleanup
 - YYYY-MM-DD: <what was done> | <blockers> | <next up>
 
 Next up (keep this short):

@@ -20,7 +20,7 @@ onMounted(() => {
     <RouterView />
   </AppShell>
 
-  <main v-else class="min-h-screen px-4 py-16 sm:px-5">
+  <main v-else class="min-h-screen">
     <RouterView />
   </main>
 

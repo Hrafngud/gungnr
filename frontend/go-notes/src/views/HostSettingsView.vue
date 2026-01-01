@@ -374,7 +374,14 @@ onMounted(async () => {
           <div class="flex items-start justify-between gap-3">
             <div>
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Docker
+                <span class="flex items-center gap-2">
+                  <FontAwesomeIcon
+                    icon="['fab', 'docker']"
+                    class="h-3.5 w-3.5 text-[color:var(--muted-2)]"
+                    aria-hidden="true"
+                  />
+                  Docker
+                </span>
               </p>
               <h3 class="mt-2 text-base font-semibold text-[color:var(--text)]">
                 Engine status
@@ -407,7 +414,14 @@ onMounted(async () => {
           <div class="flex items-start justify-between gap-3">
             <div>
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Tunnel
+                <span class="flex items-center gap-2">
+                  <FontAwesomeIcon
+                    icon="['fab', 'cloudflare']"
+                    class="h-3.5 w-3.5 text-[color:var(--muted-2)]"
+                    aria-hidden="true"
+                  />
+                  Tunnel
+                </span>
               </p>
               <h3 class="mt-2 text-base font-semibold text-[color:var(--text)]">
                 Cloudflared status
