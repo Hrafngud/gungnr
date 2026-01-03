@@ -258,6 +258,8 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
       {{ healthError }}
     </UiState>
 
+    <hr />
+
     <div class="grid gap-6 lg:grid-cols-[0.9fr,1.1fr]">
       <UiPanel as="article" class="space-y-4 p-6" data-onboard="network-tunnel">
         <div class="flex items-start justify-between gap-3">
@@ -425,6 +427,8 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
       </UiPanel>
     </div>
 
+    <hr />
+
     <div class="grid gap-6 lg:grid-cols-[1fr,1fr]">
       <UiPanel as="article" class="space-y-4 p-6">
         <div class="flex items-start justify-between gap-3">
@@ -457,13 +461,33 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
           No ingress hostnames found yet.
         </UiState>
 
-        <div v-else class="space-y-3 text-xs text-[color:var(--muted)]">
-          <UiListRow v-for="route in ingressRoutes" :key="route.hostname" class="space-y-2">
-            <p class="text-[color:var(--text)]">
-              {{ route.hostname }}
-            </p>
-            <p>Service: {{ route.service }}</p>
-          </UiListRow>
+        <div v-else class="space-y-2">
+          <div class="grid grid-cols-4 gap-3 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+            <div>Subdomain</div>
+            <div>Full hostname</div>
+            <div>Type</div>
+            <div>Target service</div>
+          </div>
+          <div class="space-y-1">
+            <div
+              v-for="route in ingressRoutes"
+              :key="route.hostname"
+              class="grid grid-cols-4 gap-3 rounded border border-[color:var(--border)] bg-[color:var(--bg-soft)] px-3 py-2 text-xs text-[color:var(--text)]"
+            >
+              <div class="truncate font-medium">
+                {{ route.hostname.split('.')[0] }}
+              </div>
+              <div class="truncate text-[color:var(--muted)]">
+                {{ route.hostname }}
+              </div>
+              <div class="text-[color:var(--muted)]">
+                CNAME
+              </div>
+              <div class="truncate text-[color:var(--muted)]">
+                {{ route.service }}
+              </div>
+            </div>
+          </div>
         </div>
       </UiPanel>
 

@@ -196,6 +196,8 @@ onMounted(async () => {
       {{ error }}
     </UiState>
 
+    <hr />
+
     <div class="grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
       <UiPanel as="article" class="space-y-5 p-6" data-onboard="github-token">
         <div class="flex items-start justify-between gap-3">

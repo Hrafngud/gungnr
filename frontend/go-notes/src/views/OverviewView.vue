@@ -132,6 +132,8 @@ onMounted(() => {
       </div>
     </div>
 
+    <hr />
+
     <section class="space-y-6">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>

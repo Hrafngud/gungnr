@@ -8,4 +8,5 @@ export interface ServicePreset {
   description: string;
   repoLabel: string;
   repoUrl: string;
+  icon?: string; // Icon identifier for the service type
 }
