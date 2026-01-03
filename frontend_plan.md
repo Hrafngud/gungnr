@@ -35,21 +35,38 @@ Status: Step 1 complete (theme tokens + AppShell). Page map + routing update com
 
 5) Page Details
 - Home > Host Status: running containers count, jobs (queued/running/finished), machine name, tunnel name, domain, last service deployed, onboarding CTA to Host Settings.
-- Home > Quick Deploy: Templates and Services as card grids with repo links and deploy actions; deploy forms should open in the `FormSidePanel`.
+- Home > Quick Deploy:
+  - Templates and Services as card grids with repo links and deploy actions; deploy forms should open in the `FormSidePanel`.
+  - **Quick Services section improvements:**
+    - Add service-specific icons to each service card for visual identification.
+    - Add a search bar to filter services by name/description.
+    - Make the services container have a fixed height (matching Templates section) with scrollable overflow.
+  - **Template forms clarification:**
+    - "Create from template" form: Only Project name (required) and Subdomain (required, not optional). Remove Proxy Port and Database Port fields (auto-inferred by backend).
+    - "Deploy existing" form: Renamed conceptually to forward ANY localhost service (Docker or not). Fields: Project name (identification), Subdomain (web exposure), Running At (localhost port). Cloudflare-only implementation, no Docker involvement required.
 - Overview: container list, job timeline, last activity (remove resources section).
 - Host Settings: cloudflared config path, token, tunnel setup status, validation and hints.
   - Move Running containers under Host integrations.
   - Settings forms (e.g., for cloudflared, GitHub) should open in the `FormSidePanel`.
   - The `FormSidePanel` should also contain the status indicators, presented as a compact grid with clamped long values.
-  - Cloudflared ingress preview should also use a side panel.
+  - **Cloudflared ingress preview should use a sidebar panel (like FormSidePanel) for visual cleanup.**
   - Running containers cards: remove tunnel forward input; add Stop/Restart/Remove/Logs actions and a destructive confirmation modal (with a two-step confirmation for volume deletion).
-- Networking: tunnel status, DNS records, routing status, Cloudflare health signals.
+- Networking:
+  - Tunnel status, routing status, Cloudflare health signals.
+  - **'Expected DNS records' section should be a 4-column grid for compact information display.**
+  - **Ingress preview should use a sidebar panel (like FormSidePanel) for visual cleanup.**
 - GitHub: token status, allowlist, templates availability.
 
 6) Journeys
-- Onboarding: guided overlay with field highlights, step-by-step instructions, and links to API key creation.
+- **NEW Guidance System (replaces overlay-with-highlight):**
+  - Remove onboarding overlay approach entirely.
+  - Implement contextual form field guidance that appears on form field focus/select.
+  - Guidance text: large-font, short, objective explanations.
+  - Positioning: appears on the left side of the screen (opposite to the form panel), always in the same fixed position for easy readability.
+  - Guidance should appear above the overlay layer.
+  - Include external links (GitHub API tokens, Cloudflare settings) when applicable for quick access.
+  - Apply to ALL forms throughout the application.
 - Day-to-day: focus on quick deploy, status checks, and recent activity.
-  - Status: Onboarding overlays cover Home, Host Settings, Networking, and GitHub with API key links; day-to-day callouts added to Quick Deploy, Overview Activity, Jobs, and Activity.
 
 7) Data and Integration
 - Axios base URL and auth handling (401 -> login).

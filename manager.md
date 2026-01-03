@@ -21,21 +21,29 @@
   - DONE: Use host-installed `cloudflared` service as the only tunnel path; removed the compose cloudflared container.
   - DONE: Implement API Docker runner (socket-based) to run containers/compose directly from jobs.
   - DONE: Cloudflare DNS/ingress updates confirmed healthy; focus shifts to Docker runner UX and retiring host-worker flow.
-  - TODO: Update UI copy and help modals to instruct host operators on tunnel setup and host command execution.
-  - TODO: Persist onboarding state in the backend so overlays do not reappear.
-- TODO: Redesign sidebar collapse UX (icon-only, control in sidebar only).
-- TODO: Increase main content width by reducing horizontal padding/margins.
-- TODO: Replace native selects with a universal custom Select component.
+  - DEFERRED: Update UI copy and help modals (replaced by new contextual guidance system - UX-REFINE-2).
+  - DEFERRED: Persist onboarding state in backend (overlay system being replaced - UX-REFINE-2).
+- DONE: Redesign sidebar collapse UX (icon-only, control in sidebar only).
+- DONE: Increase main content width by reducing horizontal padding/margins.
+- DONE: Replace native selects with a universal custom Select component.
 - DONE: Draft a detailed plan for container lifecycle controls (stop/restart/remove), multi-instance naming, and the Host Settings/Overview UI rework.
-- TODO: Fix login flow to auto-redirect on `/auth/me` success.
-  - TODO: Update login page layout to the two-column design.
-  - TODO: Refactor Home Quick Deploy into card grids for Templates/Services; show deploy forms only when selected.
-  - TODO: Replace placeholder notes docs with Warp Panel plans and guidelines.
-  - TODO: Visual rework for dark zinc skeuomorphic theme, component variants, and standardized animations.
-  - TODO: Rebuild navigation with expandable sidebar, top bar, and footer.
-  - TODO: Split pages into Home, Overview, Host Settings, Networking, and GitHub config.
-  - TODO: Add onboarding overlay journey and day-to-day flow polish.
-  - TODO: Update login to two-column layout and popup GitHub OAuth.
+- DONE: Fix login flow to auto-redirect on `/auth/me` success.
+- DONE: Update login page layout to the two-column design.
+- DONE: Refactor Home Quick Deploy into card grids for Templates/Services; show deploy forms only when selected.
+- TODO: Replace placeholder notes docs with Warp Panel plans and guidelines.
+- DONE: Visual rework for dark zinc skeuomorphic theme, component variants, and standardized animations.
+- DONE: Rebuild navigation with expandable sidebar, top bar, and footer.
+- DONE: Split pages into Home, Overview, Host Settings, Networking, and GitHub config.
+- DONE: Add onboarding overlay journey and day-to-day flow polish.
+- DONE: Update login to two-column layout and popup GitHub OAuth.
+- **NEW UX Refinement Phase (2026-01-03):**
+  - TODO: UX-REFINE-1: Quick Services improvements (icons, search bar, fixed-height scrollable container).
+  - TODO: UX-REFINE-2: Replace overlay-with-highlight guidance with contextual form field help (focus-triggered, left-positioned, with external links).
+  - TODO: UX-REFINE-3: Create ingress preview sidebar component (like FormSidePanel) for Networking/Host Settings cleanup.
+  - TODO: UX-REFINE-4: Convert Networking 'Expected DNS records' to 4-column grid layout.
+  - TODO: UX-REFINE-5: Simplify "Create from template" form (project name + subdomain only, auto-infer ports).
+  - TODO: UX-REFINE-6: Clarify "Deploy existing" form to forward ANY localhost service (Docker or not) via Cloudflare-only approach.
+  - NOTE: Backend planning for GitHub/Templates integration deferred for future discussion.
 - DONE: Add root README runbook + Makefile; compose smoke test succeeded (warning: buildx plugin missing).
 - DONE: Add settings persistence + UI for base domain, GitHub token, Cloudflare token, and cloudflared config path (default to ~/.cloudflared/config.yml).
 - DONE: Surface running Docker containers and allow quick tunnel forwarding with subdomains.

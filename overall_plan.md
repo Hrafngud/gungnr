@@ -39,6 +39,12 @@ Current status: Replace notes CRUD app with Warp Panel web UI and API.
 - Fix login page layout and auto-redirect on `/auth/me` success.
 - Refactor Home Quick Deploy into card grids for Templates/Services with repo links and deploy actions.
 - Add a responsive top bar to the logs screen so controls fit on all widths.
+- **UX Refinement Phase:**
+  - Enhance Quick Services with icons, search bar, and fixed-height scrollable container.
+  - Replace onboarding overlay system with contextual form field guidance (focus-triggered, positioned left, with external links).
+  - Create ingress preview sidebar component for Networking and Host Settings visual cleanup.
+  - Convert Networking DNS records to 4-column grid layout.
+  - Simplify template forms: "Create from template" (project name + subdomain only, auto-infer ports), "Deploy existing" (forward ANY localhost service via Cloudflare-only, no Docker required).
 
 4) Dockerization
 - Backend and frontend Dockerfiles (multi-stage).
