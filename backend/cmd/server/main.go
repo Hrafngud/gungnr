@@ -28,6 +28,9 @@ func main() {
 	if err := db.AutoMigrate(gormDB); err != nil {
 		log.Fatalf("failed to run migrations: %v", err)
 	}
+	if err := db.CleanupLegacyHostWorker(gormDB); err != nil {
+		log.Printf("warn: legacy host-worker cleanup failed: %v", err)
+	}
 
 	userRepo := repository.NewGormUserRepository(gormDB)
 	projectRepo := repository.NewGormProjectRepository(gormDB)
@@ -65,7 +68,7 @@ func main() {
 		Jobs:           controller.NewJobsController(jobService),
 		Settings:       controller.NewSettingsController(settingsService, auditService),
 		Onboarding:     controller.NewOnboardingController(onboardingService, auditService),
-		Host:           controller.NewHostController(hostService),
+		Host:           controller.NewHostController(hostService, auditService),
 		Audit:          controller.NewAuditController(auditService),
 		GitHub:         controller.NewGitHubController(githubService),
 		Cloudflare:     controller.NewCloudflareController(cloudflareService),

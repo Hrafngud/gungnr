@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
@@ -7,14 +7,14 @@ import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
+import UiModal from '@/components/ui/UiModal.vue'
 import UiOnboardingOverlay from '@/components/ui/UiOnboardingOverlay.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
-import UiSelect from '@/components/ui/UiSelect.vue'
 import UiState from '@/components/ui/UiState.vue'
+import UiToggle from '@/components/ui/UiToggle.vue'
 import { healthApi } from '@/services/health'
 import { settingsApi } from '@/services/settings'
 import { hostApi } from '@/services/host'
-import { projectsApi } from '@/services/projects'
 import { apiErrorMessage } from '@/services/api'
 import { useToastStore } from '@/stores/toasts'
 import { useOnboardingStore } from '@/stores/onboarding'
@@ -60,15 +60,48 @@ const containers = ref<DockerContainer[]>([])
 const containersLoading = ref(false)
 const containersError = ref<string | null>(null)
 
-type ForwardState = {
-  subdomain: string
-  port: string
-  loading: boolean
+const settingsPanelOpen = ref(true)
+const previewPanelOpen = ref(true)
+
+type ContainerActionState = {
+  stopping: boolean
+  restarting: boolean
+  removing: boolean
   error: string | null
-  jobId: number | null
 }
 
-const forwardTargets = reactive<Record<string, ForwardState>>({})
+const actionStates = reactive<Record<string, ContainerActionState>>({})
+const removeModalOpen = ref(false)
+const removeTarget = ref<DockerContainer | null>(null)
+const removeTargetName = computed(() => removeTarget.value?.name ?? '')
+const removeVolumes = ref(false)
+const removeVolumesConfirm = ref(false)
+const removeDescription = computed(() =>
+  removeVolumes.value
+    ? 'The container and its attached volumes will be permanently removed.'
+    : 'The container will be stopped and permanently removed. Attached volumes will be preserved.',
+)
+const canConfirmRemove = computed(() => {
+  const target = removeTarget.value
+  if (!target) return false
+  const state = actionStateFor(target)
+  if (state.removing) return false
+  if (removeVolumes.value && !removeVolumesConfirm.value) return false
+  return true
+})
+
+watch(removeModalOpen, (open) => {
+  if (!open) {
+    removeTarget.value = null
+    removeVolumes.value = false
+    removeVolumesConfirm.value = false
+  }
+})
+watch(removeVolumes, (enabled) => {
+  if (!enabled) {
+    removeVolumesConfirm.value = false
+  }
+})
 
 const onboardingSteps: OnboardingStep[] = [
   {
@@ -132,36 +165,16 @@ const healthTone = (status?: string): BadgeTone => {
   }
 }
 
-const hostPortsFor = (container: DockerContainer) => {
-  const ports = (container.portBindings ?? [])
-    .filter((binding) => binding.published && binding.hostPort)
-    .map((binding) => binding.hostPort)
-  return Array.from(new Set(ports))
-}
-
-const portOptionsFor = (container: DockerContainer) =>
-  hostPortsFor(container).map((port) => ({
-    value: port.toString(),
-    label: port.toString(),
-  }))
-
-const ensureForwardState = (container: DockerContainer) => {
-  if (!forwardTargets[container.id]) {
-    const ports = hostPortsFor(container)
-    const firstPort = ports[0]
-    forwardTargets[container.id] = {
-      subdomain: '',
-      port: typeof firstPort === 'number' ? firstPort.toString() : '',
-      loading: false,
+const actionStateFor = (container: DockerContainer): ContainerActionState => {
+  if (!actionStates[container.id]) {
+    actionStates[container.id] = {
+      stopping: false,
+      restarting: false,
+      removing: false,
       error: null,
-      jobId: null,
     }
   }
-}
-
-const forwardStateFor = (container: DockerContainer): ForwardState => {
-  ensureForwardState(container)
-  return forwardTargets[container.id] as ForwardState
+  return actionStates[container.id] as ContainerActionState
 }
 
 const loadSettings = async () => {
@@ -243,7 +256,6 @@ const loadContainers = async () => {
   try {
     const { data } = await hostApi.listDocker()
     containers.value = data.containers
-    containers.value.forEach((container) => ensureForwardState(container))
   } catch (err) {
     containersError.value = apiErrorMessage(err)
   } finally {
@@ -251,32 +263,68 @@ const loadContainers = async () => {
   }
 }
 
-const queueForward = async (container: DockerContainer) => {
-  const state = forwardStateFor(container)
+const stopContainer = async (container: DockerContainer) => {
+  const state = actionStateFor(container)
+  if (state.stopping) return
   state.error = null
-  state.jobId = null
-
-  const port = Number(state.port)
-  if (!state.subdomain.trim()) {
-    state.error = 'Subdomain is required.'
-    return
-  }
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    state.error = 'Select a valid host port.'
-    return
-  }
-
-  state.loading = true
+  state.stopping = true
   try {
-    const { data } = await projectsApi.quickService({ subdomain: state.subdomain, port })
-    state.jobId = data.job.id
-    toastStore.success('Forward queued.', 'Tunnel forwarding')
+    await hostApi.stopContainer(container.name)
+    toastStore.success('Container stopped.', 'Docker')
+    await loadContainers()
   } catch (err) {
     const message = apiErrorMessage(err)
     state.error = message
-    toastStore.error(message, 'Forward failed')
+    toastStore.error(message, 'Stop failed')
   } finally {
-    state.loading = false
+    state.stopping = false
+  }
+}
+
+const restartContainer = async (container: DockerContainer) => {
+  const state = actionStateFor(container)
+  if (state.restarting) return
+  state.error = null
+  state.restarting = true
+  try {
+    await hostApi.restartContainer(container.name)
+    toastStore.success('Container restarted.', 'Docker')
+    await loadContainers()
+  } catch (err) {
+    const message = apiErrorMessage(err)
+    state.error = message
+    toastStore.error(message, 'Restart failed')
+  } finally {
+    state.restarting = false
+  }
+}
+
+const openRemoveModal = (container: DockerContainer) => {
+  removeTarget.value = container
+  removeVolumes.value = false
+  removeModalOpen.value = true
+}
+
+const confirmRemove = async () => {
+  const target = removeTarget.value
+  if (!target) return
+  if (removeVolumes.value && !removeVolumesConfirm.value) return
+  const state = actionStateFor(target)
+  if (state.removing) return
+  state.error = null
+  state.removing = true
+  try {
+    await hostApi.removeContainer(target.name, removeVolumes.value)
+    toastStore.success('Container removed.', 'Docker')
+    removeModalOpen.value = false
+    removeTarget.value = null
+    await loadContainers()
+  } catch (err) {
+    const message = apiErrorMessage(err)
+    state.error = message
+    toastStore.error(message, 'Remove failed')
+  } finally {
+    state.removing = false
   }
 }
 
@@ -328,6 +376,20 @@ onMounted(async () => {
             Refresh host data
           </span>
         </UiButton>
+        <UiButton
+          variant="ghost"
+          size="sm"
+          @click="settingsPanelOpen = !settingsPanelOpen"
+        >
+          {{ settingsPanelOpen ? 'Hide settings panel' : 'Show settings panel' }}
+        </UiButton>
+        <UiButton
+          variant="ghost"
+          size="sm"
+          @click="previewPanelOpen = !previewPanelOpen"
+        >
+          {{ previewPanelOpen ? 'Hide ingress preview' : 'Show ingress preview' }}
+        </UiButton>
       </div>
     </div>
 
@@ -339,470 +401,481 @@ onMounted(async () => {
       {{ success }}
     </UiInlineFeedback>
 
-    <UiPanel as="section" class="space-y-6 p-6" data-onboard="host-integrations">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-            Status
-          </p>
-          <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">
-            Host integrations
-          </h2>
-          <p class="mt-2 text-sm text-[color:var(--muted)]">
-            Keep Docker and the host cloudflared service ready for automation.
-          </p>
-        </div>
-        <UiButton
-          variant="ghost"
-          size="sm"
-          :disabled="healthLoading"
-          @click="loadHealth"
-        >
-          <span class="flex items-center gap-2">
-            <UiInlineSpinner v-if="healthLoading" />
-            Refresh status
-          </span>
-        </UiButton>
-      </div>
-
-      <UiState v-if="healthLoading" loading>
-        Checking host integrations...
-      </UiState>
-
-      <div v-else class="grid gap-4 md:grid-cols-2">
-        <UiPanel as="article" variant="soft" class="space-y-3 p-4">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                <span class="flex items-center gap-2">
-                  <FontAwesomeIcon
-                    icon="['fab', 'docker']"
-                    class="h-3.5 w-3.5 text-[color:var(--muted-2)]"
-                    aria-hidden="true"
-                  />
-                  Docker
-                </span>
-              </p>
-              <h3 class="mt-2 text-base font-semibold text-[color:var(--text)]">
-                Engine status
-              </h3>
-            </div>
-            <UiBadge :tone="healthTone(dockerHealth?.status)">
-              {{ dockerHealth?.status || 'unknown' }}
-            </UiBadge>
-          </div>
-
-          <div class="space-y-2 text-xs text-[color:var(--muted)]">
-            <div class="flex items-center justify-between gap-2">
-              <span>Containers</span>
-              <span class="text-[color:var(--text)]">
-                {{
-                  dockerHealth && dockerHealth.status === 'ok'
-                    ? dockerHealth.containers
-                    : '—'
-                }}
-              </span>
-            </div>
-          </div>
-
-          <p v-if="dockerHealth?.detail" class="text-xs text-[color:var(--muted)]">
-            {{ dockerHealth.detail }}
-          </p>
-        </UiPanel>
-
-        <UiPanel as="article" variant="soft" class="space-y-3 p-4">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                <span class="flex items-center gap-2">
-                  <FontAwesomeIcon
-                    icon="['fab', 'cloudflare']"
-                    class="h-3.5 w-3.5 text-[color:var(--muted-2)]"
-                    aria-hidden="true"
-                  />
-                  Tunnel
-                </span>
-              </p>
-              <h3 class="mt-2 text-base font-semibold text-[color:var(--text)]">
-                Cloudflared status
-              </h3>
-            </div>
-            <UiBadge :tone="healthTone(tunnelHealth?.status)">
-              {{ tunnelHealth?.status || 'unknown' }}
-            </UiBadge>
-          </div>
-
-          <div class="space-y-2 text-xs text-[color:var(--muted)]">
-            <div class="flex items-center justify-between gap-2">
-              <span>Tunnel</span>
-              <span class="text-[color:var(--text)]">
-                {{ tunnelHealth?.tunnel || '—' }}
-              </span>
-            </div>
-            <div class="flex items-center justify-between gap-2">
-              <span>Connectors</span>
-              <span class="text-[color:var(--text)]">
-                {{
-                  tunnelHealth &&
-                  (tunnelHealth.status === 'ok' || tunnelHealth.status === 'warning')
-                    ? tunnelHealth.connections
-                    : '—'
-                }}
-              </span>
-            </div>
-          </div>
-
-          <p v-if="tunnelHealth?.configPath" class="text-xs text-[color:var(--muted)]">
-            {{ tunnelHealth.configPath }}
-          </p>
-          <p v-if="tunnelHealth?.detail" class="text-xs text-[color:var(--muted)]">
-            {{ tunnelHealth.detail }}
-          </p>
-        </UiPanel>
-      </div>
-    </UiPanel>
-
-    <div class="grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
-      <UiPanel as="form" variant="raise" class="space-y-6 p-6" @submit.prevent="saveSettings">
-        <div class="flex items-center justify-between gap-4">
+    <div class="grid gap-6 lg:grid-cols-[1.25fr,0.75fr]">
+      <UiPanel as="section" class="space-y-6 p-6">
+        <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Settings
+              Host integrations
             </p>
-            <h2 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
-              Panel overrides
+            <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">
+              Running containers
             </h2>
-          </div>
-          <UiBadge tone="neutral">Overrides</UiBadge>
-        </div>
-
-        <div class="grid gap-4 text-sm text-[color:var(--muted)]">
-          <label class="grid gap-2">
-            <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Base domain
-            </span>
-            <UiInput
-              v-model="settingsForm.baseDomain"
-              type="text"
-              placeholder="example.com"
-              :disabled="loading"
-            />
-          </label>
-
-          <div class="grid gap-4" data-onboard="host-api-tokens">
-            <label class="grid gap-2">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                GitHub token
-              </span>
-              <UiInput
-                v-model="settingsForm.githubToken"
-                type="password"
-                placeholder="ghp_••••••"
-                :disabled="loading"
-              />
-            </label>
-
-            <label class="grid gap-2">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Cloudflare API token
-              </span>
-              <UiInput
-                v-model="settingsForm.cloudflareToken"
-                type="password"
-                placeholder="cf_••••••"
-                :disabled="loading"
-              />
-            </label>
-
-            <label class="grid gap-2">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Cloudflare account ID
-              </span>
-              <UiInput
-                v-model="settingsForm.cloudflareAccountId"
-                type="text"
-                placeholder="Account ID"
-                :disabled="loading"
-              />
-            </label>
-
-            <label class="grid gap-2">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Cloudflare zone ID
-              </span>
-              <UiInput
-                v-model="settingsForm.cloudflareZoneId"
-                type="text"
-                placeholder="Zone ID"
-                :disabled="loading"
-              />
-            </label>
-
-            <label class="grid gap-2">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Cloudflared tunnel (name or ID)
-              </span>
-              <UiInput
-                v-model="settingsForm.cloudflaredTunnel"
-                type="text"
-                placeholder="Tunnel name or UUID"
-                :disabled="loading"
-              />
-            </label>
-
-            <p class="text-xs text-[color:var(--muted)]">
-              Use a Cloudflare API token (not a global API key) with Account:Cloudflare Tunnel:Edit
-              and Zone:DNS:Edit for the configured account and zone.
+            <p class="mt-2 text-sm text-[color:var(--muted)]">
+              Stop, restart, or remove containers without losing track of their ports.
             </p>
-
-            <div
-              v-if="settingsSources || cloudflaredTunnelName"
-              class="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)]/80 p-3 text-[11px] text-[color:var(--muted)]"
-            >
-              <UiListRow class="flex items-center justify-between gap-2">
-                <span>Tunnel ref (resolved)</span>
-                <span class="text-[color:var(--text)]">
-                  {{ cloudflaredTunnelName || '—' }}
-                </span>
-              </UiListRow>
-              <UiListRow class="flex items-center justify-between gap-2">
-                <span>Tunnel source</span>
-                <span class="text-[color:var(--text)]">
-                  {{ settingsSources?.cloudflaredTunnel || 'unset' }}
-                </span>
-              </UiListRow>
-              <UiListRow class="flex items-center justify-between gap-2">
-                <span>Account ID source</span>
-                <span class="text-[color:var(--text)]">
-                  {{ settingsSources?.cloudflareAccountId || 'unset' }}
-                </span>
-              </UiListRow>
-              <UiListRow class="flex items-center justify-between gap-2">
-                <span>Zone ID source</span>
-                <span class="text-[color:var(--text)]">
-                  {{ settingsSources?.cloudflareZoneId || 'unset' }}
-                </span>
-              </UiListRow>
-              <UiListRow class="flex items-center justify-between gap-2">
-                <span>Token source</span>
-                <span class="text-[color:var(--text)]">
-                  {{ settingsSources?.cloudflareToken || 'unset' }}
-                </span>
-              </UiListRow>
-              <UiListRow class="flex items-center justify-between gap-2">
-                <span>Config path source</span>
-                <span class="text-[color:var(--text)]">
-                  {{ settingsSources?.cloudflaredConfigPath || 'unset' }}
-                </span>
-              </UiListRow>
-            </div>
-          </div>
-
-          <label class="grid gap-2" data-onboard="host-cloudflared-config">
-            <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Cloudflared config path
-            </span>
-            <UiInput
-              v-model="settingsForm.cloudflaredConfigPath"
-              type="text"
-              placeholder="~/.cloudflared/config.yml"
-              :disabled="loading"
-            />
-          </label>
-        </div>
-
-        <div class="flex flex-wrap gap-3">
-          <UiButton
-            type="submit"
-            variant="primary"
-            size="md"
-            :disabled="saving || loading"
-          >
-            <span class="flex items-center gap-2">
-              <UiInlineSpinner v-if="saving" />
-              {{ saving ? 'Saving...' : 'Save settings' }}
-            </span>
-          </UiButton>
-          <UiButton variant="ghost" size="md" :disabled="loading" @click="loadSettings">
-            Reload
-          </UiButton>
-        </div>
-      </UiPanel>
-
-      <UiPanel variant="raise" class="space-y-4 p-6">
-        <div class="flex items-center justify-between gap-2">
-          <div>
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Cloudflared config
-            </p>
-            <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
-              Live ingress preview
-            </h3>
           </div>
           <UiButton
             variant="ghost"
-            size="xs"
-            :disabled="previewLoading"
-            @click="loadPreview"
+            size="sm"
+            :disabled="containersLoading"
+            @click="loadContainers"
           >
             <span class="flex items-center gap-2">
-              <UiInlineSpinner v-if="previewLoading" />
-              Refresh
+              <UiInlineSpinner v-if="containersLoading" />
+              Refresh list
             </span>
           </UiButton>
         </div>
 
-        <p class="text-xs text-[color:var(--muted)]">
-          Previewing {{ preview?.path || 'cloudflared config' }}.
-        </p>
-
-        <UiState v-if="previewLoading" loading>
-          Loading config preview...
+        <UiState v-if="containersError" tone="error">
+          {{ containersError }}
         </UiState>
 
-        <UiState v-else-if="previewError" tone="error">
-          {{ previewError }}
+        <UiState v-else-if="containersLoading" loading>
+          Loading Docker containers...
         </UiState>
 
-        <pre
-          v-else-if="hasPreview"
-          class="max-h-80 overflow-auto rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)]/90 p-4 text-xs text-[color:var(--accent-ink)]"
-        ><code>{{ preview?.contents }}</code></pre>
-
-        <UiState v-else>
-          Cloudflared config not loaded yet.
+        <UiState v-else-if="containers.length === 0">
+          No running containers detected on the host.
         </UiState>
-      </UiPanel>
-    </div>
 
-    <section class="space-y-6">
-      <div class="flex items-center justify-between gap-4">
-        <div>
-          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-            Host
-          </p>
-          <h2 class="mt-2 text-2xl font-semibold text-[color:var(--text)]">
-            Running containers
-          </h2>
-        </div>
-        <UiButton
-          variant="ghost"
-          size="sm"
-          :disabled="containersLoading"
-          @click="loadContainers"
-        >
-          <span class="flex items-center gap-2">
-            <UiInlineSpinner v-if="containersLoading" />
-            Refresh list
-          </span>
-        </UiButton>
-      </div>
+        <div v-else class="grid gap-4 lg:grid-cols-2">
+          <UiListRow
+            v-for="container in containers"
+            :key="container.id"
+            as="article"
+            class="space-y-4"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  {{ container.service || 'Container' }}
+                </p>
+                <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
+                  {{ container.name }}
+                </h3>
+                <p class="mt-1 text-xs text-[color:var(--muted)]">
+                  {{ container.image }}
+                </p>
+              </div>
+              <UiBadge :tone="statusTone(container.status)">
+                {{ container.status }}
+              </UiBadge>
+            </div>
 
-      <UiState v-if="containersError" tone="error">
-        {{ containersError }}
-      </UiState>
+            <div class="space-y-2 text-xs text-[color:var(--muted)]">
+              <div class="flex items-center justify-between gap-2">
+                <span>Ports</span>
+                <span class="text-[color:var(--text)]">
+                  {{ container.ports || '—' }}
+                </span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span>Project</span>
+                <span class="text-[color:var(--text)]">
+                  {{ container.project || 'n/a' }}
+                </span>
+              </div>
+            </div>
 
-      <UiState v-else-if="containersLoading" loading>
-        Loading Docker containers...
-      </UiState>
-
-      <UiState v-else-if="containers.length === 0">
-        No running containers detected on the host.
-      </UiState>
-
-      <div v-else class="grid gap-4 lg:grid-cols-2">
-        <UiListRow
-          v-for="container in containers"
-          :key="container.id"
-          as="article"
-          class="space-y-4"
-        >
-          <div class="flex items-start justify-between gap-3">
-            <div>
+            <UiPanel variant="soft" class="space-y-3 p-4">
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                {{ container.service || 'Container' }}
+                Lifecycle actions
               </p>
-              <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
-                {{ container.name }}
-              </h3>
-              <p class="mt-1 text-xs text-[color:var(--muted)]">
-                {{ container.image }}
-              </p>
-            </div>
-            <UiBadge :tone="statusTone(container.status)">
-              {{ container.status }}
-            </UiBadge>
-          </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <UiButton
+                  variant="ghost"
+                  size="sm"
+                  :disabled="actionStateFor(container).stopping"
+                  @click="stopContainer(container)"
+                >
+                  <span class="flex items-center gap-2">
+                    <UiInlineSpinner v-if="actionStateFor(container).stopping" />
+                    {{ actionStateFor(container).stopping ? 'Stopping...' : 'Stop' }}
+                  </span>
+                </UiButton>
+                <UiButton
+                  variant="ghost"
+                  size="sm"
+                  :disabled="actionStateFor(container).restarting"
+                  @click="restartContainer(container)"
+                >
+                  <span class="flex items-center gap-2">
+                    <UiInlineSpinner v-if="actionStateFor(container).restarting" />
+                    {{ actionStateFor(container).restarting ? 'Restarting...' : 'Restart' }}
+                  </span>
+                </UiButton>
+                <UiButton
+                  variant="ghost"
+                  size="sm"
+                  class="text-[color:var(--danger)]"
+                  :disabled="actionStateFor(container).removing"
+                  @click="openRemoveModal(container)"
+                >
+                  Remove
+                </UiButton>
+                <UiButton
+                  :as="RouterLink"
+                  :to="{ path: '/logs', query: { container: container.name } }"
+                  variant="ghost"
+                  size="sm"
+                >
+                  Logs
+                </UiButton>
+              </div>
 
-          <div class="space-y-2 text-xs text-[color:var(--muted)]">
-            <div class="flex items-center justify-between gap-2">
-              <span>Ports</span>
-              <span class="text-[color:var(--text)]">
-                {{ container.ports || '—' }}
-              </span>
-            </div>
-            <div class="flex items-center justify-between gap-2">
-              <span>Project</span>
-              <span class="text-[color:var(--text)]">
-                {{ container.project || 'n/a' }}
-              </span>
-            </div>
-          </div>
+              <UiInlineFeedback v-if="actionStateFor(container).error" tone="error">
+                {{ actionStateFor(container).error }}
+              </UiInlineFeedback>
+            </UiPanel>
+          </UiListRow>
+        </div>
+      </UiPanel>
 
-          <UiPanel variant="soft" class="space-y-3 p-4">
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Tunnel forward
-            </p>
-            <div class="grid gap-3 text-xs text-[color:var(--muted)] sm:grid-cols-[1.2fr,0.8fr]">
-              <UiInput
-                v-model="forwardStateFor(container).subdomain"
-                type="text"
-                placeholder="subdomain"
-                :disabled="forwardStateFor(container).loading"
-              />
-              <UiSelect
-                v-model="forwardStateFor(container).port"
-                :disabled="forwardStateFor(container).loading"
-                placeholder="Select port"
-                :options="portOptionsFor(container)"
-              />
-            </div>
-
-            <div class="flex flex-wrap items-center gap-3">
+      <div class="space-y-6">
+        <Transition name="panel-slide">
+          <UiPanel
+            v-if="settingsPanelOpen"
+            as="section"
+            variant="raise"
+            class="space-y-6 p-6"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Status + settings
+                </p>
+                <h2 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
+                  Host configuration
+                </h2>
+                <p class="mt-2 text-sm text-[color:var(--muted)]">
+                  Keep Docker and cloudflared healthy, then update the overrides that drive deploys.
+                </p>
+              </div>
               <UiButton
-                variant="primary"
-                size="md"
-                :disabled="forwardStateFor(container).loading"
-                @click="queueForward(container)"
+                variant="ghost"
+                size="sm"
+                :disabled="healthLoading"
+                @click="loadHealth"
               >
                 <span class="flex items-center gap-2">
-                  <UiInlineSpinner v-if="forwardStateFor(container).loading" />
-                  {{
-                    forwardStateFor(container).loading
-                      ? 'Forwarding...'
-                      : 'Forward via tunnel'
-                  }}
+                  <UiInlineSpinner v-if="healthLoading" />
+                  Refresh status
                 </span>
-              </UiButton>
-
-              <UiButton
-                v-if="forwardStateFor(container).jobId"
-                :as="RouterLink"
-                :to="`/jobs/${forwardStateFor(container).jobId}`"
-                variant="ghost"
-                size="md"
-              >
-                View job
               </UiButton>
             </div>
 
-            <UiInlineFeedback v-if="forwardStateFor(container).error" tone="error">
-              {{ forwardStateFor(container).error }}
-            </UiInlineFeedback>
+            <UiState v-if="healthLoading" loading>
+              Checking host integrations...
+            </UiState>
+
+            <div v-else class="grid gap-3 sm:grid-cols-2" data-onboard="host-integrations">
+              <UiPanel variant="soft" class="space-y-2 p-3">
+                <div class="flex items-center justify-between gap-2">
+                  <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                    Docker
+                  </p>
+                  <UiBadge :tone="healthTone(dockerHealth?.status)">
+                    {{ dockerHealth?.status || 'unknown' }}
+                  </UiBadge>
+                </div>
+                <p class="text-xs text-[color:var(--muted)]">
+                  Containers
+                  <span class="ml-1 text-[color:var(--text)]">
+                    {{
+                      dockerHealth && dockerHealth.status === 'ok'
+                        ? dockerHealth.containers
+                        : '—'
+                    }}
+                  </span>
+                </p>
+                <p
+                  v-if="dockerHealth?.detail"
+                  class="truncate text-xs text-[color:var(--muted)]"
+                  :title="dockerHealth.detail"
+                >
+                  {{ dockerHealth.detail }}
+                </p>
+              </UiPanel>
+
+              <UiPanel variant="soft" class="space-y-2 p-3">
+                <div class="flex items-center justify-between gap-2">
+                  <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                    Tunnel status
+                  </p>
+                  <UiBadge :tone="healthTone(tunnelHealth?.status)">
+                    {{ tunnelHealth?.status || 'unknown' }}
+                  </UiBadge>
+                </div>
+                <p class="text-xs text-[color:var(--muted)]">
+                  Connectors
+                  <span class="ml-1 text-[color:var(--text)]">
+                    {{
+                      tunnelHealth &&
+                      (tunnelHealth.status === 'ok' || tunnelHealth.status === 'warning')
+                        ? tunnelHealth.connections
+                        : '—'
+                    }}
+                  </span>
+                </p>
+                <p
+                  v-if="tunnelHealth?.detail"
+                  class="truncate text-xs text-[color:var(--muted)]"
+                  :title="tunnelHealth.detail"
+                >
+                  {{ tunnelHealth.detail }}
+                </p>
+              </UiPanel>
+
+              <UiPanel variant="soft" class="space-y-2 p-3">
+                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Tunnel ref
+                </p>
+                <p
+                  class="truncate text-sm font-semibold text-[color:var(--text)]"
+                  :title="tunnelHealth?.tunnel || '—'"
+                >
+                  {{ tunnelHealth?.tunnel || '—' }}
+                </p>
+                <p class="text-xs text-[color:var(--muted)]">
+                  Source: {{ settingsSources?.cloudflaredTunnel || 'unset' }}
+                </p>
+              </UiPanel>
+
+              <UiPanel variant="soft" class="space-y-2 p-3">
+                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Config path
+                </p>
+                <p
+                  class="truncate text-sm font-semibold text-[color:var(--text)]"
+                  :title="tunnelHealth?.configPath || '—'"
+                >
+                  {{ tunnelHealth?.configPath || '—' }}
+                </p>
+                <p class="text-xs text-[color:var(--muted)]">
+                  Source: {{ settingsSources?.cloudflaredConfigPath || 'unset' }}
+                </p>
+              </UiPanel>
+            </div>
+
+            <form class="space-y-6" @submit.prevent="saveSettings">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                    Settings
+                  </p>
+                  <h3 class="mt-2 text-base font-semibold text-[color:var(--text)]">
+                    Panel overrides
+                  </h3>
+                </div>
+                <UiBadge tone="neutral">Overrides</UiBadge>
+              </div>
+
+              <div class="grid gap-4 text-sm text-[color:var(--muted)]">
+                <label class="grid gap-2">
+                  <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                    Base domain
+                  </span>
+                  <UiInput
+                    v-model="settingsForm.baseDomain"
+                    type="text"
+                    placeholder="example.com"
+                    :disabled="loading"
+                  />
+                </label>
+
+                <div class="grid gap-4" data-onboard="host-api-tokens">
+                  <label class="grid gap-2">
+                    <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                      GitHub token
+                    </span>
+                    <UiInput
+                      v-model="settingsForm.githubToken"
+                      type="password"
+                      placeholder="ghp_••••••"
+                      :disabled="loading"
+                    />
+                  </label>
+
+                  <label class="grid gap-2">
+                    <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                      Cloudflare API token
+                    </span>
+                    <UiInput
+                      v-model="settingsForm.cloudflareToken"
+                      type="password"
+                      placeholder="cf_••••••"
+                      :disabled="loading"
+                    />
+                  </label>
+
+                  <label class="grid gap-2">
+                    <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                      Cloudflare account ID
+                    </span>
+                    <UiInput
+                      v-model="settingsForm.cloudflareAccountId"
+                      type="text"
+                      placeholder="Account ID"
+                      :disabled="loading"
+                    />
+                  </label>
+
+                  <label class="grid gap-2">
+                    <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                      Cloudflare zone ID
+                    </span>
+                    <UiInput
+                      v-model="settingsForm.cloudflareZoneId"
+                      type="text"
+                      placeholder="Zone ID"
+                      :disabled="loading"
+                    />
+                  </label>
+
+                  <label class="grid gap-2">
+                    <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                      Cloudflared tunnel (name or ID)
+                    </span>
+                    <UiInput
+                      v-model="settingsForm.cloudflaredTunnel"
+                      type="text"
+                      placeholder="Tunnel name or UUID"
+                      :disabled="loading"
+                    />
+                  </label>
+
+                  <p class="text-xs text-[color:var(--muted)]">
+                    Use a Cloudflare API token (not a global API key) with
+                    Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit for the configured account
+                    and zone.
+                  </p>
+
+                  <div
+                    v-if="settingsSources || cloudflaredTunnelName"
+                    class="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)]/80 p-3 text-[11px] text-[color:var(--muted)]"
+                  >
+                    <UiListRow class="flex items-center justify-between gap-2">
+                      <span>Tunnel ref (resolved)</span>
+                      <span class="text-[color:var(--text)]">
+                        {{ cloudflaredTunnelName || '—' }}
+                      </span>
+                    </UiListRow>
+                    <UiListRow class="flex items-center justify-between gap-2">
+                      <span>Tunnel source</span>
+                      <span class="text-[color:var(--text)]">
+                        {{ settingsSources?.cloudflaredTunnel || 'unset' }}
+                      </span>
+                    </UiListRow>
+                    <UiListRow class="flex items-center justify-between gap-2">
+                      <span>Account ID source</span>
+                      <span class="text-[color:var(--text)]">
+                        {{ settingsSources?.cloudflareAccountId || 'unset' }}
+                      </span>
+                    </UiListRow>
+                    <UiListRow class="flex items-center justify-between gap-2">
+                      <span>Zone ID source</span>
+                      <span class="text-[color:var(--text)]">
+                        {{ settingsSources?.cloudflareZoneId || 'unset' }}
+                      </span>
+                    </UiListRow>
+                    <UiListRow class="flex items-center justify-between gap-2">
+                      <span>Token source</span>
+                      <span class="text-[color:var(--text)]">
+                        {{ settingsSources?.cloudflareToken || 'unset' }}
+                      </span>
+                    </UiListRow>
+                    <UiListRow class="flex items-center justify-between gap-2">
+                      <span>Config path source</span>
+                      <span class="text-[color:var(--text)]">
+                        {{ settingsSources?.cloudflaredConfigPath || 'unset' }}
+                      </span>
+                    </UiListRow>
+                  </div>
+                </div>
+
+                <label class="grid gap-2" data-onboard="host-cloudflared-config">
+                  <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                    Cloudflared config path
+                  </span>
+                  <UiInput
+                    v-model="settingsForm.cloudflaredConfigPath"
+                    type="text"
+                    placeholder="~/.cloudflared/config.yml"
+                    :disabled="loading"
+                  />
+                </label>
+              </div>
+
+              <div class="flex flex-wrap gap-3">
+                <UiButton
+                  type="submit"
+                  variant="primary"
+                  size="md"
+                  :disabled="saving || loading"
+                >
+                  <span class="flex items-center gap-2">
+                    <UiInlineSpinner v-if="saving" />
+                    {{ saving ? 'Saving...' : 'Save settings' }}
+                  </span>
+                </UiButton>
+                <UiButton variant="ghost" size="md" :disabled="loading" @click="loadSettings">
+                  Reload
+                </UiButton>
+              </div>
+            </form>
           </UiPanel>
-        </UiListRow>
+        </Transition>
+
+        <Transition name="panel-slide">
+          <UiPanel v-if="previewPanelOpen" variant="raise" class="space-y-4 p-6">
+            <div class="flex items-center justify-between gap-2">
+              <div>
+                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Cloudflared config
+                </p>
+                <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
+                  Live ingress preview
+                </h3>
+              </div>
+              <UiButton
+                variant="ghost"
+                size="xs"
+                :disabled="previewLoading"
+                @click="loadPreview"
+              >
+                <span class="flex items-center gap-2">
+                  <UiInlineSpinner v-if="previewLoading" />
+                  Refresh
+                </span>
+              </UiButton>
+            </div>
+
+            <p class="text-xs text-[color:var(--muted)]">
+              Previewing {{ preview?.path || 'cloudflared config' }}.
+            </p>
+
+            <UiState v-if="previewLoading" loading>
+              Loading config preview...
+            </UiState>
+
+            <UiState v-else-if="previewError" tone="error">
+              {{ previewError }}
+            </UiState>
+
+            <pre
+              v-else-if="hasPreview"
+              class="max-h-80 overflow-auto rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)]/90 p-4 text-xs text-[color:var(--accent-ink)]"
+            ><code>{{ preview?.contents }}</code></pre>
+
+            <UiState v-else>
+              Cloudflared config not loaded yet.
+            </UiState>
+          </UiPanel>
+        </Transition>
       </div>
-    </section>
+    </div>
 
     <UiOnboardingOverlay
       v-model="onboardingOpen"
@@ -811,5 +884,50 @@ onMounted(async () => {
       @finish="markOnboardingComplete"
       @skip="markOnboardingComplete"
     />
+
+    <UiModal
+      v-model="removeModalOpen"
+      title="Remove container"
+      :description="removeDescription"
+    >
+      <div class="space-y-4">
+        <p class="text-sm text-[color:var(--muted)]">
+          Remove <span class="text-[color:var(--text)]">{{ removeTargetName }}</span>? This cannot
+          be undone for the container.
+        </p>
+        <UiToggle v-model="removeVolumes">Remove attached volumes</UiToggle>
+        <div
+          v-if="removeVolumes"
+          class="space-y-2 rounded-xl border border-[color:var(--danger)]/40 bg-[color:var(--surface-inset)]/60 p-3"
+        >
+          <p class="text-xs text-[color:var(--danger)]">
+            Attached volumes will be deleted and cannot be recovered.
+          </p>
+          <UiToggle v-model="removeVolumesConfirm">
+            I confirm permanent volume deletion.
+          </UiToggle>
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-3">
+          <UiButton variant="ghost" size="sm" @click="removeModalOpen = false">
+            Cancel
+          </UiButton>
+          <UiButton
+            variant="danger"
+            size="sm"
+            :disabled="!canConfirmRemove"
+            @click="confirmRemove"
+          >
+            <span class="flex items-center gap-2">
+              <UiInlineSpinner
+                v-if="removeTarget && actionStateFor(removeTarget).removing"
+              />
+              {{ removeTarget && actionStateFor(removeTarget).removing ? 'Removing...' : 'Remove' }}
+            </span>
+          </UiButton>
+        </div>
+      </template>
+    </UiModal>
   </section>
 </template>

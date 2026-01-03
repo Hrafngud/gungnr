@@ -4,7 +4,7 @@ import type { Component } from 'vue'
 
 defineOptions({ inheritAttrs: false })
 
-type ButtonVariant = 'default' | 'primary' | 'ghost' | 'chip'
+type ButtonVariant = 'default' | 'primary' | 'ghost' | 'chip' | 'danger'
 type ButtonSize = 'md' | 'sm' | 'xs' | 'chip'
 
 const props = withDefaults(defineProps<{
@@ -28,6 +28,8 @@ const variantClass = computed(() => {
   switch (props.variant) {
     case 'primary':
       return 'btn-primary'
+    case 'danger':
+      return 'btn-danger'
     case 'ghost':
       return 'btn-ghost'
     default:

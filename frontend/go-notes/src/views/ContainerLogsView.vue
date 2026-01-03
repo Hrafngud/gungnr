@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
@@ -15,6 +16,7 @@ import { useToastStore } from '@/stores/toasts'
 import type { DockerContainer } from '@/types/host'
 
 const toastStore = useToastStore()
+const route = useRoute()
 const containers = ref<DockerContainer[]>([])
 const loading = ref(false)
 const error = ref('')
@@ -28,11 +30,15 @@ const containerFilter = ref('')
 const followLive = ref(true)
 const showTimestamps = ref(true)
 const logViewport = ref<HTMLElement | null>(null)
+const routeApplied = ref(false)
 
 let streamSource: EventSource | null = null
 
 const selectedInfo = computed(() =>
   containers.value.find((container) => container.name === selectedContainer.value),
+)
+const routeContainer = computed(() =>
+  typeof route.query.container === 'string' ? route.query.container : '',
 )
 
 const filteredContainers = computed(() => {
@@ -92,6 +98,7 @@ const loadContainers = async () => {
   try {
     const { data } = await hostApi.listDocker()
     containers.value = data.containers
+    applyRouteSelection()
     if (!selectedContainer.value && data.containers.length > 0) {
       const first = data.containers[0]
       if (first) {
@@ -109,6 +116,15 @@ const resolveTail = () => {
   const parsed = Number.parseInt(tailInput.value, 10)
   if (Number.isNaN(parsed) || parsed <= 0) return 200
   return Math.min(parsed, 5000)
+}
+
+const applyRouteSelection = () => {
+  if (!routeContainer.value || routeApplied.value) return
+  const match = containers.value.find((container) => container.name === routeContainer.value)
+  if (match) {
+    selectedContainer.value = match.name
+    routeApplied.value = true
+  }
 }
 
 const clearLogs = () => {
@@ -241,6 +257,17 @@ watch(tailInput, () => {
 
 watch(logLines, () => {
   void scrollToBottom()
+})
+
+watch(routeContainer, () => {
+  routeApplied.value = false
+  applyRouteSelection()
+})
+
+watch(containers, () => {
+  if (!loading.value) {
+    applyRouteSelection()
+  }
 })
 
 onMounted(async () => {

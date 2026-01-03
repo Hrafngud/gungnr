@@ -23,10 +23,11 @@
   - DONE: Cloudflare DNS/ingress updates confirmed healthy; focus shifts to Docker runner UX and retiring host-worker flow.
   - TODO: Update UI copy and help modals to instruct host operators on tunnel setup and host command execution.
   - TODO: Persist onboarding state in the backend so overlays do not reappear.
-  - TODO: Redesign sidebar collapse UX (icon-only, control in sidebar only).
-  - TODO: Increase main content width by reducing horizontal padding/margins.
-  - TODO: Replace native selects with a universal custom Select component.
-  - TODO: Fix login flow to auto-redirect on `/auth/me` success.
+- TODO: Redesign sidebar collapse UX (icon-only, control in sidebar only).
+- TODO: Increase main content width by reducing horizontal padding/margins.
+- TODO: Replace native selects with a universal custom Select component.
+- DONE: Draft a detailed plan for container lifecycle controls (stop/restart/remove), multi-instance naming, and the Host Settings/Overview UI rework.
+- TODO: Fix login flow to auto-redirect on `/auth/me` success.
   - TODO: Update login page layout to the two-column design.
   - TODO: Refactor Home Quick Deploy into card grids for Templates/Services; show deploy forms only when selected.
   - TODO: Replace placeholder notes docs with Warp Panel plans and guidelines.
@@ -89,17 +90,45 @@
 - DONE: Add live container logs screen for all running containers (not just deploy jobs).
 - DONE: Add a responsive top bar on the logs screen so controls fit at all widths.
 - DONE: Add copy logs action, collapsible sidebar controls, and enhanced container log details.
+- DONE: Preselect logs view container when navigating from Host Settings.
 - DONE: Improve external API error logging for Cloudflare/GitHub responses with response metadata and payload summaries.
 - DONE: Capture GitHub error response body snippets for clearer API failure logs.
 - DONE: Improve GitHub OAuth error logging with response status/body details for token exchange and user/org checks.
 - DONE: Retire host-worker UI flow (remove host command modal and pending_host labels) and add quick-service image/container port inputs with hints.
 - DONE: Remove host-worker backend endpoints/job type and normalize pending_host to pending in job responses.
+- DONE: Clean legacy host-worker job data on startup, remove host-token fields from the job model/repository, and defer column drops until a real migration path exists.
 - DONE: Compose smoke test run locally; buildx plugin warning persists.
 - NOTE: Frontend smoke test blocked; `npm run build` failed because `vue-tsc` is not available (install deps locally).
 - NOTE: User will run smoke tests locally.
 - NOTE: Cloudflare API auth error code 10000 persists in `/health/tunnel` despite valid token claims; likely settings mismatch (DB overrides env) or account/zone mismatch.
 - NOTE: `docker compose up --build` completed; buildx plugin warning persists.
 - NOTE: Cloudflare docs confirm `config.yml` ingress rules must end with a catch-all rule, and DNS records can be created via `cloudflared tunnel route dns` (requires cert.pem).
+
+### Container lifecycle + Host Settings/Overview rework plan
+- Backend lifecycle endpoints:
+  - Add `/api/v1/host/docker/stop`, `/api/v1/host/docker/restart`, `/api/v1/host/docker/remove`.
+  - Request body: `{ "container": "name-or-id" }` with strict container ref validation.
+  - Stop: `docker stop <container>` (preserve config for later restart).
+  - Restart: `docker restart <container>`.
+  - Remove: `docker rm -f <container>` (destroy container state; volumes can be optionally removed).
+  - Audit log entries for each action with container ref + action metadata.
+- Duplicate naming strategy:
+  - Base name derived from image (strip registry tag/digest, sanitize to `[a-z0-9_.-]`).
+  - If `containerName` provided, sanitize/validate and still ensure uniqueness.
+  - If name exists, auto-suffix `name1`, `name2`, `name3` until free.
+  - Log chosen name when suffixing to make results visible in job logs.
+- Docker runner semantics:
+  - Stop leaves container config and data intact; restart uses same name and ports.
+  - Remove deletes the container only, with an option to also remove volumes. This is explicit in the UI with a two-step confirmation.
+- Host Settings rework:
+  - Move running containers into the Host integrations panel section.
+  - Replace the inline tunnel-forward form with action buttons: Stop, Restart, Remove, Logs.
+  - Require a destructive confirmation modal for Remove.
+  - Add a toggleable right-side panel for settings + status indicators; compact status indicators into a grid with clamped values.
+  - Add a separate toggleable side panel for cloudflared ingress preview.
+- Overview rework:
+  - Remove the Resource snapshots section entirely.
+  - Keep container highlights, job timeline, and recent activity.
 
 ### Docker / Compose usage (target)
 - Defaults live in `.env.example` (copy to `.env` to override).

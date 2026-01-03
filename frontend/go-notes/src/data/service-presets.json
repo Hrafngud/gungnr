@@ -1,0 +1,222 @@
+[
+  {
+    "id": "excalidraw",
+    "name": "Excalidraw",
+    "subdomain": "draw",
+    "port": 80,
+    "image": "excalidraw/excalidraw:latest",
+    "containerPort": 80,
+    "description": "Collaborative whiteboard for diagrams/architecture sketching",
+    "repoLabel": "excalidraw/excalidraw",
+    "repoUrl": "https://github.com/excalidraw/excalidraw"
+  },
+  {
+    "id": "openwebui",
+    "name": "OpenWebUI",
+    "subdomain": "openwebui",
+    "port": 3000,
+    "image": "ghcr.io/open-webui/open-webui:main",
+    "containerPort": 8080,
+    "description": "Self-hosted UI for local LLMs (pair with Ollama)",
+    "repoLabel": "open-webui/open-webui",
+    "repoUrl": "https://github.com/open-webui/open-webui"
+  },
+  {
+    "id": "ollama",
+    "name": "Ollama",
+    "subdomain": "ollama",
+    "port": 11434,
+    "image": "ollama/ollama:latest",
+    "containerPort": 11434,
+    "description": "Run local LLMs",
+    "repoLabel": "ollama/ollama",
+    "repoUrl": "https://github.com/ollama/ollama"
+  },
+  {
+    "id": "pocketbase",
+    "name": "PocketBase",
+    "subdomain": "pocketbase",
+    "port": 8090,
+    "image": "ghcr.io/muchobien/pocketbase:latest",
+    "containerPort": 8090,
+    "description": "Lightweight Go-based backend with realtime DB, auth, admin UI",
+    "repoLabel": "pocketbase/pocketbase",
+    "repoUrl": "https://github.com/pocketbase/pocketbase"
+  },
+  {
+    "id": "postgres",
+    "name": "PostgreSQL",
+    "subdomain": "postgres",
+    "port": 5432,
+    "image": "postgres:latest",
+    "containerPort": 5432,
+    "description": "Relational database",
+    "repoLabel": "postgres/postgres",
+    "repoUrl": "https://github.com/postgres/postgres"
+  },
+  {
+    "id": "mysql",
+    "name": "MySQL",
+    "subdomain": "mysql",
+    "port": 3306,
+    "image": "mysql:latest",
+    "containerPort": 3306,
+    "description": "Relational database",
+    "repoLabel": "docker-library/mysql",
+    "repoUrl": "https://github.com/docker-library/mysql"
+  },
+  {
+    "id": "redis",
+    "name": "Redis",
+    "subdomain": "redis",
+    "port": 6379,
+    "image": "redis:latest",
+    "containerPort": 6379,
+    "description": "In-memory cache/queue",
+    "repoLabel": "redis/redis",
+    "repoUrl": "https://github.com/redis/redis"
+  },
+  {
+    "id": "mongodb",
+    "name": "MongoDB",
+    "subdomain": "mongodb",
+    "port": 27017,
+    "image": "mongo:latest",
+    "containerPort": 27017,
+    "description": "NoSQL document database",
+    "repoLabel": "docker-library/mongo",
+    "repoUrl": "https://github.com/docker-library/mongo"
+  },
+  {
+    "id": "meilisearch",
+    "name": "MeiliSearch",
+    "subdomain": "meili",
+    "port": 7700,
+    "image": "getmeili/meilisearch:latest",
+    "containerPort": 7700,
+    "description": "Fast full-text search engine",
+    "repoLabel": "meilisearch/meilisearch",
+    "repoUrl": "https://github.com/meilisearch/meilisearch"
+  },
+  {
+    "id": "nginx",
+    "name": "Nginx",
+    "subdomain": "nginx",
+    "port": 80,
+    "image": "nginx:latest",
+    "containerPort": 80,
+    "description": "Web server / reverse proxy",
+    "repoLabel": "nginx/nginx",
+    "repoUrl": "https://github.com/nginx/nginx"
+  },
+  {
+    "id": "traefik",
+    "name": "Traefik",
+    "subdomain": "traefik",
+    "port": 8080,
+    "image": "traefik:latest",
+    "containerPort": 8080,
+    "description": "Reverse proxy with auto-SSL and Docker integration",
+    "repoLabel": "traefik/traefik",
+    "repoUrl": "https://github.com/traefik/traefik"
+  },
+  {
+    "id": "minio",
+    "name": "MinIO",
+    "subdomain": "minio",
+    "port": 9001,
+    "image": "quay.io/minio/minio",
+    "containerPort": 9001,
+    "description": "S3-compatible object storage",
+    "repoLabel": "minio/minio",
+    "repoUrl": "https://github.com/minio/minio"
+  },
+  {
+    "id": "mailhog",
+    "name": "MailHog",
+    "subdomain": "mailhog",
+    "port": 8025,
+    "image": "mailhog/mailhog:latest",
+    "containerPort": 8025,
+    "description": "Email testing / capture tool",
+    "repoLabel": "mailhog/MailHog",
+    "repoUrl": "https://github.com/mailhog/MailHog"
+  },
+  {
+    "id": "hoppscotch",
+    "name": "Hoppscotch",
+    "subdomain": "hoppscotch",
+    "port": 3000,
+    "image": "hoppscotch/hoppscotch:latest",
+    "containerPort": 3000,
+    "description": "Open-source API client (Postman alternative)",
+    "repoLabel": "hoppscotch/hoppscotch",
+    "repoUrl": "https://github.com/hoppscotch/hoppscotch"
+  },
+  {
+    "id": "ittools",
+    "name": "IT-Tools",
+    "subdomain": "ittools",
+    "port": 8080,
+    "image": "corentinth/it-tools:latest",
+    "containerPort": 80,
+    "description": "Handy dev utilities (JSON formatter, encoders, etc.)",
+    "repoLabel": "CorentinTh/it-tools",
+    "repoUrl": "https://github.com/CorentinTh/it-tools"
+  },
+  {
+    "id": "adminer",
+    "name": "Adminer",
+    "subdomain": "adminer",
+    "port": 8080,
+    "image": "adminer:latest",
+    "containerPort": 8080,
+    "description": "Lightweight database management",
+    "repoLabel": "vrana/adminer",
+    "repoUrl": "https://github.com/vrana/adminer"
+  },
+  {
+    "id": "mongoexpress",
+    "name": "Mongo Express",
+    "subdomain": "mongoexpress",
+    "port": 8081,
+    "image": "mongo-express:latest",
+    "containerPort": 8081,
+    "description": "Web admin for MongoDB",
+    "repoLabel": "mongo-express/mongo-express",
+    "repoUrl": "https://github.com/mongo-express/mongo-express"
+  },
+  {
+    "id": "portainer",
+    "name": "Portainer",
+    "subdomain": "portainer",
+    "port": 9000,
+    "image": "portainer/portainer-ce:latest",
+    "containerPort": 9000,
+    "description": "Docker/Kubernetes management UI",
+    "repoLabel": "portainer/portainer",
+    "repoUrl": "https://github.com/portainer/portainer"
+  },
+  {
+    "id": "codeserver",
+    "name": "Code-Server",
+    "subdomain": "code",
+    "port": 8080,
+    "image": "codercom/code-server:latest",
+    "containerPort": 8080,
+    "description": "VS Code in the browser",
+    "repoLabel": "coder/code-server",
+    "repoUrl": "https://github.com/coder/code-server"
+  },
+  {
+    "id": "gitea",
+    "name": "Gitea",
+    "subdomain": "gitea",
+    "port": 3000,
+    "image": "gitea/gitea:latest",
+    "containerPort": 3000,
+    "description": "Lightweight self-hosted Git service",
+    "repoLabel": "go-gitea/gitea",
+    "repoUrl": "https://github.com/go-gitea/gitea"
+  }
+]

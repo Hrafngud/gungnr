@@ -5,14 +5,15 @@ Status: Step 1 complete (theme tokens + AppShell). Page map + routing update com
 1) Visual Identity and Theme System
 - Define design tokens (zinc palette, accent, borders, shadows, radii, spacing).
 - Build flat zinc monochrome surfaces with minimal borders and no gradients/glass.
+- Content is free-form and separated by custom `<hr>` elements; no rounded containers.
 - Establish typography pairings and scale.
 - Standardize animations (page load, staggered reveals, modal transitions).
 - Icon set: Iconoir.
 
 2) Reusable Component System
-- Build base components with variants: Button, Input, Select, Toggle, Card/Panel, Badge/Status, ListRow, Tooltip, Modal/Sheet.
+- Build base components with variants: Button, Input, Select, Toggle, Card/Panel, Badge/Status, ListRow, Tooltip, Modal/Sheet, FormSidePanel.
 - Standardized loading state (page skeletons + inline spinners).
-- Standardized form and info display pages via composables with explicit states (loading, empty, error, ready).
+- Standardized form display via a reusable `FormSidePanel` component for all forms in the application. This component should appear from the right, have an overlay, and scrollable inner content.
 - Toasts and inline feedback patterns.
 - Implement a universal Select component with a custom dropdown and replace all native selects.
 
@@ -22,7 +23,7 @@ Status: Step 1 complete (theme tokens + AppShell). Page map + routing update com
 - Collapsed state uses icons only (no text labels).
 - Top bar for user/session actions and host status summary.
 - Footer with product info, links, and build metadata.
-- Reduce horizontal padding/margins to give more space to main page content.
+- Horizontal margin between content and page edge is minimal (5%).
 
 4) Routes and Information Architecture
 - `/login`: simple two-column layout, brief description left, GitHub auth button right, popup OAuth window.
@@ -34,9 +35,14 @@ Status: Step 1 complete (theme tokens + AppShell). Page map + routing update com
 
 5) Page Details
 - Home > Host Status: running containers count, jobs (queued/running/finished), machine name, tunnel name, domain, last service deployed, onboarding CTA to Host Settings.
-- Home > Quick Deploy: Templates and Services as card grids with repo links and deploy actions; show deploy forms only when a card is selected.
-- Overview: container list, job timeline, resource snapshots, last activity.
+- Home > Quick Deploy: Templates and Services as card grids with repo links and deploy actions; deploy forms should open in the `FormSidePanel`.
+- Overview: container list, job timeline, last activity (remove resources section).
 - Host Settings: cloudflared config path, token, tunnel setup status, validation and hints.
+  - Move Running containers under Host integrations.
+  - Settings forms (e.g., for cloudflared, GitHub) should open in the `FormSidePanel`.
+  - The `FormSidePanel` should also contain the status indicators, presented as a compact grid with clamped long values.
+  - Cloudflared ingress preview should also use a side panel.
+  - Running containers cards: remove tunnel forward input; add Stop/Restart/Remove/Logs actions and a destructive confirmation modal (with a two-step confirmation for volume deletion).
 - Networking: tunnel status, DNS records, routing status, Cloudflare health signals.
 - GitHub: token status, allowlist, templates availability.
 

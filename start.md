@@ -16,4 +16,4 @@ Execute next_task.md fully.
 Testing is handled by the user. Do not assign testing/verification as "Next up" tasks unless explicitly requested.
 Document changes, decisions, and results in relevant .md files.
 Update next_task.md with the next pending task.
-Next task: Clean legacy host-worker data (host_deploy jobs/tokens) and decide on DB schema cleanup.
+Next task: Container lifecycle controls + Host Settings/Overview UI rework (see next_task.md).

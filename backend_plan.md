@@ -29,7 +29,8 @@ Status: Replace notes CRUD with Warp Panel API, job runner, and integrations (AP
 6) Integrations
 - GitHub: create repo from template, list repos, clone.
 - Docker: API-runner via socket for `docker run` (quick service) and `docker compose up` (templates).
-- Docker: check port usage, container name collisions, and expose container logs.
+- Docker: check port usage, handle container name collisions, expose container logs.
+- Docker: add lifecycle controls (stop/restart/remove) with explicit stop-vs-remove semantics (remove can optionally delete volumes).
 - Cloudflare: host-first DNS via `cloudflared tunnel route dns`; keep API-managed ingress optional.
 - Cloudflared: local config preview + validation; update config.yml and restart host service safely.
   - Tunnel status: surface active tunnel and ingress entries.
@@ -40,7 +41,8 @@ Status: Replace notes CRUD with Warp Panel API, job runner, and integrations (AP
 - Quick service: run container first, then update tunnel ingress to the selected port.
 - Template deploy: `docker compose up --build -d`, then update ingress to proxy port.
 - Infer container name from image (e.g., `excalidraw/excalidraw` -> `excalidraw`).
-- Ensure container reuse rules (restart or replace on name collision).
+- Ensure container naming rules when collisions occur (suffix with incrementing numbers).
+- Stop keeps the container configuration intact for later restart; remove deletes the container, with an option to also remove volumes.
 - API now invokes Docker via the host socket; host-worker flow is removed.
 
 8) Job Runner
@@ -53,6 +55,7 @@ Status: Replace notes CRUD with Warp Panel API, job runner, and integrations (AP
 - Auth: `/auth/login`, `/auth/callback`, `/auth/me`, `/auth/logout`.
 - Projects: list, create-from-template, deploy-existing, quick-service.
 - Jobs: list, get status, get logs.
+- Containers: list, stop, restart, remove (with optional volume deletion), logs.
 - Health: `/healthz`, `/health/docker`, `/health/tunnel`.
 - Onboarding: `GET /api/v1/onboarding` and `PATCH /api/v1/onboarding` (store completion per user).
 

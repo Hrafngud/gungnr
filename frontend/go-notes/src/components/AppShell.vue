@@ -59,23 +59,18 @@ const navItems: NavItem[] = [
 const route = useRoute()
 const auth = useAuthStore()
 const SIDEBAR_KEY = 'warp-panel.sidebar'
-const sidebarMode = ref<'expanded' | 'collapsed' | 'hidden'>('expanded')
+const sidebarMode = ref<'expanded' | 'collapsed'>('expanded')
 
 const isSidebarCollapsed = computed(() => sidebarMode.value === 'collapsed')
-const isSidebarHidden = computed(() => sidebarMode.value === 'hidden')
 
 const toggleCollapse = () => {
   sidebarMode.value = isSidebarCollapsed.value ? 'expanded' : 'collapsed'
 }
 
-const toggleHidden = () => {
-  sidebarMode.value = isSidebarHidden.value ? 'expanded' : 'hidden'
-}
-
 onMounted(() => {
   if (typeof window === 'undefined') return
   const stored = window.localStorage.getItem(SIDEBAR_KEY)
-  if (stored === 'expanded' || stored === 'collapsed' || stored === 'hidden') {
+  if (stored === 'expanded' || stored === 'collapsed') {
     sidebarMode.value = stored
   }
 })
@@ -102,7 +97,6 @@ const isActive = (to: string) => {
       <aside
         class="sticky top-0 hidden h-screen flex-col gap-6 border-r border-[color:var(--border)] bg-[color:var(--surface)] py-8 lg:flex"
         :class="[
-          isSidebarHidden ? 'lg:hidden' : 'lg:flex',
           isSidebarCollapsed ? 'w-20 px-3' : 'w-72 px-6',
         ]"
       >
@@ -175,53 +169,25 @@ const isActive = (to: string) => {
             </p>
           </div>
 
-          <div class="grid gap-2">
+          <div class="grid place-items-center">
             <button
               type="button"
-              class="btn btn-ghost flex w-full items-center justify-center px-3 py-2 text-[11px] font-semibold"
+              class="btn btn-ghost flex w-full items-center justify-center rounded-full p-2"
               :title="isSidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'"
-              :disabled="isSidebarHidden"
               :aria-label="isSidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'"
               @click="toggleCollapse"
             >
-              <span
-                v-if="isSidebarCollapsed"
-                aria-hidden="true"
-                class="text-lg leading-none"
-              >
-                >>
-              </span>
-              <span v-else>Collapse nav</span>
-            </button>
-            <button
-              type="button"
-              class="btn btn-ghost flex w-full items-center justify-center px-3 py-2 text-[11px] font-semibold"
-              :title="isSidebarHidden ? 'Show navigation' : 'Hide navigation'"
-              :aria-label="isSidebarHidden ? 'Show navigation' : 'Hide navigation'"
-              @click="toggleHidden"
-            >
-              <span
-                v-if="isSidebarCollapsed"
-                aria-hidden="true"
-                class="text-lg leading-none"
-              >
-                {{ isSidebarHidden ? '>>' : 'x' }}
-              </span>
-              <span v-else>{{ isSidebarHidden ? 'Show nav' : 'Hide nav' }}</span>
+              <NavIcon
+                :name="isSidebarCollapsed ? 'arrow-right' : 'arrow-left'"
+                class="h-4 w-4 text-[color:var(--muted-2)]"
+              />
             </button>
           </div>
         </div>
       </aside>
 
       <div class="min-h-screen flex-1">
-        <button
-          v-if="isSidebarHidden"
-          type="button"
-          class="btn btn-ghost fixed left-4 top-24 z-30 hidden items-center gap-2 px-3 py-2 text-[11px] font-semibold lg:flex"
-          @click="toggleHidden"
-        >
-          Show nav
-        </button>
+
         <header class="sticky top-0 z-20 border-b border-[color:var(--border)] bg-[color:var(--bg-soft)] px-4 py-4">
           <div class="mx-auto flex w-full max-w-7xl items-center justify-between">
             <div>
@@ -268,7 +234,7 @@ const isActive = (to: string) => {
           </nav>
         </header>
 
-        <main class="mx-auto w-full max-w-7xl px-4 pb-16 pt-8 sm:px-5">
+        <main class="w-full px-[5%] pb-16 pt-8">
           <slot />
         </main>
       </div>

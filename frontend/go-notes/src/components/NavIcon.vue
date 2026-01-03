@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-type IconName = 'home' | 'overview' | 'host' | 'network' | 'github' | 'activity' | 'logs'
+type IconName = 'home' | 'overview' | 'host' | 'network' | 'github' | 'activity' | 'logs' | 'arrow-left' | 'arrow-right'
 
 const props = defineProps<{
   name: IconName
@@ -53,6 +53,12 @@ const paths: Record<IconName, string[]> = {
     'M4 6h16v12H4z',
     'M7 10l2 2l-2 2',
     'M11 14h6',
+  ],
+  'arrow-left': [
+    'M15 18l-6-6l6-6',
+  ],
+  'arrow-right': [
+    'M9 18l6-6l-6-6',
   ],
 }
 </script>

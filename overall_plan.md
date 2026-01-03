@@ -19,6 +19,8 @@ Current status: Replace notes CRUD app with Warp Panel web UI and API.
 - Add health endpoints for docker and tunnel checks.
 - Add settings endpoints and use them in workflows (domain/token/config path).
 - Add Docker runner job types for `docker run` and `docker compose` from the API.
+- Add container lifecycle controls (stop/restart/remove) with clear stop-vs-remove semantics.
+- Add automatic container naming for multiple instances of the same image (suffix with incrementing numbers).
 - Persist onboarding state per user to avoid repeated overlays.
 
 3) Frontend Setup
@@ -26,6 +28,9 @@ Current status: Replace notes CRUD app with Warp Panel web UI and API.
 - Build component system with variants, loading states, and animations.
 - Build sidebar navigation, top bar, and footer.
 - Implement Home, Overview, Host Settings, Networking, and GitHub pages.
+- Rework Host Settings layout: side panels for settings and ingress preview, and a slimmer status grid.
+- Update running container cards with stop/restart/remove/logs actions and confirmation flow.
+- Remove the Overview Resources section.
 - Wire API services with auth handling.
 - Add onboarding overlay journey and day-to-day flow polish.
 - Improve sidebar collapse UX (icon-only, toggle in sidebar only).
