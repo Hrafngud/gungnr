@@ -95,7 +95,7 @@ const isActive = (to: string) => {
   <div class="min-h-screen text-[color:var(--text)]">
     <div class="flex">
       <aside
-        class="sticky top-0 hidden h-screen flex-col gap-6 border-r border-[color:var(--border)] bg-[color:var(--surface)] py-8 lg:flex"
+        class="sidebar-nav sticky top-0 hidden h-screen flex-col gap-6 border-r border-[color:var(--border)] bg-[color:var(--surface)] py-8 lg:flex"
         :class="[
           isSidebarCollapsed ? 'w-20 px-3' : 'w-72 px-6',
         ]"

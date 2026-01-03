@@ -8,7 +8,8 @@
     "containerPort": 80,
     "description": "Collaborative whiteboard for diagrams/architecture sketching",
     "repoLabel": "excalidraw/excalidraw",
-    "repoUrl": "https://github.com/excalidraw/excalidraw"
+    "repoUrl": "https://github.com/excalidraw/excalidraw",
+    "icon": "draw"
   },
   {
     "id": "openwebui",
@@ -19,7 +20,8 @@
     "containerPort": 8080,
     "description": "Self-hosted UI for local LLMs (pair with Ollama)",
     "repoLabel": "open-webui/open-webui",
-    "repoUrl": "https://github.com/open-webui/open-webui"
+    "repoUrl": "https://github.com/open-webui/open-webui",
+    "icon": "ai"
   },
   {
     "id": "ollama",
@@ -30,7 +32,8 @@
     "containerPort": 11434,
     "description": "Run local LLMs",
     "repoLabel": "ollama/ollama",
-    "repoUrl": "https://github.com/ollama/ollama"
+    "repoUrl": "https://github.com/ollama/ollama",
+    "icon": "ai"
   },
   {
     "id": "pocketbase",
@@ -41,7 +44,8 @@
     "containerPort": 8090,
     "description": "Lightweight Go-based backend with realtime DB, auth, admin UI",
     "repoLabel": "pocketbase/pocketbase",
-    "repoUrl": "https://github.com/pocketbase/pocketbase"
+    "repoUrl": "https://github.com/pocketbase/pocketbase",
+    "icon": "server"
   },
   {
     "id": "postgres",
@@ -52,7 +56,8 @@
     "containerPort": 5432,
     "description": "Relational database",
     "repoLabel": "postgres/postgres",
-    "repoUrl": "https://github.com/postgres/postgres"
+    "repoUrl": "https://github.com/postgres/postgres",
+    "icon": "database"
   },
   {
     "id": "mysql",
@@ -63,7 +68,8 @@
     "containerPort": 3306,
     "description": "Relational database",
     "repoLabel": "docker-library/mysql",
-    "repoUrl": "https://github.com/docker-library/mysql"
+    "repoUrl": "https://github.com/docker-library/mysql",
+    "icon": "database"
   },
   {
     "id": "redis",
@@ -74,7 +80,8 @@
     "containerPort": 6379,
     "description": "In-memory cache/queue",
     "repoLabel": "redis/redis",
-    "repoUrl": "https://github.com/redis/redis"
+    "repoUrl": "https://github.com/redis/redis",
+    "icon": "cache"
   },
   {
     "id": "mongodb",
@@ -85,7 +92,8 @@
     "containerPort": 27017,
     "description": "NoSQL document database",
     "repoLabel": "docker-library/mongo",
-    "repoUrl": "https://github.com/docker-library/mongo"
+    "repoUrl": "https://github.com/docker-library/mongo",
+    "icon": "database"
   },
   {
     "id": "meilisearch",
@@ -96,7 +104,8 @@
     "containerPort": 7700,
     "description": "Fast full-text search engine",
     "repoLabel": "meilisearch/meilisearch",
-    "repoUrl": "https://github.com/meilisearch/meilisearch"
+    "repoUrl": "https://github.com/meilisearch/meilisearch",
+    "icon": "search"
   },
   {
     "id": "nginx",
@@ -107,7 +116,8 @@
     "containerPort": 80,
     "description": "Web server / reverse proxy",
     "repoLabel": "nginx/nginx",
-    "repoUrl": "https://github.com/nginx/nginx"
+    "repoUrl": "https://github.com/nginx/nginx",
+    "icon": "server"
   },
   {
     "id": "traefik",
@@ -118,7 +128,8 @@
     "containerPort": 8080,
     "description": "Reverse proxy with auto-SSL and Docker integration",
     "repoLabel": "traefik/traefik",
-    "repoUrl": "https://github.com/traefik/traefik"
+    "repoUrl": "https://github.com/traefik/traefik",
+    "icon": "server"
   },
   {
     "id": "minio",
@@ -129,7 +140,8 @@
     "containerPort": 9001,
     "description": "S3-compatible object storage",
     "repoLabel": "minio/minio",
-    "repoUrl": "https://github.com/minio/minio"
+    "repoUrl": "https://github.com/minio/minio",
+    "icon": "storage"
   },
   {
     "id": "mailhog",
@@ -140,7 +152,8 @@
     "containerPort": 8025,
     "description": "Email testing / capture tool",
     "repoLabel": "mailhog/MailHog",
-    "repoUrl": "https://github.com/mailhog/MailHog"
+    "repoUrl": "https://github.com/mailhog/MailHog",
+    "icon": "mail"
   },
   {
     "id": "hoppscotch",
@@ -151,7 +164,8 @@
     "containerPort": 3000,
     "description": "Open-source API client (Postman alternative)",
     "repoLabel": "hoppscotch/hoppscotch",
-    "repoUrl": "https://github.com/hoppscotch/hoppscotch"
+    "repoUrl": "https://github.com/hoppscotch/hoppscotch",
+    "icon": "tool"
   },
   {
     "id": "ittools",
@@ -162,7 +176,8 @@
     "containerPort": 80,
     "description": "Handy dev utilities (JSON formatter, encoders, etc.)",
     "repoLabel": "CorentinTh/it-tools",
-    "repoUrl": "https://github.com/CorentinTh/it-tools"
+    "repoUrl": "https://github.com/CorentinTh/it-tools",
+    "icon": "tool"
   },
   {
     "id": "adminer",
@@ -173,7 +188,8 @@
     "containerPort": 8080,
     "description": "Lightweight database management",
     "repoLabel": "vrana/adminer",
-    "repoUrl": "https://github.com/vrana/adminer"
+    "repoUrl": "https://github.com/vrana/adminer",
+    "icon": "admin"
   },
   {
     "id": "mongoexpress",
@@ -184,7 +200,8 @@
     "containerPort": 8081,
     "description": "Web admin for MongoDB",
     "repoLabel": "mongo-express/mongo-express",
-    "repoUrl": "https://github.com/mongo-express/mongo-express"
+    "repoUrl": "https://github.com/mongo-express/mongo-express",
+    "icon": "admin"
   },
   {
     "id": "portainer",
@@ -195,7 +212,8 @@
     "containerPort": 9000,
     "description": "Docker/Kubernetes management UI",
     "repoLabel": "portainer/portainer",
-    "repoUrl": "https://github.com/portainer/portainer"
+    "repoUrl": "https://github.com/portainer/portainer",
+    "icon": "admin"
   },
   {
     "id": "codeserver",
@@ -206,7 +224,8 @@
     "containerPort": 8080,
     "description": "VS Code in the browser",
     "repoLabel": "coder/code-server",
-    "repoUrl": "https://github.com/coder/code-server"
+    "repoUrl": "https://github.com/coder/code-server",
+    "icon": "code"
   },
   {
     "id": "gitea",
@@ -217,6 +236,7 @@
     "containerPort": 3000,
     "description": "Lightweight self-hosted Git service",
     "repoLabel": "go-gitea/gitea",
-    "repoUrl": "https://github.com/go-gitea/gitea"
+    "repoUrl": "https://github.com/go-gitea/gitea",
+    "icon": "git"
   }
 ]

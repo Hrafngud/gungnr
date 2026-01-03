@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
+import UiFormSidePanel from '@/components/ui/UiFormSidePanel.vue'
 import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
 import UiInput from '@/components/ui/UiInput.vue'
-import UiListRow from '@/components/ui/UiListRow.vue'
 import UiOnboardingOverlay from '@/components/ui/UiOnboardingOverlay.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
-import UiState from '@/components/ui/UiState.vue'
+import HostStatusPanel from '@/components/home/HostStatusPanel.vue'
+import TemplateCardsSection from '@/components/home/TemplateCardsSection.vue'
+import ServiceCardsSection from '@/components/home/ServiceCardsSection.vue'
 import { useProjectsStore } from '@/stores/projects'
 import { useJobsStore } from '@/stores/jobs'
 import { useAuthStore } from '@/stores/auth'
@@ -26,14 +27,14 @@ import type { Settings } from '@/types/settings'
 import type { GitHubCatalog } from '@/types/github'
 import type { OnboardingStep } from '@/types/onboarding'
 
-import { servicePresets } from '@/data/service-presets'
-
 type QueueState = {
   loading: boolean
   error: string | null
   success: string | null
   jobId: number | null
 }
+
+type TemplateCardId = 'create' | 'existing'
 
 type ServiceCard = {
   id: string
@@ -47,16 +48,6 @@ type ServiceCard = {
   repoUrl: string
   kind: 'custom' | 'preset'
 }
-
-type TemplateCardId = 'create' | 'existing'
-type TemplateCard = {
-  id: TemplateCardId
-  title: string
-  description: string
-  actionLabel: string
-}
-
-type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
 const projectsStore = useProjectsStore()
 const jobsStore = useJobsStore()
@@ -77,6 +68,9 @@ const localLoading = ref(false)
 const localError = ref<string | null>(null)
 const catalog = ref<GitHubCatalog | null>(null)
 const catalogError = ref<string | null>(null)
+const templateFormOpen = ref(false)
+const existingFormOpen = ref(false)
+const quickFormOpen = ref(false)
 
 const templateState = reactive<QueueState>({
   loading: false,
@@ -118,46 +112,6 @@ const quickForm = reactive({
   image: '',
   containerPort: '',
 })
-
-const templateCards: TemplateCard[] = [
-  {
-    id: 'create',
-    title: 'Create from template',
-    description: 'Create a new repo from the approved template source.',
-    actionLabel: 'Configure template',
-  },
-  {
-    id: 'existing',
-    title: 'Deploy existing',
-    description: 'Launch a local template folder with new ingress.',
-    actionLabel: 'Configure deploy',
-  },
-]
-
-const customServiceCard: ServiceCard = {
-  id: 'custom',
-  name: 'Custom service',
-  description: 'Forward any local port through the host tunnel.',
-  repoLabel: 'cloudflare/cloudflared',
-  repoUrl: 'https://github.com/cloudflare/cloudflared',
-  kind: 'custom',
-}
-
-const serviceCards = computed<ServiceCard[]>(() => [
-  customServiceCard,
-  ...servicePresets.map((preset) => ({
-    id: preset.id,
-    name: preset.name,
-    description: preset.description,
-    subdomain: preset.subdomain,
-    port: preset.port,
-    image: preset.image,
-    containerPort: preset.containerPort,
-    repoLabel: preset.repoLabel,
-    repoUrl: preset.repoUrl,
-    kind: 'preset' as const,
-  })),
-])
 
 const selectedTemplateCard = ref<TemplateCardId | null>(null)
 const selectedServiceCard = ref<string | null>(null)
@@ -201,34 +155,17 @@ const jobCounts = computed(() => {
   return counts
 })
 
-const jobTone = computed<BadgeTone>(() => {
-  if (jobCounts.value.failed > 0) return 'error'
-  if (jobCounts.value.running > 0) return 'warn'
-  if (jobCounts.value.pending > 0) return 'neutral'
-  if (jobCounts.value.completed > 0) return 'ok'
-  return 'neutral'
-})
-
 const lastJob = computed(() => jobsStore.jobs[0] ?? null)
 
 const lastProject = computed(() => {
   if (projectsStore.projects.length === 0) return null
-  return [...projectsStore.projects].sort((a, b) => {
+  const sorted = [...projectsStore.projects].sort((a, b) => {
     const aTime = new Date(a.updatedAt || a.createdAt).getTime()
     const bTime = new Date(b.updatedAt || b.createdAt).getTime()
     return bTime - aTime
-  })[0]
+  })
+  return sorted[0] ?? null
 })
-
-const lastServiceLabel = computed(() => lastProject.value?.name ?? 'n/a')
-
-const lastServiceTime = computed(() => {
-  if (!lastProject.value) return 'No deployments yet.'
-  const stamp = lastProject.value.updatedAt || lastProject.value.createdAt
-  return `Updated ${formatDate(stamp)}`
-})
-
-const domainLabel = computed(() => settings.value?.baseDomain || 'n/a')
 
 const templateRepoLabel = computed(() => {
   if (catalogError.value) return 'Template source unavailable'
@@ -239,32 +176,7 @@ const templateRepoLabel = computed(() => {
   return `${owner}/${repo}`
 })
 
-const templateRepoUrl = computed(() => {
-  if (!catalog.value?.template?.configured) return ''
-  const owner = catalog.value.template.owner
-  const repo = catalog.value.template.repo
-  if (!owner || !repo) return ''
-  return `https://github.com/${owner}/${repo}`
-})
-
-const selectedService = computed(() =>
-  serviceCards.value.find((card) => card.id === selectedServiceCard.value) ?? null,
-)
-
-const healthTone = (status?: string): BadgeTone => {
-  switch (status) {
-    case 'ok':
-      return 'ok'
-    case 'warning':
-      return 'warn'
-    case 'error':
-      return 'error'
-    case 'missing':
-      return 'neutral'
-    default:
-      return 'neutral'
-  }
-}
+const selectedServiceName = ref<string>('')
 
 const resetState = (state: QueueState) => {
   state.error = null
@@ -278,13 +190,6 @@ const parsePort = (value: string, required: boolean) => {
   const parsed = Number(trimmed)
   if (!Number.isInteger(parsed)) return null
   return parsed
-}
-
-const formatDate = (value?: string | null) => {
-  if (!value) return 'n/a'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return 'n/a'
-  return date.toLocaleString()
 }
 
 const loadHostStatus = async () => {
@@ -459,23 +364,37 @@ const submitQuick = async () => {
 const selectTemplateCard = async (id: TemplateCardId) => {
   if (selectedTemplateCard.value === id) {
     selectedTemplateCard.value = null
+    if (id === 'create') {
+      templateFormOpen.value = false
+    } else if (id === 'existing') {
+      existingFormOpen.value = false
+    }
     return
   }
   selectedTemplateCard.value = id
   resetState(templateState)
   resetState(existingState)
-  if (id === 'existing' && localProjects.value.length === 0 && !localLoading.value) {
-    await loadLocalProjects()
+  if (id === 'create') {
+    templateFormOpen.value = true
+  } else if (id === 'existing') {
+    existingFormOpen.value = true
+    if (localProjects.value.length === 0 && !localLoading.value) {
+      await loadLocalProjects()
+    }
   }
 }
 
 const selectServiceCard = (card: ServiceCard) => {
   if (selectedServiceCard.value === card.id) {
     selectedServiceCard.value = null
+    selectedServiceName.value = ''
+    quickFormOpen.value = false
     return
   }
   selectedServiceCard.value = card.id
+  selectedServiceName.value = card.name
   resetState(quickState)
+  quickFormOpen.value = true
   if (card.kind === 'custom') {
     quickForm.subdomain = ''
     quickForm.port = ''
@@ -534,200 +453,22 @@ watch(
 </script>
 
 <template>
-  <section class="space-y-12">
-    <div class="flex flex-wrap items-center justify-between gap-4">
-      <div>
-        <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-          Home
-        </p>
-        <h1 class="mt-2 text-3xl font-semibold text-[color:var(--text)]">
-          Host status
-        </h1>
-        <p class="mt-2 text-sm text-[color:var(--muted)]">
-          Monitor the deploy surface and keep automation primed for your next stack.
-        </p>
-      </div>
-      <div class="flex flex-wrap gap-3">
-        <UiButton variant="ghost" @click="refreshAll">
-          Refresh status
-        </UiButton>
-        <UiButton
-          :as="RouterLink"
-          to="/host-settings"
-          variant="primary"
-        >
-          Open host settings
-        </UiButton>
-      </div>
-    </div>
-    <UiPanel variant="soft" class="space-y-4 p-4" data-onboard="home-status">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-            Host status
-          </p>
-          <h2 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
-            Live runtime signals
-          </h2>
-        </div>
-        <UiBadge tone="neutral">
-          {{ hostLoading ? 'Refreshing' : 'Live snapshot' }}
-        </UiBadge>
-      </div>
-      <UiState v-if="settingsError" tone="error">
-        {{ settingsError }}
-      </UiState>
-      <UiState v-if="jobsStore.error" tone="error">
-        {{ jobsStore.error }}
-      </UiState>
-      <UiState v-if="projectsStore.error" tone="error">
-        {{ projectsStore.error }}
-      </UiState>
-      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <UiListRow as="article" class="space-y-2">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Containers
-              </p>
-              <p class="mt-1 text-xl font-semibold text-[color:var(--text)]">
-                {{ dockerHealth?.containers ?? 'n/a' }}
-              </p>
-            </div>
-            <UiBadge :tone="healthTone(dockerHealth?.status)">
-              {{ dockerHealth?.status || 'unknown' }}
-            </UiBadge>
-          </div>
-          <p class="text-xs text-[color:var(--muted)]">
-            {{ dockerHealth?.detail || 'No container data available yet.' }}
-          </p>
-        </UiListRow>
-        <UiListRow as="article" class="space-y-2">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Jobs
-              </p>
-              <p class="mt-1 text-base font-semibold text-[color:var(--text)]">
-                Automation queue
-              </p>
-            </div>
-            <UiBadge :tone="jobTone">
-              {{ jobsStore.jobs.length }} total
-            </UiBadge>
-          </div>
-          <div class="grid gap-1 text-xs text-[color:var(--muted)]">
-            <div class="flex items-center justify-between">
-              <span>Queued</span>
-              <span class="text-[color:var(--text)]">{{ jobCounts.pending }}</span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span>Running</span>
-              <span class="text-[color:var(--text)]">{{ jobCounts.running }}</span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span>Completed</span>
-              <span class="text-[color:var(--text)]">{{ jobCounts.completed }}</span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span>Failed</span>
-              <span class="text-[color:var(--text)]">{{ jobCounts.failed }}</span>
-            </div>
-          </div>
-          <p class="text-xs text-[color:var(--muted)]">
-            {{
-              lastJob
-                ? `Latest: ${lastJob.type} - ${formatDate(lastJob.createdAt)}`
-                : 'No job history yet.'
-            }}
-          </p>
-        </UiListRow>
-        <UiListRow as="article" class="space-y-2">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Machine
-              </p>
-              <p class="mt-1 text-base font-semibold text-[color:var(--text)]">
-                {{ machineName || 'n/a' }}
-              </p>
-            </div>
-            <UiBadge tone="neutral">Panel host</UiBadge>
-          </div>
-          <p class="text-xs text-[color:var(--muted)]">
-            Hostname pulled from the active panel URL.
-          </p>
-        </UiListRow>
-        <UiListRow as="article" class="space-y-2">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Tunnel
-              </p>
-              <p class="mt-1 text-base font-semibold text-[color:var(--text)]">
-                {{ tunnelHealth?.tunnel || 'n/a' }}
-              </p>
-            </div>
-            <UiBadge :tone="healthTone(tunnelHealth?.status)">
-              {{ tunnelHealth?.status || 'unknown' }}
-            </UiBadge>
-          </div>
-          <p class="text-xs text-[color:var(--muted)]">
-            {{ tunnelHealth?.detail || 'Cloudflared status unavailable.' }}
-          </p>
-        </UiListRow>
-        <UiListRow as="article" class="space-y-2">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Domain
-              </p>
-              <p class="mt-1 text-base font-semibold text-[color:var(--text)]">
-                {{ domainLabel }}
-              </p>
-            </div>
-            <UiBadge tone="neutral">Primary</UiBadge>
-          </div>
-          <p class="text-xs text-[color:var(--muted)]">
-            Used for new subdomains and host tunnel ingress.
-          </p>
-        </UiListRow>
-        <UiListRow as="article" class="space-y-2">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Last service
-              </p>
-              <p class="mt-1 text-base font-semibold text-[color:var(--text)]">
-                {{ lastServiceLabel }}
-              </p>
-            </div>
-            <UiBadge tone="neutral">Deploy</UiBadge>
-          </div>
-          <p class="text-xs text-[color:var(--muted)]">
-            {{ lastServiceTime }}
-          </p>
-        </UiListRow>
-      </div>
-      <UiListRow class="flex flex-wrap items-center justify-between gap-3" data-onboard="home-onboarding">
-        <div>
-          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-            Onboarding
-          </p>
-          <p class="mt-1 text-sm text-[color:var(--muted)]">
-            Finish host setup to unlock host tunnel automation and DNS updates.
-          </p>
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <UiButton :as="RouterLink" to="/host-settings" variant="primary" size="sm">
-            Configure host
-          </UiButton>
-          <UiButton variant="ghost" size="sm" @click="startOnboarding">
-            View guide
-          </UiButton>
-        </div>
-      </UiListRow>
-    </UiPanel>
+  <HostStatusPanel
+    :machine-name="machineName"
+    :docker-health="dockerHealth"
+    :tunnel-health="tunnelHealth"
+    :settings="settings"
+    :host-loading="hostLoading"
+    :settings-error="settingsError"
+    :jobs-error="jobsStore.error"
+    :projects-error="projectsStore.error"
+    :job-counts="jobCounts"
+    :last-job="lastJob"
+    :last-project="lastProject"
+    @refresh="refreshAll"
+    @start-onboarding="startOnboarding"
+  />
+  <hr />
     <section class="space-y-6" data-onboard="home-quick-deploy">
       <div class="flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -769,439 +510,18 @@ watch(
         </UiButton>
       </UiPanel>
       <div class="grid gap-6 lg:grid-cols-2">
-        <UiPanel as="article" variant="raise" class="space-y-6 p-6">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Templates
-              </p>
-              <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
-                GitHub-backed stacks
-              </h3>
-              <p class="mt-2 text-sm text-[color:var(--muted)]">
-                Create new repos from templates or deploy existing folders.
-              </p>
-            </div>
-            <UiButton :as="RouterLink" to="/github" variant="ghost" size="sm">
-              GitHub settings
-            </UiButton>
-          </div>
-          <div class="grid gap-4 sm:grid-cols-2">
-            <UiPanel
-              v-for="card in templateCards"
-              :key="card.id"
-              :variant="selectedTemplateCard === card.id ? 'raise' : 'soft'"
-              class="flex h-full flex-col gap-4 p-4 text-left transition"
-              :class="selectedTemplateCard === card.id ? 'border-[color:var(--accent)]' : ''"
-            >
-              <div class="flex items-start justify-between gap-3">
-                <div>
-                  <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                    Template
-                  </p>
-                  <h4 class="mt-2 text-base font-semibold text-[color:var(--text)]">
-                    {{ card.title }}
-                  </h4>
-                  <p class="mt-2 text-xs text-[color:var(--muted)]">
-                    {{ card.description }}
-                  </p>
-                </div>
-                <UiBadge :tone="selectedTemplateCard === card.id ? 'ok' : 'neutral'">
-                  {{ selectedTemplateCard === card.id ? 'Selected' : 'Ready' }}
-                </UiBadge>
-              </div>
-              <div class="flex items-center gap-2 text-xs text-[color:var(--muted)]">
-                <svg
-                  class="h-3.5 w-3.5 text-[color:var(--muted-2)]"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.6"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M10 13a5 5 0 0 1 0-7l2-2a5 5 0 0 1 7 7l-2 2" />
-                  <path d="M14 11a5 5 0 0 1 0 7l-2 2a5 5 0 0 1-7-7l2-2" />
-                </svg>
-                <a
-                  v-if="templateRepoUrl"
-                  :href="templateRepoUrl"
-                  target="_blank"
-                  rel="noreferrer"
-                  class="text-[color:var(--text)] transition hover:text-[color:var(--accent-ink)]"
-                >
-                  {{ templateRepoLabel }}
-                </a>
-                <span v-else>{{ templateRepoLabel }}</span>
-              </div>
-              <UiButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                @click="selectTemplateCard(card.id)"
-              >
-                {{ selectedTemplateCard === card.id ? 'Hide form' : card.actionLabel }}
-              </UiButton>
-            </UiPanel>
-          </div>
-          <UiPanel
-            v-if="selectedTemplateCard === 'create'"
-            as="form"
-            variant="soft"
-            class="space-y-4 p-4"
-            @submit.prevent="submitTemplate"
-          >
-            <div class="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                  Create from template
-                </p>
-                <p class="mt-1 text-xs text-[color:var(--muted)]">
-                  Template source: {{ templateRepoLabel }}
-                </p>
-              </div>
-              <UiButton type="button" variant="ghost" size="xs" @click="selectedTemplateCard = null">
-                Back to cards
-              </UiButton>
-            </div>
-            <label class="grid gap-2 text-sm">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Project name
-              </span>
-              <UiInput
-                v-model="templateForm.name"
-                type="text"
-                placeholder="warp-ops"
-                :disabled="templateState.loading"
-              />
-            </label>
-            <label class="grid gap-2 text-sm">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Subdomain (optional)
-              </span>
-              <UiInput
-                v-model="templateForm.subdomain"
-                type="text"
-                placeholder="warp-ops"
-                :disabled="templateState.loading"
-              />
-            </label>
-            <div class="grid gap-3 sm:grid-cols-2">
-              <label class="grid gap-2 text-sm">
-                <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                  Proxy port
-                </span>
-                <UiInput
-                  v-model="templateForm.proxyPort"
-                  type="text"
-                  placeholder="80"
-                  :disabled="templateState.loading"
-                />
-              </label>
-              <label class="grid gap-2 text-sm">
-                <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                  Database port
-                </span>
-                <UiInput
-                  v-model="templateForm.dbPort"
-                  type="text"
-                  placeholder="5432"
-                  :disabled="templateState.loading"
-                />
-              </label>
-            </div>
-            <UiInlineFeedback v-if="templateState.error" tone="error">
-              {{ templateState.error }}
-            </UiInlineFeedback>
-            <UiInlineFeedback v-if="templateState.success" tone="ok">
-              {{ templateState.success }}
-            </UiInlineFeedback>
-            <div class="flex flex-wrap items-center gap-3">
-              <UiButton
-                type="submit"
-                variant="primary"
-                :disabled="templateState.loading || !isAuthenticated"
-              >
-                {{ templateState.loading ? 'Queueing...' : 'Queue template job' }}
-              </UiButton>
-              <UiButton
-                v-if="templateState.jobId"
-                :as="RouterLink"
-                :to="`/jobs/${templateState.jobId}`"
-                variant="ghost"
-              >
-                View job log
-              </UiButton>
-            </div>
-          </UiPanel>
-          <UiPanel
-            v-if="selectedTemplateCard === 'existing'"
-            as="form"
-            variant="soft"
-            class="space-y-4 p-4"
-            @submit.prevent="submitExisting"
-          >
-            <div class="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                  Deploy existing
-                </p>
-                <p class="mt-1 text-xs text-[color:var(--muted)]">
-                  Use a local template folder and assign a new subdomain.
-                </p>
-              </div>
-              <div class="flex items-center gap-2">
-                <UiButton type="button" variant="ghost" size="xs" @click="selectedTemplateCard = null">
-                  Back to cards
-                </UiButton>
-                <UiButton type="button" variant="ghost" size="xs" @click="loadLocalProjects">
-                  Refresh list
-                </UiButton>
-              </div>
-            </div>
-            <label class="grid gap-2 text-sm">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Project folder
-              </span>
-              <UiInput
-                v-model="existingForm.name"
-                list="local-projects"
-                type="text"
-                placeholder="template-folder"
-                :disabled="existingState.loading"
-              />
-              <datalist id="local-projects">
-                <option v-for="project in localProjects" :key="project.name" :value="project.name" />
-              </datalist>
-              <p v-if="localLoading" class="text-xs text-[color:var(--muted)]">
-                Loading local templates...
-              </p>
-              <p v-else-if="localError" class="text-xs text-[color:var(--danger)]">
-                {{ localError }}
-              </p>
-            </label>
-            <label class="grid gap-2 text-sm">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Subdomain
-              </span>
-              <UiInput
-                v-model="existingForm.subdomain"
-                type="text"
-                placeholder="warp-ops"
-                :disabled="existingState.loading"
-              />
-            </label>
-            <label class="grid gap-2 text-sm">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Host port
-              </span>
-              <UiInput
-                v-model="existingForm.port"
-                type="text"
-                placeholder="80"
-                :disabled="existingState.loading"
-              />
-            </label>
-            <UiInlineFeedback v-if="existingState.error" tone="error">
-              {{ existingState.error }}
-            </UiInlineFeedback>
-            <UiInlineFeedback v-if="existingState.success" tone="ok">
-              {{ existingState.success }}
-            </UiInlineFeedback>
-            <div class="flex flex-wrap items-center gap-3">
-              <UiButton
-                type="submit"
-                variant="primary"
-                :disabled="existingState.loading || !isAuthenticated"
-              >
-                {{ existingState.loading ? 'Queueing...' : 'Queue deploy job' }}
-              </UiButton>
-              <UiButton
-                v-if="existingState.jobId"
-                :as="RouterLink"
-                :to="`/jobs/${existingState.jobId}`"
-                variant="ghost"
-              >
-                View job log
-              </UiButton>
-            </div>
-          </UiPanel>
-        </UiPanel>
-        <UiPanel as="article" variant="raise" class="space-y-6 p-6">
-          <div>
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Services
-            </p>
-            <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
-              Quick tunnel forwards
-            </h3>
-            <p class="mt-2 text-sm text-[color:var(--muted)]">
-              Expose a running port through the host tunnel service instantly.
-            </p>
-          </div>
-          <div class="grid gap-4 sm:grid-cols-2 overflow-y-auto" style="max-height: calc(2 * (theme('spacing.40') + theme('spacing.4')))">
-            <UiPanel
-              v-for="card in serviceCards"
-              :key="card.id"
-              :variant="selectedServiceCard === card.id ? 'raise' : 'soft'"
-              class="flex h-full flex-col gap-4 p-4 text-left transition"
-              :class="selectedServiceCard === card.id ? 'border-[color:var(--accent)]' : ''"
-            >
-              <div class="flex items-start justify-between gap-3">
-                <div>
-                  <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                    Service
-                  </p>
-                  <h4 class="mt-2 text-base font-semibold text-[color:var(--text)]">
-                    {{ card.name }}
-                  </h4>
-                  <p class="mt-2 text-xs text-[color:var(--muted)]">
-                    {{ card.description }}
-                  </p>
-                </div>
-                <UiBadge :tone="selectedServiceCard === card.id ? 'ok' : 'neutral'">
-                  {{ selectedServiceCard === card.id ? 'Selected' : card.kind === 'custom' ? 'Custom' : 'Preset' }}
-                </UiBadge>
-              </div>
-              <div class="flex flex-wrap items-center gap-2 text-xs text-[color:var(--muted)]">
-                <span v-if="card.subdomain">subdomain: {{ card.subdomain }}</span>
-                <span v-if="card.port">port: {{ card.port }}</span>
-              </div>
-              <div class="flex items-center gap-2 text-xs text-[color:var(--muted)]">
-                <svg
-                  class="h-3.5 w-3.5 text-[color:var(--muted-2)]"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.6"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M10 13a5 5 0 0 1 0-7l2-2a5 5 0 0 1 7 7l-2 2" />
-                  <path d="M14 11a5 5 0 0 1 0 7l-2 2a5 5 0 0 1-7-7l2-2" />
-                </svg>
-                <a
-                  :href="card.repoUrl"
-                  target="_blank"
-                  rel="noreferrer"
-                  class="text-[color:var(--text)] transition hover:text-[color:var(--accent-ink)]"
-                >
-                  {{ card.repoLabel }}
-                </a>
-              </div>
-              <UiButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                @click="selectServiceCard(card)"
-              >
-                {{ selectedServiceCard === card.id ? 'Hide form' : 'Select service' }}
-              </UiButton>
-            </UiPanel>
-          </div>
-          <UiPanel
-            v-if="selectedService"
-            as="form"
-            variant="soft"
-            class="space-y-4 p-4"
-            @submit.prevent="submitQuick"
-          >
-            <div class="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                  Forward {{ selectedService.name }}
-                </p>
-                <p class="mt-1 text-xs text-[color:var(--muted)]">
-                  {{ selectedService.description }}
-                </p>
-              </div>
-              <UiButton type="button" variant="ghost" size="xs" @click="selectedServiceCard = null">
-                Back to cards
-              </UiButton>
-            </div>
-            <label class="grid gap-2 text-sm">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Subdomain
-              </span>
-              <UiInput
-                v-model="quickForm.subdomain"
-                type="text"
-                placeholder="preview"
-                :disabled="quickState.loading"
-              />
-            </label>
-            <label class="grid gap-2 text-sm">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Local port
-              </span>
-              <UiInput
-                v-model="quickForm.port"
-                type="text"
-                placeholder="5173"
-                :disabled="quickState.loading"
-              />
-              <p class="text-xs text-[color:var(--muted)]">
-                Host port exposed by Docker on this machine.
-              </p>
-            </label>
-            <label class="grid gap-2 text-sm">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Container image (optional)
-              </span>
-              <UiInput
-                v-model="quickForm.image"
-                type="text"
-                placeholder="excalidraw/excalidraw:latest"
-                :disabled="quickState.loading"
-              />
-              <p class="text-xs text-[color:var(--muted)]">
-                Leave blank to use the default image.
-              </p>
-            </label>
-            <label class="grid gap-2 text-sm">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Container port (optional)
-              </span>
-              <UiInput
-                v-model="quickForm.containerPort"
-                type="text"
-                placeholder="80"
-                :disabled="quickState.loading"
-              />
-              <p class="text-xs text-[color:var(--muted)]">
-                Port inside the container (default 80). Host port maps to this.
-              </p>
-            </label>
-            <UiInlineFeedback v-if="quickState.error" tone="error">
-              {{ quickState.error }}
-            </UiInlineFeedback>
-            <UiInlineFeedback v-if="quickState.success" tone="ok">
-              {{ quickState.success }}
-            </UiInlineFeedback>
-            <div class="flex flex-wrap items-center gap-3">
-              <UiButton
-                type="submit"
-                variant="primary"
-                :disabled="quickState.loading || !isAuthenticated"
-              >
-                {{ quickState.loading ? 'Queueing...' : 'Forward service' }}
-              </UiButton>
-              <UiButton
-                v-if="quickState.jobId"
-                :as="RouterLink"
-                :to="`/jobs/${quickState.jobId}`"
-                variant="ghost"
-              >
-                View job log
-              </UiButton>
-            </div>
-          </UiPanel>
-        </UiPanel>
+        <TemplateCardsSection
+          :catalog="catalog"
+          :catalog-error="catalogError"
+          :selected-card="selectedTemplateCard"
+          @select-card="selectTemplateCard"
+        />
+        <ServiceCardsSection
+          :selected-card-id="selectedServiceCard"
+          @select-card="selectServiceCard"
+        />
       </div>
     </section>
-  </section>
   <UiOnboardingOverlay
     v-model="onboardingOpen"
     v-model:stepIndex="onboardingStep"
@@ -1209,4 +529,240 @@ watch(
     @finish="markOnboardingComplete"
     @skip="markOnboardingComplete"
   />
+  <UiFormSidePanel
+    v-model="templateFormOpen"
+    title="Create from template"
+  >
+    <form class="space-y-5" @submit.prevent="submitTemplate">
+      <div class="space-y-2">
+        <p class="text-xs text-[color:var(--muted)]">
+          Create a new GitHub repo from your template and deploy it locally with automatic port configuration.
+        </p>
+        <p class="text-xs text-[color:var(--muted)]">
+          Template source: {{ templateRepoLabel }}
+        </p>
+      </div>
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+          Project name <span class="text-[color:var(--danger)]">*</span>
+        </span>
+        <UiInput
+          v-model="templateForm.name"
+          type="text"
+          placeholder="my-project"
+          required
+          :disabled="templateState.loading"
+        />
+        <p class="text-xs text-[color:var(--muted)]">
+          Name for the GitHub repo and local folder.
+        </p>
+      </label>
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+          Subdomain <span class="text-[color:var(--danger)]">*</span>
+        </span>
+        <UiInput
+          v-model="templateForm.subdomain"
+          type="text"
+          placeholder="my-project"
+          required
+          :disabled="templateState.loading"
+        />
+        <p class="text-xs text-[color:var(--muted)]">
+          Subdomain for web access via your Cloudflare tunnel.
+        </p>
+      </label>
+      <UiInlineFeedback v-if="templateState.error" tone="error">
+        {{ templateState.error }}
+      </UiInlineFeedback>
+      <UiInlineFeedback v-if="templateState.success" tone="ok">
+        {{ templateState.success }}
+      </UiInlineFeedback>
+      <div class="flex flex-wrap items-center gap-3">
+        <UiButton
+          type="submit"
+          variant="primary"
+          :disabled="templateState.loading || !isAuthenticated"
+        >
+          {{ templateState.loading ? 'Queueing...' : 'Queue template job' }}
+        </UiButton>
+        <UiButton
+          v-if="templateState.jobId"
+          :as="RouterLink"
+          :to="`/jobs/${templateState.jobId}`"
+          variant="ghost"
+        >
+          View job log
+        </UiButton>
+      </div>
+    </form>
+  </UiFormSidePanel>
+  <UiFormSidePanel
+    v-model="existingFormOpen"
+    title="Forward localhost service"
+  >
+    <form class="space-y-5" @submit.prevent="submitExisting">
+      <div class="space-y-2">
+        <p class="text-xs text-[color:var(--muted)]">
+          Forward any running localhost service (Docker or not) through your Cloudflare tunnel for web access.
+        </p>
+      </div>
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+          Service name <span class="text-[color:var(--danger)]">*</span>
+        </span>
+        <UiInput
+          v-model="existingForm.name"
+          type="text"
+          placeholder="my-service"
+          required
+          :disabled="existingState.loading"
+        />
+        <p class="text-xs text-[color:var(--muted)]">
+          Internal identifier for tracking this forwarded service.
+        </p>
+      </label>
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+          Subdomain <span class="text-[color:var(--danger)]">*</span>
+        </span>
+        <UiInput
+          v-model="existingForm.subdomain"
+          type="text"
+          placeholder="my-service"
+          required
+          :disabled="existingState.loading"
+        />
+        <p class="text-xs text-[color:var(--muted)]">
+          Subdomain for web access via your Cloudflare tunnel.
+        </p>
+      </label>
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+          Running at (localhost port) <span class="text-[color:var(--danger)]">*</span>
+        </span>
+        <UiInput
+          v-model="existingForm.port"
+          type="text"
+          placeholder="3000"
+          required
+          :disabled="existingState.loading"
+        />
+        <p class="text-xs text-[color:var(--muted)]">
+          The localhost port where your service is currently running.
+        </p>
+      </label>
+      <UiInlineFeedback v-if="existingState.error" tone="error">
+        {{ existingState.error }}
+      </UiInlineFeedback>
+      <UiInlineFeedback v-if="existingState.success" tone="ok">
+        {{ existingState.success }}
+      </UiInlineFeedback>
+      <div class="flex flex-wrap items-center gap-3">
+        <UiButton
+          type="submit"
+          variant="primary"
+          :disabled="existingState.loading || !isAuthenticated"
+        >
+          {{ existingState.loading ? 'Queueing...' : 'Queue forward job' }}
+        </UiButton>
+        <UiButton
+          v-if="existingState.jobId"
+          :as="RouterLink"
+          :to="`/jobs/${existingState.jobId}`"
+          variant="ghost"
+        >
+          View job log
+        </UiButton>
+      </div>
+    </form>
+  </UiFormSidePanel>
+  <UiFormSidePanel
+    v-model="quickFormOpen"
+    :title="selectedServiceName ? `Forward ${selectedServiceName}` : 'Quick service'"
+  >
+    <form class="space-y-5" @submit.prevent="submitQuick">
+      <div class="space-y-2">
+        <p class="text-xs text-[color:var(--muted)]">
+          Expose a running port through the host tunnel service instantly.
+        </p>
+      </div>
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+          Subdomain
+        </span>
+        <UiInput
+          v-model="quickForm.subdomain"
+          type="text"
+          placeholder="preview"
+          :disabled="quickState.loading"
+        />
+      </label>
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+          Local port
+        </span>
+        <UiInput
+          v-model="quickForm.port"
+          type="text"
+          placeholder="5173"
+          :disabled="quickState.loading"
+        />
+        <p class="text-xs text-[color:var(--muted)]">
+          Host port exposed by Docker on this machine.
+        </p>
+      </label>
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+          Container image (optional)
+        </span>
+        <UiInput
+          v-model="quickForm.image"
+          type="text"
+          placeholder="excalidraw/excalidraw:latest"
+          :disabled="quickState.loading"
+        />
+        <p class="text-xs text-[color:var(--muted)]">
+          Leave blank to use the default image.
+        </p>
+      </label>
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+          Container port (optional)
+        </span>
+        <UiInput
+          v-model="quickForm.containerPort"
+          type="text"
+          placeholder="80"
+          :disabled="quickState.loading"
+        />
+        <p class="text-xs text-[color:var(--muted)]">
+          Port inside the container (default 80). Host port maps to this.
+        </p>
+      </label>
+      <UiInlineFeedback v-if="quickState.error" tone="error">
+        {{ quickState.error }}
+      </UiInlineFeedback>
+      <UiInlineFeedback v-if="quickState.success" tone="ok">
+        {{ quickState.success }}
+      </UiInlineFeedback>
+      <div class="flex flex-wrap items-center gap-3">
+        <UiButton
+          type="submit"
+          variant="primary"
+          :disabled="quickState.loading || !isAuthenticated"
+        >
+          {{ quickState.loading ? 'Queueing...' : 'Forward service' }}
+        </UiButton>
+        <UiButton
+          v-if="quickState.jobId"
+          :as="RouterLink"
+          :to="`/jobs/${quickState.jobId}`"
+          variant="ghost"
+        >
+          View job log
+        </UiButton>
+      </div>
+    </form>
+  </UiFormSidePanel>
 </template>

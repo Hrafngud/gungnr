@@ -107,6 +107,8 @@ const retryJob = async (job: Job) => {
       </UiButton>
     </UiPanel>
 
+    <hr />
+
     <UiState v-if="jobsStore.error" tone="error">
       {{ jobsStore.error }}
     </UiState>

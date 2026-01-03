@@ -72,6 +72,8 @@ const formatMetadata = (raw: string) => {
       </UiButton>
     </UiPanel>
 
+    <hr />
+
     <UiState v-if="auditStore.error" tone="error">
       {{ auditStore.error }}
     </UiState>
