@@ -40,17 +40,6 @@ func (r *GormJobRepository) Get(ctx context.Context, id uint) (*models.Job, erro
 	return &job, nil
 }
 
-func (r *GormJobRepository) GetByHostToken(ctx context.Context, token string) (*models.Job, error) {
-	var job models.Job
-	if err := r.db.WithContext(ctx).Where("host_token = ?", token).First(&job).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	return &job, nil
-}
-
 func (r *GormJobRepository) MarkRunning(ctx context.Context, id uint, startedAt time.Time) error {
 	return r.db.WithContext(ctx).Model(&models.Job{}).Where("id = ?", id).Updates(map[string]any{
 		"status":     "running",
@@ -67,23 +56,6 @@ func (r *GormJobRepository) MarkFinished(ctx context.Context, id uint, status st
 		updates["error"] = errMsg
 	}
 	return r.db.WithContext(ctx).Model(&models.Job{}).Where("id = ?", id).Updates(updates).Error
-}
-
-func (r *GormJobRepository) MarkHostTokenClaimed(ctx context.Context, id uint, claimedAt time.Time) error {
-	return r.db.WithContext(ctx).Model(&models.Job{}).
-		Where("id = ? AND host_token_claimed_at IS NULL", id).
-		Updates(map[string]any{
-			"host_token_claimed_at": claimedAt,
-		}).Error
-}
-
-func (r *GormJobRepository) MarkHostTokenUsed(ctx context.Context, id uint, usedAt time.Time) error {
-	return r.db.WithContext(ctx).Model(&models.Job{}).
-		Where("id = ?", id).
-		Updates(map[string]any{
-			"host_token_used_at": usedAt,
-			"host_token":         "",
-		}).Error
 }
 
 func (r *GormJobRepository) AppendLog(ctx context.Context, id uint, line string) error {

@@ -25,11 +25,8 @@ type JobRepository interface {
 	List(ctx context.Context) ([]models.Job, error)
 	Create(ctx context.Context, job *models.Job) error
 	Get(ctx context.Context, id uint) (*models.Job, error)
-	GetByHostToken(ctx context.Context, token string) (*models.Job, error)
 	MarkRunning(ctx context.Context, id uint, startedAt time.Time) error
 	MarkFinished(ctx context.Context, id uint, status string, finishedAt time.Time, errMsg string) error
-	MarkHostTokenClaimed(ctx context.Context, id uint, claimedAt time.Time) error
-	MarkHostTokenUsed(ctx context.Context, id uint, usedAt time.Time) error
 	AppendLog(ctx context.Context, id uint, line string) error
 }
 

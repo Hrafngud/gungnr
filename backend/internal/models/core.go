@@ -43,10 +43,6 @@ type Job struct {
 	Error              string `gorm:"type:text"`
 	Input              string `gorm:"type:text"`
 	LogLines           string `gorm:"type:text"`
-	HostToken          string `gorm:"size:64;index"`
-	HostTokenExpiresAt *time.Time
-	HostTokenClaimedAt *time.Time
-	HostTokenUsedAt    *time.Time
 }
 
 type AuditLog struct {

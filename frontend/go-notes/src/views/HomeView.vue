@@ -26,23 +26,13 @@ import type { Settings } from '@/types/settings'
 import type { GitHubCatalog } from '@/types/github'
 import type { OnboardingStep } from '@/types/onboarding'
 
+import { servicePresets } from '@/data/service-presets'
+
 type QueueState = {
   loading: boolean
   error: string | null
   success: string | null
   jobId: number | null
-}
-
-type ServicePreset = {
-  id: string
-  name: string
-  subdomain: string
-  port: number
-  image: string
-  containerPort: number
-  description: string
-  repoLabel: string
-  repoUrl: string
 }
 
 type ServiceCard = {
@@ -59,7 +49,6 @@ type ServiceCard = {
 }
 
 type TemplateCardId = 'create' | 'existing'
-
 type TemplateCard = {
   id: TemplateCardId
   title: string
@@ -83,7 +72,6 @@ const hostLoading = ref(false)
 const settingsError = ref<string | null>(null)
 const onboardingOpen = ref(false)
 const onboardingStep = ref(0)
-
 const localProjects = ref<LocalProject[]>([])
 const localLoading = ref(false)
 const localError = ref<string | null>(null)
@@ -130,64 +118,6 @@ const quickForm = reactive({
   image: '',
   containerPort: '',
 })
-
-const servicePresets: ServicePreset[] = [
-  {
-    id: 'excalidraw',
-    name: 'Excalidraw',
-    subdomain: 'draw',
-    port: 5000,
-    image: 'excalidraw/excalidraw:latest',
-    containerPort: 80,
-    description: 'Whiteboard collaboration',
-    repoLabel: 'excalidraw/excalidraw',
-    repoUrl: 'https://github.com/excalidraw/excalidraw',
-  },
-  {
-    id: 'openwebui',
-    name: 'OpenWebUI',
-    subdomain: 'openwebui',
-    port: 3000,
-    image: 'ghcr.io/open-webui/open-webui:main',
-    containerPort: 8080,
-    description: 'LLM web interface',
-    repoLabel: 'open-webui/open-webui',
-    repoUrl: 'https://github.com/open-webui/open-webui',
-  },
-  {
-    id: 'ollama',
-    name: 'Ollama',
-    subdomain: 'ollama',
-    port: 11434,
-    image: 'ollama/ollama:latest',
-    containerPort: 11434,
-    description: 'Local model runtime',
-    repoLabel: 'ollama/ollama',
-    repoUrl: 'https://github.com/ollama/ollama',
-  },
-  {
-    id: 'redis',
-    name: 'Redis',
-    subdomain: 'redis',
-    port: 6379,
-    image: 'redis:latest',
-    containerPort: 6379,
-    description: 'Cache + queue store',
-    repoLabel: 'redis/redis',
-    repoUrl: 'https://github.com/redis/redis',
-  },
-  {
-    id: 'postgres',
-    name: 'Postgres',
-    subdomain: 'postgres',
-    port: 5432,
-    image: 'postgres:latest',
-    containerPort: 5432,
-    description: 'Database service',
-    repoLabel: 'postgres/postgres',
-    repoUrl: 'https://github.com/postgres/postgres',
-  },
-]
 
 const templateCards: TemplateCard[] = [
   {
@@ -291,6 +221,7 @@ const lastProject = computed(() => {
 })
 
 const lastServiceLabel = computed(() => lastProject.value?.name ?? 'n/a')
+
 const lastServiceTime = computed(() => {
   if (!lastProject.value) return 'No deployments yet.'
   const stamp = lastProject.value.updatedAt || lastProject.value.createdAt
@@ -298,6 +229,7 @@ const lastServiceTime = computed(() => {
 })
 
 const domainLabel = computed(() => settings.value?.baseDomain || 'n/a')
+
 const templateRepoLabel = computed(() => {
   if (catalogError.value) return 'Template source unavailable'
   if (!catalog.value?.template?.configured) return 'Template source not configured'
@@ -306,6 +238,7 @@ const templateRepoLabel = computed(() => {
   if (!owner || !repo) return 'Template source not configured'
   return `${owner}/${repo}`
 })
+
 const templateRepoUrl = computed(() => {
   if (!catalog.value?.template?.configured) return ''
   const owner = catalog.value.template.owner
@@ -313,6 +246,7 @@ const templateRepoUrl = computed(() => {
   if (!owner || !repo) return ''
   return `https://github.com/${owner}/${repo}`
 })
+
 const selectedService = computed(() =>
   serviceCards.value.find((card) => card.id === selectedServiceCard.value) ?? null,
 )
@@ -356,31 +290,26 @@ const formatDate = (value?: string | null) => {
 const loadHostStatus = async () => {
   hostLoading.value = true
   settingsError.value = null
-
   const [dockerResult, tunnelResult, settingsResult] = await Promise.allSettled([
     healthApi.docker(),
     healthApi.tunnel(),
     settingsApi.get(),
   ])
-
   if (dockerResult.status === 'fulfilled') {
     dockerHealth.value = dockerResult.value.data
   } else {
     dockerHealth.value = { status: 'error', detail: apiErrorMessage(dockerResult.reason) }
   }
-
   if (tunnelResult.status === 'fulfilled') {
     tunnelHealth.value = tunnelResult.value.data
   } else {
     tunnelHealth.value = { status: 'error', detail: apiErrorMessage(tunnelResult.reason) }
   }
-
   if (settingsResult.status === 'fulfilled') {
     settings.value = settingsResult.value.data.settings
   } else {
     settingsError.value = apiErrorMessage(settingsResult.reason)
   }
-
   hostLoading.value = false
 }
 
@@ -425,7 +354,6 @@ const refreshAll = async () => {
 const submitTemplate = async () => {
   if (templateState.loading || !isAuthenticated.value) return
   resetState(templateState)
-
   if (!templateForm.name.trim()) {
     templateState.error = 'Project name is required.'
     return
@@ -436,7 +364,6 @@ const submitTemplate = async () => {
     templateState.error = 'Ports must be numeric.'
     return
   }
-
   templateState.loading = true
   try {
     const { data } = await projectsApi.createFromTemplate({
@@ -461,7 +388,6 @@ const submitTemplate = async () => {
 const submitExisting = async () => {
   if (existingState.loading || !isAuthenticated.value) return
   resetState(existingState)
-
   if (!existingForm.name.trim() || !existingForm.subdomain.trim()) {
     existingState.error = 'Project name and subdomain are required.'
     return
@@ -471,7 +397,6 @@ const submitExisting = async () => {
     existingState.error = 'Port must be numeric.'
     return
   }
-
   existingState.loading = true
   try {
     const { data } = await projectsApi.deployExisting({
@@ -495,7 +420,6 @@ const submitExisting = async () => {
 const submitQuick = async () => {
   if (quickState.loading || !isAuthenticated.value) return
   resetState(quickState)
-
   if (!quickForm.subdomain.trim()) {
     quickState.error = 'Subdomain is required.'
     return
@@ -511,7 +435,6 @@ const submitQuick = async () => {
     return
   }
   const image = quickForm.image.trim()
-
   quickState.loading = true
   try {
     const { data } = await projectsApi.quickService({
@@ -637,7 +560,6 @@ watch(
         </UiButton>
       </div>
     </div>
-
     <UiPanel variant="soft" class="space-y-4 p-4" data-onboard="home-status">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -652,19 +574,15 @@ watch(
           {{ hostLoading ? 'Refreshing' : 'Live snapshot' }}
         </UiBadge>
       </div>
-
       <UiState v-if="settingsError" tone="error">
         {{ settingsError }}
       </UiState>
-
       <UiState v-if="jobsStore.error" tone="error">
         {{ jobsStore.error }}
       </UiState>
-
       <UiState v-if="projectsStore.error" tone="error">
         {{ projectsStore.error }}
       </UiState>
-
       <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <UiListRow as="article" class="space-y-2">
           <div class="flex items-center justify-between gap-3">
@@ -684,7 +602,6 @@ watch(
             {{ dockerHealth?.detail || 'No container data available yet.' }}
           </p>
         </UiListRow>
-
         <UiListRow as="article" class="space-y-2">
           <div class="flex items-center justify-between gap-3">
             <div>
@@ -725,7 +642,6 @@ watch(
             }}
           </p>
         </UiListRow>
-
         <UiListRow as="article" class="space-y-2">
           <div class="flex items-center justify-between gap-3">
             <div>
@@ -742,7 +658,6 @@ watch(
             Hostname pulled from the active panel URL.
           </p>
         </UiListRow>
-
         <UiListRow as="article" class="space-y-2">
           <div class="flex items-center justify-between gap-3">
             <div>
@@ -761,7 +676,6 @@ watch(
             {{ tunnelHealth?.detail || 'Cloudflared status unavailable.' }}
           </p>
         </UiListRow>
-
         <UiListRow as="article" class="space-y-2">
           <div class="flex items-center justify-between gap-3">
             <div>
@@ -778,7 +692,6 @@ watch(
             Used for new subdomains and host tunnel ingress.
           </p>
         </UiListRow>
-
         <UiListRow as="article" class="space-y-2">
           <div class="flex items-center justify-between gap-3">
             <div>
@@ -796,7 +709,6 @@ watch(
           </p>
         </UiListRow>
       </div>
-
       <UiListRow class="flex flex-wrap items-center justify-between gap-3" data-onboard="home-onboarding">
         <div>
           <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
@@ -816,7 +728,6 @@ watch(
         </div>
       </UiListRow>
     </UiPanel>
-
     <section class="space-y-6" data-onboard="home-quick-deploy">
       <div class="flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -831,7 +742,6 @@ watch(
           </p>
         </div>
       </div>
-
       <UiPanel
         v-if="!isAuthenticated"
         variant="soft"
@@ -842,7 +752,6 @@ watch(
           Sign in
         </UiButton>
       </UiPanel>
-
       <UiPanel
         variant="soft"
         class="flex flex-wrap items-center justify-between gap-3 p-4 text-xs text-[color:var(--muted)]"
@@ -859,7 +768,6 @@ watch(
           Open overview
         </UiButton>
       </UiPanel>
-
       <div class="grid gap-6 lg:grid-cols-2">
         <UiPanel as="article" variant="raise" class="space-y-6 p-6">
           <div class="flex flex-wrap items-center justify-between gap-3">
@@ -878,7 +786,6 @@ watch(
               GitHub settings
             </UiButton>
           </div>
-
           <div class="grid gap-4 sm:grid-cols-2">
             <UiPanel
               v-for="card in templateCards"
@@ -938,7 +845,6 @@ watch(
               </UiButton>
             </UiPanel>
           </div>
-
           <UiPanel
             v-if="selectedTemplateCard === 'create'"
             as="form"
@@ -1005,14 +911,12 @@ watch(
                 />
               </label>
             </div>
-
             <UiInlineFeedback v-if="templateState.error" tone="error">
               {{ templateState.error }}
             </UiInlineFeedback>
             <UiInlineFeedback v-if="templateState.success" tone="ok">
               {{ templateState.success }}
             </UiInlineFeedback>
-
             <div class="flex flex-wrap items-center gap-3">
               <UiButton
                 type="submit"
@@ -1031,7 +935,6 @@ watch(
               </UiButton>
             </div>
           </UiPanel>
-
           <UiPanel
             v-if="selectedTemplateCard === 'existing'"
             as="form"
@@ -1057,7 +960,6 @@ watch(
                 </UiButton>
               </div>
             </div>
-
             <label class="grid gap-2 text-sm">
               <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                 Project folder
@@ -1079,7 +981,6 @@ watch(
                 {{ localError }}
               </p>
             </label>
-
             <label class="grid gap-2 text-sm">
               <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                 Subdomain
@@ -1091,7 +992,6 @@ watch(
                 :disabled="existingState.loading"
               />
             </label>
-
             <label class="grid gap-2 text-sm">
               <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                 Host port
@@ -1103,14 +1003,12 @@ watch(
                 :disabled="existingState.loading"
               />
             </label>
-
             <UiInlineFeedback v-if="existingState.error" tone="error">
               {{ existingState.error }}
             </UiInlineFeedback>
             <UiInlineFeedback v-if="existingState.success" tone="ok">
               {{ existingState.success }}
             </UiInlineFeedback>
-
             <div class="flex flex-wrap items-center gap-3">
               <UiButton
                 type="submit"
@@ -1130,7 +1028,6 @@ watch(
             </div>
           </UiPanel>
         </UiPanel>
-
         <UiPanel as="article" variant="raise" class="space-y-6 p-6">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
@@ -1143,8 +1040,7 @@ watch(
               Expose a running port through the host tunnel service instantly.
             </p>
           </div>
-
-          <div class="grid gap-4 sm:grid-cols-2">
+          <div class="grid gap-4 sm:grid-cols-2 overflow-y-auto" style="max-height: calc(2 * (theme('spacing.40') + theme('spacing.4')))">
             <UiPanel
               v-for="card in serviceCards"
               :key="card.id"
@@ -1205,7 +1101,6 @@ watch(
               </UiButton>
             </UiPanel>
           </div>
-
           <UiPanel
             v-if="selectedService"
             as="form"
@@ -1279,14 +1174,12 @@ watch(
                 Port inside the container (default 80). Host port maps to this.
               </p>
             </label>
-
             <UiInlineFeedback v-if="quickState.error" tone="error">
               {{ quickState.error }}
             </UiInlineFeedback>
             <UiInlineFeedback v-if="quickState.success" tone="ok">
               {{ quickState.success }}
             </UiInlineFeedback>
-
             <div class="flex flex-wrap items-center gap-3">
               <UiButton
                 type="submit"
@@ -1309,7 +1202,6 @@ watch(
       </div>
     </section>
   </section>
-
   <UiOnboardingOverlay
     v-model="onboardingOpen"
     v-model:stepIndex="onboardingStep"

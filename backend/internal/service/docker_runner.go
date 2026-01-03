@@ -72,12 +72,14 @@ func (r *DockerRunner) RunContainer(ctx context.Context, logger jobs.Logger, req
 		return fmt.Errorf("host port %d is already in use", req.HostPort)
 	}
 
-	exists, err := r.containerExists(ctx, name)
+	names, err := r.listContainerNames(ctx)
 	if err != nil {
 		return err
 	}
-	if exists {
-		return fmt.Errorf("container name %q already exists", name)
+	uniqueName := ensureUniqueContainerName(name, names)
+	if uniqueName != name {
+		logger.Logf("container name %q already exists; using %q", name, uniqueName)
+		name = uniqueName
 	}
 
 	logger.Logf("starting docker container %s (%s)", name, image)
@@ -120,17 +122,29 @@ func (r *DockerRunner) ensureDocker(ctx context.Context) error {
 }
 
 func (r *DockerRunner) containerExists(ctx context.Context, name string) (bool, error) {
+	names, err := r.listContainerNames(ctx)
+	if err != nil {
+		return false, err
+	}
+	_, ok := names[name]
+	return ok, nil
+}
+
+func (r *DockerRunner) listContainerNames(ctx context.Context) (map[string]struct{}, error) {
 	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "--format", "{{.Names}}")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return false, fmt.Errorf("docker ps failed: %w: %s", err, strings.TrimSpace(string(output)))
+		return nil, fmt.Errorf("docker ps failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
+	names := make(map[string]struct{})
 	for _, line := range strings.Split(string(output), "\n") {
-		if strings.TrimSpace(line) == name {
-			return true, nil
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
 		}
+		names[trimmed] = struct{}{}
 	}
-	return false, nil
+	return names, nil
 }
 
 func isPortInUse(ctx context.Context, port int) (bool, error) {
@@ -219,4 +233,16 @@ func sanitizeContainerName(name string) string {
 		return ""
 	}
 	return sanitized
+}
+
+func ensureUniqueContainerName(base string, existing map[string]struct{}) string {
+	if _, ok := existing[base]; !ok {
+		return base
+	}
+	for i := 1; ; i++ {
+		candidate := fmt.Sprintf("%s%d", base, i)
+		if _, ok := existing[candidate]; !ok {
+			return candidate
+		}
+	}
 }

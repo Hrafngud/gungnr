@@ -26,6 +26,7 @@
   --success: #6ed3a2;
   --warning: #e4b764;
   --danger: #f07f7f;
+  --danger-strong: #f39f9f;
   --success-rgb: 110, 211, 162;
   --warning-rgb: 228, 183, 100;
   --danger-rgb: 240, 127, 127;
@@ -45,6 +46,13 @@ body {
   min-height: 100vh;
   color: var(--text);
   background: var(--bg);
+}
+
+hr {
+  border: 0;
+  height: 1px;
+  background: var(--border);
+  margin: 3rem 0;
 }
 
 a {
@@ -144,6 +152,17 @@ h3 {
 
 .btn-primary:hover {
   background: var(--accent-strong);
+}
+
+.btn-danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--bg);
+  box-shadow: none;
+}
+
+.btn-danger:hover {
+  background: var(--danger-strong);
 }
 
 .btn-ghost {
@@ -735,6 +754,17 @@ h3 {
   opacity: 0;
 }
 
+.panel-slide-enter-active,
+.panel-slide-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.panel-slide-enter-from,
+.panel-slide-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
 @media (max-width: 640px) {
   .toast-stack {
     top: 1rem;
@@ -754,7 +784,9 @@ h3 {
   }
   .toast-slide-enter-active,
   .toast-slide-leave-active,
-  .toast-slide-move {
+  .toast-slide-move,
+  .panel-slide-enter-active,
+  .panel-slide-leave-active {
     transition: none;
   }
 }

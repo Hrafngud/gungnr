@@ -110,6 +110,23 @@ func (s *HostService) StartContainerLogs(ctx context.Context, container string, 
 	return cmd, stdout, nil
 }
 
+func (s *HostService) StopContainer(ctx context.Context, container string) error {
+	return s.runDockerCommand(ctx, "stop", container)
+}
+
+func (s *HostService) RestartContainer(ctx context.Context, container string) error {
+	return s.runDockerCommand(ctx, "restart", container)
+}
+
+func (s *HostService) RemoveContainer(ctx context.Context, container string, removeVolumes bool) error {
+	args := []string{"rm", "-f"}
+	if removeVolumes {
+		args = append(args, "-v")
+	}
+	args = append(args, container)
+	return s.runDockerCommand(ctx, args...)
+}
+
 type dockerPSLine struct {
 	ID         string `json:"ID"`
 	Image      string `json:"Image"`
@@ -178,6 +195,15 @@ func parseDockerPorts(raw string) []DockerPortBinding {
 	}
 
 	return bindings
+}
+
+func (s *HostService) runDockerCommand(ctx context.Context, args ...string) error {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker %s failed: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func parseHostPort(raw string) (string, int) {
