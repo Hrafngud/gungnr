@@ -44,6 +44,18 @@
   - TODO: UX-REFINE-5: Simplify "Create from template" form (project name + subdomain only, auto-infer ports).
   - TODO: UX-REFINE-6: Clarify "Deploy existing" form to forward ANY localhost service (Docker or not) via Cloudflare-only approach.
   - NOTE: Backend planning for GitHub/Templates integration deferred for future discussion.
+- **NEW Backend + Host Enhancements (2026-01-03):**
+  - TODO: Implement GitHub template generation using App token + generate endpoint.
+  - TODO: Add template catalog (multiple repos) and local repo discovery for lifecycle actions.
+  - TODO: Implement Cloudflare-only forwarding for localhost services (no Docker).
+  - TODO: List running + stopped containers, add filters, and restart-only-stopped logic.
+  - TODO: Add Docker usage stats summary (disk usage + counts) to Host Settings.
+  - TODO: Update UI with action icons and template repo selector.
+  - TODO: Add project-based filters for containers/volumes/images to scope multi-container templates.
+  - TODO: Replace sidebar logo block with the existing GitHub auth indicator (move it from the current location into the sidebar header position).
+  - TODO: Add global loading overlay and iconography for refresh/edit/login/logout actions.
+  - TODO: Redirect to login on logout action.
+  - NOTE: All new flows should mirror `deploy.sh` behavior (port selection, compose patching, DNS/ingress updates, tunnel restart), but via API/UI.
 - DONE: Add root README runbook + Makefile; compose smoke test succeeded (warning: buildx plugin missing).
 - DONE: Add settings persistence + UI for base domain, GitHub token, Cloudflare token, and cloudflared config path (default to ~/.cloudflared/config.yml).
 - DONE: Surface running Docker containers and allow quick tunnel forwarding with subdomains.

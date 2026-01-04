@@ -5,51 +5,18 @@ import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
-import UiOnboardingOverlay from '@/components/ui/UiOnboardingOverlay.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiSkeleton from '@/components/ui/UiSkeleton.vue'
 import UiState from '@/components/ui/UiState.vue'
 import { githubApi } from '@/services/github'
 import { apiErrorMessage } from '@/services/api'
-import { useOnboardingStore } from '@/stores/onboarding'
 import type { GitHubCatalog } from '@/types/github'
-import type { OnboardingStep } from '@/types/onboarding'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
 const catalog = ref<GitHubCatalog | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
-const onboardingOpen = ref(false)
-const onboardingStep = ref(0)
-const onboardingStore = useOnboardingStore()
-
-const onboardingSteps: OnboardingStep[] = [
-  {
-    id: 'token',
-    title: 'Confirm GitHub token',
-    description: 'Add a token so template creation and catalog sync are available.',
-    target: "[data-onboard='github-token']",
-    links: [
-      {
-        label: 'GitHub tokens',
-        href: 'https://github.com/settings/tokens',
-      },
-    ],
-  },
-  {
-    id: 'templates',
-    title: 'Check template availability',
-    description: 'Review the template sources and allowlist status for deploy readiness.',
-    target: "[data-onboard='github-templates']",
-  },
-  {
-    id: 'host-settings',
-    title: 'Open host settings',
-    description: 'Jump to Host Settings to update tokens or allowlist rules.',
-    target: "[data-onboard='github-actions']",
-  },
-]
 
 const hasToken = computed(() => Boolean(catalog.value?.tokenConfigured))
 const templateConfigured = computed(() => Boolean(catalog.value?.template.configured))
@@ -144,21 +111,8 @@ const loadCatalog = async () => {
   }
 }
 
-const startOnboarding = () => {
-  onboardingStep.value = 0
-  onboardingOpen.value = true
-}
-
-const markOnboardingComplete = () => {
-  onboardingStore.updateState({ github: true })
-}
-
 onMounted(async () => {
   loadCatalog()
-  await onboardingStore.fetchState()
-  if (!onboardingStore.state.github) {
-    onboardingOpen.value = true
-  }
 })
 </script>
 
@@ -176,10 +130,7 @@ onMounted(async () => {
           Review token status and template availability for deploy workflows.
         </p>
       </div>
-      <div class="flex flex-wrap gap-3" data-onboard="github-actions">
-        <UiButton variant="ghost" size="sm" @click="startOnboarding">
-          View guide
-        </UiButton>
+      <div class="flex flex-wrap gap-3">
         <UiButton variant="ghost" size="sm" :disabled="loading" @click="loadCatalog">
           <span class="flex items-center gap-2">
             <UiInlineSpinner v-if="loading" />
@@ -199,7 +150,7 @@ onMounted(async () => {
     <hr />
 
     <div class="grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
-      <UiPanel as="article" class="space-y-5 p-6" data-onboard="github-token">
+      <UiPanel as="article" class="space-y-5 p-6">
         <div class="flex items-start justify-between gap-3">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
@@ -265,7 +216,7 @@ onMounted(async () => {
         </div>
       </UiPanel>
 
-      <UiPanel as="article" variant="raise" class="space-y-5 p-6" data-onboard="github-templates">
+      <UiPanel as="article" variant="raise" class="space-y-5 p-6">
         <div class="flex items-start justify-between gap-3">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
@@ -313,12 +264,5 @@ onMounted(async () => {
       </UiPanel>
     </div>
 
-    <UiOnboardingOverlay
-      v-model="onboardingOpen"
-      v-model:stepIndex="onboardingStep"
-      :steps="onboardingSteps"
-      @finish="markOnboardingComplete"
-      @skip="markOnboardingComplete"
-    />
   </section>
 </template>

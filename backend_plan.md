@@ -5,6 +5,7 @@ Status: Replace notes CRUD with Warp Panel API, job runner, and integrations (AP
 1) Scaffolding
 - Create folders: `cmd/server`, `internal/config`, `internal/db`, `internal/models`, `internal/repository`, `internal/service`, `internal/controller`, `internal/router`, `internal/middleware`, `internal/integrations`, `internal/jobs`.
 - Add main entry in `cmd/server/main.go`.
+  - Keep parity with `deploy.sh` behaviors (template generation, compose patching, cloudflared updates, DNS routing), but implemented via APIs.
 
 2) Dependencies and Config
 - Add Gin, GORM (postgres driver), pgx stdlib, viper/godotenv, testify.
@@ -35,6 +36,26 @@ Status: Replace notes CRUD with Warp Panel API, job runner, and integrations (AP
 - Cloudflared: local config preview + validation; update config.yml and restart host service safely.
   - Tunnel status: surface active tunnel and ingress entries.
   - Optional Docker tunnel path only for fully containerized hosts.
+ - Parity notes vs `deploy.sh`:
+   - Port selection: mimic `find_free_port` logic and avoid host/Docker conflicts.
+   - Ingress updates: preserve catch-all rule and avoid duplicate hostnames.
+   - Tunnel restart semantics: match the "restart to apply new ingress" flow.
+
+6.1) GitHub Template Generation (App Token)
+- Review GitHub docs for template generation using ref.tools (`/repositories/.../generate`).
+- Confirm token type and issuance flow: GitHub App installation token (not OAuth token).
+- Document required permissions: Repository administration/content for template + create repo, plus org access if needed.
+  - Capture exact scopes/permissions for: template read, repo creation, repo contents, workflows (if used).
+- Add config fields for GitHub App ID, installation ID, private key or token source (env + DB storage).
+  - Define storage strategy (env bootstrap, persisted settings, secrets handling).
+- Support owner selection (user vs org) and visibility in request payload.
+- Support `include_all_branches` when generating from template if needed.
+- Implement token minting/refresh and ensure scopes are logged for debugging.
+- Add template source allowlist (owner/repo) and enforce repo visibility rules.
+- Implement generate endpoint call with request validation (owner, template repo, new repo name, visibility).
+- Handle async repo creation readiness (polling/backoff before clone/deploy).
+- Add GitHub error handling with response payload snippets for debugging.
+ - Ensure generated repo name is safe and unique (lowercase, hyphenated, avoid collisions).
 
 7) Docker Runner Jobs
 - Add job types: `docker_run`, `docker_compose_up`.
@@ -56,6 +77,11 @@ Status: Replace notes CRUD with Warp Panel API, job runner, and integrations (AP
 - Projects: list, create-from-template, deploy-existing, quick-service.
 - Jobs: list, get status, get logs.
 - Containers: list, stop, restart, remove (with optional volume deletion), logs.
+- Containers: list running + stopped (include status), filter support.
+- Containers: filter by project ID/name and include volumes/images scoped to project.
+- Host repos: list local template projects for lifecycle actions (stop/restart).
+- Templates: list available template repos (from GitHub config + API).
+- Forward local service: create/update Cloudflare DNS + ingress for a given localhost port (no Docker).
 - Health: `/healthz`, `/health/docker`, `/health/tunnel`.
 - Onboarding: `GET /api/v1/onboarding` and `PATCH /api/v1/onboarding` (store completion per user).
 
@@ -64,6 +90,9 @@ Status: Replace notes CRUD with Warp Panel API, job runner, and integrations (AP
 - Never accept raw shell commands from the UI.
 - Use an allowlist for subdomain formats and template repo.
 - Ensure host tokens are single-use with short TTL.
+ - Validate template repo selection against allowlist (owner/name), no arbitrary repo URLs.
+ - Validate local repo discovery root path; prevent path traversal.
+ - Validate project-based filters via known labels and DB mappings only.
 
 11) Observability
 - Structured logs with request IDs.
@@ -73,3 +102,9 @@ Status: Replace notes CRUD with Warp Panel API, job runner, and integrations (AP
 12) Dockerization
 - Multi-stage Dockerfile for API.
 - Compose mounts for docker socket, templates dir, and cloudflared config.
+
+13) Host Resource Insights
+- Add Docker usage stats endpoint (disk usage, images/containers/volumes count).
+- Add basic host resource snapshot if feasible (optional CPU/memory via Docker API).
+ - Define data source (`docker system df` or Docker API) and include counts + total size.
+ - Keep response lightweight; avoid expensive calls on every page load.

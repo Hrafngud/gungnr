@@ -24,6 +24,8 @@ Status: Step 1 complete (theme tokens + AppShell). Page map + routing update com
 - Top bar for user/session actions and host status summary.
 - Footer with product info, links, and build metadata.
 - Horizontal margin between content and page edge is minimal (5%).
+- Replace the top sidebar logo/title block with a GitHub auth indicator (status + login/logout).
+  - Move the existing GitHub auth indicator into the sidebar header slot (no new indicator, just relocate).
 
 4) Routes and Information Architecture
 - `/login`: simple two-column layout, brief description left, GitHub auth button right, popup OAuth window.
@@ -44,6 +46,10 @@ Status: Step 1 complete (theme tokens + AppShell). Page map + routing update com
   - **Template forms clarification:**
     - "Create from template" form: Only Project name (required) and Subdomain (required, not optional). Remove Proxy Port and Database Port fields (auto-inferred by backend).
     - "Deploy existing" form: Renamed conceptually to forward ANY localhost service (Docker or not). Fields: Project name (identification), Subdomain (web exposure), Running At (localhost port). Cloudflare-only implementation, no Docker involvement required.
+  - **Template repo selector:**
+    - Add a repo selector list sourced from backend template catalog.
+    - Show multiple templates with repo owner/name + short description.
+    - Allow empty state when no templates are configured.
 - Overview: container list, job timeline, last activity (remove resources section).
 - Host Settings: cloudflared config path, token, tunnel setup status, validation and hints.
   - Move Running containers under Host integrations.
@@ -51,6 +57,11 @@ Status: Step 1 complete (theme tokens + AppShell). Page map + routing update com
   - The `FormSidePanel` should also contain the status indicators, presented as a compact grid with clamped long values.
   - **Cloudflared ingress preview should use a sidebar panel (like FormSidePanel) for visual cleanup.**
   - Running containers cards: remove tunnel forward input; add Stop/Restart/Remove/Logs actions and a destructive confirmation modal (with a two-step confirmation for volume deletion).
+  - Running containers list should also show stopped containers with filters (running/stopped/all).
+  - Add iconography to action buttons (stop/restart/remove/logs).
+  - Add basic Docker usage summary (disk used, images/containers/volumes count).
+  - Add project filters to scope containers/volumes for multi-container templates.
+  - Use project-aware labels (compose project/service) for consistent filtering UI.
 - Networking:
   - Tunnel status, routing status, Cloudflare health signals.
   - **'Expected DNS records' section should be a 4-column grid for compact information display.**
@@ -73,6 +84,14 @@ Status: Step 1 complete (theme tokens + AppShell). Page map + routing update com
 - Map new pages to existing settings/health APIs and add any missing endpoints as needed.
 - Add help modals with Cloudflare tunnel setup steps and links to the official docs (config.yml, route dns, run as a service).
 - Auto-redirect from login when `/auth/me` succeeds to avoid stuck login state.
+- Add template catalog API consumption and repo selector state in Home view.
+- Add Docker usage and container status filtering support in Host Settings.
+- Add project filtering support for containers/volumes in Host Settings and Overview.
+- Add a global loading overlay for page-level loads and critical actions.
+- Add iconography to refresh/edit/login/logout actions.
+- Redirect to login on logout.
+ - Global loading overlay should block page content until initial data load completes (not for every small request).
+ - Overlay must not hide error toasts or prevent retry actions when initial load fails.
 
 8) Testing and Quality
 - `npm run build` for smoke test.

@@ -17,11 +17,25 @@ Task breakdown (checklist):
 - [x] UI-REWORK-5: Refactor HomeView to a more concise, componentized approach. Break down the large view into smaller, reusable components (e.g., HostStatusPanel, TemplateCardsSection, ServiceCardsSection).
 - [x] UI-REWORK-6: Standardize sidebar animations for both navigation and form sidebars. Create smooth, consistent open/close animations with proper timing and easing.
 - [x] UX-REFINE-1: Quick Services improvements - Add service icons, search bar, fixed-height scrollable container matching Templates section height.
-- [ ] UX-REFINE-2: Redesign guidance system - Replace overlay-with-highlight with large-font contextual help on form field focus, positioned on left side opposite form, with external links (GitHub, Cloudflare) when applicable.
-- [ ] UX-REFINE-3: Ingress preview sidebar - Convert live ingress preview to a sidebar panel (like FormSidePanel) for visual cleanup in Networking and Host Settings.
+- [x] UX-REFINE-2: Redesign guidance system - Replace overlay-with-highlight with large-font contextual help on form field focus, positioned on left side opposite form, with external links (GitHub, Cloudflare) when applicable.
+- [x] UX-REFINE-3: Ingress preview sidebar - Convert live ingress preview to a sidebar panel (like FormSidePanel) for visual cleanup in Networking and Host Settings.
 - [x] UX-REFINE-4: Networking DNS grid - Convert 'Expected DNS records' section to a 4-column grid layout for compact info display.
 - [x] UX-REFINE-5: Template form clarification - Update 'Create from template' form to only include: Project name (required), Subdomain (required, not optional). Remove Proxy/DB port fields (auto-inferred).
 - [x] UX-REFINE-6: Deploy existing clarification - Update 'Deploy existing' form to forward ANY localhost service (Docker or not) with fields: Project name (identification), Subdomain (web exposure), Running At (localhost port). Cloudflare-only, no Docker involvement.
+- [ ] GITHUB-GEN-1: Review GitHub template generate docs with ref.tools and capture endpoint specifics + payloads.
+- [ ] GITHUB-GEN-2: Define GitHub App token requirements (permissions, installation flow, storage).
+- [ ] GITHUB-GEN-3: Add backend plan for template catalog + repo allowlist + generate endpoint workflow.
+- [ ] HOME-TEMPLATE-1: Add template repo selector and empty state in Home > Create from template.
+- [ ] HOME-TEMPLATE-2: Add local repo list for lifecycle actions (stop/restart) and clarify ownership.
+- [ ] FORWARD-LOCAL-1: Add backend + UI flow for forwarding localhost service via Cloudflare only (no Docker).
+- [ ] HOST-CONTAINERS-1: List running + stopped containers, add filter toggles, and restrict restart to stopped.
+- [ ] HOST-CONTAINERS-2: Add action icons for stop/restart/remove/logs.
+- [ ] HOST-DOCKER-1: Add basic Docker usage summary (disk usage + counts).
+- [ ] HOST-DOCKER-2: Add project-based filters for containers/volumes/images.
+- [ ] SIDEBAR-AUTH-1: Replace sidebar logo header with GitHub auth indicator.
+- [ ] UI-LOADING-1: Add global loading overlay for page-level loads.
+- [ ] UI-ICONS-1: Add iconography for refresh/edit/login/logout buttons.
+- [ ] AUTH-REDIRECT-1: Redirect to login on logout.
 
 Iteration log (append each session):
 - 2026-01-02: User initiated a major visual rework. Pivoting from previous tasks.
@@ -71,7 +85,31 @@ Iteration log (append each session):
     - Added header row with column labels.
     - Each DNS record now displays as a single row with all information visible at a glance.
     - Applied truncate to prevent long values from breaking the layout.
+- 2026-01-03 (Session 6): Completed UX-REFINE-2 and UX-REFINE-3.
+  - UX-REFINE-2: Replaced onboarding overlay with contextual field guidance on form focus.
+    - Added reusable UiFieldGuidance with left-side placement and external token links where needed.
+    - Wired guidance into all form fields in Home and Host Settings.
+    - Removed overlay-driven onboarding buttons from Home, Host Settings, Networking, and GitHub.
+  - UX-REFINE-3: Converted ingress previews into right-side panels.
+    - Added ingress preview side panels in Host Settings and Networking with refresh controls.
+    - Simplified the main layouts by removing inline preview panels.
+- 2026-01-03 (Session 7): Cleanup + copy review.
+  - Removed all onboarding overlay/store/service/type references and onboarding CSS.
+  - Scrubbed remaining onboarding data attributes and labels.
+  - Reviewed guidance copy/links for accuracy and kept token docs references intact.
+- 2026-01-03 (Session 8): Backend onboarding removal.
+  - Deleted onboarding API/controller/service/repository/model and stopped AutoMigrate from creating onboarding tables.
+  - Removed onboarding routes from the router and server dependency wiring.
+- 2026-01-03 (Session 9): Cleanup per user request.
+  - Cleared the remaining Next up items as requested (no action taken).
+- 2026-01-03 (Session 10): Planning-only update for backend/frontend improvements.
+  - Added planning tasks for GitHub template generation, template catalog UI, localhost forwarding, and container filters.
+  - Noted requirement for GitHub App token + permissions and Cloudflare-only forwarding flow.
+  - Prepared checklist items for Docker usage stats and stopped container support.
+- 2026-01-03 (Session 11): Added more planning tasks for container project filters and UI polish.
+  - Added tasks for sidebar auth indicator, global loading overlay, iconography, and logout redirect.
 
 Next up (keep this short):
-- Create ingress preview sidebar component for Networking/Host Settings cleanup.
-- Replace onboarding overlay system with contextual form field guidance.
+- Review GitHub template generate docs and record endpoint requirements.
+- Define GitHub App token permissions + storage approach.
+- Draft backend endpoints for template catalog, local repos, and localhost forwarding.

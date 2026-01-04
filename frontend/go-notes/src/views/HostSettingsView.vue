@@ -3,13 +3,13 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
+import UiFieldGuidance from '@/components/ui/UiFieldGuidance.vue'
 import UiFormSidePanel from '@/components/ui/UiFormSidePanel.vue'
 import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
 import UiModal from '@/components/ui/UiModal.vue'
-import UiOnboardingOverlay from '@/components/ui/UiOnboardingOverlay.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
 import UiToggle from '@/components/ui/UiToggle.vue'
@@ -18,9 +18,8 @@ import { settingsApi } from '@/services/settings'
 import { hostApi } from '@/services/host'
 import { apiErrorMessage } from '@/services/api'
 import { useToastStore } from '@/stores/toasts'
-import { useOnboardingStore } from '@/stores/onboarding'
+import { useFieldGuidance } from '@/composables/useFieldGuidance'
 import type { CloudflaredPreview, Settings, SettingsSources } from '@/types/settings'
-import type { OnboardingStep } from '@/types/onboarding'
 import type { DockerContainer } from '@/types/host'
 import type { DockerHealth, TunnelHealth } from '@/types/health'
 
@@ -40,7 +39,7 @@ const settingsSources = ref<SettingsSources | null>(null)
 const cloudflaredTunnelName = ref<string | null>(null)
 
 const toastStore = useToastStore()
-const onboardingStore = useOnboardingStore()
+const fieldGuidance = useFieldGuidance()
 
 const loading = ref(false)
 const saving = ref(false)
@@ -50,8 +49,6 @@ const success = ref<string | null>(null)
 const preview = ref<CloudflaredPreview | null>(null)
 const previewLoading = ref(false)
 const previewError = ref<string | null>(null)
-const onboardingOpen = ref(false)
-const onboardingStep = ref(0)
 
 const dockerHealth = ref<DockerHealth | null>(null)
 const tunnelHealth = ref<TunnelHealth | null>(null)
@@ -62,7 +59,7 @@ const containersLoading = ref(false)
 const containersError = ref<string | null>(null)
 
 const settingsFormOpen = ref(false)
-const previewPanelOpen = ref(true)
+const ingressPreviewOpen = ref(false)
 
 type ContainerActionState = {
   stopping: boolean
@@ -103,43 +100,6 @@ watch(removeVolumes, (enabled) => {
     removeVolumesConfirm.value = false
   }
 })
-
-const onboardingSteps: OnboardingStep[] = [
-  {
-    id: 'integrations',
-    title: 'Verify host integrations',
-    description: 'Confirm Docker and the host cloudflared service before enabling automation.',
-    target: "[data-onboard='host-integrations']",
-  },
-  {
-    id: 'tokens',
-    title: 'Add API tokens',
-    description: 'Save GitHub and Cloudflare tokens so template creation and DNS updates can run.',
-    target: "[data-onboard='host-api-tokens']",
-    links: [
-      {
-        label: 'GitHub tokens',
-        href: 'https://github.com/settings/tokens',
-      },
-      {
-        label: 'Cloudflare API tokens',
-        href: 'https://dash.cloudflare.com/profile/api-tokens',
-      },
-    ],
-  },
-  {
-    id: 'cloudflared-config',
-    title: 'Point to cloudflared config',
-    description: 'Use the active config.yml from the host service so Warp Panel can update ingress safely.',
-    target: "[data-onboard='host-cloudflared-config']",
-    links: [
-      {
-        label: 'Cloudflare tunnel guide',
-        href: 'https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/',
-      },
-    ],
-  },
-]
 
 const hasPreview = computed(() => Boolean(preview.value?.contents))
 
@@ -329,21 +289,8 @@ const confirmRemove = async () => {
   }
 }
 
-const startOnboarding = () => {
-  onboardingStep.value = 0
-  onboardingOpen.value = true
-}
-
-const markOnboardingComplete = () => {
-  onboardingStore.updateState({ hostSettings: true })
-}
-
 onMounted(async () => {
   await Promise.all([loadSettings(), loadPreview(), loadHealth(), loadContainers()])
-  await onboardingStore.fetchState()
-  if (!onboardingStore.state.hostSettings) {
-    onboardingOpen.value = true
-  }
 })
 </script>
 
@@ -363,9 +310,6 @@ onMounted(async () => {
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <UiButton variant="ghost" size="sm" @click="startOnboarding">
-          View guide
-        </UiButton>
         <UiButton
           variant="ghost"
           size="sm"
@@ -387,9 +331,9 @@ onMounted(async () => {
         <UiButton
           variant="ghost"
           size="sm"
-          @click="previewPanelOpen = !previewPanelOpen"
+          @click="ingressPreviewOpen = true"
         >
-          {{ previewPanelOpen ? 'Hide ingress preview' : 'Show ingress preview' }}
+          Ingress preview
         </UiButton>
       </div>
     </div>
@@ -404,7 +348,7 @@ onMounted(async () => {
 
     <hr />
 
-    <div class="grid gap-6 lg:grid-cols-[1.25fr,0.75fr]">
+    <div class="grid gap-6">
       <UiPanel as="section" class="space-y-6 p-6">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -536,63 +480,7 @@ onMounted(async () => {
         </div>
       </UiPanel>
 
-      <div class="space-y-6">
-        <Transition name="panel-slide">
-          <UiPanel v-if="previewPanelOpen" variant="raise" class="space-y-4 p-6">
-            <div class="flex items-center justify-between gap-2">
-              <div>
-                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                  Cloudflared config
-                </p>
-                <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
-                  Live ingress preview
-                </h3>
-              </div>
-              <UiButton
-                variant="ghost"
-                size="xs"
-                :disabled="previewLoading"
-                @click="loadPreview"
-              >
-                <span class="flex items-center gap-2">
-                  <UiInlineSpinner v-if="previewLoading" />
-                  Refresh
-                </span>
-              </UiButton>
-            </div>
-
-            <p class="text-xs text-[color:var(--muted)]">
-              Previewing {{ preview?.path || 'cloudflared config' }}.
-            </p>
-
-            <UiState v-if="previewLoading" loading>
-              Loading config preview...
-            </UiState>
-
-            <UiState v-else-if="previewError" tone="error">
-              {{ previewError }}
-            </UiState>
-
-            <pre
-              v-else-if="hasPreview"
-              class="max-h-80 overflow-auto rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)]/90 p-4 text-xs text-[color:var(--accent-ink)]"
-            ><code>{{ preview?.contents }}</code></pre>
-
-            <UiState v-else>
-              Cloudflared config not loaded yet.
-            </UiState>
-          </UiPanel>
-        </Transition>
-      </div>
     </div>
-
-    <UiOnboardingOverlay
-      v-model="onboardingOpen"
-      v-model:stepIndex="onboardingStep"
-      :steps="onboardingSteps"
-      @finish="markOnboardingComplete"
-      @skip="markOnboardingComplete"
-    />
 
     <UiModal
       v-model="removeModalOpen"
@@ -670,7 +558,7 @@ onMounted(async () => {
           Checking host integrations...
         </UiState>
 
-        <div v-else class="grid gap-3 sm:grid-cols-2" data-onboard="host-integrations">
+        <div v-else class="grid gap-3 sm:grid-cols-2">
           <UiPanel variant="soft" class="space-y-2 p-3">
             <div class="flex items-center justify-between gap-2">
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
@@ -780,10 +668,15 @@ onMounted(async () => {
               type="text"
               placeholder="example.com"
               :disabled="loading"
+              @focus="fieldGuidance.show({
+                title: 'Base domain',
+                description: 'Primary domain used to build subdomains for new services.',
+              })"
+              @blur="fieldGuidance.clear()"
             />
           </label>
 
-          <div class="grid gap-4" data-onboard="host-api-tokens">
+          <div class="grid gap-4">
             <label class="grid gap-2">
               <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                 GitHub token
@@ -793,6 +686,14 @@ onMounted(async () => {
                 type="password"
                 placeholder="ghp_••••••"
                 :disabled="loading"
+                @focus="fieldGuidance.show({
+                  title: 'GitHub token',
+                  description: 'Personal access token used to create template repos and sync the catalog.',
+                  links: [
+                    { label: 'GitHub tokens', href: 'https://github.com/settings/tokens' },
+                  ],
+                })"
+                @blur="fieldGuidance.clear()"
               />
             </label>
 
@@ -805,6 +706,14 @@ onMounted(async () => {
                 type="password"
                 placeholder="cf_••••••"
                 :disabled="loading"
+                @focus="fieldGuidance.show({
+                  title: 'Cloudflare API token',
+                  description: 'Token with Tunnel:Edit and DNS:Edit for the selected account and zone.',
+                  links: [
+                    { label: 'Cloudflare API tokens', href: 'https://dash.cloudflare.com/profile/api-tokens' },
+                  ],
+                })"
+                @blur="fieldGuidance.clear()"
               />
             </label>
 
@@ -817,6 +726,14 @@ onMounted(async () => {
                 type="text"
                 placeholder="Account ID"
                 :disabled="loading"
+                @focus="fieldGuidance.show({
+                  title: 'Cloudflare account ID',
+                  description: 'Account identifier that owns the tunnel and DNS zone.',
+                  links: [
+                    { label: 'Cloudflare dashboard', href: 'https://dash.cloudflare.com' },
+                  ],
+                })"
+                @blur="fieldGuidance.clear()"
               />
             </label>
 
@@ -829,6 +746,14 @@ onMounted(async () => {
                 type="text"
                 placeholder="Zone ID"
                 :disabled="loading"
+                @focus="fieldGuidance.show({
+                  title: 'Cloudflare zone ID',
+                  description: 'Zone identifier for the base domain you are routing.',
+                  links: [
+                    { label: 'Cloudflare dashboard', href: 'https://dash.cloudflare.com' },
+                  ],
+                })"
+                @blur="fieldGuidance.clear()"
               />
             </label>
 
@@ -841,6 +766,14 @@ onMounted(async () => {
                 type="text"
                 placeholder="Tunnel name or UUID"
                 :disabled="loading"
+                @focus="fieldGuidance.show({
+                  title: 'Cloudflared tunnel',
+                  description: 'Name or UUID used to resolve and update ingress rules.',
+                  links: [
+                    { label: 'Tunnel guide', href: 'https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/' },
+                  ],
+                })"
+                @blur="fieldGuidance.clear()"
               />
             </label>
 
@@ -893,7 +826,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <label class="grid gap-2" data-onboard="host-cloudflared-config">
+          <label class="grid gap-2">
             <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
               Cloudflared config path
             </span>
@@ -902,6 +835,14 @@ onMounted(async () => {
               type="text"
               placeholder="~/.cloudflared/config.yml"
               :disabled="loading"
+              @focus="fieldGuidance.show({
+                title: 'Cloudflared config path',
+                description: 'Path to the config.yml used by the host cloudflared service.',
+                links: [
+                  { label: 'Tunnel guide', href: 'https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/' },
+                ],
+              })"
+              @blur="fieldGuidance.clear()"
             />
           </label>
 
@@ -932,5 +873,61 @@ onMounted(async () => {
         </form>
       </div>
     </UiFormSidePanel>
+
+    <UiFormSidePanel
+      v-model="ingressPreviewOpen"
+      title="Ingress preview"
+      eyebrow="Ingress"
+    >
+      <div class="space-y-4">
+        <div class="flex items-center justify-between gap-2">
+          <div>
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              Cloudflared config
+            </p>
+            <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
+              Live ingress preview
+            </h3>
+          </div>
+          <UiButton
+            variant="ghost"
+            size="xs"
+            :disabled="previewLoading"
+            @click="loadPreview"
+          >
+            <span class="flex items-center gap-2">
+              <UiInlineSpinner v-if="previewLoading" />
+              Refresh
+            </span>
+          </UiButton>
+        </div>
+
+        <p class="text-xs text-[color:var(--muted)]">
+          Previewing {{ preview?.path || 'cloudflared config' }}.
+        </p>
+
+        <UiState v-if="previewLoading" loading>
+          Loading config preview...
+        </UiState>
+
+        <UiState v-else-if="previewError" tone="error">
+          {{ previewError }}
+        </UiState>
+
+        <pre
+          v-else-if="hasPreview"
+          class="max-h-80 overflow-auto border border-[color:var(--border)] bg-[color:var(--surface-inset)]/90 p-4 text-xs text-[color:var(--accent-ink)]"
+        ><code>{{ preview?.contents }}</code></pre>
+
+        <UiState v-else>
+          Cloudflared config not loaded yet.
+        </UiState>
+      </div>
+    </UiFormSidePanel>
+
+    <UiFieldGuidance
+      :model-value="fieldGuidance.open.value"
+      :content="fieldGuidance.content.value"
+    />
   </section>
 </template>

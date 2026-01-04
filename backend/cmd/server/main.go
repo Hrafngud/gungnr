@@ -37,14 +37,12 @@ func main() {
 	jobRepo := repository.NewGormJobRepository(gormDB)
 	settingsRepo := repository.NewGormSettingsRepository(gormDB)
 	auditRepo := repository.NewGormAuditLogRepository(gormDB)
-	onboardingRepo := repository.NewGormOnboardingRepository(gormDB)
 
 	authService := service.NewAuthService(cfg, userRepo)
 	jobRunner := jobs.NewRunner(jobRepo)
 	jobService := service.NewJobService(jobRepo, jobRunner)
 	projectService := service.NewProjectService(cfg, projectRepo, jobService)
 	settingsService := service.NewSettingsService(cfg, settingsRepo)
-	onboardingService := service.NewOnboardingService(onboardingRepo)
 	githubService := service.NewGitHubService(cfg, settingsService)
 	cloudflareService := service.NewCloudflareService(settingsService)
 	auditService := service.NewAuditService(auditRepo)
@@ -67,7 +65,6 @@ func main() {
 		Projects:       controller.NewProjectsController(projectService, auditService),
 		Jobs:           controller.NewJobsController(jobService),
 		Settings:       controller.NewSettingsController(settingsService, auditService),
-		Onboarding:     controller.NewOnboardingController(onboardingService, auditService),
 		Host:           controller.NewHostController(hostService, auditService),
 		Audit:          controller.NewAuditController(auditService),
 		GitHub:         controller.NewGitHubController(githubService),

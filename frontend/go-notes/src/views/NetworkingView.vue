@@ -2,20 +2,18 @@
 import { computed, onMounted, ref } from 'vue'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
+import UiFormSidePanel from '@/components/ui/UiFormSidePanel.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
-import UiOnboardingOverlay from '@/components/ui/UiOnboardingOverlay.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
 import { cloudflareApi } from '@/services/cloudflare'
 import { healthApi } from '@/services/health'
 import { settingsApi } from '@/services/settings'
 import { apiErrorMessage } from '@/services/api'
-import { useOnboardingStore } from '@/stores/onboarding'
 import type { CloudflarePreflight } from '@/types/cloudflare'
 import type { CloudflaredPreview, Settings, SettingsSources } from '@/types/settings'
 import type { TunnelHealth } from '@/types/health'
-import type { OnboardingStep } from '@/types/onboarding'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
@@ -34,36 +32,7 @@ const settingsError = ref<string | null>(null)
 const preflight = ref<CloudflarePreflight | null>(null)
 const preflightLoading = ref(false)
 const preflightError = ref<string | null>(null)
-const onboardingOpen = ref(false)
-const onboardingStep = ref(0)
-const onboardingStore = useOnboardingStore()
-
-const onboardingSteps: OnboardingStep[] = [
-  {
-    id: 'tunnel-health',
-    title: 'Verify tunnel health',
-    description: 'Confirm the host cloudflared service reports a healthy connection and active connectors.',
-    target: "[data-onboard='network-tunnel']",
-  },
-  {
-    id: 'ingress-preview',
-    title: 'Review ingress rules',
-    description: 'Double-check the active ingress config before routing DNS to new services.',
-    target: "[data-onboard='network-ingress']",
-    links: [
-      {
-        label: 'Cloudflared ingress docs',
-        href: 'https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/configuration/local-management/ingress/',
-      },
-    ],
-  },
-  {
-    id: 'refresh',
-    title: 'Refresh after changes',
-    description: 'Use the refresh controls whenever the tunnel or config changes.',
-    target: "[data-onboard='network-actions']",
-  },
-]
+const ingressPreviewOpen = ref(false)
 
 const hasPreview = computed(() => Boolean(preview.value?.contents))
 const cloudflareTokenConfigured = computed(() => Boolean(settings.value?.cloudflareToken))
@@ -166,21 +135,8 @@ const loadPreflight = async () => {
   }
 }
 
-const startOnboarding = () => {
-  onboardingStep.value = 0
-  onboardingOpen.value = true
-}
-
-const markOnboardingComplete = () => {
-  onboardingStore.updateState({ networking: true })
-}
-
 onMounted(async () => {
   await Promise.all([loadHealth(), loadPreview(), loadSettings(), loadPreflight()])
-  await onboardingStore.fetchState()
-  if (!onboardingStore.state.networking) {
-    onboardingOpen.value = true
-  }
 })
 
 function parseIngressRoutes(contents: string): IngressRoute[] {
@@ -235,21 +191,15 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
           Monitor the host cloudflared service and the active ingress configuration.
         </p>
       </div>
-      <div class="flex flex-wrap gap-3" data-onboard="network-actions">
-        <UiButton variant="ghost" size="sm" @click="startOnboarding">
-          View guide
-        </UiButton>
+      <div class="flex flex-wrap gap-3">
         <UiButton variant="ghost" size="sm" :disabled="healthLoading" @click="loadHealth">
           <span class="flex items-center gap-2">
             <UiInlineSpinner v-if="healthLoading" />
             Refresh status
           </span>
         </UiButton>
-        <UiButton variant="ghost" size="sm" :disabled="previewLoading" @click="loadPreview">
-          <span class="flex items-center gap-2">
-            <UiInlineSpinner v-if="previewLoading" />
-            Refresh preview
-          </span>
+        <UiButton variant="ghost" size="sm" @click="ingressPreviewOpen = true">
+          Ingress preview
         </UiButton>
       </div>
     </div>
@@ -260,8 +210,8 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
 
     <hr />
 
-    <div class="grid gap-6 lg:grid-cols-[0.9fr,1.1fr]">
-      <UiPanel as="article" class="space-y-4 p-6" data-onboard="network-tunnel">
+    <div class="grid gap-6">
+      <UiPanel as="article" class="space-y-4 p-6">
         <div class="flex items-start justify-between gap-3">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
@@ -392,39 +342,6 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
         </div>
       </UiPanel>
 
-      <UiPanel as="article" variant="raise" class="space-y-4 p-6" data-onboard="network-ingress">
-        <div class="flex items-center justify-between gap-2">
-          <div>
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Ingress
-            </p>
-            <h2 class="mt-2 text-base font-semibold text-[color:var(--text)]">
-              Cloudflared config preview
-            </h2>
-          </div>
-        </div>
-
-        <p class="text-xs text-[color:var(--muted)]">
-          Previewing {{ preview?.path || 'cloudflared config' }}.
-        </p>
-
-        <UiState v-if="previewLoading" loading>
-          Loading config preview...
-        </UiState>
-
-        <UiState v-else-if="previewError" tone="error">
-          {{ previewError }}
-        </UiState>
-
-        <pre
-          v-else-if="hasPreview"
-          class="max-h-80 overflow-auto rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)]/90 p-4 text-xs text-[color:var(--accent-ink)]"
-        ><code>{{ preview?.contents }}</code></pre>
-
-        <UiState v-else>
-          Cloudflared config not loaded yet.
-        </UiState>
-      </UiPanel>
     </div>
 
     <hr />
@@ -615,12 +532,55 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
       </UiPanel>
     </div>
 
-    <UiOnboardingOverlay
-      v-model="onboardingOpen"
-      v-model:stepIndex="onboardingStep"
-      :steps="onboardingSteps"
-      @finish="markOnboardingComplete"
-      @skip="markOnboardingComplete"
-    />
+    <UiFormSidePanel
+      v-model="ingressPreviewOpen"
+      title="Ingress preview"
+      eyebrow="Ingress"
+    >
+      <div class="space-y-4">
+        <div class="flex items-center justify-between gap-2">
+          <div>
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              Cloudflared config
+            </p>
+            <h2 class="mt-2 text-base font-semibold text-[color:var(--text)]">
+              Cloudflared config preview
+            </h2>
+          </div>
+          <UiButton
+            variant="ghost"
+            size="xs"
+            :disabled="previewLoading"
+            @click="loadPreview"
+          >
+            <span class="flex items-center gap-2">
+              <UiInlineSpinner v-if="previewLoading" />
+              Refresh
+            </span>
+          </UiButton>
+        </div>
+
+        <p class="text-xs text-[color:var(--muted)]">
+          Previewing {{ preview?.path || 'cloudflared config' }}.
+        </p>
+
+        <UiState v-if="previewLoading" loading>
+          Loading config preview...
+        </UiState>
+
+        <UiState v-else-if="previewError" tone="error">
+          {{ previewError }}
+        </UiState>
+
+        <pre
+          v-else-if="hasPreview"
+          class="max-h-80 overflow-auto border border-[color:var(--border)] bg-[color:var(--surface-inset)]/90 p-4 text-xs text-[color:var(--accent-ink)]"
+        ><code>{{ preview?.contents }}</code></pre>
+
+        <UiState v-else>
+          Cloudflared config not loaded yet.
+        </UiState>
+      </div>
+    </UiFormSidePanel>
   </section>
 </template>

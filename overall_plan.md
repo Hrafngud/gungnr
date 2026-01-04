@@ -1,6 +1,7 @@
 ## Overall Plan and Dependencies
 
 Current status: Replace notes CRUD app with Warp Panel web UI and API.
+Guiding principle: Mimic the behavior of `deploy.sh` end-to-end, but via the web UI + API (no manual shell steps).
 
 1) Foundations
 - Align env variables for backend/frontend and host integrations.
@@ -15,11 +16,15 @@ Current status: Replace notes CRUD app with Warp Panel web UI and API.
 - Scaffold backend structure and config loader.
 - Implement GitHub OAuth auth + allowlist.
 - Add integrations for GitHub, Cloudflare, Docker, and cloudflared.
+- Add GitHub template generation flow (App token + generate endpoint) and template catalog support.
+- Add local repo discovery (host filesystem) for stop/restart lifecycle actions.
+- Add Cloudflare-only forwarding for existing localhost services (no Docker involvement).
 - Build job runner and persistence models.
 - Add health endpoints for docker and tunnel checks.
 - Add settings endpoints and use them in workflows (domain/token/config path).
 - Add Docker runner job types for `docker run` and `docker compose` from the API.
 - Add container lifecycle controls (stop/restart/remove) with clear stop-vs-remove semantics.
+- Add container filtering by project (including volumes for multi-container templates).
 - Add automatic container naming for multiple instances of the same image (suffix with incrementing numbers).
 - Persist onboarding state per user to avoid repeated overlays.
 
@@ -45,6 +50,12 @@ Current status: Replace notes CRUD app with Warp Panel web UI and API.
   - Create ingress preview sidebar component for Networking and Host Settings visual cleanup.
   - Convert Networking DNS records to 4-column grid layout.
   - Simplify template forms: "Create from template" (project name + subdomain only, auto-infer ports), "Deploy existing" (forward ANY localhost service via Cloudflare-only, no Docker required).
+  - Add template repo selector and list available template repos on Home > Create from template.
+  - Add running/stopped container filters with icons and basic Docker usage stats in Host Settings.
+  - Add project-based container filtering and volume visibility per project.
+  - Replace sidebar logo header with GitHub auth indicator.
+  - Add global page-loading overlay and iconography for refresh/edit/login/logout.
+  - Redirect to login on logout action.
 
 4) Dockerization
 - Backend and frontend Dockerfiles (multi-stage).
