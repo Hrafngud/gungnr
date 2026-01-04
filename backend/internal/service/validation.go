@@ -20,6 +20,16 @@ func ValidateProjectName(name string) error {
 	return nil
 }
 
+func ValidateServiceName(name string) error {
+	if name == "" {
+		return fmt.Errorf("service name is required")
+	}
+	if !projectNameRe.MatchString(name) {
+		return fmt.Errorf("service name must be lowercase alphanumerics or dashes")
+	}
+	return nil
+}
+
 func ValidateSubdomain(subdomain string) error {
 	if subdomain == "" {
 		return fmt.Errorf("subdomain is required")

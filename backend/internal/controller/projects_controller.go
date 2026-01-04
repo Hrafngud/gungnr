@@ -36,6 +36,7 @@ func (c *ProjectsController) Register(r gin.IRoutes) {
 	r.GET("/projects/local", c.ListLocal)
 	r.POST("/projects/template", c.CreateFromTemplate)
 	r.POST("/projects/existing", c.DeployExisting)
+	r.POST("/projects/forward", c.ForwardLocal)
 	r.POST("/projects/quick", c.QuickService)
 }
 
@@ -91,6 +92,7 @@ func (c *ProjectsController) CreateFromTemplate(ctx *gin.Context) {
 		subdomain = req.Name
 	}
 	c.logAudit(ctx, "project.create_template", req.Name, map[string]any{
+		"template":  req.Template,
 		"subdomain": subdomain,
 		"proxyPort": req.ProxyPort,
 		"dbPort":    req.DBPort,
@@ -114,6 +116,28 @@ func (c *ProjectsController) DeployExisting(ctx *gin.Context) {
 	}
 
 	c.logAudit(ctx, "project.deploy_existing", req.Name, map[string]any{
+		"subdomain": req.Subdomain,
+		"port":      req.Port,
+		"jobId":     job.ID,
+	})
+
+	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
+}
+
+func (c *ProjectsController) ForwardLocal(ctx *gin.Context) {
+	var req service.ForwardLocalRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	job, err := c.service.ForwardLocal(ctx.Request.Context(), req)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.logAudit(ctx, "project.forward_local", req.Name, map[string]any{
 		"subdomain": req.Subdomain,
 		"port":      req.Port,
 		"jobId":     job.ID,

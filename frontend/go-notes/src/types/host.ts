@@ -18,3 +18,24 @@ export interface DockerContainer {
   project: string
   portBindings: DockerPortBinding[]
 }
+
+export interface DockerUsageEntry {
+  count: number
+  size: string
+}
+
+export interface DockerUsageProjectCounts {
+  containers: number
+  images: number
+  volumes: number
+}
+
+export interface DockerUsageSummary {
+  totalSize: string
+  images: DockerUsageEntry
+  containers: DockerUsageEntry
+  volumes: DockerUsageEntry
+  buildCache?: DockerUsageEntry
+  project?: string
+  projectCounts?: DockerUsageProjectCounts
+}

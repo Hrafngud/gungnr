@@ -8,8 +8,10 @@ import UiListRow from '@/components/ui/UiListRow.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiSkeleton from '@/components/ui/UiSkeleton.vue'
 import UiState from '@/components/ui/UiState.vue'
+import NavIcon from '@/components/NavIcon.vue'
 import { githubApi } from '@/services/github'
 import { apiErrorMessage } from '@/services/api'
+import { usePageLoadingStore } from '@/stores/pageLoading'
 import type { GitHubCatalog } from '@/types/github'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
@@ -17,43 +19,56 @@ type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 const catalog = ref<GitHubCatalog | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
+const pageLoading = usePageLoadingStore()
 
-const hasToken = computed(() => Boolean(catalog.value?.tokenConfigured))
 const templateConfigured = computed(() => Boolean(catalog.value?.template.configured))
 const allowlistMode = computed(() => catalog.value?.allowlist.mode ?? 'none')
 const allowlistUsers = computed(() => catalog.value?.allowlist.users ?? [])
 const allowlistOrg = computed(() => catalog.value?.allowlist.org ?? '')
+const appConfigured = computed(() => Boolean(catalog.value?.app?.configured))
 
-const tokenStatus = computed(() => {
+const installationTokenStatus = computed(() => {
   if (loading.value && !catalog.value) return 'Checking'
   if (!catalog.value) return 'Unknown'
-  return hasToken.value ? 'Configured' : 'Missing'
+  return appConfigured.value ? 'Configured' : 'Missing'
 })
 
-const tokenTone = computed<BadgeTone>(() => {
-  if (tokenStatus.value === 'Configured') return 'ok'
-  if (tokenStatus.value === 'Missing') return 'warn'
+const installationTokenTone = computed<BadgeTone>(() => {
+  if (installationTokenStatus.value === 'Configured') return 'ok'
+  if (installationTokenStatus.value === 'Missing') return 'warn'
+  return 'neutral'
+})
+
+const appStatus = computed(() => {
+  if (loading.value && !catalog.value) return 'Checking'
+  if (!catalog.value) return 'Unknown'
+  return appConfigured.value ? 'Configured' : 'Missing'
+})
+
+const appTone = computed<BadgeTone>(() => {
+  if (appStatus.value === 'Configured') return 'ok'
+  if (appStatus.value === 'Missing') return 'warn'
   return 'neutral'
 })
 
 const templateStatus = computed(() => {
   if (loading.value && !catalog.value) return 'Checking'
   if (!catalog.value) return 'Unknown'
-  if (!hasToken.value) return 'Needs token'
+  if (!appConfigured.value) return 'Needs app setup'
   if (!templateConfigured.value) return 'Not configured'
   return 'Ready'
 })
 
 const templateTone = computed<BadgeTone>(() => {
   if (templateStatus.value === 'Ready') return 'ok'
-  if (templateStatus.value === 'Needs token' || templateStatus.value === 'Not configured') {
+  if (templateStatus.value === 'Needs app setup' || templateStatus.value === 'Not configured') {
     return 'warn'
   }
   return 'neutral'
 })
 
 const templateSyncLabel = computed(() => {
-  if (!hasToken.value) return 'Waiting'
+  if (!appConfigured.value) return 'Waiting'
   if (!templateConfigured.value) return 'Needs template'
   return 'Ready'
 })
@@ -78,6 +93,24 @@ const allowlistUsersLabel = computed(() => {
     return `${head} +${allowlistUsers.value.length - limit} more`
   }
   return head
+})
+
+const appIdStatus = computed(() => {
+  if (loading.value && !catalog.value) return 'Checking'
+  if (!catalog.value) return 'Unknown'
+  return catalog.value.app.appIdConfigured ? 'Configured' : 'Missing'
+})
+
+const appInstallationStatus = computed(() => {
+  if (loading.value && !catalog.value) return 'Checking'
+  if (!catalog.value) return 'Unknown'
+  return catalog.value.app.installationIdConfigured ? 'Configured' : 'Missing'
+})
+
+const appKeyStatus = computed(() => {
+  if (loading.value && !catalog.value) return 'Checking'
+  if (!catalog.value) return 'Unknown'
+  return catalog.value.app.privateKeyConfigured ? 'Configured' : 'Missing'
 })
 
 const templateSource = computed(() => {
@@ -112,7 +145,9 @@ const loadCatalog = async () => {
 }
 
 onMounted(async () => {
-  loadCatalog()
+  pageLoading.start('Loading GitHub catalog...')
+  await loadCatalog()
+  pageLoading.stop()
 })
 </script>
 
@@ -133,6 +168,7 @@ onMounted(async () => {
       <div class="flex flex-wrap gap-3">
         <UiButton variant="ghost" size="sm" :disabled="loading" @click="loadCatalog">
           <span class="flex items-center gap-2">
+            <NavIcon name="refresh" class="h-3.5 w-3.5" />
             <UiInlineSpinner v-if="loading" />
             Refresh status
           </span>
@@ -149,25 +185,25 @@ onMounted(async () => {
 
     <hr />
 
-    <div class="grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
+    <div class="grid gap-6 lg:grid-cols-3">
       <UiPanel as="article" class="space-y-5 p-6">
         <div class="flex items-start justify-between gap-3">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Token
+              App token
             </p>
             <h2 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
-              GitHub token status
+              Installation token status
             </h2>
           </div>
-          <UiBadge :tone="tokenTone">
-            {{ tokenStatus }}
+          <UiBadge :tone="installationTokenTone">
+            {{ installationTokenStatus }}
           </UiBadge>
         </div>
 
         <p class="text-sm text-[color:var(--muted)]">
-          The panel uses the token to create repos from templates and sync the
-          available stack catalog.
+          Installation tokens are minted from the GitHub App to create repos
+          from templates and sync the catalog.
         </p>
 
         <UiPanel v-if="loading && !catalog" variant="soft" class="space-y-3 p-4">
@@ -180,7 +216,7 @@ onMounted(async () => {
           <UiListRow class="flex items-center justify-between gap-2">
             <span>Repo creation</span>
             <span class="text-[color:var(--text)]">
-              {{ hasToken ? 'Enabled' : 'Needs token' }}
+              {{ appConfigured ? 'Enabled' : 'Needs app setup' }}
             </span>
           </UiListRow>
           <UiListRow class="flex items-center justify-between gap-2">
@@ -211,6 +247,54 @@ onMounted(async () => {
             <span>Allowed org</span>
             <span class="text-[color:var(--text)]">
               {{ allowlistOrg || '--' }}
+            </span>
+          </UiListRow>
+        </div>
+      </UiPanel>
+
+      <UiPanel as="article" variant="soft" class="space-y-5 p-6">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              GitHub App
+            </p>
+            <h2 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
+              App credential status
+            </h2>
+          </div>
+          <UiBadge :tone="appTone">
+            {{ appStatus }}
+          </UiBadge>
+        </div>
+
+        <p class="text-sm text-[color:var(--muted)]">
+          App credentials unlock installation tokens for template generation
+          when a PAT is not set.
+        </p>
+
+        <UiPanel v-if="loading && !catalog" variant="soft" class="space-y-3 p-4">
+          <UiSkeleton class="h-3 w-32" />
+          <UiSkeleton class="h-3 w-full" />
+          <UiSkeleton class="h-3 w-2/3" />
+        </UiPanel>
+
+        <div v-else class="space-y-3 text-xs text-[color:var(--muted)]">
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>App ID</span>
+            <span class="text-[color:var(--text)]">
+              {{ appIdStatus }}
+            </span>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Installation ID</span>
+            <span class="text-[color:var(--text)]">
+              {{ appInstallationStatus }}
+            </span>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Private key</span>
+            <span class="text-[color:var(--text)]">
+              {{ appKeyStatus }}
             </span>
           </UiListRow>
         </div>

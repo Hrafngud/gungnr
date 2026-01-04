@@ -21,10 +21,19 @@ type GitHubAllowlist struct {
 	Org   string   `json:"org"`
 }
 
+type GitHubAppStatus struct {
+	Configured               bool `json:"configured"`
+	AppIDConfigured          bool `json:"appIdConfigured"`
+	InstallationIDConfigured bool `json:"installationIdConfigured"`
+	PrivateKeyConfigured     bool `json:"privateKeyConfigured"`
+}
+
 type GitHubCatalog struct {
-	TokenConfigured bool                  `json:"tokenConfigured"`
-	Template        GitHubTemplateCatalog `json:"template"`
-	Allowlist       GitHubAllowlist       `json:"allowlist"`
+	TokenConfigured bool                   `json:"tokenConfigured"`
+	Template        GitHubTemplateCatalog  `json:"template"`
+	Templates       []GitHubTemplateSource `json:"templates,omitempty"`
+	Allowlist       GitHubAllowlist        `json:"allowlist"`
+	App             GitHubAppStatus        `json:"app"`
 }
 
 type GitHubService struct {
@@ -38,12 +47,35 @@ func NewGitHubService(cfg config.Config, settings *SettingsService) *GitHubServi
 
 func (s *GitHubService) Catalog(ctx context.Context) (GitHubCatalog, error) {
 	cfg := s.cfg
+	var templates []GitHubTemplateSource
+	var defaultTemplate *GitHubTemplateSource
+	var templatesFromSettings bool
+	appStatus := GitHubAppStatus{}
 	if s.settings != nil {
 		resolved, err := s.settings.ResolveConfig(ctx)
 		if err != nil {
 			return GitHubCatalog{}, err
 		}
 		cfg = resolved
+
+		catalog, selected, fromSettings, err := s.settings.ResolveTemplateCatalog(ctx)
+		if err != nil {
+			return GitHubCatalog{}, err
+		}
+		templates = catalog
+		defaultTemplate = selected
+		templatesFromSettings = fromSettings
+
+		appSettings, configured, err := s.settings.GitHubAppSettings(ctx)
+		if err != nil {
+			return GitHubCatalog{}, err
+		}
+		appStatus = GitHubAppStatus{
+			Configured:               configured,
+			AppIDConfigured:          appSettings.AppID != "",
+			InstallationIDConfigured: appSettings.InstallationID != "",
+			PrivateKeyConfigured:     appSettings.PrivateKey != "",
+		}
 	}
 
 	templateOwner := strings.TrimSpace(cfg.GitHubTemplateOwner)
@@ -71,19 +103,37 @@ func (s *GitHubService) Catalog(ctx context.Context) (GitHubCatalog, error) {
 		allowlistMode = "org"
 	}
 
-	return GitHubCatalog{
-		TokenConfigured: strings.TrimSpace(cfg.GitHubToken) != "",
-		Template: GitHubTemplateCatalog{
-			Configured:  templateConfigured,
-			Owner:       templateOwner,
-			Repo:        templateRepo,
+	template := GitHubTemplateCatalog{
+		Configured:  templateConfigured,
+		Owner:       templateOwner,
+		Repo:        templateRepo,
+		TargetOwner: targetOwner,
+		Private:     cfg.GitHubRepoPrivate,
+	}
+
+	if defaultTemplate != nil {
+		template = GitHubTemplateCatalog{
+			Configured:  true,
+			Owner:       defaultTemplate.Owner,
+			Repo:        defaultTemplate.Repo,
 			TargetOwner: targetOwner,
-			Private:     cfg.GitHubRepoPrivate,
-		},
+			Private:     defaultTemplate.Private,
+		}
+	} else if templatesFromSettings {
+		template = GitHubTemplateCatalog{}
+	}
+
+	tokenConfigured := appStatus.Configured
+
+	return GitHubCatalog{
+		TokenConfigured: tokenConfigured,
+		Template:        template,
+		Templates:       templates,
 		Allowlist: GitHubAllowlist{
 			Mode:  allowlistMode,
 			Users: users,
 			Org:   org,
 		},
+		App: appStatus,
 	}, nil
 }

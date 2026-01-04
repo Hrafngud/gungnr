@@ -7,10 +7,12 @@ import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
+import NavIcon from '@/components/NavIcon.vue'
 import { cloudflareApi } from '@/services/cloudflare'
 import { healthApi } from '@/services/health'
 import { settingsApi } from '@/services/settings'
 import { apiErrorMessage } from '@/services/api'
+import { usePageLoadingStore } from '@/stores/pageLoading'
 import type { CloudflarePreflight } from '@/types/cloudflare'
 import type { CloudflaredPreview, Settings, SettingsSources } from '@/types/settings'
 import type { TunnelHealth } from '@/types/health'
@@ -33,6 +35,7 @@ const preflight = ref<CloudflarePreflight | null>(null)
 const preflightLoading = ref(false)
 const preflightError = ref<string | null>(null)
 const ingressPreviewOpen = ref(false)
+const pageLoading = usePageLoadingStore()
 
 const hasPreview = computed(() => Boolean(preview.value?.contents))
 const cloudflareTokenConfigured = computed(() => Boolean(settings.value?.cloudflareToken))
@@ -136,7 +139,9 @@ const loadPreflight = async () => {
 }
 
 onMounted(async () => {
+  pageLoading.start('Loading networking status...')
   await Promise.all([loadHealth(), loadPreview(), loadSettings(), loadPreflight()])
+  pageLoading.stop()
 })
 
 function parseIngressRoutes(contents: string): IngressRoute[] {
@@ -194,6 +199,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
       <div class="flex flex-wrap gap-3">
         <UiButton variant="ghost" size="sm" :disabled="healthLoading" @click="loadHealth">
           <span class="flex items-center gap-2">
+            <NavIcon name="refresh" class="h-3.5 w-3.5" />
             <UiInlineSpinner v-if="healthLoading" />
             Refresh status
           </span>
@@ -554,6 +560,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
             @click="loadPreview"
           >
             <span class="flex items-center gap-2">
+              <NavIcon name="refresh" class="h-3 w-3" />
               <UiInlineSpinner v-if="previewLoading" />
               Refresh
             </span>

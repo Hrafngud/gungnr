@@ -14,13 +14,14 @@ import (
 )
 
 type ProjectService struct {
-	cfg  config.Config
-	repo repository.ProjectRepository
-	jobs *JobService
+	cfg      config.Config
+	repo     repository.ProjectRepository
+	jobs     *JobService
+	settings *SettingsService
 }
 
-func NewProjectService(cfg config.Config, repo repository.ProjectRepository, jobs *JobService) *ProjectService {
-	return &ProjectService{cfg: cfg, repo: repo, jobs: jobs}
+func NewProjectService(cfg config.Config, repo repository.ProjectRepository, jobs *JobService, settings *SettingsService) *ProjectService {
+	return &ProjectService{cfg: cfg, repo: repo, jobs: jobs, settings: settings}
 }
 
 func (s *ProjectService) List(ctx context.Context) ([]models.Project, error) {
@@ -33,6 +34,7 @@ type LocalProject struct {
 }
 
 type CreateTemplateRequest struct {
+	Template  string `json:"template,omitempty"`
 	Name      string `json:"name"`
 	Subdomain string `json:"subdomain"`
 	ProxyPort int    `json:"proxyPort"`
@@ -40,6 +42,12 @@ type CreateTemplateRequest struct {
 }
 
 type DeployExistingRequest struct {
+	Name      string `json:"name"`
+	Subdomain string `json:"subdomain"`
+	Port      int    `json:"port"`
+}
+
+type ForwardLocalRequest struct {
 	Name      string `json:"name"`
 	Subdomain string `json:"subdomain"`
 	Port      int    `json:"port"`
@@ -103,6 +111,11 @@ func (s *ProjectService) CreateFromTemplate(ctx context.Context, req CreateTempl
 			return nil, err
 		}
 	}
+	normalizedTemplate, err := s.resolveTemplateSelection(ctx, req.Template)
+	if err != nil {
+		return nil, err
+	}
+	req.Template = normalizedTemplate
 	return s.jobs.Create(ctx, JobTypeCreateTemplate, req)
 }
 
@@ -122,6 +135,24 @@ func (s *ProjectService) DeployExisting(ctx context.Context, req DeployExistingR
 		return nil, err
 	}
 	return s.jobs.Create(ctx, JobTypeDeployExisting, req)
+}
+
+func (s *ProjectService) ForwardLocal(ctx context.Context, req ForwardLocalRequest) (*models.Job, error) {
+	req.Name = strings.ToLower(strings.TrimSpace(req.Name))
+	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
+	if err := ValidateServiceName(req.Name); err != nil {
+		return nil, err
+	}
+	if err := ValidateSubdomain(req.Subdomain); err != nil {
+		return nil, err
+	}
+	if req.Port == 0 {
+		req.Port = 80
+	}
+	if err := ValidatePort(req.Port); err != nil {
+		return nil, err
+	}
+	return s.jobs.Create(ctx, JobTypeForwardLocal, req)
 }
 
 func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceRequest) (*models.Job, error) {
@@ -149,4 +180,31 @@ func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceReque
 		}
 	}
 	return s.jobs.Create(ctx, JobTypeQuickService, req)
+}
+
+func (s *ProjectService) resolveTemplateSelection(ctx context.Context, templateRef string) (string, error) {
+	templateRef = strings.TrimSpace(templateRef)
+	if s.settings != nil {
+		selection, err := s.settings.ResolveTemplateSelection(ctx, templateRef)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s/%s", selection.Owner, selection.Repo), nil
+	}
+	owner := strings.TrimSpace(s.cfg.GitHubTemplateOwner)
+	repo := strings.TrimSpace(s.cfg.GitHubTemplateRepo)
+	if owner == "" || repo == "" {
+		return "", fmt.Errorf("template source not configured")
+	}
+	if templateRef == "" {
+		return fmt.Sprintf("%s/%s", owner, repo), nil
+	}
+	selectedOwner, selectedRepo, err := parseTemplateRef(templateRef)
+	if err != nil {
+		return "", err
+	}
+	if templateKey(selectedOwner, selectedRepo) != templateKey(owner, repo) {
+		return "", fmt.Errorf("template is not in allowlist")
+	}
+	return fmt.Sprintf("%s/%s", owner, repo), nil
 }

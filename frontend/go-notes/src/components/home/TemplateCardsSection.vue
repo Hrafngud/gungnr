@@ -40,21 +40,38 @@ const templateCards: TemplateCard[] = [
   },
 ]
 
+const resolvedTemplates = computed(() => {
+  const list = props.catalog?.templates?.filter(
+    (template) => template.owner && template.repo,
+  )
+  if (list && list.length > 0) return list
+  if (props.catalog?.template?.configured) {
+    const { owner, repo } = props.catalog.template
+    if (owner && repo) {
+      return [props.catalog.template]
+    }
+  }
+  return []
+})
+
 const templateRepoLabel = computed(() => {
   if (props.catalogError) return 'Template source unavailable'
-  if (!props.catalog?.template?.configured) return 'Template source not configured'
-  const owner = props.catalog.template.owner
-  const repo = props.catalog.template.repo
-  if (!owner || !repo) return 'Template source not configured'
-  return `${owner}/${repo}`
+  if (resolvedTemplates.value.length === 0) return 'Template source not configured'
+  if (resolvedTemplates.value.length === 1) {
+    const template = resolvedTemplates.value[0]
+    if (template) {
+      return `${template.owner}/${template.repo}`
+    }
+    return 'Template source not configured'
+  }
+  return `${resolvedTemplates.value.length} template sources`
 })
 
 const templateRepoUrl = computed(() => {
-  if (!props.catalog?.template?.configured) return ''
-  const owner = props.catalog.template.owner
-  const repo = props.catalog.template.repo
-  if (!owner || !repo) return ''
-  return `https://github.com/${owner}/${repo}`
+  if (resolvedTemplates.value.length !== 1) return ''
+  const template = resolvedTemplates.value[0]
+  if (!template) return ''
+  return `https://github.com/${template.owner}/${template.repo}`
 })
 </script>
 

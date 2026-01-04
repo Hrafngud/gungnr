@@ -42,6 +42,7 @@ func NewProjectWorkflows(cfg config.Config, projects repository.ProjectRepositor
 func (w *ProjectWorkflows) Register(runner *jobs.Runner) {
 	runner.Register(JobTypeCreateTemplate, w.handleCreateTemplate)
 	runner.Register(JobTypeDeployExisting, w.handleDeployExisting)
+	runner.Register(JobTypeForwardLocal, w.handleForwardLocal)
 	runner.Register(JobTypeQuickService, w.handleQuickService)
 }
 
@@ -67,6 +68,22 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 		return fmt.Errorf("load settings: %w", err)
 	}
 
+	templateOwner := strings.TrimSpace(runtimeCfg.GitHubTemplateOwner)
+	templateRepo := strings.TrimSpace(runtimeCfg.GitHubTemplateRepo)
+	templatePrivate := runtimeCfg.GitHubRepoPrivate
+	if w.settings != nil {
+		selection, err := w.settings.ResolveTemplateSelection(ctx, req.Template)
+		if err != nil {
+			return err
+		}
+		templateOwner = selection.Owner
+		templateRepo = selection.Repo
+		templatePrivate = selection.Private
+	}
+	if templateOwner == "" || templateRepo == "" {
+		return fmt.Errorf("template source not configured")
+	}
+
 	projectDir, err := projectPath(runtimeCfg.TemplatesDir, req.Name)
 	if err != nil {
 		return err
@@ -78,9 +95,41 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 		return fmt.Errorf("create templates dir: %w", err)
 	}
 
-	logger.Logf("creating GitHub repo from template for %s", req.Name)
-	githubClient := gh.NewClient(runtimeCfg)
-	repo, err := githubClient.CreateRepoFromTemplate(ctx, req.Name)
+	if w.settings == nil {
+		return fmt.Errorf("github app settings not configured")
+	}
+	appSettings, configured, err := w.settings.GitHubAppSettings(ctx)
+	if err != nil {
+		return fmt.Errorf("load github app settings: %w", err)
+	}
+	if !configured {
+		return fmt.Errorf("github app settings are incomplete")
+	}
+	creds, err := gh.ParseAppInstallationCredentials(
+		appSettings.AppID,
+		appSettings.InstallationID,
+		appSettings.PrivateKey,
+	)
+	if err != nil {
+		return fmt.Errorf("github app credentials: %w", err)
+	}
+	githubToken, err := gh.MintInstallationToken(ctx, creds)
+	if err != nil {
+		return err
+	}
+
+	logger.Logf("creating GitHub repo from template for %s (%s/%s)", req.Name, templateOwner, templateRepo)
+	logger.Log("using GitHub App installation token for template creation")
+	githubClient := gh.NewTokenClient(githubToken)
+	targetOwner := runtimeCfg.GitHubRepoOwner
+	if targetOwner == "" {
+		targetOwner = templateOwner
+	}
+	logger.Logf("validating template repo access for %s/%s", templateOwner, templateRepo)
+	if err := githubClient.ValidateTemplateRepo(ctx, templateOwner, templateRepo); err != nil {
+		return err
+	}
+	repo, err := githubClient.CreateRepoFromTemplate(ctx, templateOwner, templateRepo, req.Name, targetOwner, templatePrivate)
 	if err != nil {
 		return err
 	}
@@ -92,7 +141,7 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	if cloneURL == "" {
 		return fmt.Errorf("repo clone URL missing")
 	}
-	authURL, err := buildAuthenticatedCloneURL(cloneURL, runtimeCfg.GitHubToken)
+	authURL, err := buildAuthenticatedCloneURL(cloneURL, githubToken)
 	if err != nil {
 		return err
 	}
@@ -217,6 +266,42 @@ func (w *ProjectWorkflows) handleDeployExisting(ctx context.Context, job models.
 		Status:    "running",
 	}
 	if _, err := w.upsertProject(ctx, &project); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (w *ProjectWorkflows) handleForwardLocal(ctx context.Context, job models.Job, logger jobs.Logger) error {
+	var req ForwardLocalRequest
+	if err := json.Unmarshal([]byte(job.Input), &req); err != nil {
+		return fmt.Errorf("parse forward request: %w", err)
+	}
+	req.Name = strings.ToLower(strings.TrimSpace(req.Name))
+	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
+	if err := ValidateServiceName(req.Name); err != nil {
+		return err
+	}
+	if err := ValidateSubdomain(req.Subdomain); err != nil {
+		return err
+	}
+	if req.Port == 0 {
+		req.Port = 80
+	}
+	if err := ValidatePort(req.Port); err != nil {
+		return err
+	}
+	logger.Logf("forwarding localhost port %d for %s", req.Port, req.Name)
+
+	runtimeCfg, err := w.settings.ResolveConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load settings: %w", err)
+	}
+
+	hostname := fmt.Sprintf("%s.%s", req.Subdomain, runtimeCfg.Domain)
+	logger.Logf("configuring tunnel ingress for %s", hostname)
+	cloudflareClient := cloudflare.NewClient(runtimeCfg)
+	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, hostname, req.Port); err != nil {
 		return err
 	}
 

@@ -59,7 +59,7 @@ func (s *HealthService) Docker(ctx context.Context) DockerHealth {
 	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	containers, err := s.host.ListContainers(checkCtx)
+	containers, err := s.host.ListContainers(checkCtx, false)
 	if err != nil {
 		return DockerHealth{Status: "error", Detail: err.Error()}
 	}

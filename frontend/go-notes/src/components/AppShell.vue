@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import NavIcon from '@/components/NavIcon.vue'
+import UiPageOverlay from '@/components/ui/UiPageOverlay.vue'
+import { usePageLoadingStore } from '@/stores/pageLoading'
 
 type NavItem = {
   label: string
@@ -57,14 +59,22 @@ const navItems: NavItem[] = [
 ]
 
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
+const pageLoading = usePageLoadingStore()
 const SIDEBAR_KEY = 'warp-panel.sidebar'
 const sidebarMode = ref<'expanded' | 'collapsed'>('expanded')
 
 const isSidebarCollapsed = computed(() => sidebarMode.value === 'collapsed')
+const showOverlay = computed(() => !auth.initialized || pageLoading.loading)
 
 const toggleCollapse = () => {
   sidebarMode.value = isSidebarCollapsed.value ? 'expanded' : 'collapsed'
+}
+
+const handleLogout = async () => {
+  await auth.logout()
+  router.push('/login')
 }
 
 onMounted(() => {
@@ -100,18 +110,31 @@ const isActive = (to: string) => {
           isSidebarCollapsed ? 'w-20 px-3' : 'w-72 px-6',
         ]"
       >
-        <div class="flex items-center gap-3">
-          <div class="grid h-12 w-12 place-items-center rounded-2xl bg-[color:var(--surface-3)] text-lg font-semibold text-[color:var(--accent-ink)]">
-            WP
+        <div
+          class="space-y-3 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-2)] p-4 text-xs text-[color:var(--muted)]"
+          :class="isSidebarCollapsed ? 'p-3' : 'p-4'"
+        >
+          <p v-if="!isSidebarCollapsed" class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+            GitHub
+          </p>
+          <div v-if="auth.user" class="flex items-center gap-3">
+            <img
+              :src="auth.user.avatarUrl"
+              :alt="auth.user.login"
+              class="h-9 w-9 rounded-xl object-cover"
+            />
+            <div v-if="!isSidebarCollapsed">
+              <p class="text-sm font-semibold text-[color:var(--text)]">
+                @{{ auth.user.login }}
+              </p>
+              <p class="text-[11px] text-[color:var(--muted-2)]">
+                GitHub connected
+              </p>
+            </div>
           </div>
-          <div v-if="!isSidebarCollapsed">
-            <p class="text-xs uppercase tracking-[0.35em] text-[color:var(--muted-2)]">
-              Warp Panel
-            </p>
-            <p class="text-sm font-semibold text-[color:var(--text)]">
-              Host control surface
-            </p>
-          </div>
+          <p v-else-if="!isSidebarCollapsed" class="text-[color:var(--muted-2)]">
+            Sign in to connect GitHub.
+          </p>
         </div>
 
         <nav class="space-y-2">
@@ -141,48 +164,19 @@ const isActive = (to: string) => {
           </RouterLink>
         </nav>
 
-        <div class="mt-auto space-y-3">
-          <div
-            class="space-y-3 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-2)] p-4 text-xs text-[color:var(--muted)]"
-            :class="isSidebarCollapsed ? 'p-3' : 'p-4'"
+        <div class="mt-auto grid place-items-center">
+          <button
+            type="button"
+            class="btn btn-ghost flex w-full items-center justify-center rounded-full p-2"
+            :title="isSidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'"
+            :aria-label="isSidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'"
+            @click="toggleCollapse"
           >
-            <p v-if="!isSidebarCollapsed" class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Session
-            </p>
-            <div v-if="auth.user" class="flex items-center gap-3">
-              <img
-                :src="auth.user.avatarUrl"
-                :alt="auth.user.login"
-                class="h-9 w-9 rounded-xl object-cover"
-              />
-              <div v-if="!isSidebarCollapsed">
-                <p class="text-sm font-semibold text-[color:var(--text)]">
-                  @{{ auth.user.login }}
-                </p>
-                <p class="text-[11px] text-[color:var(--muted-2)]">
-                  Session active
-                </p>
-              </div>
-            </div>
-            <p v-else-if="!isSidebarCollapsed" class="text-[color:var(--muted-2)]">
-              Sign in to unlock deploy actions.
-            </p>
-          </div>
-
-          <div class="grid place-items-center">
-            <button
-              type="button"
-              class="btn btn-ghost flex w-full items-center justify-center rounded-full p-2"
-              :title="isSidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'"
-              :aria-label="isSidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'"
-              @click="toggleCollapse"
-            >
-              <NavIcon
-                :name="isSidebarCollapsed ? 'arrow-right' : 'arrow-left'"
-                class="h-4 w-4 text-[color:var(--muted-2)]"
-              />
-            </button>
-          </div>
+            <NavIcon
+              :name="isSidebarCollapsed ? 'arrow-right' : 'arrow-left'"
+              class="h-4 w-4 text-[color:var(--muted-2)]"
+            />
+          </button>
         </div>
       </aside>
 
@@ -204,16 +198,22 @@ const isActive = (to: string) => {
                 v-if="auth.user"
                 type="button"
                 class="btn btn-ghost px-4 py-2 text-xs font-semibold"
-                @click="auth.logout"
+                @click="handleLogout"
               >
-                Sign out
+                <span class="flex items-center gap-2">
+                  <NavIcon name="logout" class="h-3.5 w-3.5" />
+                  Sign out
+                </span>
               </button>
               <RouterLink
                 v-else
                 to="/login"
                 class="btn btn-primary px-4 py-2 text-xs font-semibold"
               >
-                Sign in
+                <span class="flex items-center gap-2">
+                  <NavIcon name="login" class="h-3.5 w-3.5" />
+                  Sign in
+                </span>
               </RouterLink>
             </div>
           </div>
@@ -239,5 +239,7 @@ const isActive = (to: string) => {
         </main>
       </div>
     </div>
+
+    <UiPageOverlay :show="showOverlay" :message="pageLoading.message" />
   </div>
 </template>

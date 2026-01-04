@@ -59,13 +59,18 @@ func (c *SettingsController) Update(ctx *gin.Context) {
 	}
 
 	c.logAudit(ctx, "settings.update", "settings", map[string]any{
-		"baseDomain":            req.BaseDomain,
-		"githubTokenSet":        req.GitHubToken != "",
-		"cloudflareTokenSet":    req.CloudflareToken != "",
-		"cloudflareAccountId":   req.CloudflareAccountID,
-		"cloudflareZoneId":      req.CloudflareZoneID,
-		"cloudflaredTunnel":     req.CloudflaredTunnel,
-		"cloudflaredConfigPath": req.CloudflaredConfigPath,
+		"baseDomain":               req.BaseDomain,
+		"githubTemplatesCount":     templateCount(req.GitHubTemplates),
+		"githubAppId":              req.GitHubAppID,
+		"githubAppClientId":        req.GitHubAppClientID,
+		"githubAppClientSecretSet": req.GitHubAppClientSecret != "",
+		"githubAppInstallationId":  req.GitHubAppInstallationID,
+		"githubAppPrivateKeySet":   req.GitHubAppPrivateKey != "",
+		"cloudflareTokenSet":       req.CloudflareToken != "",
+		"cloudflareAccountId":      req.CloudflareAccountID,
+		"cloudflareZoneId":         req.CloudflareZoneID,
+		"cloudflaredTunnel":        req.CloudflaredTunnel,
+		"cloudflaredConfigPath":    req.CloudflaredConfigPath,
 	})
 
 	response, err := c.buildResponse(ctx, settings)
@@ -111,4 +116,11 @@ func (c *SettingsController) buildResponse(ctx *gin.Context, settings service.Se
 		Sources:               sources,
 		CloudflaredTunnelName: strings.TrimSpace(cfg.CloudflaredTunnel),
 	}, nil
+}
+
+func templateCount(templates []service.GitHubTemplateSource) any {
+	if templates == nil {
+		return "unchanged"
+	}
+	return len(templates)
 }

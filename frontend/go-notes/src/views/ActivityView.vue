@@ -7,14 +7,19 @@ import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
+import NavIcon from '@/components/NavIcon.vue'
 import { useAuditStore } from '@/stores/audit'
+import { usePageLoadingStore } from '@/stores/pageLoading'
 
 const auditStore = useAuditStore()
+const pageLoading = usePageLoadingStore()
 
-onMounted(() => {
+onMounted(async () => {
+  pageLoading.start('Loading audit timeline...')
   if (!auditStore.initialized) {
-    auditStore.fetchLogs()
+    await auditStore.fetchLogs()
   }
+  pageLoading.stop()
 })
 
 const formatMetadata = (raw: string) => {
@@ -49,6 +54,7 @@ const formatMetadata = (raw: string) => {
         @click="auditStore.fetchLogs"
       >
         <span class="flex items-center gap-2">
+          <NavIcon name="refresh" class="h-3.5 w-3.5" />
           <UiInlineSpinner v-if="auditStore.loading" />
           Refresh
         </span>

@@ -1,7 +1,23 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-type IconName = 'home' | 'overview' | 'host' | 'network' | 'github' | 'activity' | 'logs' | 'arrow-left' | 'arrow-right'
+type IconName =
+  | 'home'
+  | 'overview'
+  | 'host'
+  | 'network'
+  | 'github'
+  | 'activity'
+  | 'logs'
+  | 'arrow-left'
+  | 'arrow-right'
+  | 'refresh'
+  | 'edit'
+  | 'login'
+  | 'logout'
+  | 'stop'
+  | 'restart'
+  | 'trash'
 
 const props = defineProps<{
   name: IconName
@@ -59,6 +75,41 @@ const paths: Record<IconName, string[]> = {
   ],
   'arrow-right': [
     'M9 18l6-6l-6-6',
+  ],
+  refresh: [
+    'M3 2v6h6',
+    'M21 12a9 9 0 0 0-15.5-6.5L3 8',
+    'M21 22v-6h-6',
+    'M3 12a9 9 0 0 0 15.5 6.5L21 16',
+  ],
+  edit: [
+    'M12 20h9',
+    'M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1l1-4z',
+  ],
+  login: [
+    'M15 3h4a2 2 0 0 1 2 2v4',
+    'M10 17l5-5l-5-5',
+    'M15 12H3',
+    'M15 21h4a2 2 0 0 0 2-2v-4',
+  ],
+  logout: [
+    'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4',
+    'M16 17l5-5l-5-5',
+    'M21 12H9',
+  ],
+  stop: [
+    'M6 6h12v12H6z',
+  ],
+  restart: [
+    'M21 2v6h-6',
+    'M3 12a9 9 0 0 1 14.657-6.657L21 8',
+    'M3 22v-6h6',
+    'M21 12a9 9 0 0 1-14.657 6.657L3 16',
+  ],
+  trash: [
+    'M3 6h18',
+    'M8 6V4h8v2',
+    'M6 6l1 14h10l1-14',
   ],
 }
 </script>
