@@ -45,7 +45,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'refresh'): void
-  (e: 'start-onboarding'): void
 }>()
 
 const jobTone = computed<BadgeTone>(() => {
@@ -117,7 +116,7 @@ const formatDate = (value?: string | null) => {
       </div>
     </div>
     <hr />
-    <UiPanel variant="soft" class="space-y-4 p-4" data-onboard="home-status">
+    <UiPanel variant="soft" class="space-y-4 p-4">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
@@ -266,10 +265,10 @@ const formatDate = (value?: string | null) => {
           </p>
         </UiListRow>
       </div>
-      <UiListRow class="flex flex-wrap items-center justify-between gap-3" data-onboard="home-onboarding">
+      <UiListRow class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-            Onboarding
+            Next steps
           </p>
           <p class="mt-1 text-sm text-[color:var(--muted)]">
             Finish host setup to unlock host tunnel automation and DNS updates.
@@ -278,9 +277,6 @@ const formatDate = (value?: string | null) => {
         <div class="flex flex-wrap items-center gap-2">
           <UiButton :as="RouterLink" to="/host-settings" variant="primary" size="sm">
             Configure host
-          </UiButton>
-          <UiButton variant="ghost" size="sm" @click="emit('start-onboarding')">
-            View guide
           </UiButton>
         </div>
       </UiListRow>

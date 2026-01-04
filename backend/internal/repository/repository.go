@@ -39,8 +39,3 @@ type AuditLogRepository interface {
 	List(ctx context.Context, limit int) ([]models.AuditLog, error)
 	Create(ctx context.Context, entry *models.AuditLog) error
 }
-
-type OnboardingRepository interface {
-	GetByUser(ctx context.Context, userID uint) (*models.OnboardingState, error)
-	Save(ctx context.Context, state *models.OnboardingState) error
-}

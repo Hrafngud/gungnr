@@ -3,9 +3,9 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiFormSidePanel from '@/components/ui/UiFormSidePanel.vue'
+import UiFieldGuidance from '@/components/ui/UiFieldGuidance.vue'
 import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
 import UiInput from '@/components/ui/UiInput.vue'
-import UiOnboardingOverlay from '@/components/ui/UiOnboardingOverlay.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import HostStatusPanel from '@/components/home/HostStatusPanel.vue'
 import TemplateCardsSection from '@/components/home/TemplateCardsSection.vue'
@@ -14,7 +14,6 @@ import { useProjectsStore } from '@/stores/projects'
 import { useJobsStore } from '@/stores/jobs'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toasts'
-import { useOnboardingStore } from '@/stores/onboarding'
 import { projectsApi } from '@/services/projects'
 import { healthApi } from '@/services/health'
 import { settingsApi } from '@/services/settings'
@@ -25,7 +24,7 @@ import type { LocalProject } from '@/types/projects'
 import type { DockerHealth, TunnelHealth } from '@/types/health'
 import type { Settings } from '@/types/settings'
 import type { GitHubCatalog } from '@/types/github'
-import type { OnboardingStep } from '@/types/onboarding'
+import { useFieldGuidance } from '@/composables/useFieldGuidance'
 
 type QueueState = {
   loading: boolean
@@ -53,7 +52,7 @@ const projectsStore = useProjectsStore()
 const jobsStore = useJobsStore()
 const auth = useAuthStore()
 const toastStore = useToastStore()
-const onboardingStore = useOnboardingStore()
+const fieldGuidance = useFieldGuidance()
 
 const machineName = ref('')
 const dockerHealth = ref<DockerHealth | null>(null)
@@ -61,8 +60,6 @@ const tunnelHealth = ref<TunnelHealth | null>(null)
 const settings = ref<Settings | null>(null)
 const hostLoading = ref(false)
 const settingsError = ref<string | null>(null)
-const onboardingOpen = ref(false)
-const onboardingStep = ref(0)
 const localProjects = ref<LocalProject[]>([])
 const localLoading = ref(false)
 const localError = ref<string | null>(null)
@@ -115,27 +112,6 @@ const quickForm = reactive({
 
 const selectedTemplateCard = ref<TemplateCardId | null>(null)
 const selectedServiceCard = ref<string | null>(null)
-
-const onboardingSteps: OnboardingStep[] = [
-  {
-    id: 'host-status',
-    title: 'Check host readiness',
-    description: 'Confirm Docker and the host cloudflared service are healthy before queuing deploys.',
-    target: "[data-onboard='home-status']",
-  },
-  {
-    id: 'quick-deploy',
-    title: 'Queue deploys quickly',
-    description: 'Launch a template repo or forward a local port. Jobs and Activity update as soon as each run starts.',
-    target: "[data-onboard='home-quick-deploy']",
-  },
-  {
-    id: 'finish-setup',
-    title: 'Finish host setup',
-    description: 'Complete Host Settings to connect the host tunnel service and DNS automation.',
-    target: "[data-onboard='home-onboarding']",
-  },
-]
 
 const isAuthenticated = computed(() => Boolean(auth.user))
 
@@ -409,15 +385,6 @@ const selectServiceCard = (card: ServiceCard) => {
     typeof card.containerPort === 'number' ? card.containerPort.toString() : ''
 }
 
-const startOnboarding = () => {
-  onboardingStep.value = 0
-  onboardingOpen.value = true
-}
-
-const markOnboardingComplete = () => {
-  onboardingStore.updateState({ home: true })
-}
-
 onMounted(async () => {
   if (!projectsStore.initialized) {
     projectsStore.fetchProjects()
@@ -428,10 +395,6 @@ onMounted(async () => {
   loadHostStatus()
   if (typeof window !== 'undefined') {
     machineName.value = window.location.hostname || 'localhost'
-  }
-  await onboardingStore.fetchState()
-  if (!onboardingStore.state.home) {
-    onboardingOpen.value = true
   }
 })
 
@@ -466,10 +429,9 @@ watch(
     :last-job="lastJob"
     :last-project="lastProject"
     @refresh="refreshAll"
-    @start-onboarding="startOnboarding"
   />
   <hr />
-    <section class="space-y-6" data-onboard="home-quick-deploy">
+    <section class="space-y-6">
       <div class="flex flex-wrap items-center justify-between gap-4">
         <div>
           <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
@@ -522,12 +484,9 @@ watch(
         />
       </div>
     </section>
-  <UiOnboardingOverlay
-    v-model="onboardingOpen"
-    v-model:stepIndex="onboardingStep"
-    :steps="onboardingSteps"
-    @finish="markOnboardingComplete"
-    @skip="markOnboardingComplete"
+  <UiFieldGuidance
+    :model-value="fieldGuidance.open.value"
+    :content="fieldGuidance.content.value"
   />
   <UiFormSidePanel
     v-model="templateFormOpen"
@@ -552,6 +511,11 @@ watch(
           placeholder="my-project"
           required
           :disabled="templateState.loading"
+          @focus="fieldGuidance.show({
+            title: 'Project name',
+            description: 'Used for the GitHub repo and the local folder. Keep it short and DNS-safe.',
+          })"
+          @blur="fieldGuidance.clear()"
         />
         <p class="text-xs text-[color:var(--muted)]">
           Name for the GitHub repo and local folder.
@@ -567,6 +531,11 @@ watch(
           placeholder="my-project"
           required
           :disabled="templateState.loading"
+          @focus="fieldGuidance.show({
+            title: 'Subdomain',
+            description: 'Becomes the hostname prepended to your base domain in Cloudflare.',
+          })"
+          @blur="fieldGuidance.clear()"
         />
         <p class="text-xs text-[color:var(--muted)]">
           Subdomain for web access via your Cloudflare tunnel.
@@ -617,6 +586,11 @@ watch(
           placeholder="my-service"
           required
           :disabled="existingState.loading"
+          @focus="fieldGuidance.show({
+            title: 'Service name',
+            description: 'Used for tracking this forwarded service in jobs and activity.',
+          })"
+          @blur="fieldGuidance.clear()"
         />
         <p class="text-xs text-[color:var(--muted)]">
           Internal identifier for tracking this forwarded service.
@@ -632,6 +606,11 @@ watch(
           placeholder="my-service"
           required
           :disabled="existingState.loading"
+          @focus="fieldGuidance.show({
+            title: 'Subdomain',
+            description: 'The public hostname to route through your Cloudflare tunnel.',
+          })"
+          @blur="fieldGuidance.clear()"
         />
         <p class="text-xs text-[color:var(--muted)]">
           Subdomain for web access via your Cloudflare tunnel.
@@ -647,6 +626,11 @@ watch(
           placeholder="3000"
           required
           :disabled="existingState.loading"
+          @focus="fieldGuidance.show({
+            title: 'Localhost port',
+            description: 'Enter the port your service is already listening on (for example 3000).',
+          })"
+          @blur="fieldGuidance.clear()"
         />
         <p class="text-xs text-[color:var(--muted)]">
           The localhost port where your service is currently running.
@@ -696,6 +680,11 @@ watch(
           type="text"
           placeholder="preview"
           :disabled="quickState.loading"
+          @focus="fieldGuidance.show({
+            title: 'Subdomain',
+            description: 'Set the hostname Cloudflare should route to this service.',
+          })"
+          @blur="fieldGuidance.clear()"
         />
       </label>
       <label class="grid gap-2 text-sm">
@@ -707,6 +696,11 @@ watch(
           type="text"
           placeholder="5173"
           :disabled="quickState.loading"
+          @focus="fieldGuidance.show({
+            title: 'Local port',
+            description: 'Port already exposed on this host that you want to publish.',
+          })"
+          @blur="fieldGuidance.clear()"
         />
         <p class="text-xs text-[color:var(--muted)]">
           Host port exposed by Docker on this machine.
@@ -721,6 +715,11 @@ watch(
           type="text"
           placeholder="excalidraw/excalidraw:latest"
           :disabled="quickState.loading"
+          @focus="fieldGuidance.show({
+            title: 'Container image',
+            description: 'Optional image to run if you want Warp Panel to launch the service.',
+          })"
+          @blur="fieldGuidance.clear()"
         />
         <p class="text-xs text-[color:var(--muted)]">
           Leave blank to use the default image.
@@ -735,6 +734,11 @@ watch(
           type="text"
           placeholder="80"
           :disabled="quickState.loading"
+          @focus="fieldGuidance.show({
+            title: 'Container port',
+            description: 'Port inside the container that the host port maps to.',
+          })"
+          @blur="fieldGuidance.clear()"
         />
         <p class="text-xs text-[color:var(--muted)]">
           Port inside the container (default 80). Host port maps to this.

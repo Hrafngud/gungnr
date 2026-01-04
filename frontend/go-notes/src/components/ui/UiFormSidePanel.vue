@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   modelValue: boolean
   title?: string
-}>()
+  eyebrow?: string
+}>(), {
+  eyebrow: 'Form',
+})
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
@@ -45,7 +48,7 @@ const onOverlayClick = (event: MouseEvent) => {
             <div class="form-side-panel-header">
               <div v-if="title">
                 <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                  Form
+                  {{ props.eyebrow }}
                 </p>
                 <h2 class="mt-1 text-lg font-semibold text-[color:var(--text)]">
                   {{ title }}

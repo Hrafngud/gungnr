@@ -662,47 +662,6 @@ h3 {
   border-top: 1px solid var(--border);
 }
 
-.onboarding-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
-  background: rgba(6, 6, 10, 0.78);
-}
-
-.onboarding-highlight {
-  position: fixed;
-  border-radius: 0;
-  border: 1px solid rgba(228, 228, 231, 0.65);
-  box-shadow: 0 0 0 1px rgba(228, 228, 231, 0.2);
-  pointer-events: none;
-}
-
-.onboarding-card {
-  position: fixed;
-  z-index: 91;
-  border-radius: 0;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  box-shadow: none;
-  padding: 1rem 1.2rem;
-}
-
-.onboarding-progress {
-  font-size: 0.6rem;
-  text-transform: uppercase;
-  letter-spacing: 0.3em;
-  color: var(--muted-2);
-}
-
-.onboarding-links a {
-  transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
-}
-
-.onboarding-links a:hover {
-  border-color: var(--text);
-  background: var(--surface-3);
-}
-
 @keyframes page-in {
   from {
     opacity: 0;

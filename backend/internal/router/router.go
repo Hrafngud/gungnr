@@ -13,7 +13,6 @@ type Dependencies struct {
 	Projects       *controller.ProjectsController
 	Jobs           *controller.JobsController
 	Settings       *controller.SettingsController
-	Onboarding     *controller.OnboardingController
 	Host           *controller.HostController
 	Audit          *controller.AuditController
 	GitHub         *controller.GitHubController
@@ -49,9 +48,6 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	}
 	if deps.Settings != nil {
 		deps.Settings.Register(authed)
-	}
-	if deps.Onboarding != nil {
-		deps.Onboarding.Register(authed)
 	}
 	if deps.Host != nil {
 		deps.Host.Register(authed)

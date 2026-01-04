@@ -28,7 +28,7 @@ defineProps<{
     >
       <div
         v-if="modelValue && content"
-        class="fixed left-[5%] top-1/2 z-[60] w-[300px] -translate-y-1/2 space-y-4 rounded bg-[color:var(--surface)] p-6 shadow-2xl"
+        class="fixed left-[5%] top-1/2 z-[70] w-[300px] -translate-y-1/2 space-y-4 bg-[color:var(--surface)] p-6 shadow-2xl"
         role="complementary"
         aria-live="polite"
       >

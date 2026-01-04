@@ -64,12 +64,3 @@ type Settings struct {
 	CloudflaredTunnel     string `gorm:"size:255"`
 	CloudflaredConfigPath string `gorm:"size:512"`
 }
-
-type OnboardingState struct {
-	gorm.Model
-	UserID       uint `gorm:"uniqueIndex"`
-	Home         bool
-	HostSettings bool
-	Networking   bool
-	GitHub       bool
-}
