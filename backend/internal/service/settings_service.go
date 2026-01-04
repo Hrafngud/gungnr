@@ -37,6 +37,7 @@ type SettingsSources struct {
 	GitHubAppClientSecret   string `json:"githubAppClientSecret"`
 	GitHubAppInstallationID string `json:"githubAppInstallationId"`
 	GitHubAppPrivateKey     string `json:"githubAppPrivateKey"`
+	TemplatesDir            string `json:"templatesDir"`
 	CloudflareToken         string `json:"cloudflareToken"`
 	CloudflareAccountID     string `json:"cloudflareAccountId"`
 	CloudflareZoneID        string `json:"cloudflareZoneId"`
@@ -228,6 +229,7 @@ func (s *SettingsService) ResolveConfigWithSources(ctx context.Context) (config.
 		GitHubAppClientSecret:   sourceFromValue("", "env"),
 		GitHubAppInstallationID: sourceFromValue("", "env"),
 		GitHubAppPrivateKey:     sourceFromValue("", "env"),
+		TemplatesDir:            sourceFromValue(cfg.TemplatesDir, "env"),
 		CloudflareToken:         sourceFromValue(cfg.CloudflareAPIToken, "env"),
 		CloudflareAccountID:     sourceFromValue(cfg.CloudflareAccountID, "env"),
 		CloudflareZoneID:        sourceFromValue(cfg.CloudflareZoneID, "env"),
@@ -296,6 +298,11 @@ func (s *SettingsService) ResolveConfigWithSources(ctx context.Context) (config.
 			sources.CloudflaredConfigPath = "settings"
 		} else if sources.CloudflaredConfigPath == "" {
 			sources.CloudflaredConfigPath = "unset"
+		}
+	}
+	if strings.TrimSpace(cfg.TemplatesDir) == "" {
+		if sources.TemplatesDir == "" {
+			sources.TemplatesDir = "unset"
 		}
 	}
 
@@ -463,6 +470,9 @@ func normalizeSources(input SettingsSources) SettingsSources {
 	}
 	if input.CloudflaredConfigPath == "" {
 		input.CloudflaredConfigPath = "unset"
+	}
+	if input.TemplatesDir == "" {
+		input.TemplatesDir = "unset"
 	}
 	return input
 }

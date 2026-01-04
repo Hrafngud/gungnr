@@ -46,6 +46,7 @@ const settingsForm = reactive<Settings>({
 
 const settingsSources = ref<SettingsSources | null>(null)
 const cloudflaredTunnelName = ref<string | null>(null)
+const templatesDir = ref<string | null>(null)
 
 const toastStore = useToastStore()
 const fieldGuidance = useFieldGuidance()
@@ -239,6 +240,7 @@ const loadSettings = async () => {
     Object.assign(settingsForm, data.settings)
     settingsSources.value = data.sources ?? null
     cloudflaredTunnelName.value = data.cloudflaredTunnelName ?? null
+    templatesDir.value = data.templatesDir ?? null
   } catch (err) {
     error.value = apiErrorMessage(err)
   } finally {
@@ -256,6 +258,7 @@ const saveSettings = async () => {
     Object.assign(settingsForm, data.settings)
     settingsSources.value = data.sources ?? null
     cloudflaredTunnelName.value = data.cloudflaredTunnelName ?? null
+    templatesDir.value = data.templatesDir ?? null
     success.value = 'Settings saved.'
     toastStore.success('Settings saved.', 'Settings updated')
     await loadPreview()
@@ -873,7 +876,7 @@ watch(projectFilter, () => {
           Checking host integrations...
         </UiState>
 
-        <div v-else class="grid gap-3 sm:grid-cols-2">
+        <div v-else class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <UiPanel variant="soft" class="space-y-2 p-3">
             <div class="flex items-center justify-between gap-2">
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
@@ -958,6 +961,21 @@ watch(projectFilter, () => {
             </p>
             <p class="text-xs text-[color:var(--muted)]">
               Source: {{ settingsSources?.cloudflaredConfigPath || 'unset' }}
+            </p>
+          </UiPanel>
+
+          <UiPanel variant="soft" class="space-y-2 p-3">
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              Templates dir
+            </p>
+            <p
+              class="truncate text-sm font-semibold text-[color:var(--text)]"
+              :title="templatesDir || '—'"
+            >
+              {{ templatesDir || '—' }}
+            </p>
+            <p class="text-xs text-[color:var(--muted)]">
+              Source: {{ settingsSources?.templatesDir || 'unset' }}
             </p>
           </UiPanel>
         </div>

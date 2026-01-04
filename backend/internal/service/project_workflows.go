@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"go-notes/internal/config"
 	"go-notes/internal/integrations/cloudflare"
@@ -147,7 +148,7 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	}
 
 	logger.Log("cloning repository into templates directory")
-	if err := runQuietCommand(ctx, logger, "", []string{"GIT_TERMINAL_PROMPT=0"}, "git", "clone", authURL, projectDir); err != nil {
+	if err := cloneTemplateRepo(ctx, logger, authURL, projectDir); err != nil {
 		return err
 	}
 
@@ -543,6 +544,40 @@ func buildAuthenticatedCloneURL(rawURL, token string) (string, error) {
 	}
 	parsed.User = url.UserPassword("x-access-token", token)
 	return parsed.String(), nil
+}
+
+func cloneTemplateRepo(ctx context.Context, logger jobs.Logger, authURL, projectDir string) error {
+	const maxAttempts = 3
+	composePath := filepath.Join(projectDir, "docker-compose.yml")
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			logger.Logf("retrying repository clone (attempt %d/%d)", attempt, maxAttempts)
+		}
+
+		if err := runQuietCommand(ctx, logger, "", []string{"GIT_TERMINAL_PROMPT=0"}, "git", "clone", authURL, projectDir); err != nil {
+			lastErr = err
+		} else if _, err := os.Stat(composePath); err == nil {
+			return nil
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("check compose file: %w", err)
+		} else {
+			lastErr = fmt.Errorf("docker-compose.yml missing after clone")
+		}
+
+		if err := os.RemoveAll(projectDir); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("cleanup failed clone: %w", err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(attempt) * time.Second):
+		}
+	}
+
+	return lastErr
 }
 
 func runLoggedCommand(ctx context.Context, logger jobs.Logger, dir string, env []string, name string, args ...string) error {

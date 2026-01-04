@@ -19,10 +19,25 @@ export type GitHubAppStatus = {
   privateKeyConfigured: boolean
 }
 
+export type GitHubRepoAccessDiagnostics = {
+  checked: boolean
+  available: boolean
+  error?: string
+  requestId?: string
+}
+
+export type GitHubTemplateAccessDiagnostics = {
+  installationOwner?: string
+  installationOwnerType?: string
+  installationError?: string
+  repoAccess: GitHubRepoAccessDiagnostics
+}
+
 export type GitHubCatalog = {
   tokenConfigured: boolean
   template: GitHubTemplateCatalog
   templates?: GitHubTemplateCatalog[]
   allowlist: GitHubAllowlist
   app: GitHubAppStatus
+  templateAccess?: GitHubTemplateAccessDiagnostics
 }
