@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -52,6 +53,9 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	if err := json.Unmarshal([]byte(job.Input), &req); err != nil {
 		return fmt.Errorf("parse template request: %w", err)
 	}
+	if w.settings == nil {
+		return fmt.Errorf("settings not configured")
+	}
 	req.Name = strings.ToLower(strings.TrimSpace(req.Name))
 	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
 	if req.Subdomain == "" {
@@ -94,10 +98,6 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	}
 	if err := os.MkdirAll(runtimeCfg.TemplatesDir, 0o755); err != nil {
 		return fmt.Errorf("create templates dir: %w", err)
-	}
-
-	if w.settings == nil {
-		return fmt.Errorf("github app settings not configured")
 	}
 	appSettings, configured, err := w.settings.GitHubAppSettings(ctx)
 	if err != nil {
@@ -172,10 +172,13 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	logger.Logf("using proxy port %d and db port %d", proxyPort, dbPort)
 
 	composePath := filepath.Join(projectDir, "docker-compose.yml")
-	if err := patchComposePorts(composePath, proxyPort, dbPort); err != nil {
+	patchSummary, err := patchComposePorts(composePath, proxyPort, dbPort)
+	if err == nil || patchSummary.Proxy.Matched || patchSummary.DB.Matched || patchSummary.Proxy.Reason != "" || patchSummary.DB.Reason != "" {
+		logComposePatchSummary(logger, proxyPort, dbPort, patchSummary)
+	}
+	if err != nil {
 		return err
 	}
-	logger.Log("patched docker-compose.yml with selected ports")
 
 	project := models.Project{
 		Name:      req.Name,
@@ -503,36 +506,157 @@ func parsePublishedPorts(raw string) []int {
 	return ports
 }
 
-var (
-	proxyPortPattern = regexp.MustCompile(`(?m)^(\s*-\s*["']?)80:80(["']?)\s*$`)
-	dbPortPattern    = regexp.MustCompile(`(?m)^(\s*-\s*["']?)(?:\${DB_PORT:-5432}|5432):5432(["']?)\s*$`)
-)
+type portPatchOutcome struct {
+	Matched       bool
+	Changed       bool
+	Pattern       string
+	Matches       int
+	Reason        string
+	ExtraMappings int
+}
 
-func patchComposePorts(path string, proxyPort, dbPort int) error {
+type composePatchSummary struct {
+	Proxy portPatchOutcome
+	DB    portPatchOutcome
+}
+
+func patchComposePorts(path string, proxyPort, dbPort int) (composePatchSummary, error) {
+	var summary composePatchSummary
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read compose file: %w", err)
+		return summary, fmt.Errorf("read compose file: %w", err)
 	}
-	contents := string(raw)
-	updated := contents
+	lines := strings.Split(string(raw), "\n")
+	changed := false
 
 	if proxyPort > 0 {
-		updated = proxyPortPattern.ReplaceAllString(updated, fmt.Sprintf("${1}%d:80${2}", proxyPort))
+		summary.Proxy = patchComposePort(lines, 80, proxyPort)
+		if summary.Proxy.Changed {
+			changed = true
+		}
 	}
 	if dbPort > 0 {
-		updated = dbPortPattern.ReplaceAllString(updated, fmt.Sprintf("${1}%d:5432${2}", dbPort))
+		summary.DB = patchComposePort(lines, 5432, dbPort)
+		if summary.DB.Changed {
+			changed = true
+		}
 	}
 
-	if updated == contents {
-		return fmt.Errorf("no port mappings updated in compose file")
+	if proxyPort > 0 && !summary.Proxy.Matched {
+		return summary, fmt.Errorf("compose file missing host port mapping for container port 80")
 	}
 
-	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
-		return fmt.Errorf("write compose file: %w", err)
+	if changed {
+		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+			return summary, fmt.Errorf("write compose file: %w", err)
+		}
 	}
 
-	return nil
+	return summary, nil
 }
+
+func patchComposePort(lines []string, containerPort, hostPort int) portPatchOutcome {
+	outcome := portPatchOutcome{}
+	if hostPort <= 0 {
+		outcome.Reason = "host port not provided"
+		return outcome
+	}
+
+	re := regexp.MustCompile(fmt.Sprintf(`^(\s*-\s*['"]?)(.+):%d(\s*/\w+)?(['"]?)(\s+#.*)?\s*$`, containerPort))
+	for i, line := range lines {
+		matches := re.FindStringSubmatch(line)
+		if matches == nil {
+			continue
+		}
+		outcome.Matches++
+		outcome.Matched = true
+		if outcome.Pattern != "" {
+			continue
+		}
+
+		hostPart := strings.TrimSpace(matches[2])
+		newHostPart, pattern := formatHostPart(hostPart, hostPort)
+		outcome.Pattern = pattern
+		newLine := fmt.Sprintf("%s%s:%d%s%s%s", matches[1], newHostPart, containerPort, matches[3], matches[4], matches[5])
+		if newLine != line {
+			lines[i] = newLine
+			outcome.Changed = true
+		}
+	}
+
+	if outcome.Matches > 1 {
+		outcome.ExtraMappings = outcome.Matches - 1
+	}
+	if !outcome.Matched {
+		outcome.Reason = fmt.Sprintf("no host port mapping found for container port %d", containerPort)
+	} else if !outcome.Changed {
+		outcome.Reason = fmt.Sprintf("host port already set to %d for container port %d", hostPort, containerPort)
+	}
+
+	return outcome
+}
+
+func formatHostPart(hostPart string, hostPort int) (string, string) {
+	hostPart = strings.TrimSpace(hostPart)
+	portValue := strconv.Itoa(hostPort)
+
+	if envVarPattern.MatchString(hostPart) {
+		return portValue, "env host port"
+	}
+
+	if matches := ipv4HostPattern.FindStringSubmatch(hostPart); matches != nil {
+		return fmt.Sprintf("%s:%s", matches[1], portValue), "ip-bound host port"
+	}
+
+	if strings.HasPrefix(hostPart, "localhost:") {
+		return fmt.Sprintf("localhost:%s", portValue), "host-bound port"
+	}
+
+	if strings.HasPrefix(hostPart, "[") {
+		if idx := strings.LastIndex(hostPart, "]:"); idx != -1 {
+			return fmt.Sprintf("%s:%s", hostPart[:idx+1], portValue), "ip-bound host port"
+		}
+	}
+
+	if idx := strings.LastIndex(hostPart, ":"); idx != -1 {
+		return fmt.Sprintf("%s:%s", hostPart[:idx], portValue), "host-bound port"
+	}
+
+	return portValue, "explicit host port"
+}
+
+func logComposePatchSummary(logger jobs.Logger, proxyPort, dbPort int, summary composePatchSummary) {
+	if proxyPort > 0 {
+		logComposePatchOutcome(logger, "proxy", 80, proxyPort, summary.Proxy)
+	}
+	if dbPort > 0 {
+		logComposePatchOutcome(logger, "db", 5432, dbPort, summary.DB)
+	}
+}
+
+func logComposePatchOutcome(logger jobs.Logger, label string, containerPort, hostPort int, outcome portPatchOutcome) {
+	if outcome.Matched {
+		if outcome.Changed {
+			logger.Logf("patched %s port using %s mapping to %d:%d", label, outcome.Pattern, hostPort, containerPort)
+		} else {
+			logger.Logf("%s port already set to %d:%d using %s mapping", label, hostPort, containerPort, outcome.Pattern)
+		}
+		if outcome.ExtraMappings > 0 {
+			logger.Logf("found %d additional %s port mappings for container port %d (left unchanged)", outcome.ExtraMappings, label, containerPort)
+		}
+		return
+	}
+	if outcome.Reason != "" {
+		logger.Logf("no %s port update applied: %s", label, outcome.Reason)
+		return
+	}
+	logger.Logf("no %s port update applied for container port %d", label, containerPort)
+}
+
+var (
+	envVarPattern  = regexp.MustCompile(`^\$\{[^}]+\}$`)
+	ipv4HostPattern = regexp.MustCompile(`^(\d{1,3}(?:\.\d{1,3}){3}):`)
+)
 
 func buildAuthenticatedCloneURL(rawURL, token string) (string, error) {
 	if token == "" {
@@ -609,7 +733,7 @@ func runLoggedCommand(ctx context.Context, logger jobs.Logger, dir string, env [
 		for scanner.Scan() {
 			logger.Log(scanner.Text())
 		}
-		if err := scanner.Err(); err != nil {
+		if err := scanner.Err(); err != nil && !errors.Is(err, os.ErrClosed) {
 			done <- err
 			return
 		}
@@ -619,9 +743,9 @@ func runLoggedCommand(ctx context.Context, logger jobs.Logger, dir string, env [
 	go read(stdout)
 	go read(stderr)
 
-	waitErr := cmd.Wait()
 	err1 := <-done
 	err2 := <-done
+	waitErr := cmd.Wait()
 
 	if waitErr != nil {
 		return fmt.Errorf("%s failed: %w", name, waitErr)
