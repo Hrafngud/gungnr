@@ -1,5 +1,13 @@
 ## Iteration Log
 
+- 2026-01-06: Diagnosed and fixed create_template job failure on log streaming shutdown.
+  - Root cause: `runLoggedCommand` called `cmd.Wait()` before log readers completed, yielding `read |0: file already closed` from scanner and marking jobs failed even when compose exited 0.
+  - Fix: wait for stdout/stderr readers to finish before `Wait`, and ignore `os.ErrClosed` in scanners to avoid false failures.
+- 2026-01-06: Queued diagnosis task for job 91 failure (`read |0: file already closed`) after docker compose start.
+- 2026-01-06: Marked the Docker usage summary task as already completed; no new tasks queued.
+- 2026-01-06: Guarded legacy host-worker cleanup against missing columns.
+  - Added jobs table presence check and column discovery before clearing legacy host tokens.
+  - Cleanup now skips the update when `host_token` columns are absent, avoiding fresh-db warnings.
 - 2026-01-04: New GitHub template repo lookup error observed.
   - Error: `template repo lookup failed: GET https://api.github.com/repos/Hrafngud/go-ground: 404 Not Found` using the GitHub App installation token.
   - Next task set to diagnose access/installation scope vs repo visibility, review docs, and propose a concise fix plan.
@@ -9,6 +17,8 @@
 - 2026-01-04: Removed PAT references and fallback logic; create-from-template now requires GitHub App installation tokens only. Updated UI guidance and GitHub page copy to reflect App-only flow and removed PAT settings field.
 - 2026-01-04: Clarified GitHub token/App permissions in Host Settings guidance and helper text for GitHub access fields.
 - 2026-01-04: Added GitHub App credential status panel to GitHub page with backend catalog fields for App ID/Installation ID/Private Key status. Fixed strict null checks in `TemplateCardsSection` and `HomeView`. Ran `npm run build` successfully.
+- 2026-01-05: Guarded create-from-template settings access to avoid nil dereference.
+  - Added early settings nil check in `handleCreateTemplate` to return a clear error before resolving config or accessing GitHub app settings.
 - 2026-01-02: User initiated a major visual rework. Pivoting from previous tasks.
 - 2026-01-03 (Session 1): Starting UI-REWORK-1 - removing rounded containers, reducing margins, adding custom hr separators.
   - Completed UI-REWORK-1: Removed border-radius from all panel, list-row, state, modal, toast, and onboarding classes in style.css. Horizontal margins already at 5% (`px-[5%]` in AppShell.vue). Added `<hr />` separators to HomeView, OverviewView, ActivityView, GitHubView, HostSettingsView, JobsView, and NetworkingView.
@@ -144,6 +154,10 @@
 - 2026-01-04 (Session 13): Planned dynamic compose port patching.
   - Noted create-from-template failure when compose ports don't match default patterns.
   - Updated next task to implement flexible port injection + better logs.
+- 2026-01-04 (Session 14): Implemented flexible compose port patching.
+  - Updated compose port patching to match host mappings for container ports 80/5432, including env-substituted and IP-bound patterns.
+  - Logged patch results per port (pattern used, already-set notes, or precise missing-mapping reasons).
+  - Preserved compose file output unless actual changes were applied.
 
 ## Completed Task Snapshot
 
