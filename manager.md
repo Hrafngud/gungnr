@@ -1,162 +1,18 @@
-## Warp Panel - Project Tracker
+## Warp Panel - Project State
 
-- Scope: Web control panel to perform all deploy.sh tasks from a browser. It runs on the host PC (Docker, filesystem, cloudflared access) and is served via Cloudflare Tunnel for remote control.
-- Principle: `deploy.sh` is reference-only; do not modify it. The UI must reproduce its CLI behavior before advanced setups.
-- Core flows:
-  - Create new project from a GitHub template, clone locally, patch compose ports, build and run.
-  - Deploy an existing local template project (compose up if needed).
-  - Expose a quick local service (any running port) via tunnel + DNS.
-  - Manage tunnel ingress and DNS for subdomains on the configured zone.
-  - Guide onboarding with step-by-step hints and links for required API keys.
-- Deliverables:
-  - Go API with authenticated GitHub login, Cloudflare and GitHub integrations, job runner, audit logs.
-  - Vue UI with dark zinc skeuomorphic theme, sidebar navigation, and dedicated pages for Home, Overview, Host Settings, Networking, and GitHub config.
-  - Docker Compose stack with Postgres, API, and web frontend.
-- Tech decisions:
-  - Backend: Go 1.22+, Gin, GORM + pgx, go-github, cloudflared CLI, oauth2.
-  - Frontend: Vue 3 + Vite + TS, Tailwind CSS v4, Pinia, Axios, vue-router.
-  - DB: Postgres for projects, jobs, and audit logs.
-  - Host access: Docker socket bind, templates dir bind, cloudflared config bind.
-- Progress log:
-  - DONE: Use host-installed `cloudflared` service as the only tunnel path; removed the compose cloudflared container.
-  - DONE: Implement API Docker runner (socket-based) to run containers/compose directly from jobs.
-  - DONE: Cloudflare DNS/ingress updates confirmed healthy; focus shifts to Docker runner UX and retiring host-worker flow.
-  - DEFERRED: Update UI copy and help modals (replaced by new contextual guidance system - UX-REFINE-2).
-  - DEFERRED: Persist onboarding state in backend (overlay system being replaced - UX-REFINE-2).
-- DONE: Redesign sidebar collapse UX (icon-only, control in sidebar only).
-- DONE: Increase main content width by reducing horizontal padding/margins.
-- DONE: Replace native selects with a universal custom Select component.
-- DONE: Draft a detailed plan for container lifecycle controls (stop/restart/remove), multi-instance naming, and the Host Settings/Overview UI rework.
-- DONE: Fix login flow to auto-redirect on `/auth/me` success.
-- DONE: Update login page layout to the two-column design.
-- DONE: Refactor Home Quick Deploy into card grids for Templates/Services; show deploy forms only when selected.
-- TODO: Replace placeholder notes docs with Warp Panel plans and guidelines.
-- DONE: Visual rework for dark zinc skeuomorphic theme, component variants, and standardized animations.
-- DONE: Rebuild navigation with expandable sidebar, top bar, and footer.
-- DONE: Split pages into Home, Overview, Host Settings, Networking, and GitHub config.
-- DONE: Add onboarding overlay journey and day-to-day flow polish.
-- DONE: Update login to two-column layout and popup GitHub OAuth.
-- **NEW UX Refinement Phase (2026-01-03):**
-  - TODO: UX-REFINE-1: Quick Services improvements (icons, search bar, fixed-height scrollable container).
-  - TODO: UX-REFINE-2: Replace overlay-with-highlight guidance with contextual form field help (focus-triggered, left-positioned, with external links).
-  - TODO: UX-REFINE-3: Create ingress preview sidebar component (like FormSidePanel) for Networking/Host Settings cleanup.
-  - TODO: UX-REFINE-4: Convert Networking 'Expected DNS records' to 4-column grid layout.
-  - TODO: UX-REFINE-5: Simplify "Create from template" form (project name + subdomain only, auto-infer ports).
-  - TODO: UX-REFINE-6: Clarify "Deploy existing" form to forward ANY localhost service (Docker or not) via Cloudflare-only approach.
-  - NOTE: Backend planning for GitHub/Templates integration deferred for future discussion.
-- **NEW Backend + Host Enhancements (2026-01-03):**
-  - TODO: Implement GitHub template generation using App token + generate endpoint.
-  - TODO: Add template catalog (multiple repos) and local repo discovery for lifecycle actions.
-  - TODO: Implement Cloudflare-only forwarding for localhost services (no Docker).
-  - TODO: List running + stopped containers, add filters, and restart-only-stopped logic.
-  - TODO: Add Docker usage stats summary (disk usage + counts) to Host Settings.
-  - TODO: Update UI with action icons and template repo selector.
-  - TODO: Add project-based filters for containers/volumes/images to scope multi-container templates.
-  - TODO: Replace sidebar logo block with the existing GitHub auth indicator (move it from the current location into the sidebar header position).
-  - TODO: Add global loading overlay and iconography for refresh/edit/login/logout actions.
-  - TODO: Redirect to login on logout action.
-  - NOTE: All new flows should mirror `deploy.sh` behavior (port selection, compose patching, DNS/ingress updates, tunnel restart), but via API/UI.
-- DONE: Add root README runbook + Makefile; compose smoke test succeeded (warning: buildx plugin missing).
-- DONE: Add settings persistence + UI for base domain, GitHub token, Cloudflare token, and cloudflared config path (default to ~/.cloudflared/config.yml).
-- DONE: Surface running Docker containers and allow quick tunnel forwarding with subdomains.
-- DONE: Add cloudflared config preview in the Settings UI.
-- DONE: Validation pass after Dockerfile arch fix (compose build + end-to-end flows per user).
-- DONE: Add tunnel status health checks and status panel in the UI.
-- DONE: Implement GitHub OAuth login + allowlist scaffolding with session cookies.
-- DONE: Protect `/api/v1` routes with auth middleware and add project/job list placeholders.
-- DONE: Add integrations stubs, job runner scaffold, and Projects/Jobs UI views.
-- DONE: Gate UI routes behind auth (login-only access for unauthenticated users).
-- DONE: Resolve GitHub OAuth callback URLs from the public host when local defaults leak.
-  - DONE: Allow configuring auth cookie domain to avoid invalid OAuth state on cross-subdomain callbacks.
-  - DONE: Fix GitHub user lookup to use the correct GORM column mapping.
-- DONE: Implement job runner persistence, workflow handlers, and job log streaming.
-- DONE: Add host-worker job type with one-time tokens plus host fetch/log/complete endpoints.
-- NOTE: Decision shift - prefer API-run Docker socket runner (Option A) and treat host worker flow as legacy.
-- DONE: Wire template creation, deploy existing, and quick service endpoints + UI flows.
-- DONE: Add GitHub template creation + cloudflared DNS/ingress updates in workflows.
-- DONE: Build UI shell and connect to API for `/auth/me`.
-- DONE: Add audit log model, API, and Activity UI for tracking user actions.
-- DONE: Compose smoke test after audit logging (buildx warning persists).
-- DONE: Apply dark zinc theme tokens and base styles for the frontend refresh.
-- DONE: Replace the header with the new AppShell (sidebar + top bar) navigation.
-- DONE: Introduce the new page map (Home, Overview, Host Settings, Networking, GitHub), add new views, update nav, and redirect legacy routes.
-- DONE: Refactor the Home view to the Host Status + Quick Deploy layout.
-- DONE: Refactor the Overview view to the host snapshot layout with container highlights, job summary, and recent activity; restyle Jobs/Activity panels to the dark zinc variants.
-- DONE: Refactor the Host Settings view to the dark zinc tokens and AppShell layout.
-- DONE: Refactor the Networking view to the dark zinc tokens and AppShell layout.
-- DONE: Refactor the GitHub view to the dark zinc tokens and AppShell layout.
-- DONE: Introduce base UI components (Button, Input, Select, Toggle, Panel, Badge) and refactor Home to use them.
-- DONE: Migrate the Overview view to base UI components with shared state blocks.
-- DONE: Add ListRow, Tooltip, and Modal/Sheet base components plus a shared loading state pattern.
-- DONE: Migrate Jobs and Activity views to base components + UiState blocks; update Host Settings, Networking, and GitHub with UiState/UiListRow and shared loading indicators.
-- DONE: Flatten the UI to a zinc monochrome palette (remove gradients/glass), simplify Home host status layout, and align login + job log styling.
-- DONE: Add popup GitHub OAuth flow with /auth/me polling for the login view.
-- DONE: Redirect to the panel after successful GitHub OAuth login.
-- DONE: Add toast notifications and standardized inline feedback for Host Settings and Home deploy forms.
-- DONE: Add onboarding overlays for Home + Host Settings with API key links, plus day-to-day guidance callouts for quick deploy and recent activity.
-- DONE: Extend onboarding overlays to Networking and GitHub with refresh + token guidance.
-- DONE: Add day-to-day guidance callouts in Jobs and Activity, and introduce turquoise accent/status colors for indicators.
-- DONE: Add GitHub catalog endpoint (token/template/allowlist summary) and wire GitHub view to real data.
-- DONE: Expand Networking with ingress-derived DNS list and Cloudflare readiness panel.
-- DONE: Add host worker command modal (copy + polling) and route deploy actions through `/jobs/host-deploy`.
-- DONE: Surface `pending_host` status in job badges/counts and replace native selects with the custom UiSelect.
-- DONE: Harden tunnel health checks with origin cert discovery + clearer missing-cert feedback.
-- DONE: Tune nginx SSE proxy settings for job log streaming.
-- DONE: Force HTTPS API base URL when the panel is served over HTTPS to prevent mixed-content blocks.
-- DONE: Move tunnel DNS + ingress updates to Cloudflare API and add account/zone settings for jobs.
-- DONE: Add Cloudflare token scope guidance (UI + README) and clarify auth errors for invalid tokens.
-- DONE: Improve Cloudflare tunnel error logging with remote-managed tunnel guidance.
-- DONE: Added tunnel health diagnostics (account/zone/tunnel sources) and return non-200 status codes for tunnel health errors.
-- DONE: Add live container logs screen for all running containers (not just deploy jobs).
-- DONE: Add a responsive top bar on the logs screen so controls fit at all widths.
-- DONE: Add copy logs action, collapsible sidebar controls, and enhanced container log details.
-- DONE: Preselect logs view container when navigating from Host Settings.
-- DONE: Improve external API error logging for Cloudflare/GitHub responses with response metadata and payload summaries.
-- DONE: Capture GitHub error response body snippets for clearer API failure logs.
-- DONE: Improve GitHub OAuth error logging with response status/body details for token exchange and user/org checks.
-- DONE: Retire host-worker UI flow (remove host command modal and pending_host labels) and add quick-service image/container port inputs with hints.
-- DONE: Remove host-worker backend endpoints/job type and normalize pending_host to pending in job responses.
-- DONE: Clean legacy host-worker job data on startup, remove host-token fields from the job model/repository, and defer column drops until a real migration path exists.
-- DONE: Compose smoke test run locally; buildx plugin warning persists.
-- NOTE: Frontend smoke test blocked; `npm run build` failed because `vue-tsc` is not available (install deps locally).
-- NOTE: User will run smoke tests locally.
-- NOTE: Cloudflare API auth error code 10000 persists in `/health/tunnel` despite valid token claims; likely settings mismatch (DB overrides env) or account/zone mismatch.
-- NOTE: `docker compose up --build` completed; buildx plugin warning persists.
-- NOTE: Cloudflare docs confirm `config.yml` ingress rules must end with a catch-all rule, and DNS records can be created via `cloudflared tunnel route dns` (requires cert.pem).
+Scope
+- Web control panel to perform all deploy.sh tasks from a browser (deploy.sh is reference-only).
+- Runs on the host PC (Docker, filesystem, cloudflared access) and is accessible remotely via Cloudflare Tunnel.
 
-### Container lifecycle + Host Settings/Overview rework plan
-- Backend lifecycle endpoints:
-  - Add `/api/v1/host/docker/stop`, `/api/v1/host/docker/restart`, `/api/v1/host/docker/remove`.
-  - Request body: `{ "container": "name-or-id" }` with strict container ref validation.
-  - Stop: `docker stop <container>` (preserve config for later restart).
-  - Restart: `docker restart <container>`.
-  - Remove: `docker rm -f <container>` (destroy container state; volumes can be optionally removed).
-  - Audit log entries for each action with container ref + action metadata.
-- Duplicate naming strategy:
-  - Base name derived from image (strip registry tag/digest, sanitize to `[a-z0-9_.-]`).
-  - If `containerName` provided, sanitize/validate and still ensure uniqueness.
-  - If name exists, auto-suffix `name1`, `name2`, `name3` until free.
-  - Log chosen name when suffixing to make results visible in job logs.
-- Docker runner semantics:
-  - Stop leaves container config and data intact; restart uses same name and ports.
-  - Remove deletes the container only, with an option to also remove volumes. This is explicit in the UI with a two-step confirmation.
-- Host Settings rework:
-  - Move running containers into the Host integrations panel section.
-  - Replace the inline tunnel-forward form with action buttons: Stop, Restart, Remove, Logs.
-  - Require a destructive confirmation modal for Remove.
-  - Add a toggleable right-side panel for settings + status indicators; compact status indicators into a grid with clamped values.
-  - Add a separate toggleable side panel for cloudflared ingress preview.
-- Overview rework:
-  - Remove the Resource snapshots section entirely.
-  - Keep container highlights, job timeline, and recent activity.
+Current state
+- UX overhaul complete: dark zinc mono theme, expanded layout, sidebar-first navigation, custom components, consistent animations.
+- Core flows wired: create from template, deploy existing, forward local service, tunnel/DNS updates, Docker lifecycle controls.
+- GitHub App flow implemented end-to-end for template generation (App credentials, installation token minting, create-from-template).
+- Host Settings reworked with form side panels, ingress preview sidebar, and Docker usage/filters.
 
-### Docker / Compose usage (target)
-- Defaults live in `.env.example` (copy to `.env` to override).
-- Build + run: `docker compose up --build`.
-- Stop and clean volumes: `docker compose down -v`.
-- Ports: proxy `http://localhost` (80), Postgres `localhost:5432`. API/web ports are internal unless you uncomment mappings in `docker-compose.yml`.
+Active decisions
+- Prefer API-run Docker socket runner; host-worker flow is retired.
+- Cloudflared runs on host (no compose cloudflared service).
 
-### Risks to track
-- Security: browser-accessible control panel must strictly restrict who can run host actions.
-- Secrets: GitHub and Cloudflare tokens stored safely (env or encrypted at rest).
-- Safety: job runner must avoid arbitrary command execution and sanitize inputs.
+Additional instructions
+- None for this iteration.

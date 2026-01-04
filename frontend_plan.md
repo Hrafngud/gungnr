@@ -52,6 +52,9 @@ Status: Step 1 complete (theme tokens + AppShell). Page map + routing update com
     - Allow empty state when no templates are configured.
 - Overview: container list, job timeline, last activity (remove resources section).
 - Host Settings: cloudflared config path, token, tunnel setup status, validation and hints.
+  - Add GitHub App credentials inputs (App ID, Client ID, Client Secret, Installation ID, Private Key) with guidance text.
+  - Link to GitHub App creation: https://github.com/settings/apps/new
+  - Guidance should list required permissions: Repository Administration (write), Contents (read), Metadata (read).
   - Move Running containers under Host integrations.
   - Settings forms (e.g., for cloudflared, GitHub) should open in the `FormSidePanel`.
   - The `FormSidePanel` should also contain the status indicators, presented as a compact grid with clamped long values.
@@ -66,7 +69,7 @@ Status: Step 1 complete (theme tokens + AppShell). Page map + routing update com
   - Tunnel status, routing status, Cloudflare health signals.
   - **'Expected DNS records' section should be a 4-column grid for compact information display.**
   - **Ingress preview should use a sidebar panel (like FormSidePanel) for visual cleanup.**
-- GitHub: token status, allowlist, templates availability.
+- GitHub: token status and templates availability.
 
 6) Journeys
 - **NEW Guidance System (replaces overlay-with-highlight):**

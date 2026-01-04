@@ -1,6 +1,10 @@
 export interface Settings {
   baseDomain: string
-  githubToken: string
+  githubAppId: string
+  githubAppClientId: string
+  githubAppClientSecret: string
+  githubAppInstallationId: string
+  githubAppPrivateKey: string
   cloudflareToken: string
   cloudflareAccountId: string
   cloudflareZoneId: string
@@ -10,7 +14,11 @@ export interface Settings {
 
 export interface SettingsSources {
   baseDomain?: string
-  githubToken?: string
+  githubAppId?: string
+  githubAppClientId?: string
+  githubAppClientSecret?: string
+  githubAppInstallationId?: string
+  githubAppPrivateKey?: string
   cloudflareToken?: string
   cloudflareAccountId?: string
   cloudflareZoneId?: string

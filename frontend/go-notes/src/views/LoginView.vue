@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import NavIcon from '@/components/NavIcon.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -130,6 +131,7 @@ onBeforeUnmount(() => {
             :href="loginHref"
             @click.prevent="openLoginPopup"
           >
+            <NavIcon name="github" class="h-4 w-4" />
             Continue with GitHub
           </a>
           <p v-if="waitingForAuth" class="mt-3 text-xs text-[color:var(--muted-2)]">

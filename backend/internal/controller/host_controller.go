@@ -24,6 +24,7 @@ func NewHostController(service *service.HostService, audit *service.AuditService
 
 func (c *HostController) Register(r gin.IRoutes) {
 	r.GET("/host/docker", c.ListDocker)
+	r.GET("/host/docker/usage", c.DockerUsage)
 	r.GET("/host/docker/logs", c.StreamDockerLogs)
 	r.POST("/host/docker/stop", c.StopDocker)
 	r.POST("/host/docker/restart", c.RestartDocker)
@@ -31,12 +32,26 @@ func (c *HostController) Register(r gin.IRoutes) {
 }
 
 func (c *HostController) ListDocker(ctx *gin.Context) {
-	containers, err := c.service.ListContainers(ctx.Request.Context())
+	containers, err := c.service.ListContainers(ctx.Request.Context(), true)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"containers": containers})
+}
+
+func (c *HostController) DockerUsage(ctx *gin.Context) {
+	project := strings.TrimSpace(ctx.Query("project"))
+	if project != "" && !isSafeContainerRef(project) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid project name"})
+		return
+	}
+	usage, err := c.service.DockerUsage(ctx.Request.Context(), project)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"summary": usage})
 }
 
 func (c *HostController) StreamDockerLogs(ctx *gin.Context) {

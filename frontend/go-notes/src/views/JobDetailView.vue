@@ -8,6 +8,7 @@ import UiState from '@/components/ui/UiState.vue'
 import { jobsApi } from '@/services/jobs'
 import { apiErrorMessage, getApiBaseUrl } from '@/services/api'
 import { jobStatusLabel, jobStatusTone } from '@/utils/jobStatus'
+import { usePageLoadingStore } from '@/stores/pageLoading'
 import type { JobDetail } from '@/types/jobs'
 
 const route = useRoute()
@@ -16,6 +17,7 @@ const logLines = ref<string[]>([])
 const error = ref<string | null>(null)
 const streaming = ref(false)
 const connected = ref(false)
+const pageLoading = usePageLoadingStore()
 let source: EventSource | null = null
 
 const jobId = Number(route.params.id)
@@ -77,12 +79,14 @@ const startStream = (offset = 0) => {
 }
 
 onMounted(async () => {
+  pageLoading.start('Loading job details...')
   await fetchJob()
   if (job.value && job.value.status !== 'completed' && job.value.status !== 'failed') {
     const seed = logLines.value.join('\n')
     const offset = seed.length > 0 ? seed.length + 1 : 0
     startStream(offset)
   }
+  pageLoading.stop()
 })
 
 onBeforeUnmount(() => {

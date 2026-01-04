@@ -11,23 +11,32 @@ import UiInput from '@/components/ui/UiInput.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
 import UiModal from '@/components/ui/UiModal.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
+import UiSelect from '@/components/ui/UiSelect.vue'
 import UiState from '@/components/ui/UiState.vue'
 import UiToggle from '@/components/ui/UiToggle.vue'
+import NavIcon from '@/components/NavIcon.vue'
 import { healthApi } from '@/services/health'
 import { settingsApi } from '@/services/settings'
 import { hostApi } from '@/services/host'
+import { projectsApi } from '@/services/projects'
 import { apiErrorMessage } from '@/services/api'
 import { useToastStore } from '@/stores/toasts'
 import { useFieldGuidance } from '@/composables/useFieldGuidance'
+import { usePageLoadingStore } from '@/stores/pageLoading'
 import type { CloudflaredPreview, Settings, SettingsSources } from '@/types/settings'
-import type { DockerContainer } from '@/types/host'
+import type { DockerContainer, DockerUsageSummary } from '@/types/host'
+import type { LocalProject } from '@/types/projects'
 import type { DockerHealth, TunnelHealth } from '@/types/health'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
 const settingsForm = reactive<Settings>({
   baseDomain: '',
-  githubToken: '',
+  githubAppId: '',
+  githubAppClientId: '',
+  githubAppClientSecret: '',
+  githubAppInstallationId: '',
+  githubAppPrivateKey: '',
   cloudflareToken: '',
   cloudflareAccountId: '',
   cloudflareZoneId: '',
@@ -40,6 +49,7 @@ const cloudflaredTunnelName = ref<string | null>(null)
 
 const toastStore = useToastStore()
 const fieldGuidance = useFieldGuidance()
+const pageLoading = usePageLoadingStore()
 
 const loading = ref(false)
 const saving = ref(false)
@@ -57,9 +67,17 @@ const healthLoading = ref(false)
 const containers = ref<DockerContainer[]>([])
 const containersLoading = ref(false)
 const containersError = ref<string | null>(null)
+const usageSummary = ref<DockerUsageSummary | null>(null)
+const usageLoading = ref(false)
+const usageError = ref<string | null>(null)
+const localProjects = ref<LocalProject[]>([])
+const localProjectsLoading = ref(false)
+const localProjectsError = ref<string | null>(null)
 
 const settingsFormOpen = ref(false)
 const ingressPreviewOpen = ref(false)
+const statusFilter = ref<'all' | 'running' | 'stopped'>('all')
+const projectFilter = ref('all')
 
 type ContainerActionState = {
   stopping: boolean
@@ -102,11 +120,75 @@ watch(removeVolumes, (enabled) => {
 })
 
 const hasPreview = computed(() => Boolean(preview.value?.contents))
+const localProjectNames = computed(
+  () => new Set(localProjects.value.map((project) => project.name.toLowerCase())),
+)
+
+const isRunningStatus = (status: string) => {
+  const normalized = status.toLowerCase()
+  return normalized.startsWith('up') || normalized.includes('running')
+}
+
+const isStoppedStatus = (status: string) => {
+  const normalized = status.toLowerCase()
+  return normalized.startsWith('exited') || normalized.includes('dead') || normalized.includes('created')
+}
+const projectOptions = computed(() => {
+  const names = new Set<string>()
+  containers.value.forEach((container) => {
+    const project = container.project?.trim()
+    if (project) {
+      names.add(project)
+    }
+  })
+  const options = Array.from(names)
+    .sort((a, b) => a.localeCompare(b))
+    .map((project) => ({ label: project, value: project }))
+  return [{ label: 'All projects', value: 'all' }, ...options]
+})
+
+const runningCount = computed(() =>
+  containers.value.filter((container) => isRunningStatus(container.status)).length,
+)
+const stoppedCount = computed(() =>
+  containers.value.filter((container) => isStoppedStatus(container.status)).length,
+)
+
+const filteredContainers = computed(() => {
+  const project = projectFilter.value
+  return containers.value.filter((container) => {
+    if (statusFilter.value === 'running' && !isRunningStatus(container.status)) {
+      return false
+    }
+    if (statusFilter.value === 'stopped' && !isStoppedStatus(container.status)) {
+      return false
+    }
+    if (project !== 'all' && container.project !== project) {
+      return false
+    }
+    return true
+  })
+})
+
+const usageCounts = computed(() => {
+  const summary = usageSummary.value
+  if (!summary) {
+    return { containers: 0, images: 0, volumes: 0 }
+  }
+  if (projectFilter.value !== 'all' && summary.projectCounts) {
+    return summary.projectCounts
+  }
+  return {
+    containers: summary.containers?.count ?? 0,
+    images: summary.images?.count ?? 0,
+    volumes: summary.volumes?.count ?? 0,
+  }
+})
 
 const statusTone = (status: string): BadgeTone => {
   const normalized = status.toLowerCase()
-  if (normalized.startsWith('up') || normalized.includes('running')) return 'ok'
-  if (normalized.startsWith('exited') || normalized.includes('dead')) return 'error'
+  if (isRunningStatus(normalized)) return 'ok'
+  if (isStoppedStatus(normalized)) return 'error'
   if (normalized.includes('restarting') || normalized.includes('paused')) return 'warn'
   return 'neutral'
 }
@@ -136,6 +218,17 @@ const actionStateFor = (container: DockerContainer): ContainerActionState => {
     }
   }
   return actionStates[container.id] as ContainerActionState
+}
+
+
+const ownershipLabel = (container: DockerContainer) => {
+  if (localProjectsLoading.value) return 'Checking'
+  if (localProjectsError.value) return 'Unknown'
+  const project = container.project?.toLowerCase()
+  if (project && localProjectNames.value.has(project)) {
+    return 'Local template'
+  }
+  return 'External'
 }
 
 const loadSettings = async () => {
@@ -224,6 +317,39 @@ const loadContainers = async () => {
   }
 }
 
+const loadDockerUsage = async () => {
+  usageLoading.value = true
+  usageError.value = null
+  try {
+    const project = projectFilter.value === 'all' ? undefined : projectFilter.value
+    const { data } = await hostApi.dockerUsage(project)
+    usageSummary.value = data.summary
+  } catch (err) {
+    usageError.value = apiErrorMessage(err)
+    usageSummary.value = null
+  } finally {
+    usageLoading.value = false
+  }
+}
+
+const loadLocalProjects = async () => {
+  localProjectsLoading.value = true
+  localProjectsError.value = null
+  try {
+    const { data } = await projectsApi.listLocal()
+    localProjects.value = data.projects
+  } catch (err) {
+    localProjectsError.value = apiErrorMessage(err)
+    localProjects.value = []
+  } finally {
+    localProjectsLoading.value = false
+  }
+}
+
+const refreshHostData = async () => {
+  await Promise.allSettled([loadContainers(), loadLocalProjects(), loadDockerUsage()])
+}
+
 const stopContainer = async (container: DockerContainer) => {
   const state = actionStateFor(container)
   if (state.stopping) return
@@ -290,7 +416,26 @@ const confirmRemove = async () => {
 }
 
 onMounted(async () => {
-  await Promise.all([loadSettings(), loadPreview(), loadHealth(), loadContainers()])
+  pageLoading.start('Loading host settings...')
+  await Promise.all([
+    loadSettings(),
+    loadPreview(),
+    loadHealth(),
+    loadContainers(),
+    loadLocalProjects(),
+    loadDockerUsage(),
+  ])
+  pageLoading.stop()
+})
+
+watch(projectOptions, (options) => {
+  if (!options.find((option) => option.value === projectFilter.value)) {
+    projectFilter.value = 'all'
+  }
+})
+
+watch(projectFilter, () => {
+  loadDockerUsage()
 })
 </script>
 
@@ -314,9 +459,10 @@ onMounted(async () => {
           variant="ghost"
           size="sm"
           :disabled="containersLoading"
-          @click="loadContainers"
+          @click="refreshHostData"
         >
           <span class="flex items-center gap-2">
+            <NavIcon name="refresh" class="h-3.5 w-3.5" />
             <UiInlineSpinner v-if="containersLoading" />
             Refresh host data
           </span>
@@ -326,7 +472,10 @@ onMounted(async () => {
           size="sm"
           @click="settingsFormOpen = true"
         >
-          Edit settings
+          <span class="flex items-center gap-2">
+            <NavIcon name="edit" class="h-3.5 w-3.5" />
+            Edit settings
+          </span>
         </UiButton>
         <UiButton
           variant="ghost"
@@ -356,24 +505,115 @@ onMounted(async () => {
               Host integrations
             </p>
             <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">
-              Running containers
+              Containers
             </h2>
             <p class="mt-2 text-sm text-[color:var(--muted)]">
-              Stop, restart, or remove containers without losing track of their ports.
+              Stop, start, or remove containers while keeping their runtime ports visible.
             </p>
           </div>
-          <UiButton
-            variant="ghost"
-            size="sm"
-            :disabled="containersLoading"
-            @click="loadContainers"
-          >
-            <span class="flex items-center gap-2">
-              <UiInlineSpinner v-if="containersLoading" />
-              Refresh list
+        <UiButton
+          variant="ghost"
+          size="sm"
+          :disabled="containersLoading"
+          @click="refreshHostData"
+        >
+          <span class="flex items-center gap-2">
+            <NavIcon name="refresh" class="h-3.5 w-3.5" />
+            <UiInlineSpinner v-if="containersLoading" />
+            Refresh list
             </span>
           </UiButton>
         </div>
+
+        <UiState v-if="usageError" tone="error">
+          {{ usageError }}
+        </UiState>
+
+        <div class="grid gap-3 lg:grid-cols-4">
+          <UiPanel variant="soft" class="space-y-2 p-3">
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                Disk usage
+              </p>
+              <UiInlineSpinner v-if="usageLoading" />
+            </div>
+            <p class="text-lg font-semibold text-[color:var(--text)]">
+              {{ usageSummary?.totalSize || '—' }}
+            </p>
+            <p class="text-xs text-[color:var(--muted)]">
+              Overall Docker footprint.
+            </p>
+          </UiPanel>
+          <UiPanel variant="soft" class="space-y-2 p-3">
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              Images
+            </p>
+            <p class="text-lg font-semibold text-[color:var(--text)]">
+              {{ usageCounts.images }}
+            </p>
+            <p class="text-xs text-[color:var(--muted)]">
+              {{ projectFilter === 'all' ? 'Total images' : 'Scoped to project' }}
+            </p>
+          </UiPanel>
+          <UiPanel variant="soft" class="space-y-2 p-3">
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              Containers
+            </p>
+            <p class="text-lg font-semibold text-[color:var(--text)]">
+              {{ usageCounts.containers }}
+            </p>
+            <p class="text-xs text-[color:var(--muted)]">
+              {{ projectFilter === 'all' ? 'Total containers' : 'Scoped to project' }}
+            </p>
+          </UiPanel>
+          <UiPanel variant="soft" class="space-y-2 p-3">
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              Volumes
+            </p>
+            <p class="text-lg font-semibold text-[color:var(--text)]">
+              {{ usageCounts.volumes }}
+            </p>
+            <p class="text-xs text-[color:var(--muted)]">
+              {{ projectFilter === 'all' ? 'Total volumes' : 'Scoped to project' }}
+            </p>
+          </UiPanel>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center gap-2">
+            <UiButton
+              variant="chip"
+              size="chip"
+              :class="statusFilter === 'all' ? 'border-[color:var(--accent)] text-[color:var(--accent-ink)]' : ''"
+              @click="statusFilter = 'all'"
+            >
+              All ({{ containers.length }})
+            </UiButton>
+            <UiButton
+              variant="chip"
+              size="chip"
+              :class="statusFilter === 'running' ? 'border-[color:var(--accent)] text-[color:var(--accent-ink)]' : ''"
+              @click="statusFilter = 'running'"
+            >
+              Running ({{ runningCount }})
+            </UiButton>
+            <UiButton
+              variant="chip"
+              size="chip"
+              :class="statusFilter === 'stopped' ? 'border-[color:var(--accent)] text-[color:var(--accent-ink)]' : ''"
+              @click="statusFilter = 'stopped'"
+            >
+              Stopped ({{ stoppedCount }})
+            </UiButton>
+          </div>
+          <div class="min-w-[200px]">
+            <UiSelect v-model="projectFilter" :options="projectOptions" />
+          </div>
+        </div>
+
+        <p v-if="projectFilter !== 'all'" class="text-xs text-[color:var(--muted)]">
+          Showing resources for project "{{ projectFilter }}". Disk usage remains global.
+        </p>
 
         <UiState v-if="containersError" tone="error">
           {{ containersError }}
@@ -383,13 +623,13 @@ onMounted(async () => {
           Loading Docker containers...
         </UiState>
 
-        <UiState v-else-if="containers.length === 0">
-          No running containers detected on the host.
+        <UiState v-else-if="filteredContainers.length === 0">
+          No containers match the current filters.
         </UiState>
 
         <div v-else class="grid gap-4 lg:grid-cols-2">
           <UiListRow
-            v-for="container in containers"
+            v-for="container in filteredContainers"
             :key="container.id"
             as="article"
             class="space-y-4"
@@ -424,6 +664,12 @@ onMounted(async () => {
                   {{ container.project || 'n/a' }}
                 </span>
               </div>
+              <div class="flex items-center justify-between gap-2">
+                <span>Ownership</span>
+                <span class="text-[color:var(--text)]">
+                  {{ ownershipLabel(container) }}
+                </span>
+              </div>
             </div>
 
             <UiPanel variant="soft" class="space-y-3 p-4">
@@ -438,6 +684,7 @@ onMounted(async () => {
                   @click="stopContainer(container)"
                 >
                   <span class="flex items-center gap-2">
+                    <NavIcon name="stop" class="h-3.5 w-3.5" />
                     <UiInlineSpinner v-if="actionStateFor(container).stopping" />
                     {{ actionStateFor(container).stopping ? 'Stopping...' : 'Stop' }}
                   </span>
@@ -445,12 +692,19 @@ onMounted(async () => {
                 <UiButton
                   variant="ghost"
                   size="sm"
-                  :disabled="actionStateFor(container).restarting"
+                  :disabled="actionStateFor(container).restarting || !isStoppedStatus(container.status)"
                   @click="restartContainer(container)"
                 >
                   <span class="flex items-center gap-2">
+                    <NavIcon name="restart" class="h-3.5 w-3.5" />
                     <UiInlineSpinner v-if="actionStateFor(container).restarting" />
-                    {{ actionStateFor(container).restarting ? 'Restarting...' : 'Restart' }}
+                    {{
+                      actionStateFor(container).restarting
+                        ? 'Restarting...'
+                        : isStoppedStatus(container.status)
+                          ? 'Start'
+                          : 'Restart'
+                    }}
                   </span>
                 </UiButton>
                 <UiButton
@@ -460,7 +714,10 @@ onMounted(async () => {
                   :disabled="actionStateFor(container).removing"
                   @click="openRemoveModal(container)"
                 >
-                  Remove
+                  <span class="flex items-center gap-2">
+                    <NavIcon name="trash" class="h-3.5 w-3.5" />
+                    Remove
+                  </span>
                 </UiButton>
                 <UiButton
                   :as="RouterLink"
@@ -468,7 +725,10 @@ onMounted(async () => {
                   variant="ghost"
                   size="sm"
                 >
-                  Logs
+                  <span class="flex items-center gap-2">
+                    <NavIcon name="logs" class="h-3.5 w-3.5" />
+                    Logs
+                  </span>
                 </UiButton>
               </div>
 
@@ -476,6 +736,60 @@ onMounted(async () => {
                 {{ actionStateFor(container).error }}
               </UiInlineFeedback>
             </UiPanel>
+          </UiListRow>
+        </div>
+      </UiPanel>
+
+      <UiPanel variant="soft" class="space-y-4 p-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              Local templates
+            </p>
+            <h3 class="mt-2 text-base font-semibold text-[color:var(--text)]">
+              Local project folders
+            </h3>
+            <p class="mt-2 text-xs text-[color:var(--muted)]">
+              These folders live in the templates directory. Lifecycle actions are safest for
+              containers whose compose project matches one of these names.
+            </p>
+          </div>
+          <UiButton
+            variant="ghost"
+            size="xs"
+            :disabled="localProjectsLoading"
+            @click="loadLocalProjects"
+          >
+            <span class="flex items-center gap-2">
+              <NavIcon name="refresh" class="h-3 w-3" />
+              <UiInlineSpinner v-if="localProjectsLoading" />
+              Refresh folders
+            </span>
+          </UiButton>
+        </div>
+
+        <UiState v-if="localProjectsError" tone="error">
+          {{ localProjectsError }}
+        </UiState>
+
+        <UiState v-else-if="localProjectsLoading" loading>
+          Loading local folders...
+        </UiState>
+
+        <UiState v-else-if="localProjects.length === 0">
+          No local template folders detected.
+        </UiState>
+
+        <div v-else class="grid gap-2 sm:grid-cols-2">
+          <UiListRow
+            v-for="project in localProjects"
+            :key="project.path"
+            class="flex items-center justify-between gap-2 text-xs"
+          >
+            <span class="text-[color:var(--text)]">{{ project.name }}</span>
+            <span class="truncate text-[color:var(--muted)]" :title="project.path">
+              {{ project.path }}
+            </span>
           </UiListRow>
         </div>
       </UiPanel>
@@ -548,6 +862,7 @@ onMounted(async () => {
             @click="loadHealth"
           >
             <span class="flex items-center gap-2">
+              <NavIcon name="refresh" class="h-3.5 w-3.5" />
               <UiInlineSpinner v-if="healthLoading" />
               Refresh status
             </span>
@@ -676,153 +991,254 @@ onMounted(async () => {
             />
           </label>
 
-          <div class="grid gap-4">
-            <label class="grid gap-2">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                GitHub token
-              </span>
-              <UiInput
-                v-model="settingsForm.githubToken"
-                type="password"
-                placeholder="ghp_••••••"
-                :disabled="loading"
-                @focus="fieldGuidance.show({
-                  title: 'GitHub token',
-                  description: 'Personal access token used to create template repos and sync the catalog.',
-                  links: [
-                    { label: 'GitHub tokens', href: 'https://github.com/settings/tokens' },
-                  ],
-                })"
-                @blur="fieldGuidance.clear()"
-              />
-            </label>
+          <div class="space-y-6">
+            <div class="space-y-4">
+              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                GitHub access
+              </p>
+              <p class="text-xs text-[color:var(--muted)]">
+                Create-from-template uses GitHub App installation tokens minted from the credentials below.
+              </p>
 
-            <label class="grid gap-2">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Cloudflare API token
-              </span>
-              <UiInput
-                v-model="settingsForm.cloudflareToken"
-                type="password"
-                placeholder="cf_••••••"
-                :disabled="loading"
-                @focus="fieldGuidance.show({
-                  title: 'Cloudflare API token',
-                  description: 'Token with Tunnel:Edit and DNS:Edit for the selected account and zone.',
-                  links: [
-                    { label: 'Cloudflare API tokens', href: 'https://dash.cloudflare.com/profile/api-tokens' },
-                  ],
-                })"
-                @blur="fieldGuidance.clear()"
-              />
-            </label>
+              <div class="grid gap-4">
+                <label class="grid gap-2">
+                  <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                    GitHub App ID
+                  </span>
+                  <UiInput
+                    v-model="settingsForm.githubAppId"
+                    type="text"
+                    placeholder="App ID"
+                    :disabled="loading"
+                    @focus="fieldGuidance.show({
+                      title: 'GitHub App ID',
+                      description: 'Numeric App ID used to mint installation tokens for template generation.',
+                      links: [
+                        { label: 'Create a GitHub App', href: 'https://github.com/settings/apps/new' },
+                      ],
+                    })"
+                    @blur="fieldGuidance.clear()"
+                  />
+                </label>
 
-            <label class="grid gap-2">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Cloudflare account ID
-              </span>
-              <UiInput
-                v-model="settingsForm.cloudflareAccountId"
-                type="text"
-                placeholder="Account ID"
-                :disabled="loading"
-                @focus="fieldGuidance.show({
-                  title: 'Cloudflare account ID',
-                  description: 'Account identifier that owns the tunnel and DNS zone.',
-                  links: [
-                    { label: 'Cloudflare dashboard', href: 'https://dash.cloudflare.com' },
-                  ],
-                })"
-                @blur="fieldGuidance.clear()"
-              />
-            </label>
+                <label class="grid gap-2">
+                  <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                    GitHub App client ID
+                  </span>
+                  <UiInput
+                    v-model="settingsForm.githubAppClientId"
+                    type="text"
+                    placeholder="Client ID"
+                    :disabled="loading"
+                    @focus="fieldGuidance.show({
+                      title: 'GitHub App client ID',
+                      description: 'Client ID shown in the GitHub App settings.',
+                      links: [
+                        { label: 'GitHub App settings', href: 'https://github.com/settings/apps' },
+                      ],
+                    })"
+                    @blur="fieldGuidance.clear()"
+                  />
+                </label>
 
-            <label class="grid gap-2">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Cloudflare zone ID
-              </span>
-              <UiInput
-                v-model="settingsForm.cloudflareZoneId"
-                type="text"
-                placeholder="Zone ID"
-                :disabled="loading"
-                @focus="fieldGuidance.show({
-                  title: 'Cloudflare zone ID',
-                  description: 'Zone identifier for the base domain you are routing.',
-                  links: [
-                    { label: 'Cloudflare dashboard', href: 'https://dash.cloudflare.com' },
-                  ],
-                })"
-                @blur="fieldGuidance.clear()"
-              />
-            </label>
+                <label class="grid gap-2">
+                  <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                    GitHub App client secret
+                  </span>
+                  <UiInput
+                    v-model="settingsForm.githubAppClientSecret"
+                    type="password"
+                    placeholder="Client secret"
+                    :disabled="loading"
+                    @focus="fieldGuidance.show({
+                      title: 'GitHub App client secret',
+                      description: 'Client secret for GitHub App OAuth flows. Stored for future use.',
+                      links: [
+                        { label: 'GitHub App settings', href: 'https://github.com/settings/apps' },
+                      ],
+                    })"
+                    @blur="fieldGuidance.clear()"
+                  />
+                </label>
 
-            <label class="grid gap-2">
-              <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Cloudflared tunnel (name or ID)
-              </span>
-              <UiInput
-                v-model="settingsForm.cloudflaredTunnel"
-                type="text"
-                placeholder="Tunnel name or UUID"
-                :disabled="loading"
-                @focus="fieldGuidance.show({
-                  title: 'Cloudflared tunnel',
-                  description: 'Name or UUID used to resolve and update ingress rules.',
-                  links: [
-                    { label: 'Tunnel guide', href: 'https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/' },
-                  ],
-                })"
-                @blur="fieldGuidance.clear()"
-              />
-            </label>
+                <label class="grid gap-2">
+                  <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                    GitHub App installation ID
+                  </span>
+                  <UiInput
+                    v-model="settingsForm.githubAppInstallationId"
+                    type="text"
+                    placeholder="Installation ID"
+                    :disabled="loading"
+                    @focus="fieldGuidance.show({
+                      title: 'GitHub App installation ID',
+                      description: 'Installation ID for the org or user that will own the generated repos.',
+                      links: [
+                        { label: 'GitHub App installs', href: 'https://github.com/settings/installations' },
+                      ],
+                    })"
+                    @blur="fieldGuidance.clear()"
+                  />
+                </label>
+              </div>
 
-            <p class="text-xs text-[color:var(--muted)]">
-              Use a Cloudflare API token (not a global API key) with
-              Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit for the configured account
-              and zone.
-            </p>
+              <label class="grid gap-2">
+                <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  GitHub App private key
+                </span>
+                <textarea
+                  v-model="settingsForm.githubAppPrivateKey"
+                  class="input min-h-[160px] resize-y"
+                  placeholder="-----BEGIN PRIVATE KEY-----"
+                  :disabled="loading"
+                  @focus="fieldGuidance.show({
+                    title: 'GitHub App private key',
+                    description: 'Paste the PEM private key to sign installation token requests.',
+                    links: [
+                      { label: 'Create a GitHub App', href: 'https://github.com/settings/apps/new' },
+                    ],
+                  })"
+                  @blur="fieldGuidance.clear()"
+                />
+              </label>
 
-            <div
-              v-if="settingsSources || cloudflaredTunnelName"
-              class="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)]/80 p-3 text-[11px] text-[color:var(--muted)]"
-            >
-              <UiListRow class="flex items-center justify-between gap-2">
-                <span>Tunnel ref (resolved)</span>
-                <span class="text-[color:var(--text)]">
-                  {{ cloudflaredTunnelName || '—' }}
+              <p class="text-xs text-[color:var(--muted)]">
+                GitHub App permissions: Repository Administration (write), Contents (read), Metadata (read). Install the app on the template repo and the target owner.
+              </p>
+            </div>
+
+            <div class="space-y-4">
+              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                Cloudflare access
+              </p>
+
+              <label class="grid gap-2">
+                <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Cloudflare API token
                 </span>
-              </UiListRow>
-              <UiListRow class="flex items-center justify-between gap-2">
-                <span>Tunnel source</span>
-                <span class="text-[color:var(--text)]">
-                  {{ settingsSources?.cloudflaredTunnel || 'unset' }}
+                <UiInput
+                  v-model="settingsForm.cloudflareToken"
+                  type="password"
+                  placeholder="cf_••••••"
+                  :disabled="loading"
+                  @focus="fieldGuidance.show({
+                    title: 'Cloudflare API token',
+                    description: 'Token with Tunnel:Edit and DNS:Edit for the selected account and zone.',
+                    links: [
+                      { label: 'Cloudflare API tokens', href: 'https://dash.cloudflare.com/profile/api-tokens' },
+                    ],
+                  })"
+                  @blur="fieldGuidance.clear()"
+                />
+              </label>
+
+              <label class="grid gap-2">
+                <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Cloudflare account ID
                 </span>
-              </UiListRow>
-              <UiListRow class="flex items-center justify-between gap-2">
-                <span>Account ID source</span>
-                <span class="text-[color:var(--text)]">
-                  {{ settingsSources?.cloudflareAccountId || 'unset' }}
+                <UiInput
+                  v-model="settingsForm.cloudflareAccountId"
+                  type="text"
+                  placeholder="Account ID"
+                  :disabled="loading"
+                  @focus="fieldGuidance.show({
+                    title: 'Cloudflare account ID',
+                    description: 'Account identifier that owns the tunnel and DNS zone.',
+                    links: [
+                      { label: 'Cloudflare dashboard', href: 'https://dash.cloudflare.com' },
+                    ],
+                  })"
+                  @blur="fieldGuidance.clear()"
+                />
+              </label>
+
+              <label class="grid gap-2">
+                <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Cloudflare zone ID
                 </span>
-              </UiListRow>
-              <UiListRow class="flex items-center justify-between gap-2">
-                <span>Zone ID source</span>
-                <span class="text-[color:var(--text)]">
-                  {{ settingsSources?.cloudflareZoneId || 'unset' }}
+                <UiInput
+                  v-model="settingsForm.cloudflareZoneId"
+                  type="text"
+                  placeholder="Zone ID"
+                  :disabled="loading"
+                  @focus="fieldGuidance.show({
+                    title: 'Cloudflare zone ID',
+                    description: 'Zone identifier for the base domain you are routing.',
+                    links: [
+                      { label: 'Cloudflare dashboard', href: 'https://dash.cloudflare.com' },
+                    ],
+                  })"
+                  @blur="fieldGuidance.clear()"
+                />
+              </label>
+
+              <label class="grid gap-2">
+                <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Cloudflared tunnel (name or ID)
                 </span>
-              </UiListRow>
-              <UiListRow class="flex items-center justify-between gap-2">
-                <span>Token source</span>
-                <span class="text-[color:var(--text)]">
-                  {{ settingsSources?.cloudflareToken || 'unset' }}
-                </span>
-              </UiListRow>
-              <UiListRow class="flex items-center justify-between gap-2">
-                <span>Config path source</span>
-                <span class="text-[color:var(--text)]">
-                  {{ settingsSources?.cloudflaredConfigPath || 'unset' }}
-                </span>
-              </UiListRow>
+                <UiInput
+                  v-model="settingsForm.cloudflaredTunnel"
+                  type="text"
+                  placeholder="Tunnel name or UUID"
+                  :disabled="loading"
+                  @focus="fieldGuidance.show({
+                    title: 'Cloudflared tunnel',
+                    description: 'Name or UUID used to resolve and update ingress rules.',
+                    links: [
+                      { label: 'Tunnel guide', href: 'https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/' },
+                    ],
+                  })"
+                  @blur="fieldGuidance.clear()"
+                />
+              </label>
+
+              <p class="text-xs text-[color:var(--muted)]">
+                Use a Cloudflare API token (not a global API key) with
+                Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit for the configured account
+                and zone.
+              </p>
+
+              <div
+                v-if="settingsSources || cloudflaredTunnelName"
+                class="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)]/80 p-3 text-[11px] text-[color:var(--muted)]"
+              >
+                <UiListRow class="flex items-center justify-between gap-2">
+                  <span>Tunnel ref (resolved)</span>
+                  <span class="text-[color:var(--text)]">
+                    {{ cloudflaredTunnelName || '—' }}
+                  </span>
+                </UiListRow>
+                <UiListRow class="flex items-center justify-between gap-2">
+                  <span>Tunnel source</span>
+                  <span class="text-[color:var(--text)]">
+                    {{ settingsSources?.cloudflaredTunnel || 'unset' }}
+                  </span>
+                </UiListRow>
+                <UiListRow class="flex items-center justify-between gap-2">
+                  <span>Account ID source</span>
+                  <span class="text-[color:var(--text)]">
+                    {{ settingsSources?.cloudflareAccountId || 'unset' }}
+                  </span>
+                </UiListRow>
+                <UiListRow class="flex items-center justify-between gap-2">
+                  <span>Zone ID source</span>
+                  <span class="text-[color:var(--text)]">
+                    {{ settingsSources?.cloudflareZoneId || 'unset' }}
+                  </span>
+                </UiListRow>
+                <UiListRow class="flex items-center justify-between gap-2">
+                  <span>Token source</span>
+                  <span class="text-[color:var(--text)]">
+                    {{ settingsSources?.cloudflareToken || 'unset' }}
+                  </span>
+                </UiListRow>
+                <UiListRow class="flex items-center justify-between gap-2">
+                  <span>Config path source</span>
+                  <span class="text-[color:var(--text)]">
+                    {{ settingsSources?.cloudflaredConfigPath || 'unset' }}
+                  </span>
+                </UiListRow>
+              </div>
             </div>
           </div>
 
@@ -867,7 +1283,10 @@ onMounted(async () => {
               </span>
             </UiButton>
             <UiButton variant="ghost" size="md" :disabled="loading" @click="loadSettings">
-              Reload
+              <span class="flex items-center gap-2">
+                <NavIcon name="refresh" class="h-3.5 w-3.5" />
+                Reload
+              </span>
             </UiButton>
           </div>
         </form>
@@ -896,6 +1315,7 @@ onMounted(async () => {
             @click="loadPreview"
           >
             <span class="flex items-center gap-2">
+              <NavIcon name="refresh" class="h-3 w-3" />
               <UiInlineSpinner v-if="previewLoading" />
               Refresh
             </span>

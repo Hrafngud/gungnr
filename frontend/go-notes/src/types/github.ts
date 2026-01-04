@@ -12,8 +12,17 @@ export type GitHubAllowlist = {
   org: string
 }
 
+export type GitHubAppStatus = {
+  configured: boolean
+  appIdConfigured: boolean
+  installationIdConfigured: boolean
+  privateKeyConfigured: boolean
+}
+
 export type GitHubCatalog = {
   tokenConfigured: boolean
   template: GitHubTemplateCatalog
+  templates?: GitHubTemplateCatalog[]
   allowlist: GitHubAllowlist
+  app: GitHubAppStatus
 }

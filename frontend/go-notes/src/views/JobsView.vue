@@ -7,24 +7,29 @@ import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
+import NavIcon from '@/components/NavIcon.vue'
 import { jobsApi } from '@/services/jobs'
 import { apiErrorMessage } from '@/services/api'
 import { useJobsStore } from '@/stores/jobs'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toasts'
+import { usePageLoadingStore } from '@/stores/pageLoading'
 import { isPendingJob, jobStatusLabel, jobStatusTone } from '@/utils/jobStatus'
 import type { Job } from '@/types/jobs'
 
 const jobsStore = useJobsStore()
 const auth = useAuthStore()
 const toastStore = useToastStore()
+const pageLoading = usePageLoadingStore()
 const stopping = ref<Record<number, boolean>>({})
 const retrying = ref<Record<number, boolean>>({})
 
-onMounted(() => {
+onMounted(async () => {
+  pageLoading.start('Loading job timeline...')
   if (!jobsStore.initialized) {
-    jobsStore.fetchJobs()
+    await jobsStore.fetchJobs()
   }
+  pageLoading.stop()
 })
 
 const stopJob = async (job: Job) => {
@@ -84,6 +89,7 @@ const retryJob = async (job: Job) => {
         @click="jobsStore.fetchJobs"
       >
         <span class="flex items-center gap-2">
+          <NavIcon name="refresh" class="h-3.5 w-3.5" />
           <UiInlineSpinner v-if="jobsStore.loading" />
           Refresh
         </span>
@@ -153,7 +159,10 @@ const retryJob = async (job: Job) => {
           size="md"
           class="mt-4 w-full justify-center"
         >
-          Sign in to continue
+          <span class="flex items-center gap-2">
+            <NavIcon name="login" class="h-4 w-4" />
+            Sign in to continue
+          </span>
         </UiButton>
       </UiPanel>
     </UiPanel>

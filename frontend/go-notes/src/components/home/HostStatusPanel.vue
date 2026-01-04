@@ -6,6 +6,7 @@ import UiButton from '@/components/ui/UiButton.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
+import NavIcon from '@/components/NavIcon.vue'
 import type { DockerHealth, TunnelHealth } from '@/types/health'
 import type { Settings } from '@/types/settings'
 
@@ -104,7 +105,10 @@ const formatDate = (value?: string | null) => {
       </div>
       <div class="flex flex-wrap gap-3">
         <UiButton variant="ghost" @click="emit('refresh')">
-          Refresh status
+          <span class="flex items-center gap-2">
+            <NavIcon name="refresh" class="h-3.5 w-3.5" />
+            Refresh status
+          </span>
         </UiButton>
         <UiButton
           :as="RouterLink"

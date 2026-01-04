@@ -41,21 +41,42 @@ Status: Replace notes CRUD with Warp Panel API, job runner, and integrations (AP
    - Ingress updates: preserve catch-all rule and avoid duplicate hostnames.
    - Tunnel restart semantics: match the "restart to apply new ingress" flow.
 
-6.1) GitHub Template Generation (App Token)
-- Review GitHub docs for template generation using ref.tools (`/repositories/.../generate`).
-- Confirm token type and issuance flow: GitHub App installation token (not OAuth token).
-- Document required permissions: Repository administration/content for template + create repo, plus org access if needed.
-  - Capture exact scopes/permissions for: template read, repo creation, repo contents, workflows (if used).
-- Add config fields for GitHub App ID, installation ID, private key or token source (env + DB storage).
-  - Define storage strategy (env bootstrap, persisted settings, secrets handling).
+6.1) GitHub Template Generation (GitHub App Token)
+- Review GitHub docs for template generation using ref.tools (`POST /repos/{template_owner}/{template_repo}/generate`).
+- Endpoint details (REST API):
+  - Headers: `Accept: application/vnd.github+json`.
+  - Path params: `template_owner` (required), `template_repo` (required, no `.git`).
+  - Body: `name` (required), `owner` (optional org/user), `description` (optional),
+    `include_all_branches` (bool, default false), `private` (bool, default false).
+  - Response: `201 Created` with repo payload.
+  - Template repo must be marked as a template and accessible to the app installation, otherwise GitHub returns 404.
+- Confirm token type and issuance flow: GitHub App user access token or installation token (no PATs).
+- GitHub App requirements (persist in DB, entered via UI):
+  - App creation link: https://github.com/settings/apps/new
+  - Permissions: Repository Administration (write), Contents (read), Metadata (read).
+  - Installation must include the template repo and the target owner (org/user).
+  - Store App ID, Client ID, Client Secret, Installation ID, and App Private Key in settings.
+- Token minting flow (server-side):
+  - Create JWT with App ID + private key.
+  - Exchange JWT for installation token (or user access token if creating repos in user space).
+  - Log token scope/permissions metadata for debugging (no secrets).
+- Access troubleshooting:
+  - `GET /repos/{owner}/{repo}` can return 404 when the GitHub App installation does not include the template repo or the repo is private/invisible to the installation.
+  - Confirm the installation ID matches the template owner (org/user) and that the app is installed with access to the template repo.
+  - For template generation, docs confirm GitHub App installation tokens are supported and require Administration (write) + Contents (read) permissions.
 - Support owner selection (user vs org) and visibility in request payload.
 - Support `include_all_branches` when generating from template if needed.
-- Implement token minting/refresh and ensure scopes are logged for debugging.
-- Add template source allowlist (owner/repo) and enforce repo visibility rules.
 - Implement generate endpoint call with request validation (owner, template repo, new repo name, visibility).
 - Handle async repo creation readiness (polling/backoff before clone/deploy).
 - Add GitHub error handling with response payload snippets for debugging.
  - Ensure generated repo name is safe and unique (lowercase, hyphenated, avoid collisions).
+
+6.2) Template Catalog (Optional)
+- Store template catalog entries (owner, repo, display name, visibility, default flag) as UI convenience only.
+- Extend `/api/v1/github/catalog` to return the template list, default template, and target owner hints.
+- Allow create-from-template to accept a template source from the catalog, but do not enforce allowlist behavior yet.
+- Document catalog ownership rules (template source vs target owner) and expose in settings UI.
+- Ensure audit logs capture selected template source and target owner/visibility.
 
 7) Docker Runner Jobs
 - Add job types: `docker_run`, `docker_compose_up`.
@@ -88,9 +109,8 @@ Status: Replace notes CRUD with Warp Panel API, job runner, and integrations (AP
 10) Validation and Safety
 - Validate names, ports, and filesystem paths.
 - Never accept raw shell commands from the UI.
-- Use an allowlist for subdomain formats and template repo.
+- Validate subdomain formats and template repo identifiers (owner/repo).
 - Ensure host tokens are single-use with short TTL.
- - Validate template repo selection against allowlist (owner/name), no arbitrary repo URLs.
  - Validate local repo discovery root path; prevent path traversal.
  - Validate project-based filters via known labels and DB mappings only.
 

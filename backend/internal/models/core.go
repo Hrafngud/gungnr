@@ -36,13 +36,13 @@ type Deployment struct {
 
 type Job struct {
 	gorm.Model
-	Type               string `gorm:"size:64;not null"`
-	Status             string `gorm:"size:32;not null"`
-	StartedAt          *time.Time
-	FinishedAt         *time.Time
-	Error              string `gorm:"type:text"`
-	Input              string `gorm:"type:text"`
-	LogLines           string `gorm:"type:text"`
+	Type       string `gorm:"size:64;not null"`
+	Status     string `gorm:"size:32;not null"`
+	StartedAt  *time.Time
+	FinishedAt *time.Time
+	Error      string `gorm:"type:text"`
+	Input      string `gorm:"type:text"`
+	LogLines   string `gorm:"type:text"`
 }
 
 type AuditLog struct {
@@ -56,11 +56,16 @@ type AuditLog struct {
 
 type Settings struct {
 	gorm.Model
-	BaseDomain            string `gorm:"size:255"`
-	GitHubToken           string `gorm:"type:text"`
-	CloudflareToken       string `gorm:"type:text"`
-	CloudflareAccountID   string `gorm:"size:255"`
-	CloudflareZoneID      string `gorm:"size:255"`
-	CloudflaredTunnel     string `gorm:"size:255"`
-	CloudflaredConfigPath string `gorm:"size:512"`
+	BaseDomain              string `gorm:"size:255"`
+	GitHubTemplates         string `gorm:"type:text"`
+	GitHubAppID             string `gorm:"size:64"`
+	GitHubAppClientID       string `gorm:"size:128"`
+	GitHubAppClientSecret   string `gorm:"type:text"`
+	GitHubAppInstallationID string `gorm:"size:64"`
+	GitHubAppPrivateKey     string `gorm:"type:text"`
+	CloudflareToken         string `gorm:"type:text"`
+	CloudflareAccountID     string `gorm:"size:255"`
+	CloudflareZoneID        string `gorm:"size:255"`
+	CloudflaredTunnel       string `gorm:"size:255"`
+	CloudflaredConfigPath   string `gorm:"size:512"`
 }

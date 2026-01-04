@@ -10,13 +10,16 @@ import UiPanel from '@/components/ui/UiPanel.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiState from '@/components/ui/UiState.vue'
 import UiToggle from '@/components/ui/UiToggle.vue'
+import NavIcon from '@/components/NavIcon.vue'
 import { hostApi } from '@/services/host'
 import { getApiBaseUrl } from '@/services/api'
 import { useToastStore } from '@/stores/toasts'
+import { usePageLoadingStore } from '@/stores/pageLoading'
 import type { DockerContainer } from '@/types/host'
 
 const toastStore = useToastStore()
 const route = useRoute()
+const pageLoading = usePageLoadingStore()
 const containers = ref<DockerContainer[]>([])
 const loading = ref(false)
 const error = ref('')
@@ -33,6 +36,11 @@ const logViewport = ref<HTMLElement | null>(null)
 const routeApplied = ref(false)
 
 let streamSource: EventSource | null = null
+
+const isRunningStatus = (status: string) => {
+  const normalized = status.toLowerCase()
+  return normalized.startsWith('up') || normalized.includes('running')
+}
 
 const selectedInfo = computed(() =>
   containers.value.find((container) => container.name === selectedContainer.value),
@@ -57,6 +65,10 @@ const filteredContainers = computed(() => {
     return haystack.includes(needle)
   })
 })
+
+const runningCount = computed(() =>
+  containers.value.filter((container) => isRunningStatus(container.status)).length,
+)
 
 const containerOptions = computed(() =>
   filteredContainers.value.map((container) => ({
@@ -100,7 +112,8 @@ const loadContainers = async () => {
     containers.value = data.containers
     applyRouteSelection()
     if (!selectedContainer.value && data.containers.length > 0) {
-      const first = data.containers[0]
+      const firstRunning = data.containers.find((container) => isRunningStatus(container.status))
+      const first = firstRunning ?? data.containers[0]
       if (first) {
         selectedContainer.value = first.name
       }
@@ -271,7 +284,9 @@ watch(containers, () => {
 })
 
 onMounted(async () => {
+  pageLoading.start('Loading containers...')
   await loadContainers()
+  pageLoading.stop()
   if (hasSelection.value) {
     startStream()
   }
@@ -293,7 +308,7 @@ onBeforeUnmount(() => {
           Live host log stream
         </h1>
         <p class="mt-2 text-sm text-[color:var(--muted)]">
-          Pick a running container and tail its output while you deploy or troubleshoot.
+          Pick a container and tail its output while you deploy or troubleshoot.
         </p>
       </div>
       <UiButton
@@ -303,6 +318,7 @@ onBeforeUnmount(() => {
         @click="loadContainers"
       >
         <span class="flex items-center gap-2">
+          <NavIcon name="refresh" class="h-3.5 w-3.5" />
           <UiInlineSpinner v-if="loading" />
           Refresh containers
         </span>
@@ -340,10 +356,11 @@ onBeforeUnmount(() => {
         <div class="flex items-center justify-between">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Running containers
+              Containers
             </p>
             <p class="text-sm text-[color:var(--muted)]">
-              {{ filteredContainers.length }} shown · {{ containers.length }} active
+              {{ filteredContainers.length }} shown · {{ runningCount }} running ·
+              {{ containers.length }} total
             </p>
           </div>
         </div>

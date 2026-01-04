@@ -14,7 +14,7 @@ Guiding principle: Mimic the behavior of `deploy.sh` end-to-end, but via the web
 
 2) Backend First
 - Scaffold backend structure and config loader.
-- Implement GitHub OAuth auth + allowlist.
+- Implement GitHub OAuth auth + access control (approach TBD).
 - Add integrations for GitHub, Cloudflare, Docker, and cloudflared.
 - Add GitHub template generation flow (App token + generate endpoint) and template catalog support.
 - Add local repo discovery (host filesystem) for stop/restart lifecycle actions.

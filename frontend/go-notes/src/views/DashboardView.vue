@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
+import NavIcon from '@/components/NavIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
@@ -115,7 +116,10 @@ const greeting = computed(() => {
         to="/login"
         class="inline-flex w-full items-center justify-center rounded-2xl border border-black/10 bg-[color:var(--accent-soft)] px-4 py-2 text-sm font-semibold text-[color:var(--accent-ink)] transition hover:-translate-y-0.5"
       >
-        Go to login
+        <span class="flex items-center gap-2">
+          <NavIcon name="login" class="h-4 w-4" />
+          Go to login
+        </span>
       </RouterLink>
     </aside>
   </section>

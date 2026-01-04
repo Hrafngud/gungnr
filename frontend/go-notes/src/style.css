@@ -622,6 +622,27 @@ h3 {
   background: rgba(6, 6, 10, 0.8);
 }
 
+.page-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(6, 6, 10, 0.78);
+}
+
+.page-overlay-card {
+  display: grid;
+  gap: 0.5rem;
+  border-radius: 0;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 1.5rem 2rem;
+  text-align: center;
+}
+
 .modal-panel {
   width: min(560px, 100%);
   max-height: 85vh;
@@ -710,6 +731,16 @@ h3 {
 
 .modal-fade-enter-from,
 .modal-fade-leave-to {
+  opacity: 0;
+}
+
+.page-fade-enter-active,
+.page-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.page-fade-enter-from,
+.page-fade-leave-to {
   opacity: 0;
 }
 

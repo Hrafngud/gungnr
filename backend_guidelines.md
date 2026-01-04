@@ -34,7 +34,6 @@
 - `GITHUB_CALLBACK_URL=https://panel.yourdomain/callback`
 - `GITHUB_ALLOWED_USERS=user1,user2`
 - `GITHUB_ALLOWED_ORG=your-org`
-- `GITHUB_TOKEN=...`
 - `GITHUB_TEMPLATE_OWNER=Hrafngud`
 - `GITHUB_TEMPLATE_REPO=go-ground`
 - `GITHUB_REPO_OWNER=your-org`

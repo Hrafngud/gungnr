@@ -10,9 +10,12 @@ export const projectsApi = {
     subdomain?: string
     proxyPort?: number
     dbPort?: number
+    template?: string
   }) => api.post<{ job: Job }>('/api/v1/projects/template', payload),
   deployExisting: (payload: { name: string; subdomain: string; port?: number }) =>
     api.post<{ job: Job }>('/api/v1/projects/existing', payload),
+  forwardLocal: (payload: { name: string; subdomain: string; port?: number }) =>
+    api.post<{ job: Job }>('/api/v1/projects/forward', payload),
   quickService: (payload: {
     subdomain: string
     port: number

@@ -1,0 +1,158 @@
+## Iteration Log
+
+- 2026-01-04: New GitHub template repo lookup error observed.
+  - Error: `template repo lookup failed: GET https://api.github.com/repos/Hrafngud/go-ground: 404 Not Found` using the GitHub App installation token.
+  - Next task set to diagnose access/installation scope vs repo visibility, review docs, and propose a concise fix plan.
+- 2026-01-04: Debugged template generation 404 and added GitHub template preflight validation.
+  - Added template repo validation (access + is_template) before `generate`, with clearer error messaging and repo name normalization.
+  - Documented the template-repo requirement in `backend_plan.md`.
+- 2026-01-04: Removed PAT references and fallback logic; create-from-template now requires GitHub App installation tokens only. Updated UI guidance and GitHub page copy to reflect App-only flow and removed PAT settings field.
+- 2026-01-04: Clarified GitHub token/App permissions in Host Settings guidance and helper text for GitHub access fields.
+- 2026-01-04: Added GitHub App credential status panel to GitHub page with backend catalog fields for App ID/Installation ID/Private Key status. Fixed strict null checks in `TemplateCardsSection` and `HomeView`. Ran `npm run build` successfully.
+- 2026-01-02: User initiated a major visual rework. Pivoting from previous tasks.
+- 2026-01-03 (Session 1): Starting UI-REWORK-1 - removing rounded containers, reducing margins, adding custom hr separators.
+  - Completed UI-REWORK-1: Removed border-radius from all panel, list-row, state, modal, toast, and onboarding classes in style.css. Horizontal margins already at 5% (`px-[5%]` in AppShell.vue). Added `<hr />` separators to HomeView, OverviewView, ActivityView, GitHubView, HostSettingsView, JobsView, and NetworkingView.
+  - Completed UI-REWORK-2: Created UiFormSidePanel component with right-side slide-in animation, overlay, scrollable content, and close button.
+  - Completed UI-REWORK-3: Refactored template creation form in HomeView to use the new FormSidePanel component.
+- 2026-01-03 (Session 2): Completing UI-REWORK-4 - refactoring all remaining forms.
+  - Refactored HomeView: All three forms (template creation, deploy existing, quick service) now use FormSidePanel component with proper state management.
+  - Refactored HostSettingsView: Settings form now uses FormSidePanel with status indicators included in the panel.
+  - All forms in the application now consistently use the FormSidePanel approach.
+- 2026-01-03 (Session 2 continued): User requested additional UI rework tasks.
+  - Added UI-REWORK-5: Componentize HomeView for better maintainability and reusability.
+  - Added UI-REWORK-6: Standardize sidebar animations across navigation and form sidebars.
+- 2026-01-03 (Session 3): Completed UI-REWORK-5 and UI-REWORK-6.
+  - Created three new components in /components/home/: HostStatusPanel.vue, TemplateCardsSection.vue, ServiceCardsSection.vue.
+  - Refactored HomeView.vue to use the new components, reducing it from 1204 lines to 775 lines (35.6% reduction).
+  - Added smooth sidebar animations to AppShell.vue with consistent timing (0.3s ease for width, 0.25s ease for opacity).
+  - Standardized all sidebar and modal transitions: navigation sidebar (0.3s), form sidebars (0.3s), modal overlay (0.25s).
+  - Frontend visual rework is now complete.
+- 2026-01-03 (Session 4): Planning phase for UX refinement cycle.
+  - User reviewed deploy.sh script context and identified UX improvements needed.
+  - Defined 6 new UX-REFINE tasks focusing on: Quick Services polish, contextual guidance system, ingress preview sidebar, DNS grid layout, and template form simplification.
+  - Key insight: "Deploy existing" should forward ANY localhost service (not just Docker) via Cloudflare-only approach.
+  - Key insight: "Create from template" should auto-infer ports and require only project name + subdomain.
+  - Backend planning for GitHub/Templates integration deferred for future discussion.
+- 2026-01-03 (Session 5): Completed UX-REFINE-1, UX-REFINE-4, UX-REFINE-5, and UX-REFINE-6.
+  - UX-REFINE-1: Quick Services improvements.
+    - Added icon field to ServicePreset type and assigned icons to all 20 service presets (draw, ai, database, cache, server, storage, mail, tool, admin, code, git, search).
+    - Implemented search bar with icon for filtering services by name/description.
+    - Added service-specific icons to each card with proper icon mapping using inline SVG paths.
+    - Set fixed-height scrollable container (368px) with empty state message for no search results.
+    - Quick Services section now has consistent visual hierarchy and improved discoverability.
+  - UX-REFINE-5: Simplified "Create from template" form.
+    - Removed Proxy Port and Database Port fields (now auto-inferred by backend).
+    - Made Subdomain field required instead of optional.
+    - Updated form description to clarify automatic port configuration.
+    - Added field-level help text explaining each input's purpose.
+  - UX-REFINE-6: Clarified "Deploy existing" form (renamed to "Forward localhost service").
+    - Renamed from "Deploy existing" to "Forward localhost service" to better reflect purpose.
+    - Updated to forward ANY localhost service (Docker or not) via Cloudflare-only approach.
+    - Changed fields: Service name (required), Subdomain (required), Running at (required localhost port).
+    - Removed Docker-specific UI elements (local project list, template folder references).
+    - Updated template card descriptions to match new form purposes.
+  - UX-REFINE-4: Converted DNS records to 4-column grid layout.
+    - Replaced vertical UiListRow layout with compact 4-column grid (Subdomain, Full hostname, Type, Target service).
+    - Added header row with column labels.
+    - Each DNS record now displays as a single row with all information visible at a glance.
+    - Applied truncate to prevent long values from breaking the layout.
+- 2026-01-03 (Session 6): Completed UX-REFINE-2 and UX-REFINE-3.
+  - UX-REFINE-2: Replaced onboarding overlay with contextual field guidance on form focus.
+    - Added reusable UiFieldGuidance with left-side placement and external token links where needed.
+    - Wired guidance into all form fields in Home and Host Settings.
+    - Removed overlay-driven onboarding buttons from Home, Host Settings, Networking, and GitHub.
+  - UX-REFINE-3: Converted ingress previews into right-side panels.
+    - Added ingress preview side panels in Host Settings and Networking with refresh controls.
+    - Simplified the main layouts by removing inline preview panels.
+- 2026-01-03 (Session 7): Cleanup + copy review.
+  - Removed all onboarding overlay/store/service/type references and onboarding CSS.
+  - Scrubbed remaining onboarding data attributes and labels.
+  - Reviewed guidance copy/links for accuracy and kept token docs references intact.
+- 2026-01-03 (Session 8): Backend onboarding removal.
+  - Deleted onboarding API/controller/service/repository/model and stopped AutoMigrate from creating onboarding tables.
+  - Removed onboarding routes from the router and server dependency wiring.
+- 2026-01-03 (Session 9): Cleanup per user request.
+  - Cleared the remaining Next up items as requested (no action taken).
+- 2026-01-03 (Session 10): Planning-only update for backend/frontend improvements.
+  - Added planning tasks for GitHub template generation, template catalog UI, localhost forwarding, and container filters.
+  - Noted requirement for GitHub App token + permissions and Cloudflare-only forwarding flow.
+  - Prepared checklist items for Docker usage stats and stopped container support.
+- 2026-01-03 (Session 11): Added more planning tasks for container project filters and UI polish.
+  - Added tasks for sidebar auth indicator, global loading overlay, iconography, and logout redirect.
+- 2026-01-03 (Session 12): Captured GitHub template generate endpoint details.
+  - Documented `POST /repos/{template_owner}/{template_repo}/generate` params, payload, and response in `backend_plan.md`.
+  - Noted token types supported and required fine-grained permissions (Administration write, Contents read).
+- 2026-01-03 (Session 13): Completed GitHub App token planning and Home template selector.
+  - Documented GitHub App installation token permissions, installation requirements, and storage strategy in `backend_plan.md`.
+  - Added template catalog + allowlist workflow details in `backend_plan.md`.
+  - Added template repo selector + empty state messaging to the Home create-from-template panel.
+- 2026-01-03 (Session 14): Added local template folder list + ownership cues for container lifecycle actions.
+  - Host Settings now loads the templates directory list and surfaces it beneath containers with refresh + error states.
+  - Container cards show an Ownership hint (local template vs external) based on compose project names.
+  - Clarified lifecycle action scope with copy tied to local template folders.
+- 2026-01-03 (Session 15): Completed localhost forwarding flow (Cloudflare-only, no Docker).
+  - Added `/api/v1/projects/forward` backend job to update DNS + ingress without compose or docker run.
+  - Wired Home "Forward localhost service" panel to the new forward-local endpoint and tightened validation/copy.
+  - Removed unused local project loading from HomeView for this flow.
+- 2026-01-03 (Session 16): Completed container lifecycle + host UI refinements.
+  - Host Settings now lists running + stopped containers with status/project filters, restart limited to stopped, and action icons for lifecycle/logs.
+  - Added Docker usage summary with project-scoped counts plus new `/api/v1/host/docker/usage` backend endpoint.
+  - Sidebar header now shows the GitHub auth indicator; logout redirects to `/login`.
+  - Added refresh/edit/login/logout iconography and a global page-loading overlay wired to initial view loads.
+- 2026-01-03 (Session 17): Reviewed backlog and selected the next backend enhancement.
+  - Picked legacy cleanup guard (review.md) as the next task to prevent startup warnings on fresh schemas.
+- 2026-01-03 (Session 18): Completed BACKEND-CLEANUP-1.
+  - Guarded legacy host-worker cleanup by skipping updates when host_token columns are absent and only updating existing legacy fields.
+- 2026-01-03 (Session 19): Reviewed backend backlog and selected the next task.
+  - Next focus: backend template catalog allowlist (settings storage + catalog payload + create-from-template validation).
+- 2026-01-03 (Session 20): Implemented backend template catalog allowlist storage + validation.
+  - Added settings persistence for template sources with default/visibility fields.
+  - Extended GitHub catalog response to include allowlisted templates and default selection.
+  - Validated create-from-template template refs against allowlist and enforced selection in jobs.
+- 2026-01-03 (Session 21): Planning update for GitHub App token flow.
+  - Removed allowlist focus from planning docs in favor of GitHub App token strategy.
+  - Defined plan to store GitHub App credentials in DB and update Host Settings guidance.
+- 2026-01-04 (Session 1): Completed GH-APP-1/2/3 (GitHub App settings + token minting + Host Settings UI).
+  - Added GitHub App credential fields to settings persistence, settings payloads/sources, and audit metadata.
+  - Minted GitHub App installation tokens for create-from-template and use them for API + git clone auth.
+  - Updated Host Settings to capture GitHub App credentials with guidance and permissions callout.
+- 2026-01-04 (Session 2): Diagnosed GitHub template repo lookup 404 and captured docs notes.
+  - Reviewed GitHub docs confirming App installation tokens are supported for template generation and require Administration (write) + Contents (read).
+  - Narrowed likely 404 causes to app installation scope or repo visibility (template repo not installed/accessible or installation ID mismatch).
+  - Added troubleshooting notes to backend planning docs.
+
+## Completed Task Snapshot
+
+- UI-REWORK-1: All pages content: Remove rounded containers, reduce horizontal margins to ~5%, and use custom `<hr>` separators.
+- UI-REWORK-2: All application forms: Create a shared `FormSidePanel` component for all forms, with a right-side slide-in animation and overlay.
+- UI-REWORK-3: Refactor the first form to use the new `FormSidePanel`.
+- UI-REWORK-4: Refactor all remaining forms to use `FormSidePanel` (HomeView deploy existing, HomeView quick service, HostSettingsView settings).
+- UI-REWORK-5: Refactor HomeView to a more concise, componentized approach. Break down the large view into smaller, reusable components (e.g., HostStatusPanel, TemplateCardsSection, ServiceCardsSection).
+- UI-REWORK-6: Standardize sidebar animations for both navigation and form sidebars. Create smooth, consistent open/close animations with proper timing and easing.
+- UX-REFINE-1: Quick Services improvements - Add service icons, search bar, fixed-height scrollable container matching Templates section height.
+- UX-REFINE-2: Redesign guidance system - Replace overlay-with-highlight with large-font contextual help on form field focus, positioned on left side opposite form, with external links (GitHub, Cloudflare) when applicable.
+- UX-REFINE-3: Ingress preview sidebar - Convert live ingress preview to a sidebar panel (like FormSidePanel) for visual cleanup in Networking and Host Settings.
+- UX-REFINE-4: Networking DNS grid - Convert 'Expected DNS records' section to a 4-column grid layout for compact info display.
+- UX-REFINE-5: Template form clarification - Update 'Create from template' form to only include: Project name (required), Subdomain (required, not optional). Remove Proxy/DB port fields (auto-inferred).
+- UX-REFINE-6: Deploy existing clarification - Update 'Deploy existing' form to forward ANY localhost service (Docker or not) with fields: Project name (identification), Subdomain (web exposure), Running At (localhost port). Cloudflare-only, no Docker involvement.
+- GITHUB-GEN-1: Review GitHub template generate docs with ref.tools and capture endpoint specifics + payloads.
+- GITHUB-GEN-2: Define GitHub App token requirements (permissions, installation flow, storage).
+- GITHUB-GEN-3: Add backend plan for template catalog + repo allowlist + generate endpoint workflow.
+- HOME-TEMPLATE-1: Add template repo selector and empty state in Home > Create from template.
+- HOME-TEMPLATE-2: Add local repo list for lifecycle actions (stop/restart) and clarify ownership.
+- FORWARD-LOCAL-1: Add backend + UI flow for forwarding localhost service via Cloudflare only (no Docker).
+- HOST-CONTAINERS-1: List running + stopped containers, add filter toggles, and restrict restart to stopped.
+- HOST-CONTAINERS-2: Add action icons for stop/restart/remove/logs.
+- HOST-DOCKER-1: Add basic Docker usage summary (disk usage + counts).
+- HOST-DOCKER-2: Add project-based filters for containers/volumes/images.
+- SIDEBAR-AUTH-1: Replace sidebar logo header with GitHub auth indicator.
+- UI-LOADING-1: Add global loading overlay for page-level loads.
+- UI-ICONS-1: Add iconography for refresh/edit/login/logout buttons.
+- AUTH-REDIRECT-1: Redirect to login on logout.
+- BACKEND-CLEANUP-1: Guard legacy host-worker cleanup when host_token columns are absent to avoid startup warnings on fresh schemas.
+- BACKEND-GH-CATALOG-1: Add template catalog allowlist storage in settings (multiple owner/repo entries, default template, visibility).
+- BACKEND-GH-CATALOG-2: Extend `/api/v1/github/catalog` to return the allowlisted template list + default selection.
+- BACKEND-GH-CATALOG-3: Update create-from-template to accept `template` (owner/repo) and validate against allowlist.
+- GH-APP-1: Store GitHub App credentials in settings (App ID, Client ID, Client Secret, Installation ID, Private Key).
+- GH-APP-2: Implement GitHub App token minting (JWT -> installation/user token) and use it for create-from-template.
+- GH-APP-3: Update Host Settings UI to accept GitHub App credentials with setup guidance + permissions.

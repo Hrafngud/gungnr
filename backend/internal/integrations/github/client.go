@@ -10,51 +10,51 @@ import (
 	"strings"
 	"time"
 
-	"go-notes/internal/config"
-
 	gogithub "github.com/google/go-github/v62/github"
 	"golang.org/x/oauth2"
 )
 
-var ErrMissingToken = errors.New("GITHUB_TOKEN is required")
+var ErrMissingToken = errors.New("github app installation token is required")
 
 const responseBodyHeader = "X-Warp-Response-Body"
 
 type Client struct {
-	cfg config.Config
 	api *gogithub.Client
 }
 
-func NewClient(cfg config.Config) *Client {
+func NewTokenClient(token string) *Client {
+	trimmed := strings.TrimSpace(token)
 	var api *gogithub.Client
-	if cfg.GitHubToken != "" {
-		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: cfg.GitHubToken})
+	if trimmed != "" {
+		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: trimmed})
 		httpClient := WrapHTTPClient(oauth2.NewClient(context.Background(), ts))
 		api = gogithub.NewClient(httpClient)
 	}
-	return &Client{cfg: cfg, api: api}
+	return &Client{api: api}
 }
 
-func (c *Client) CreateRepoFromTemplate(ctx context.Context, name string) (*gogithub.Repository, error) {
+func (c *Client) CreateRepoFromTemplate(ctx context.Context, templateOwner, templateRepo, name, targetOwner string, private bool) (*gogithub.Repository, error) {
 	if c.api == nil {
 		return nil, ErrMissingToken
 	}
-	if c.cfg.GitHubTemplateOwner == "" || c.cfg.GitHubTemplateRepo == "" {
-		return nil, errors.New("GITHUB_TEMPLATE_OWNER and GITHUB_TEMPLATE_REPO are required")
+	templateOwner = strings.TrimSpace(templateOwner)
+	templateRepo = normalizeRepoName(templateRepo)
+	if templateOwner == "" || templateRepo == "" {
+		return nil, errors.New("template owner and repo are required")
 	}
 
-	owner := c.cfg.GitHubRepoOwner
+	owner := strings.TrimSpace(targetOwner)
 	if owner == "" {
-		owner = c.cfg.GitHubTemplateOwner
+		owner = strings.TrimSpace(templateOwner)
 	}
 
 	req := &gogithub.TemplateRepoRequest{
 		Name:    gogithub.String(name),
 		Owner:   gogithub.String(owner),
-		Private: gogithub.Bool(c.cfg.GitHubRepoPrivate),
+		Private: gogithub.Bool(private),
 	}
 
-	repo, _, err := c.api.Repositories.CreateFromTemplate(ctx, c.cfg.GitHubTemplateOwner, c.cfg.GitHubTemplateRepo, req)
+	repo, _, err := c.api.Repositories.CreateFromTemplate(ctx, templateOwner, templateRepo, req)
 	if err != nil {
 		detail := FormatError(err)
 		if detail == "" {
@@ -64,6 +64,33 @@ func (c *Client) CreateRepoFromTemplate(ctx context.Context, name string) (*gogi
 	}
 
 	return repo, nil
+}
+
+func (c *Client) ValidateTemplateRepo(ctx context.Context, templateOwner, templateRepo string) error {
+	if c.api == nil {
+		return ErrMissingToken
+	}
+	templateOwner = strings.TrimSpace(templateOwner)
+	templateRepo = normalizeRepoName(templateRepo)
+	if templateOwner == "" || templateRepo == "" {
+		return errors.New("template owner and repo are required")
+	}
+
+	repo, _, err := c.api.Repositories.Get(ctx, templateOwner, templateRepo)
+	if err != nil {
+		detail := FormatError(err)
+		if detail == "" {
+			return fmt.Errorf("template repo lookup failed: %w", err)
+		}
+		return fmt.Errorf("template repo lookup failed: %w; %s", err, detail)
+	}
+	if repo == nil {
+		return fmt.Errorf("template repo lookup failed: empty response for %s/%s", templateOwner, templateRepo)
+	}
+	if !repo.GetIsTemplate() {
+		return fmt.Errorf("github repo %s/%s is not marked as a template; enable \"Template repository\" in the repo settings", templateOwner, templateRepo)
+	}
+	return nil
 }
 
 func FormatError(err error) string {
@@ -192,6 +219,18 @@ func compactBodySnippet(raw []byte) string {
 	trimmed = strings.ReplaceAll(trimmed, "\n", " ")
 	if len(trimmed) > maxLen {
 		return trimmed[:maxLen] + "..."
+	}
+	return trimmed
+}
+
+func normalizeRepoName(repo string) string {
+	trimmed := strings.TrimSpace(repo)
+	if trimmed == "" {
+		return ""
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasSuffix(lower, ".git") {
+		trimmed = strings.TrimSpace(trimmed[:len(trimmed)-4])
 	}
 	return trimmed
 }

@@ -7,6 +7,8 @@ import UiFieldGuidance from '@/components/ui/UiFieldGuidance.vue'
 import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
+import UiSelect from '@/components/ui/UiSelect.vue'
+import NavIcon from '@/components/NavIcon.vue'
 import HostStatusPanel from '@/components/home/HostStatusPanel.vue'
 import TemplateCardsSection from '@/components/home/TemplateCardsSection.vue'
 import ServiceCardsSection from '@/components/home/ServiceCardsSection.vue'
@@ -14,13 +16,13 @@ import { useProjectsStore } from '@/stores/projects'
 import { useJobsStore } from '@/stores/jobs'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toasts'
+import { usePageLoadingStore } from '@/stores/pageLoading'
 import { projectsApi } from '@/services/projects'
 import { healthApi } from '@/services/health'
 import { settingsApi } from '@/services/settings'
 import { githubApi } from '@/services/github'
 import { apiErrorMessage } from '@/services/api'
 import { isPendingJob } from '@/utils/jobStatus'
-import type { LocalProject } from '@/types/projects'
 import type { DockerHealth, TunnelHealth } from '@/types/health'
 import type { Settings } from '@/types/settings'
 import type { GitHubCatalog } from '@/types/github'
@@ -53,6 +55,7 @@ const jobsStore = useJobsStore()
 const auth = useAuthStore()
 const toastStore = useToastStore()
 const fieldGuidance = useFieldGuidance()
+const pageLoading = usePageLoadingStore()
 
 const machineName = ref('')
 const dockerHealth = ref<DockerHealth | null>(null)
@@ -60,9 +63,6 @@ const tunnelHealth = ref<TunnelHealth | null>(null)
 const settings = ref<Settings | null>(null)
 const hostLoading = ref(false)
 const settingsError = ref<string | null>(null)
-const localProjects = ref<LocalProject[]>([])
-const localLoading = ref(false)
-const localError = ref<string | null>(null)
 const catalog = ref<GitHubCatalog | null>(null)
 const catalogError = ref<string | null>(null)
 const templateFormOpen = ref(false)
@@ -91,6 +91,7 @@ const quickState = reactive<QueueState>({
 })
 
 const templateForm = reactive({
+  templateRef: '',
   name: '',
   subdomain: '',
   proxyPort: '',
@@ -143,14 +144,52 @@ const lastProject = computed(() => {
   return sorted[0] ?? null
 })
 
+const templateOptions = computed(() => {
+  const templates = catalog.value?.templates?.filter(
+    (template) => template.owner && template.repo,
+  )
+  if (templates && templates.length > 0) {
+    return templates.map((template) => ({
+      value: `${template.owner}/${template.repo}`,
+      label: template.private
+        ? `${template.owner}/${template.repo} (private)`
+        : `${template.owner}/${template.repo}`,
+    }))
+  }
+  if (catalog.value?.template?.configured) {
+    const { owner, repo, private: isPrivate } = catalog.value.template
+    if (owner && repo) {
+      return [
+        {
+          value: `${owner}/${repo}`,
+          label: isPrivate ? `${owner}/${repo} (private)` : `${owner}/${repo}`,
+        },
+      ]
+    }
+  }
+  return []
+})
+
 const templateRepoLabel = computed(() => {
   if (catalogError.value) return 'Template source unavailable'
-  if (!catalog.value?.template?.configured) return 'Template source not configured'
-  const owner = catalog.value.template.owner
-  const repo = catalog.value.template.repo
-  if (!owner || !repo) return 'Template source not configured'
-  return `${owner}/${repo}`
+  if (templateOptions.value.length === 0) {
+    return isAuthenticated.value ? 'Template source not configured' : 'Sign in to load templates'
+  }
+  const selected = templateOptions.value.find(
+    (option) => option.value === templateForm.templateRef,
+  )
+  return selected?.label ?? templateOptions.value[0]?.label ?? 'Template source not configured'
 })
+
+const templateEmptyStateMessage = computed(() => {
+  if (catalogError.value) return 'Template catalog failed to load.'
+  if (!isAuthenticated.value) return 'Sign in to load template repositories.'
+  return 'No template repositories configured yet.'
+})
+
+const templateSelectionDisabled = computed(
+  () => templateState.loading || !isAuthenticated.value || templateOptions.value.length === 0,
+)
 
 const selectedServiceName = ref<string>('')
 
@@ -194,19 +233,6 @@ const loadHostStatus = async () => {
   hostLoading.value = false
 }
 
-const loadLocalProjects = async () => {
-  localLoading.value = true
-  localError.value = null
-  try {
-    const { data } = await projectsApi.listLocal()
-    localProjects.value = data.projects
-  } catch (err) {
-    localError.value = apiErrorMessage(err)
-  } finally {
-    localLoading.value = false
-  }
-}
-
 const loadCatalog = async () => {
   if (!isAuthenticated.value) {
     catalog.value = null
@@ -235,6 +261,16 @@ const refreshAll = async () => {
 const submitTemplate = async () => {
   if (templateState.loading || !isAuthenticated.value) return
   resetState(templateState)
+  if (templateOptions.value.length === 0) {
+    templateState.error = isAuthenticated.value
+      ? 'Template source is not configured.'
+      : 'Sign in to load template sources.'
+    return
+  }
+  if (!templateForm.templateRef.trim()) {
+    templateState.error = 'Select a template source.'
+    return
+  }
   if (!templateForm.name.trim()) {
     templateState.error = 'Project name is required.'
     return
@@ -248,6 +284,7 @@ const submitTemplate = async () => {
   templateState.loading = true
   try {
     const { data } = await projectsApi.createFromTemplate({
+      template: templateForm.templateRef,
       name: templateForm.name,
       subdomain: templateForm.subdomain || undefined,
       proxyPort,
@@ -270,29 +307,29 @@ const submitExisting = async () => {
   if (existingState.loading || !isAuthenticated.value) return
   resetState(existingState)
   if (!existingForm.name.trim() || !existingForm.subdomain.trim()) {
-    existingState.error = 'Project name and subdomain are required.'
+    existingState.error = 'Service name and subdomain are required.'
     return
   }
-  const port = parsePort(existingForm.port, false)
-  if (port === null) {
+  const port = parsePort(existingForm.port, true)
+  if (port === null || port === undefined) {
     existingState.error = 'Port must be numeric.'
     return
   }
   existingState.loading = true
   try {
-    const { data } = await projectsApi.deployExisting({
+    const { data } = await projectsApi.forwardLocal({
       name: existingForm.name,
       subdomain: existingForm.subdomain,
       port,
     })
     existingState.jobId = data.job.id
-    existingState.success = 'Deployment queued. Automation started.'
-    toastStore.success('Deployment queued.', 'Deploy job queued')
+    existingState.success = 'Forward queued. Automation started.'
+    toastStore.success('Forward queued.', 'Forward job queued')
     await refreshAll()
   } catch (err) {
     const message = apiErrorMessage(err)
     existingState.error = message
-    toastStore.error(message, 'Deploy job failed')
+    toastStore.error(message, 'Forward failed')
   } finally {
     existingState.loading = false
   }
@@ -354,9 +391,6 @@ const selectTemplateCard = async (id: TemplateCardId) => {
     templateFormOpen.value = true
   } else if (id === 'existing') {
     existingFormOpen.value = true
-    if (localProjects.value.length === 0 && !localLoading.value) {
-      await loadLocalProjects()
-    }
   }
 }
 
@@ -386,25 +420,39 @@ const selectServiceCard = (card: ServiceCard) => {
 }
 
 onMounted(async () => {
-  if (!projectsStore.initialized) {
-    projectsStore.fetchProjects()
-  }
-  if (!jobsStore.initialized) {
-    jobsStore.fetchJobs()
-  }
-  loadHostStatus()
+  pageLoading.start('Loading host snapshot...')
+  await Promise.allSettled([
+    !projectsStore.initialized ? projectsStore.fetchProjects() : Promise.resolve(),
+    !jobsStore.initialized ? jobsStore.fetchJobs() : Promise.resolve(),
+    loadHostStatus(),
+  ])
+  pageLoading.stop()
   if (typeof window !== 'undefined') {
     machineName.value = window.location.hostname || 'localhost'
   }
 })
 
 watch(
+  () => templateOptions.value,
+  (options) => {
+    if (options.length === 0) {
+      templateForm.templateRef = ''
+      return
+    }
+    if (!options.find((option) => option.value === templateForm.templateRef)) {
+      const fallback = options[0]
+      if (fallback) {
+        templateForm.templateRef = fallback.value
+      }
+    }
+  },
+  { immediate: true },
+)
+
+watch(
   () => auth.user,
   (value) => {
     if (value) {
-      if (localProjects.value.length === 0 && !localLoading.value) {
-        loadLocalProjects()
-      }
       loadCatalog()
     } else {
       catalog.value = null
@@ -452,7 +500,10 @@ watch(
       >
         <span>Sign in to queue deploy jobs and host tunnel actions.</span>
         <UiButton :as="RouterLink" to="/login" variant="primary">
-          Sign in
+          <span class="flex items-center gap-2">
+            <NavIcon name="login" class="h-4 w-4" />
+            Sign in
+          </span>
         </UiButton>
       </UiPanel>
       <UiPanel
@@ -501,6 +552,50 @@ watch(
           Template source: {{ templateRepoLabel }}
         </p>
       </div>
+      <UiPanel
+        v-if="templateOptions.length === 0"
+        variant="soft"
+        class="flex flex-wrap items-center justify-between gap-3 p-3 text-xs text-[color:var(--muted)]"
+      >
+        <div>
+          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+            Template sources
+          </p>
+          <p class="mt-1 text-sm text-[color:var(--muted)]">
+            {{ templateEmptyStateMessage }}
+          </p>
+        </div>
+        <UiButton
+          :as="RouterLink"
+          :to="isAuthenticated ? '/github' : '/login'"
+          variant="ghost"
+          size="sm"
+        >
+          <span class="flex items-center gap-2">
+            <NavIcon v-if="!isAuthenticated" name="login" class="h-3.5 w-3.5" />
+            {{ isAuthenticated ? 'GitHub settings' : 'Sign in' }}
+          </span>
+        </UiButton>
+      </UiPanel>
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+          Template repo <span class="text-[color:var(--danger)]">*</span>
+        </span>
+        <UiSelect
+          v-model="templateForm.templateRef"
+          :options="templateOptions"
+          placeholder="Select a template"
+          :disabled="templateSelectionDisabled"
+          @focusin="fieldGuidance.show({
+            title: 'Template source',
+            description: 'Choose the GitHub template repo Warp Panel should clone and deploy.',
+          })"
+          @focusout="fieldGuidance.clear()"
+        />
+        <p class="text-xs text-[color:var(--muted)]">
+          Pick the repository that seeds the new project.
+        </p>
+      </label>
       <label class="grid gap-2 text-sm">
         <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
           Project name <span class="text-[color:var(--danger)]">*</span>
@@ -510,7 +605,7 @@ watch(
           type="text"
           placeholder="my-project"
           required
-          :disabled="templateState.loading"
+          :disabled="templateState.loading || !isAuthenticated || templateOptions.length === 0"
           @focus="fieldGuidance.show({
             title: 'Project name',
             description: 'Used for the GitHub repo and the local folder. Keep it short and DNS-safe.',
@@ -530,7 +625,7 @@ watch(
           type="text"
           placeholder="my-project"
           required
-          :disabled="templateState.loading"
+          :disabled="templateState.loading || !isAuthenticated || templateOptions.length === 0"
           @focus="fieldGuidance.show({
             title: 'Subdomain',
             description: 'Becomes the hostname prepended to your base domain in Cloudflare.',
@@ -551,7 +646,7 @@ watch(
         <UiButton
           type="submit"
           variant="primary"
-          :disabled="templateState.loading || !isAuthenticated"
+          :disabled="templateState.loading || !isAuthenticated || templateOptions.length === 0"
         >
           {{ templateState.loading ? 'Queueing...' : 'Queue template job' }}
         </UiButton>

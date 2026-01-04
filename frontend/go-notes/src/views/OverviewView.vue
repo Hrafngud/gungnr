@@ -7,8 +7,10 @@ import UiListRow from '@/components/ui/UiListRow.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
 import UiTooltip from '@/components/ui/UiTooltip.vue'
+import NavIcon from '@/components/NavIcon.vue'
 import { useJobsStore } from '@/stores/jobs'
 import { useAuditStore } from '@/stores/audit'
+import { usePageLoadingStore } from '@/stores/pageLoading'
 import { hostApi } from '@/services/host'
 import { apiErrorMessage } from '@/services/api'
 import { isPendingJob, jobStatusLabel, jobStatusTone } from '@/utils/jobStatus'
@@ -18,12 +20,21 @@ type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
 const jobsStore = useJobsStore()
 const auditStore = useAuditStore()
+const pageLoading = usePageLoadingStore()
 
 const containers = ref<DockerContainer[]>([])
 const containersLoading = ref(false)
 const containersError = ref<string | null>(null)
 
-const containerHighlights = computed(() => containers.value.slice(0, 4))
+const isRunningStatus = (status: string) => {
+  const normalized = status.toLowerCase()
+  return normalized.startsWith('up') || normalized.includes('running')
+}
+
+const runningContainers = computed(() =>
+  containers.value.filter((container) => isRunningStatus(container.status)),
+)
+const containerHighlights = computed(() => runningContainers.value.slice(0, 4))
 const recentJobs = computed(() => jobsStore.jobs.slice(0, 4))
 const recentActivity = computed(() => auditStore.logs.slice(0, 5))
 
@@ -47,12 +58,8 @@ const latestJob = computed(() => jobsStore.jobs[0] ?? null)
 
 const containerTone = (status: string): BadgeTone => {
   const normalized = status.toLowerCase()
-  if (normalized.startsWith('up') || normalized.includes('running')) {
-    return 'ok'
-  }
-  if (normalized.startsWith('exited') || normalized.includes('dead')) {
-    return 'error'
-  }
+  if (isRunningStatus(normalized)) return 'ok'
+  if (normalized.startsWith('exited') || normalized.includes('dead')) return 'error'
   return 'neutral'
 }
 
@@ -97,14 +104,14 @@ const refreshAll = async () => {
   ])
 }
 
-onMounted(() => {
-  if (!jobsStore.initialized) {
-    jobsStore.fetchJobs()
-  }
-  if (!auditStore.initialized) {
-    auditStore.fetchLogs()
-  }
-  loadContainers()
+onMounted(async () => {
+  pageLoading.start('Loading overview data...')
+  await Promise.allSettled([
+    !jobsStore.initialized ? jobsStore.fetchJobs() : Promise.resolve(),
+    !auditStore.initialized ? auditStore.fetchLogs() : Promise.resolve(),
+    loadContainers(),
+  ])
+  pageLoading.stop()
 })
 </script>
 
@@ -124,7 +131,10 @@ onMounted(() => {
       </div>
       <div class="flex flex-wrap gap-3">
         <UiButton variant="ghost" size="sm" @click="refreshAll">
-          Refresh overview
+          <span class="flex items-center gap-2">
+            <NavIcon name="refresh" class="h-3.5 w-3.5" />
+            Refresh overview
+          </span>
         </UiButton>
         <UiButton :as="RouterLink" to="/host-settings" variant="primary" size="sm">
           Open host settings
@@ -148,7 +158,10 @@ onMounted(() => {
           </p>
         </div>
         <UiButton variant="ghost" size="sm" @click="loadContainers">
-          Refresh list
+          <span class="flex items-center gap-2">
+            <NavIcon name="refresh" class="h-3.5 w-3.5" />
+            Refresh list
+          </span>
         </UiButton>
       </div>
 
@@ -229,7 +242,10 @@ onMounted(() => {
           </p>
         </div>
         <UiButton variant="ghost" size="sm" @click="jobsStore.fetchJobs">
-          Refresh jobs
+          <span class="flex items-center gap-2">
+            <NavIcon name="refresh" class="h-3.5 w-3.5" />
+            Refresh jobs
+          </span>
         </UiButton>
       </div>
 
@@ -347,7 +363,10 @@ onMounted(() => {
           </p>
         </div>
         <UiButton variant="ghost" size="sm" @click="auditStore.fetchLogs">
-          Refresh activity
+          <span class="flex items-center gap-2">
+            <NavIcon name="refresh" class="h-3.5 w-3.5" />
+            Refresh activity
+          </span>
         </UiButton>
       </div>
 
