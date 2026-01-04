@@ -26,6 +26,12 @@ type AppInstallationCredentials struct {
 	PrivateKey     string
 }
 
+type InstallationInfo struct {
+	ID        int64
+	Owner     string
+	OwnerType string
+}
+
 func ParseAppInstallationCredentials(appIDRaw, installationIDRaw, privateKey string) (AppInstallationCredentials, error) {
 	appIDRaw = strings.TrimSpace(appIDRaw)
 	installationIDRaw = strings.TrimSpace(installationIDRaw)
@@ -49,6 +55,34 @@ func ParseAppInstallationCredentials(appIDRaw, installationIDRaw, privateKey str
 		AppID:          appID,
 		InstallationID: installationID,
 		PrivateKey:     privateKey,
+	}, nil
+}
+
+func FetchInstallation(ctx context.Context, creds AppInstallationCredentials) (InstallationInfo, error) {
+	jwtToken, err := createAppJWT(creds.AppID, creds.PrivateKey)
+	if err != nil {
+		return InstallationInfo{}, err
+	}
+
+	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: jwtToken})
+	httpClient := WrapHTTPClient(oauth2.NewClient(ctx, ts))
+	api := gogithub.NewClient(httpClient)
+
+	installation, _, err := api.Apps.GetInstallation(ctx, creds.InstallationID)
+	if err != nil {
+		detail := FormatError(err)
+		if detail == "" {
+			return InstallationInfo{}, fmt.Errorf("fetch github app installation: %w", err)
+		}
+		return InstallationInfo{}, fmt.Errorf("fetch github app installation: %w; %s", err, detail)
+	}
+	if installation == nil || installation.Account == nil {
+		return InstallationInfo{}, errors.New("github app installation response missing account")
+	}
+	return InstallationInfo{
+		ID:        installation.GetID(),
+		Owner:     strings.TrimSpace(installation.Account.GetLogin()),
+		OwnerType: strings.TrimSpace(installation.Account.GetType()),
 	}, nil
 }
 

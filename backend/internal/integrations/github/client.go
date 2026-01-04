@@ -22,6 +22,13 @@ type Client struct {
 	api *gogithub.Client
 }
 
+type RepoAccessDiagnostics struct {
+	Checked   bool   `json:"checked"`
+	Available bool   `json:"available"`
+	Error     string `json:"error,omitempty"`
+	RequestID string `json:"requestId,omitempty"`
+}
+
 func NewTokenClient(token string) *Client {
 	trimmed := strings.TrimSpace(token)
 	var api *gogithub.Client
@@ -78,11 +85,19 @@ func (c *Client) ValidateTemplateRepo(ctx context.Context, templateOwner, templa
 
 	repo, _, err := c.api.Repositories.Get(ctx, templateOwner, templateRepo)
 	if err != nil {
-		detail := FormatError(err)
-		if detail == "" {
-			return fmt.Errorf("template repo lookup failed: %w", err)
+		guidance := ""
+		if isNotFoundError(err) {
+			guidance = fmt.Sprintf("github app installation cannot access %s/%s; install the app on the repo owner or update the installation ID", templateOwner, templateRepo)
 		}
-		return fmt.Errorf("template repo lookup failed: %w; %s", err, detail)
+		detail := FormatError(err)
+		base := "template repo lookup failed"
+		if guidance != "" {
+			base = fmt.Sprintf("%s: %s", base, guidance)
+		}
+		if detail == "" {
+			return fmt.Errorf("%s: %w", base, err)
+		}
+		return fmt.Errorf("%s: %w; %s", base, err, detail)
 	}
 	if repo == nil {
 		return fmt.Errorf("template repo lookup failed: empty response for %s/%s", templateOwner, templateRepo)
@@ -91,6 +106,52 @@ func (c *Client) ValidateTemplateRepo(ctx context.Context, templateOwner, templa
 		return fmt.Errorf("github repo %s/%s is not marked as a template; enable \"Template repository\" in the repo settings", templateOwner, templateRepo)
 	}
 	return nil
+}
+
+func (c *Client) CheckRepoAccess(ctx context.Context, templateOwner, templateRepo string) RepoAccessDiagnostics {
+	if c.api == nil {
+		return RepoAccessDiagnostics{
+			Checked: false,
+			Error:   ErrMissingToken.Error(),
+		}
+	}
+	templateOwner = strings.TrimSpace(templateOwner)
+	templateRepo = normalizeRepoName(templateRepo)
+	if templateOwner == "" || templateRepo == "" {
+		return RepoAccessDiagnostics{
+			Checked: false,
+			Error:   "template owner and repo are required",
+		}
+	}
+
+	repo, resp, err := c.api.Repositories.Get(ctx, templateOwner, templateRepo)
+	diagnostics := RepoAccessDiagnostics{
+		Checked: true,
+	}
+	if diagnostics.RequestID == "" {
+		diagnostics.RequestID = requestIDFromResponse(resp.Response)
+	}
+	if err != nil {
+		diagnostics.Available = false
+		detail := FormatError(err)
+		if detail == "" {
+			diagnostics.Error = err.Error()
+		} else {
+			diagnostics.Error = detail
+		}
+		if diagnostics.RequestID == "" {
+			diagnostics.RequestID = requestIDFromError(err)
+		}
+		return diagnostics
+	}
+	if repo == nil {
+		diagnostics.Available = false
+		diagnostics.Error = fmt.Sprintf("template repo lookup failed: empty response for %s/%s", templateOwner, templateRepo)
+		return diagnostics
+	}
+
+	diagnostics.Available = true
+	return diagnostics
 }
 
 func FormatError(err error) string {
@@ -168,6 +229,40 @@ func formatGitHubResponseMeta(resp *http.Response) string {
 		meta = fmt.Sprintf("%s response=%s", meta, body)
 	}
 	return fmt.Sprintf(" (%s)", strings.TrimSpace(meta))
+}
+
+func requestIDFromResponse(resp *http.Response) string {
+	if resp == nil {
+		return ""
+	}
+	requestID := strings.TrimSpace(resp.Header.Get("X-GitHub-Request-Id"))
+	if requestID == "" {
+		requestID = strings.TrimSpace(resp.Header.Get("X-Request-Id"))
+	}
+	return requestID
+}
+
+func requestIDFromError(err error) string {
+	switch typed := err.(type) {
+	case *gogithub.RateLimitError:
+		return requestIDFromResponse(typed.Response)
+	case *gogithub.AbuseRateLimitError:
+		return requestIDFromResponse(typed.Response)
+	case *gogithub.AcceptedError:
+		return ""
+	case *gogithub.ErrorResponse:
+		return requestIDFromResponse(typed.Response)
+	default:
+		return ""
+	}
+}
+
+func isNotFoundError(err error) bool {
+	typed, ok := err.(*gogithub.ErrorResponse)
+	if !ok || typed.Response == nil {
+		return false
+	}
+	return typed.Response.StatusCode == http.StatusNotFound
 }
 
 func WrapHTTPClient(client *http.Client) *http.Client {

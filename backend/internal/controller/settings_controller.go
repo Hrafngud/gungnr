@@ -14,6 +14,7 @@ type SettingsResponse struct {
 	Settings              service.SettingsPayload `json:"settings"`
 	Sources               service.SettingsSources `json:"sources,omitempty"`
 	CloudflaredTunnelName string                  `json:"cloudflaredTunnelName,omitempty"`
+	TemplatesDir          string                  `json:"templatesDir,omitempty"`
 }
 
 type SettingsController struct {
@@ -115,6 +116,7 @@ func (c *SettingsController) buildResponse(ctx *gin.Context, settings service.Se
 		Settings:              settings,
 		Sources:               sources,
 		CloudflaredTunnelName: strings.TrimSpace(cfg.CloudflaredTunnel),
+		TemplatesDir:          strings.TrimSpace(cfg.TemplatesDir),
 	}, nil
 }
 

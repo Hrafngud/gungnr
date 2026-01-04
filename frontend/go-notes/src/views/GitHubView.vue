@@ -121,6 +121,15 @@ const templateSource = computed(() => {
   return `${owner}/${repo}`
 })
 
+const templateAccess = computed(() => catalog.value?.templateAccess)
+
+const installationOwnerLabel = computed(() => {
+  const owner = templateAccess.value?.installationOwner?.trim()
+  if (!owner) return '--'
+  const ownerType = templateAccess.value?.installationOwnerType?.trim()
+  return ownerType ? `${owner} (${ownerType})` : owner
+})
+
 const templateTargetOwner = computed(() => {
   if (!catalog.value?.template.configured) return '--'
   return catalog.value.template.targetOwner || '--'
@@ -130,6 +139,27 @@ const templateVisibility = computed(() => {
   if (!catalog.value?.template.configured) return '--'
   return catalog.value.template.private ? 'Private' : 'Public'
 })
+
+const templateAccessStatus = computed(() => {
+  if (loading.value && !catalog.value) return 'Checking'
+  if (!catalog.value) return 'Unknown'
+  if (!templateConfigured.value) return 'Not configured'
+  const access = templateAccess.value?.repoAccess
+  if (!access?.checked) {
+    if (access?.error) return 'Error'
+    return 'Not checked'
+  }
+  return access.available ? 'Accessible' : 'Blocked'
+})
+
+const templateAccessTone = computed<BadgeTone>(() => {
+  if (templateAccessStatus.value === 'Accessible') return 'ok'
+  if (templateAccessStatus.value === 'Blocked' || templateAccessStatus.value === 'Error') return 'warn'
+  return 'neutral'
+})
+
+const templateAccessError = computed(() => templateAccess.value?.repoAccess?.error || '')
+const templateAccessRequestId = computed(() => templateAccess.value?.repoAccess?.requestId || '')
 
 const loadCatalog = async () => {
   loading.value = true
@@ -333,6 +363,18 @@ onMounted(async () => {
             </span>
           </UiListRow>
           <UiListRow class="flex items-center justify-between gap-2">
+            <span>Installation owner</span>
+            <span class="text-[color:var(--text)]">
+              {{ installationOwnerLabel }}
+            </span>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Template access</span>
+            <UiBadge :tone="templateAccessTone">
+              {{ templateAccessStatus }}
+            </UiBadge>
+          </UiListRow>
+          <UiListRow class="flex items-center justify-between gap-2">
             <span>Target owner</span>
             <span class="text-[color:var(--text)]">
               {{ templateTargetOwner }}
@@ -344,6 +386,17 @@ onMounted(async () => {
               {{ templateVisibility }}
             </span>
           </UiListRow>
+          <UiPanel
+            v-if="templateAccessError"
+            variant="soft"
+            class="space-y-2 border border-[color:var(--border)] p-3 text-xs text-[color:var(--muted)]"
+          >
+            <div class="text-[color:var(--text)]">Access details</div>
+            <div>{{ templateAccessError }}</div>
+            <div v-if="templateAccessRequestId">
+              Request ID: <span class="text-[color:var(--text)]">{{ templateAccessRequestId }}</span>
+            </div>
+          </UiPanel>
         </div>
       </UiPanel>
     </div>

@@ -19,6 +19,7 @@ export interface SettingsSources {
   githubAppClientSecret?: string
   githubAppInstallationId?: string
   githubAppPrivateKey?: string
+  templatesDir?: string
   cloudflareToken?: string
   cloudflareAccountId?: string
   cloudflareZoneId?: string
@@ -30,6 +31,7 @@ export interface SettingsResponse {
   settings: Settings
   sources?: SettingsSources
   cloudflaredTunnelName?: string
+  templatesDir?: string
 }
 
 export interface CloudflaredPreview {

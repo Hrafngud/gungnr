@@ -121,6 +121,30 @@
   - Narrowed likely 404 causes to app installation scope or repo visibility (template repo not installed/accessible or installation ID mismatch).
   - Added troubleshooting notes to backend planning docs.
 
+- 2026-01-04 (Session 7): Added GitHub App template access diagnostics.
+  - Added repo access diagnostics (checked/available + error detail/request ID) and installation owner lookup in GitHub catalog response.
+  - Added guidance to template validation errors when the app installation cannot access the template repo.
+  - Updated GitHub UI to display installation owner, access status, and error/request ID details.
+- 2026-01-04 (Session 8): Fixed GitHub client response handling build errors.
+  - Updated request ID and response metadata helpers to use `github.Response` with go-github v62.
+  - Removed `AcceptedError` response handling that no longer exists in v62.
+- 2026-01-04 (Session 9): Resolved remaining go-github v62 build errors and verified compile.
+  - Reworked response meta helpers to accept `http.Response` and passed `github.Response.Response` where needed.
+  - Removed a duplicate `err` redeclaration in `GitHubService` settings handling.
+  - `go build -o /tmp/server ./cmd/server` now succeeds locally.
+- 2026-01-04 (Session 10): GitHub App token flow confirmed and permissions issue resolved.
+  - Required permissions clarified (Administration: write, Contents: read, Metadata: read) and installation access fixed.
+  - New blocker identified: template repo clone not materializing under `/templates`, causing `docker-compose.yml` missing error.
+- 2026-01-04 (Session 11): Template clone reliability fix.
+  - Added clone retry with cleanup and compose file existence check before port patching.
+  - Template creation now waits for `/templates/<project>/docker-compose.yml` to exist before proceeding.
+- 2026-01-04 (Session 12): Surfaced templates directory source in Host Settings.
+  - Added templates dir value and source to settings response for UI display.
+  - Host Settings now shows the resolved templates directory alongside tunnel/config status.
+- 2026-01-04 (Session 13): Planned dynamic compose port patching.
+  - Noted create-from-template failure when compose ports don't match default patterns.
+  - Updated next task to implement flexible port injection + better logs.
+
 ## Completed Task Snapshot
 
 - UI-REWORK-1: All pages content: Remove rounded containers, reduce horizontal margins to ~5%, and use custom `<hr>` separators.
