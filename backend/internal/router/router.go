@@ -8,17 +8,19 @@ import (
 )
 
 type Dependencies struct {
-	Health         *controller.HealthController
-	Auth           *controller.AuthController
-	Projects       *controller.ProjectsController
-	Jobs           *controller.JobsController
-	Settings       *controller.SettingsController
-	Host           *controller.HostController
-	Audit          *controller.AuditController
-	GitHub         *controller.GitHubController
-	Cloudflare     *controller.CloudflareController
-	AllowedOrigins []string
-	AuthMiddleware gin.HandlerFunc
+	Health          *controller.HealthController
+	Auth            *controller.AuthController
+	Projects        *controller.ProjectsController
+	Jobs            *controller.JobsController
+	Settings        *controller.SettingsController
+	Host            *controller.HostController
+	Audit           *controller.AuditController
+	Users           *controller.UsersController
+	GitHub          *controller.GitHubController
+	Cloudflare      *controller.CloudflareController
+	AllowedOrigins  []string
+	AuthMiddleware  gin.HandlerFunc
+	UsersMiddleware gin.HandlerFunc
 }
 
 func NewRouter(deps Dependencies) *gin.Engine {
@@ -54,6 +56,15 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	}
 	if deps.Audit != nil {
 		deps.Audit.Register(authed)
+	}
+	if deps.Users != nil {
+		deps.Users.Register(authed)
+		adminGroup := authed
+		if deps.UsersMiddleware != nil {
+			adminGroup = authed.Group("")
+			adminGroup.Use(deps.UsersMiddleware)
+		}
+		deps.Users.RegisterAdmin(adminGroup)
 	}
 	if deps.GitHub != nil {
 		deps.GitHub.Register(authed)

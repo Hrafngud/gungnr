@@ -38,11 +38,17 @@ func main() {
 	settingsRepo := repository.NewGormSettingsRepository(gormDB)
 	auditRepo := repository.NewGormAuditLogRepository(gormDB)
 
+	rbacService := service.NewRBACService(cfg, userRepo)
+	if err := rbacService.SeedSuperUser(); err != nil {
+		log.Fatalf("failed to seed superuser: %v", err)
+	}
+
 	authService := service.NewAuthService(cfg, userRepo)
 	jobRunner := jobs.NewRunner(jobRepo)
 	jobService := service.NewJobService(jobRepo, jobRunner)
 	settingsService := service.NewSettingsService(cfg, settingsRepo)
 	projectService := service.NewProjectService(cfg, projectRepo, jobService, settingsService)
+	userService := service.NewUserService(userRepo)
 	githubService := service.NewGitHubService(cfg, settingsService)
 	cloudflareService := service.NewCloudflareService(settingsService)
 	auditService := service.NewAuditService(auditRepo)
@@ -60,17 +66,19 @@ func main() {
 	cookieDomain := cfg.CookieDomain
 
 	r := router.NewRouter(router.Dependencies{
-		Health:         controller.NewHealthController(healthService),
-		Auth:           controller.NewAuthController(authService, auditService, sessionManager, secureCookie, cookieDomain),
-		Projects:       controller.NewProjectsController(projectService, auditService),
-		Jobs:           controller.NewJobsController(jobService),
-		Settings:       controller.NewSettingsController(settingsService, auditService),
-		Host:           controller.NewHostController(hostService, auditService),
-		Audit:          controller.NewAuditController(auditService),
-		GitHub:         controller.NewGitHubController(githubService),
-		Cloudflare:     controller.NewCloudflareController(cloudflareService),
-		AllowedOrigins: cfg.AllowedOrigins,
-		AuthMiddleware: middleware.AuthRequired(sessionManager),
+		Health:          controller.NewHealthController(healthService),
+		Auth:            controller.NewAuthController(authService, auditService, sessionManager, secureCookie, cookieDomain),
+		Projects:        controller.NewProjectsController(projectService, auditService),
+		Jobs:            controller.NewJobsController(jobService),
+		Settings:        controller.NewSettingsController(settingsService, auditService),
+		Host:            controller.NewHostController(hostService, auditService),
+		Audit:           controller.NewAuditController(auditService),
+		Users:           controller.NewUsersController(userService),
+		GitHub:          controller.NewGitHubController(githubService),
+		Cloudflare:      controller.NewCloudflareController(cloudflareService),
+		AllowedOrigins:  cfg.AllowedOrigins,
+		AuthMiddleware:  middleware.AuthRequired(sessionManager),
+		UsersMiddleware: middleware.RequireAdmin(sessionManager),
 	})
 
 	log.Printf("server starting on %s", cfg.Port)

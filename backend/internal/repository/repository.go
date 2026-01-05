@@ -12,6 +12,15 @@ var ErrNotFound = errors.New("record not found")
 
 type UserRepository interface {
 	UpsertFromGitHub(githubID int64, login, avatarURL string) (*models.User, error)
+	CreateAllowlistUser(githubID int64, login, avatarURL string) (*models.User, error)
+	GetByGitHubID(githubID int64) (*models.User, error)
+	GetByID(id uint) (*models.User, error)
+	UpsertSuperUser(githubID int64, login string) (*models.User, error)
+	ListByRole(role string) ([]models.User, error)
+	ListAll() ([]models.User, error)
+	CountByRole(role string) (int64, error)
+	UpdateRole(id uint, role string) error
+	DeleteByIDs(ids []uint) error
 }
 
 type ProjectRepository interface {

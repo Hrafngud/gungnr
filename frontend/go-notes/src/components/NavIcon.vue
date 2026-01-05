@@ -9,6 +9,7 @@ type IconName =
   | 'github'
   | 'activity'
   | 'logs'
+  | 'users'
   | 'arrow-left'
   | 'arrow-right'
   | 'refresh'
@@ -69,6 +70,12 @@ const paths: Record<IconName, string[]> = {
     'M4 6h16v12H4z',
     'M7 10l2 2l-2 2',
     'M11 14h6',
+  ],
+  users: [
+    'M7 11a3 3 0 1 0 0-6a3 3 0 0 0 0 6z',
+    'M17 11a3 3 0 1 0 0-6a3 3 0 0 0 0 6z',
+    'M3 20a4 4 0 0 1 8 0',
+    'M13 20a4 4 0 0 1 8 0',
   ],
   'arrow-left': [
     'M15 18l-6-6l6-6',

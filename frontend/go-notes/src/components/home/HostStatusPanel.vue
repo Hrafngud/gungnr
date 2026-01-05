@@ -9,6 +9,7 @@ import UiState from '@/components/ui/UiState.vue'
 import NavIcon from '@/components/NavIcon.vue'
 import type { DockerHealth, TunnelHealth } from '@/types/health'
 import type { Settings } from '@/types/settings'
+import { ok } from 'assert'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
@@ -172,7 +173,7 @@ const formatDate = (value?: string | null) => {
                 Automation queue
               </p>
             </div>
-            <UiBadge :tone="jobTone">
+            <UiBadge :tone="ok">
               {{ jobCounts.pending + jobCounts.running + jobCounts.completed + jobCounts.failed }} total
             </UiBadge>
           </div>

@@ -7,9 +7,16 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"go-notes/internal/auth"
+	"go-notes/internal/models"
 )
 
 const sessionContextKey = "session"
+
+var roleRank = map[string]int{
+	models.RoleUser:      1,
+	models.RoleAdmin:     2,
+	models.RoleSuperUser: 3,
+}
 
 func AuthRequired(sessions *auth.Manager) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
@@ -23,6 +30,18 @@ func AuthRequired(sessions *auth.Manager) gin.HandlerFunc {
 		ctx.Set(sessionContextKey, session)
 		ctx.Next()
 	}
+}
+
+func RequireUser(sessions *auth.Manager) gin.HandlerFunc {
+	return requireRole(sessions, models.RoleUser)
+}
+
+func RequireAdmin(sessions *auth.Manager) gin.HandlerFunc {
+	return requireRole(sessions, models.RoleAdmin)
+}
+
+func RequireSuperUser(sessions *auth.Manager) gin.HandlerFunc {
+	return requireRole(sessions, models.RoleSuperUser)
 }
 
 func ReadSession(ctx *gin.Context, sessions *auth.Manager) (auth.Session, error) {
@@ -66,4 +85,36 @@ func SessionFromContext(ctx *gin.Context) (auth.Session, bool) {
 
 	session, ok := value.(auth.Session)
 	return session, ok
+}
+
+func requireRole(sessions *auth.Manager, requiredRole string) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		session, err := ReadSession(ctx, sessions)
+		if err != nil {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+			ctx.Abort()
+			return
+		}
+
+		if !roleAllowed(session.Role, requiredRole) {
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			ctx.Abort()
+			return
+		}
+
+		ctx.Set(sessionContextKey, session)
+		ctx.Next()
+	}
+}
+
+func roleAllowed(userRole, requiredRole string) bool {
+	userRank, ok := roleRank[strings.ToLower(userRole)]
+	if !ok {
+		return false
+	}
+	requiredRank, ok := roleRank[strings.ToLower(requiredRole)]
+	if !ok {
+		return false
+	}
+	return userRank >= requiredRank
 }

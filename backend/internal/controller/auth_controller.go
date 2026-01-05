@@ -32,6 +32,7 @@ type authUserResponse struct {
 	ID        uint      `json:"id"`
 	Login     string    `json:"login"`
 	AvatarURL string    `json:"avatarUrl"`
+	Role      string    `json:"role"`
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
@@ -105,7 +106,7 @@ func (c *AuthController) Callback(ctx *gin.Context) {
 		return
 	}
 
-	session := c.sessions.NewSession(user.ID, user.Login, user.AvatarURL)
+	session := c.sessions.NewSession(user.ID, user.Login, user.AvatarURL, user.Role)
 	value, err := c.sessions.Encode(session)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
@@ -133,6 +134,7 @@ func (c *AuthController) Me(ctx *gin.Context) {
 		ID:        session.UserID,
 		Login:     session.Login,
 		AvatarURL: session.AvatarURL,
+		Role:      session.Role,
 		ExpiresAt: session.ExpiresAt,
 	})
 }
@@ -168,7 +170,7 @@ func (c *AuthController) TestToken(ctx *gin.Context) {
 		return
 	}
 
-	session := c.sessions.NewSession(user.ID, user.Login, user.AvatarURL)
+	session := c.sessions.NewSession(user.ID, user.Login, user.AvatarURL, user.Role)
 	value, err := c.sessions.Encode(session)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
@@ -187,6 +189,7 @@ func (c *AuthController) TestToken(ctx *gin.Context) {
 			ID:        session.UserID,
 			Login:     session.Login,
 			AvatarURL: session.AvatarURL,
+			Role:      session.Role,
 			ExpiresAt: session.ExpiresAt,
 		},
 	})

@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"go-notes/internal/middleware"
+	"go-notes/internal/models"
 	"go-notes/internal/service"
 )
 
@@ -47,6 +48,12 @@ func (c *SettingsController) Get(ctx *gin.Context) {
 }
 
 func (c *SettingsController) Update(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "admin role required"})
+		return
+	}
+
 	var req service.SettingsPayload
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
@@ -125,4 +132,13 @@ func templateCount(templates []service.GitHubTemplateSource) any {
 		return "unchanged"
 	}
 	return len(templates)
+}
+
+func isAdminRole(role string) bool {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case models.RoleAdmin, models.RoleSuperUser:
+		return true
+	default:
+		return false
+	}
 }

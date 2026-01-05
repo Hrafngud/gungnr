@@ -6,6 +6,7 @@ import ContainerLogsView from '@/views/ContainerLogsView.vue'
 import HostSettingsView from '@/views/HostSettingsView.vue'
 import NetworkingView from '@/views/NetworkingView.vue'
 import GitHubView from '@/views/GitHubView.vue'
+import UsersView from '@/views/UsersView.vue'
 import JobsView from '@/views/JobsView.vue'
 import JobDetailView from '@/views/JobDetailView.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -63,6 +64,12 @@ const router = createRouter({
       meta: { title: 'GitHub' },
     },
     {
+      path: '/users',
+      name: 'users',
+      component: UsersView,
+      meta: { title: 'Users' },
+    },
+    {
       path: '/jobs/:id',
       name: 'job-detail',
       component: JobDetailView,
@@ -103,6 +110,12 @@ router.beforeEach(async (to) => {
 
   if (!auth.isAuthenticated) {
     return { name: 'login' }
+  }
+
+  if (to.meta?.requiresAdmin) {
+    if (!auth.isAdmin) {
+      return { name: 'home' }
+    }
   }
 
   return true

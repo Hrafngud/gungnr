@@ -9,11 +9,11 @@ import { usePageLoadingStore } from '@/stores/pageLoading'
 type NavItem = {
   label: string
   to: string
-  icon: 'home' | 'overview' | 'activity' | 'logs' | 'host' | 'network' | 'github'
+  icon: 'home' | 'overview' | 'activity' | 'logs' | 'host' | 'network' | 'github' | 'users'
   helper: string
 }
 
-const navItems: NavItem[] = [
+const baseNavItems: NavItem[] = [
   {
     label: 'Home',
     to: '/',
@@ -56,6 +56,12 @@ const navItems: NavItem[] = [
     icon: 'github',
     helper: 'Templates',
   },
+  {
+    label: 'Users',
+    to: '/users',
+    icon: 'users',
+    helper: 'Access control',
+  },
 ]
 
 const route = useRoute()
@@ -67,6 +73,7 @@ const sidebarMode = ref<'expanded' | 'collapsed'>('expanded')
 
 const isSidebarCollapsed = computed(() => sidebarMode.value === 'collapsed')
 const showOverlay = computed(() => !auth.initialized || pageLoading.loading)
+const navItems = computed(() => baseNavItems)
 
 const toggleCollapse = () => {
   sidebarMode.value = isSidebarCollapsed.value ? 'expanded' : 'collapsed'
