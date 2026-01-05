@@ -22,6 +22,17 @@ Status: Replace notes CRUD with Warp Panel API, job runner, and integrations (AP
 - Allowlist users or org membership.
 - Session cookies or JWT with short TTL.
 
+4.1) Phase 2 - RBAC Security Layer (Step-by-step)
+- Add `role` to users table (enum or text), default `user`.
+- Likely wipe existing `users` table before seeding to avoid legacy allowlist state.
+- Remove `GITHUB_ALLOWED_USERS` / `GITHUB_ALLOWED_ORG` logic from OAuth flow.
+- On OAuth login: only allow users present in DB (allowlist lives in users table).
+- Seed SuperUser from env (`SUPERUSER_GH_NAME`, `SUPER_GH_ID`) on startup.
+- Enforce SuperUser cap (max 2); remove excess and shutdown panel if exceeded.
+- Add role to session payload and include in `/auth/me`.
+- Add role-aware middleware helpers (RequireAdmin, RequireSuperUser, RequireUser).
+- Protect user-management routes (Admin/SuperUser) and add ownership checks for User.
+
 5) Database Models
 - User, Project, Deployment, Job, AuditLog.
 - Auto-migrate on startup.

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,8 @@ type Config struct {
 	GitHubTemplateRepo  string
 	GitHubRepoOwner     string
 	GitHubRepoPrivate   bool
+	SuperUserGitHubName string
+	SuperUserGitHubID   int64
 	TemplatesDir        string
 	Domain              string
 	CloudflareAPIToken  string
@@ -62,6 +65,8 @@ func Load() (Config, error) {
 	v.SetDefault("ADMIN_LOGIN", "")
 	v.SetDefault("ADMIN_PASSWORD", "")
 	v.SetDefault("TEMPLATES_DIR", "/templates")
+	v.SetDefault("SUPERUSER_GH_NAME", "")
+	v.SetDefault("SUPER_GH_ID", "")
 	v.SetDefault("GITHUB_REPO_PRIVATE", true)
 	v.SetDefault("DOMAIN", "")
 	v.SetDefault("CLOUDFLARE_API_TOKEN", "")
@@ -102,6 +107,8 @@ func Load() (Config, error) {
 		GitHubTemplateRepo:  v.GetString("GITHUB_TEMPLATE_REPO"),
 		GitHubRepoOwner:     v.GetString("GITHUB_REPO_OWNER"),
 		GitHubRepoPrivate:   v.GetBool("GITHUB_REPO_PRIVATE"),
+		SuperUserGitHubName: strings.TrimSpace(v.GetString("SUPERUSER_GH_NAME")),
+		SuperUserGitHubID:   parseInt64(v.GetString("SUPER_GH_ID")),
 		TemplatesDir:        v.GetString("TEMPLATES_DIR"),
 		Domain:              v.GetString("DOMAIN"),
 		CloudflareAPIToken:  v.GetString("CLOUDFLARE_API_TOKEN"),
@@ -143,4 +150,16 @@ func parseCSV(input string) []string {
 	}
 
 	return cleaned
+}
+
+func parseInt64(input string) int64 {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return 0
+	}
+	value, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return value
 }

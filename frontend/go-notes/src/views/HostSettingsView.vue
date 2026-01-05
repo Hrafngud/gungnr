@@ -21,6 +21,7 @@ import { hostApi } from '@/services/host'
 import { projectsApi } from '@/services/projects'
 import { apiErrorMessage } from '@/services/api'
 import { useToastStore } from '@/stores/toasts'
+import { useAuthStore } from '@/stores/auth'
 import { useFieldGuidance } from '@/composables/useFieldGuidance'
 import { usePageLoadingStore } from '@/stores/pageLoading'
 import type { CloudflaredPreview, Settings, SettingsSources } from '@/types/settings'
@@ -49,6 +50,7 @@ const cloudflaredTunnelName = ref<string | null>(null)
 const templatesDir = ref<string | null>(null)
 
 const toastStore = useToastStore()
+const authStore = useAuthStore()
 const fieldGuidance = useFieldGuidance()
 const pageLoading = usePageLoadingStore()
 
@@ -106,6 +108,7 @@ const canConfirmRemove = computed(() => {
   if (removeVolumes.value && !removeVolumesConfirm.value) return false
   return true
 })
+const isAdmin = computed(() => authStore.isAdmin)
 
 watch(removeModalOpen, (open) => {
   if (!open) {
@@ -249,6 +252,11 @@ const loadSettings = async () => {
 }
 
 const saveSettings = async () => {
+  if (!isAdmin.value) {
+    error.value = 'Admin access is required to update host or GitHub settings.'
+    toastStore.error('Admin access required.', 'Read-only access')
+    return
+  }
   if (saving.value) return
   saving.value = true
   error.value = null
@@ -473,6 +481,7 @@ watch(projectFilter, () => {
         <UiButton
           variant="primary"
           size="sm"
+          :disabled="!isAdmin"
           @click="settingsFormOpen = true"
         >
           <span class="flex items-center gap-2">
@@ -489,6 +498,10 @@ watch(projectFilter, () => {
         </UiButton>
       </div>
     </div>
+
+    <UiInlineFeedback v-if="!isAdmin" tone="warn">
+      Read-only access: admin permissions are required to update host and GitHub settings.
+    </UiInlineFeedback>
 
     <UiInlineFeedback v-if="error" tone="error">
       {{ error }}
@@ -1293,7 +1306,7 @@ watch(projectFilter, () => {
               type="submit"
               variant="primary"
               size="md"
-              :disabled="saving || loading"
+              :disabled="saving || loading || !isAdmin"
             >
               <span class="flex items-center gap-2">
                 <UiInlineSpinner v-if="saving" />

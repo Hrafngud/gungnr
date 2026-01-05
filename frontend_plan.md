@@ -106,3 +106,9 @@ Status: Step 1 complete (theme tokens + AppShell). Page map + routing update com
 10) Observability
 - Add a live logs screen to stream all running container logs with filters and pause/resume.
 - Add a responsive top bar on the logs screen so controls fit across breakpoints.
+
+11) Phase 2 - Security Layer (RBAC UI)
+- Update auth store to include role from `/auth/me`.
+- Gate admin UI actions based on role (hide for User).
+- Add Users navigation tab for Admin/SuperUser only.
+- Add Users view to manage allowlist and assign Admin/User roles (no SuperUser assignment in UI).

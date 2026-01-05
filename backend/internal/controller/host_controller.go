@@ -122,6 +122,11 @@ type removeContainerRequest struct {
 }
 
 func (c *HostController) StopDocker(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "admin role required"})
+		return
+	}
 	container, ok := c.parseContainerAction(ctx)
 	if !ok {
 		return
@@ -135,6 +140,11 @@ func (c *HostController) StopDocker(ctx *gin.Context) {
 }
 
 func (c *HostController) RestartDocker(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "admin role required"})
+		return
+	}
 	container, ok := c.parseContainerAction(ctx)
 	if !ok {
 		return
@@ -148,6 +158,11 @@ func (c *HostController) RestartDocker(ctx *gin.Context) {
 }
 
 func (c *HostController) RemoveDocker(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "admin role required"})
+		return
+	}
 	req, ok := c.parseRemoveContainerAction(ctx)
 	if !ok {
 		return

@@ -21,6 +21,7 @@ type Session struct {
 	UserID    uint      `json:"userId"`
 	Login     string    `json:"login"`
 	AvatarURL string    `json:"avatarUrl"`
+	Role      string    `json:"role"`
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
@@ -69,6 +70,10 @@ func (m *Manager) Decode(value string) (Session, error) {
 		return Session{}, ErrInvalidSession
 	}
 
+	if session.Role == "" {
+		session.Role = "user"
+	}
+
 	if time.Now().After(session.ExpiresAt) {
 		return Session{}, ErrExpiredSession
 	}
@@ -76,11 +81,15 @@ func (m *Manager) Decode(value string) (Session, error) {
 	return session, nil
 }
 
-func (m *Manager) NewSession(userID uint, login, avatarURL string) Session {
+func (m *Manager) NewSession(userID uint, login, avatarURL, role string) Session {
+	if role == "" {
+		role = "user"
+	}
 	return Session{
 		UserID:    userID,
 		Login:     login,
 		AvatarURL: avatarURL,
+		Role:      role,
 		ExpiresAt: time.Now().Add(m.ttl),
 	}
 }

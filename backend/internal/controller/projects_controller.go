@@ -75,6 +75,11 @@ func (c *ProjectsController) ListLocal(ctx *gin.Context) {
 }
 
 func (c *ProjectsController) CreateFromTemplate(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "admin role required"})
+		return
+	}
 	var req service.CreateTemplateRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
@@ -103,6 +108,11 @@ func (c *ProjectsController) CreateFromTemplate(ctx *gin.Context) {
 }
 
 func (c *ProjectsController) DeployExisting(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "admin role required"})
+		return
+	}
 	var req service.DeployExistingRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
@@ -125,6 +135,11 @@ func (c *ProjectsController) DeployExisting(ctx *gin.Context) {
 }
 
 func (c *ProjectsController) ForwardLocal(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "admin role required"})
+		return
+	}
 	var req service.ForwardLocalRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
@@ -147,6 +162,11 @@ func (c *ProjectsController) ForwardLocal(ctx *gin.Context) {
 }
 
 func (c *ProjectsController) QuickService(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "admin role required"})
+		return
+	}
 	var req service.QuickServiceRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})

@@ -11,8 +11,15 @@ type User struct {
 	GitHubID    int64     `gorm:"uniqueIndex;not null"`
 	Login       string    `gorm:"size:64;not null"`
 	AvatarURL   string    `gorm:"size:512"`
+	Role        string    `gorm:"size:32;not null;default:user"`
 	LastLoginAt time.Time `gorm:"not null"`
 }
+
+const (
+	RoleUser      = "user"
+	RoleAdmin     = "admin"
+	RoleSuperUser = "superuser"
+)
 
 type Project struct {
 	gorm.Model

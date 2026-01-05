@@ -12,6 +12,7 @@ import NavIcon from '@/components/NavIcon.vue'
 import { githubApi } from '@/services/github'
 import { apiErrorMessage } from '@/services/api'
 import { usePageLoadingStore } from '@/stores/pageLoading'
+import { useAuthStore } from '@/stores/auth'
 import type { GitHubCatalog } from '@/types/github'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
@@ -20,8 +21,10 @@ const catalog = ref<GitHubCatalog | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 const pageLoading = usePageLoadingStore()
+const authStore = useAuthStore()
 
 const templateConfigured = computed(() => Boolean(catalog.value?.template.configured))
+const isAdmin = computed(() => authStore.isAdmin)
 const allowlistMode = computed(() => catalog.value?.allowlist.mode ?? 'none')
 const allowlistUsers = computed(() => catalog.value?.allowlist.users ?? [])
 const allowlistOrg = computed(() => catalog.value?.allowlist.org ?? '')
@@ -211,6 +214,10 @@ onMounted(async () => {
 
     <UiState v-if="error" tone="error">
       {{ error }}
+    </UiState>
+
+    <UiState v-if="!isAdmin" tone="warn">
+      Read-only access: admin permissions are required to update GitHub settings.
     </UiState>
 
     <hr />

@@ -1,6 +1,6 @@
 ## Overall Plan and Dependencies
 
-Current status: Replace notes CRUD app with Warp Panel web UI and API.
+Current status: Core Warp Panel features are already working; we are proceeding with a Phase 2 security layer.
 Guiding principle: Mimic the behavior of `deploy.sh` end-to-end, but via the web UI + API (no manual shell steps).
 
 1) Foundations
@@ -70,3 +70,10 @@ Guiding principle: Mimic the behavior of `deploy.sh` end-to-end, but via the web
 6) Observability
 - Add live container logs screen for all running containers (not just deploy jobs).
 - Provide filtering by container name and stream logs via SSE or WebSocket.
+
+7) Phase 2 - Security Layer (RBAC)
+- Replace allowlist env logic with DB-backed allowlist + roles.
+- Add SuperUser/Admin/User roles and enforce via middleware.
+- Seed SuperUser from env and block programmatic SuperUser assignment.
+- Add Users management UI for Admin/SuperUser.
+- Embed role in session payload and propagate to `/auth/me`.

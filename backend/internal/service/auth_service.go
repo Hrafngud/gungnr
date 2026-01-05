@@ -88,11 +88,13 @@ func (s *AuthService) Exchange(ctx context.Context, code, redirectURL string) (*
 		return nil, errors.New("github user payload incomplete")
 	}
 
-	allowed, err := s.isAllowed(ctx, client, ghUser.GetLogin())
-	if err != nil {
-		return nil, err
+	if _, err := s.userRepo.GetByGitHubID(ghUser.GetID()); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrUnauthorized
+		}
+		return nil, fmt.Errorf("check allowlist: %w", err)
 	}
-	if !allowed {
+	if ghUser.GetLogin() == "" {
 		return nil, ErrUnauthorized
 	}
 
@@ -116,30 +118,6 @@ func (s *AuthService) oauthConfigForRedirect(redirectURL string) *oauth2.Config 
 	cfg := *s.oauthConfig
 	cfg.RedirectURL = redirectURL
 	return &cfg
-}
-
-func (s *AuthService) isAllowed(ctx context.Context, client *github.Client, login string) (bool, error) {
-	allowedUsers := s.cfg.GitHubAllowedUsers
-	if len(allowedUsers) == 0 && s.cfg.GitHubAllowedOrg == "" {
-		return true, nil
-	}
-
-	for _, allowed := range allowedUsers {
-		if allowed == login {
-			return true, nil
-		}
-	}
-
-	if s.cfg.GitHubAllowedOrg == "" {
-		return false, nil
-	}
-
-	ok, _, err := client.Organizations.IsMember(ctx, s.cfg.GitHubAllowedOrg, login)
-	if err != nil {
-		return false, formatGitHubClientError("check org membership", err)
-	}
-
-	return ok, nil
 }
 
 func formatGitHubClientError(action string, err error) error {

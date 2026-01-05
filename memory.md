@@ -1,5 +1,33 @@
 ## Iteration Log
 
+- 2026-01-07: Added allowlist add/remove support with role-aware access.
+  - Added admin-only endpoints to create and delete allowlist users and opened user list to all authenticated roles.
+  - Resolved GitHub usernames via the public API, preserved login casing, and blocked superuser removal.
+  - Updated Users UI with add/remove controls, view-only messaging for non-admins, and route/nav access for all roles.
+- 2026-01-05: Locked down host/Docker mutation endpoints and project lifecycle actions behind admin roles.
+  - Added admin-role checks to Docker stop/restart/remove and template lifecycle endpoints while leaving read-only endpoints accessible.
+- 2026-01-07: Added RBAC enforcement for settings updates and fixed compose env wiring.
+  - Passed `SUPERUSER_GH_NAME` and `SUPER_GH_ID` through the API service in `docker-compose.yml`.
+  - Guarded `PUT /api/v1/settings` so only Admin/SuperUser can update settings; non-admins now get 403 while reads still work.
+- 2026-01-07: Ran backend/frontend build checks and gated Host Settings + GitHub pages for non-admins.
+  - Build checks: `go build ./cmd/server` and `npm run build` in `frontend/go-notes`.
+  - Disabled Host Settings save flow for non-admins and added read-only indicators on Host Settings and GitHub views.
+- 2026-01-06: Added RBAC Users UI and role-aware navigation.
+  - Added Users view with list, last login formatting, and admin/user role updates.
+  - Wired /api/v1/users list + role update service calls with toast feedback.
+  - Added role fields to auth type/store and gated Users nav + route for Admin/SuperUser.
+  - Added Users nav icon.
+- 2026-01-06: Added RBAC user management endpoints with SuperUser guard.
+  - Added `/api/v1/users` list and `/api/v1/users/:id/role` role update (admin/user only).
+  - Enforced last-superuser demotion protection and wired RequireSuperUser middleware for these routes.
+- 2026-01-06: Clarified SuperUser cap enforcement error messaging during startup seeding.
+- 2026-01-06: Began Phase 2 security planning for RBAC.
+  - Updated overall plan to highlight Phase 2 security layer and RBAC milestones.
+  - Added step-by-step RBAC plan to backend and frontend planning files.
+  - Set next task to implement RBAC data model and SuperUser seed/guard.
+- 2026-01-06: Noted likely users table wipe before RBAC seeding to avoid legacy allowlist state.
+- 2026-01-06: Documented the current OAuth auth flow.
+  - Added `auth.md` describing GitHub OAuth, session cookies, allowlists, callback handling, and the optional test token.
 - 2026-01-06: Diagnosed and fixed create_template job failure on log streaming shutdown.
   - Root cause: `runLoggedCommand` called `cmd.Wait()` before log readers completed, yielding `read |0: file already closed` from scanner and marking jobs failed even when compose exited 0.
   - Fix: wait for stdout/stderr readers to finish before `Wait`, and ignore `os.ErrClosed` in scanners to avoid false failures.
@@ -19,6 +47,9 @@
 - 2026-01-04: Added GitHub App credential status panel to GitHub page with backend catalog fields for App ID/Installation ID/Private Key status. Fixed strict null checks in `TemplateCardsSection` and `HomeView`. Ran `npm run build` successfully.
 - 2026-01-05: Guarded create-from-template settings access to avoid nil dereference.
   - Added early settings nil check in `handleCreateTemplate` to return a clear error before resolving config or accessing GitHub app settings.
+- 2026-01-05: Implemented RBAC allowlist seeding and enforcement.
+  - Added `role` to users with a default of `user` plus superuser seeding/cap enforcement on startup.
+  - OAuth now checks the DB allowlist (GitHub ID) and denies users not present.
 - 2026-01-02: User initiated a major visual rework. Pivoting from previous tasks.
 - 2026-01-03 (Session 1): Starting UI-REWORK-1 - removing rounded containers, reducing margins, adding custom hr separators.
   - Completed UI-REWORK-1: Removed border-radius from all panel, list-row, state, modal, toast, and onboarding classes in style.css. Horizontal margins already at 5% (`px-[5%]` in AppShell.vue). Added `<hr />` separators to HomeView, OverviewView, ActivityView, GitHubView, HostSettingsView, JobsView, and NetworkingView.
@@ -158,6 +189,10 @@
   - Updated compose port patching to match host mappings for container ports 80/5432, including env-substituted and IP-bound patterns.
   - Logged patch results per port (pattern used, already-set notes, or precise missing-mapping reasons).
   - Preserved compose file output unless actual changes were applied.
+- 2026-01-04 (Session 15): Added role-aware session payload and middleware helpers.
+  - Included user role in session encoding/decoding and surfaced it in `/auth/me` and test-token responses.
+  - Added role-aware middleware helpers for RequireUser/RequireAdmin/RequireSuperUser with rank checks.
+  - Introduced the admin role constant to round out RBAC scaffolding.
 
 ## Completed Task Snapshot
 
