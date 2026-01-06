@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
@@ -23,6 +23,14 @@ const toastStore = useToastStore()
 const pageLoading = usePageLoadingStore()
 const stopping = ref<Record<number, boolean>>({})
 const retrying = ref<Record<number, boolean>>({})
+const canGoBack = computed(() => jobsStore.page > 1)
+const canGoForward = computed(() => jobsStore.page < jobsStore.totalPages)
+const pageSummary = computed(() => {
+  if (jobsStore.total === 0) return '0 jobs'
+  const start = (jobsStore.page - 1) * jobsStore.pageSize + 1
+  const end = Math.min(jobsStore.page * jobsStore.pageSize, jobsStore.total)
+  return `${start}-${end} of ${jobsStore.total} jobs`
+})
 
 onMounted(async () => {
   pageLoading.start('Loading job timeline...')
@@ -64,6 +72,12 @@ const retryJob = async (job: Job) => {
   } finally {
     retrying.value[job.id] = false
   }
+}
+
+const goToPage = async (nextPage: number) => {
+  if (nextPage < 1) return
+  if (jobsStore.totalPages > 0 && nextPage > jobsStore.totalPages) return
+  await jobsStore.fetchJobs({ page: nextPage })
 }
 
 </script>
@@ -238,6 +252,42 @@ const retryJob = async (job: Job) => {
           </div>
         </div>
       </UiListRow>
+
+      <div
+        v-if="jobsStore.totalPages > 1"
+        class="flex flex-wrap items-center justify-between gap-3 border border-[color:var(--border)] bg-[color:var(--surface)] px-4 py-3 text-xs text-[color:var(--muted)]"
+      >
+        <div class="flex items-center gap-2">
+          <span class="text-[color:var(--text)]">
+            Page {{ jobsStore.page }} of {{ jobsStore.totalPages }}
+          </span>
+          <span>{{ pageSummary }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <UiButton
+            variant="ghost"
+            size="sm"
+            :disabled="jobsStore.loading || !canGoBack"
+            @click="goToPage(jobsStore.page - 1)"
+          >
+            <span class="flex items-center gap-2">
+              <NavIcon name="arrow-left" class="h-3.5 w-3.5" />
+              Previous
+            </span>
+          </UiButton>
+          <UiButton
+            variant="ghost"
+            size="sm"
+            :disabled="jobsStore.loading || !canGoForward"
+            @click="goToPage(jobsStore.page + 1)"
+          >
+            <span class="flex items-center gap-2">
+              Next
+              <NavIcon name="arrow-right" class="h-3.5 w-3.5" />
+            </span>
+          </UiButton>
+        </div>
+      </div>
     </div>
   </section>
 </template>

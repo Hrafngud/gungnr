@@ -72,7 +72,7 @@ Required for login:
 - `GITHUB_CALLBACK_URL` (use `http://localhost/auth/callback` when using the
   proxy, or your public host)
 Optional access control:
-- `GITHUB_ALLOWED_USERS`, `GITHUB_ALLOWED_ORG`
+Manage access via the Users allowlist in the panel (SuperUser/Admin only).
 Admin test token (optional):
 - `ADMIN_LOGIN`, `ADMIN_PASSWORD` to enable `POST /test-token` for a bearer token.
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
+import NavIcon from '@/components/NavIcon.vue'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
@@ -30,13 +31,13 @@ const templateCards: TemplateCard[] = [
     id: 'create',
     title: 'Create from template',
     description: 'Create a new GitHub repo and deploy with auto-configured ports.',
-    actionLabel: 'Configure template',
+    actionLabel: 'Configure Template',
   },
   {
     id: 'existing',
     title: 'Forward localhost service',
     description: 'Expose any running localhost port via Cloudflare tunnel.',
-    actionLabel: 'Configure forward',
+    actionLabel: 'Configure Forward',
   },
 ]
 
@@ -76,7 +77,7 @@ const templateRepoUrl = computed(() => {
 </script>
 
 <template>
-  <UiPanel as="article" variant="raise" class="space-y-6 p-6">
+  <UiPanel as="article" variant="raise" class="flex h-full flex-col gap-6 p-6">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
@@ -93,18 +94,18 @@ const templateRepoUrl = computed(() => {
         GitHub settings
       </UiButton>
     </div>
-    <div class="grid gap-4 sm:grid-cols-2">
+    <div class="flex flex-1 flex-col gap-4">
       <UiPanel
         v-for="card in templateCards"
         :key="card.id"
         :variant="selectedCard === card.id ? 'raise' : 'soft'"
-        class="flex h-full flex-col gap-4 p-4 text-left transition"
+        class="flex flex-1 flex-col gap-4 p-4 text-left transition"
         :class="selectedCard === card.id ? 'border-[color:var(--accent)]' : ''"
       >
         <div class="flex items-start justify-between gap-3">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Template
+              {{ card.id === 'create' ? 'Template' : 'Forward' }}
             </p>
             <h4 class="mt-2 text-base font-semibold text-[color:var(--text)]">
               {{ card.title }}
@@ -117,7 +118,10 @@ const templateRepoUrl = computed(() => {
             {{ selectedCard === card.id ? 'Selected' : 'Ready' }}
           </UiBadge>
         </div>
-        <div class="flex items-center gap-2 text-xs text-[color:var(--muted)]">
+        <div
+          v-if="card.id === 'create'"
+          class="flex items-center gap-2 text-xs text-[color:var(--muted)]"
+        >
           <svg
             class="h-3.5 w-3.5 text-[color:var(--muted-2)]"
             viewBox="0 0 24 24"
@@ -142,13 +146,20 @@ const templateRepoUrl = computed(() => {
           </a>
           <span v-else>{{ templateRepoLabel }}</span>
         </div>
+        <div v-else class="flex-1" />
         <UiButton
           type="button"
-          variant="ghost"
+          variant="primary"
           size="sm"
           @click="emit('select-card', card.id)"
         >
-          {{ card.actionLabel }}
+          <span class="flex items-center gap-2">
+            <NavIcon
+              :name="card.id === 'create' ? 'template' : 'forward'"
+              class="h-4 w-4"
+            />
+            {{ card.actionLabel }}
+          </span>
         </UiButton>
       </UiPanel>
     </div>

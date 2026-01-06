@@ -16,12 +16,6 @@ type GitHubTemplateCatalog struct {
 	Private     bool   `json:"private"`
 }
 
-type GitHubAllowlist struct {
-	Mode  string   `json:"mode"`
-	Users []string `json:"users"`
-	Org   string   `json:"org"`
-}
-
 type GitHubAppStatus struct {
 	Configured               bool `json:"configured"`
 	AppIDConfigured          bool `json:"appIdConfigured"`
@@ -40,7 +34,6 @@ type GitHubCatalog struct {
 	TokenConfigured bool                             `json:"tokenConfigured"`
 	Template        GitHubTemplateCatalog            `json:"template"`
 	Templates       []GitHubTemplateSource           `json:"templates,omitempty"`
-	Allowlist       GitHubAllowlist                  `json:"allowlist"`
 	App             GitHubAppStatus                  `json:"app"`
 	TemplateAccess  *GitHubTemplateAccessDiagnostics `json:"templateAccess,omitempty"`
 }
@@ -98,22 +91,6 @@ func (s *GitHubService) Catalog(ctx context.Context) (GitHubCatalog, error) {
 		targetOwner = templateOwner
 	}
 
-	users := make([]string, 0, len(cfg.GitHubAllowedUsers))
-	for _, user := range cfg.GitHubAllowedUsers {
-		trimmed := strings.TrimSpace(user)
-		if trimmed != "" {
-			users = append(users, trimmed)
-		}
-	}
-
-	org := strings.TrimSpace(cfg.GitHubAllowedOrg)
-	allowlistMode := "none"
-	if len(users) > 0 {
-		allowlistMode = "users"
-	} else if org != "" {
-		allowlistMode = "org"
-	}
-
 	template := GitHubTemplateCatalog{
 		Configured:  templateConfigured,
 		Owner:       templateOwner,
@@ -144,11 +121,6 @@ func (s *GitHubService) Catalog(ctx context.Context) (GitHubCatalog, error) {
 		TokenConfigured: tokenConfigured,
 		Template:        template,
 		Templates:       templates,
-		Allowlist: GitHubAllowlist{
-			Mode:  allowlistMode,
-			Users: users,
-			Org:   org,
-		},
 		App:            appStatus,
 		TemplateAccess: templateAccess,
 	}, nil

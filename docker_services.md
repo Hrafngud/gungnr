@@ -62,9 +62,9 @@ A curated collection of lightweight, self-hosted Docker services to boost your l
 
 - **Traefik** (reverse proxy with auto-SSL and Docker integration)
   ```bash
-  docker run -d -p 80:80 -p 443:443 -p 8080:8080 --name traefik -v /var/run/docker.sock:/var/run/docker.sock -v traefikdata:/data --restart unless-stopped traefik:latest --api.insecure=true --providers.docker
+  docker run -d -p 80:80 -p 443:443 -p 8383:8383 --name traefik -v /var/run/docker.sock:/var/run/docker.sock -v traefikdata:/data --restart unless-stopped traefik:latest --api.insecure=true --providers.docker
   ```
-  Dashboard: `http://localhost:8080`
+  Dashboard: `http://localhost:8383`
 
 ## Storage and Files
 - **MinIO** (S3-compatible object storage)
@@ -119,9 +119,9 @@ A curated collection of lightweight, self-hosted Docker services to boost your l
 ## Development Environments
 - **Code-Server** (VS Code in the browser)
   ```bash
-  docker run -d -p 8080:8080 --name code-server -v $(pwd):/home/coder/project -e PASSWORD=yourpassword --restart unless-stopped codercom/code-server:latest
+  docker run -d -p 8585:8080 --name code-server -v $(pwd):/home/coder/project -e PASSWORD=yourpassword --restart unless-stopped codercom/code-server:latest
   ```
-  Access: `http://localhost:8080`
+  Access: `http://localhost:8585`
 
 ## Version Control
 - **Gitea** (lightweight self-hosted Git)

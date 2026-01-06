@@ -6,12 +6,6 @@ export type GitHubTemplateCatalog = {
   private: boolean
 }
 
-export type GitHubAllowlist = {
-  mode: 'users' | 'org' | 'none'
-  users: string[]
-  org: string
-}
-
 export type GitHubAppStatus = {
   configured: boolean
   appIdConfigured: boolean
@@ -37,7 +31,6 @@ export type GitHubCatalog = {
   tokenConfigured: boolean
   template: GitHubTemplateCatalog
   templates?: GitHubTemplateCatalog[]
-  allowlist: GitHubAllowlist
   app: GitHubAppStatus
   templateAccess?: GitHubTemplateAccessDiagnostics
 }

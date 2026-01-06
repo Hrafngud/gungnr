@@ -25,6 +25,25 @@ func (r *GormJobRepository) List(ctx context.Context) ([]models.Job, error) {
 	return jobs, nil
 }
 
+func (r *GormJobRepository) ListPage(ctx context.Context, offset int, limit int) ([]models.Job, int64, error) {
+	var jobs []models.Job
+	var total int64
+
+	if err := r.db.WithContext(ctx).Model(&models.Job{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if err := r.db.WithContext(ctx).
+		Order("created_at desc").
+		Offset(offset).
+		Limit(limit).
+		Find(&jobs).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return jobs, total, nil
+}
+
 func (r *GormJobRepository) Create(ctx context.Context, job *models.Job) error {
 	return r.db.WithContext(ctx).Create(job).Error
 }

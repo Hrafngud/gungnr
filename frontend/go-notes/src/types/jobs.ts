@@ -11,3 +11,11 @@ export interface Job {
 export interface JobDetail extends Job {
   logLines: string[]
 }
+
+export interface JobListResponse {
+  jobs: Job[]
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+}

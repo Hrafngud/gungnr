@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -33,7 +34,13 @@ func (c *JobsController) Register(r gin.IRoutes) {
 }
 
 func (c *JobsController) List(ctx *gin.Context) {
-	jobs, err := c.service.List(ctx.Request.Context())
+	page := parsePositiveIntQuery(ctx, "page", 1)
+	limit := parsePositiveIntQuery(ctx, "limit", 25)
+	if limit > 100 {
+		limit = 100
+	}
+
+	jobs, total, err := c.service.ListPage(ctx.Request.Context(), page, limit)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load jobs"})
 		return
@@ -44,7 +51,18 @@ func (c *JobsController) List(ctx *gin.Context) {
 		response = append(response, newJobResponse(job))
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"jobs": response})
+	totalPages := 0
+	if total > 0 {
+		totalPages = int(math.Ceil(float64(total) / float64(limit)))
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"jobs":       response,
+		"page":       page,
+		"pageSize":   limit,
+		"total":      total,
+		"totalPages": totalPages,
+	})
 }
 
 type jobDetailResponse struct {
@@ -218,6 +236,18 @@ func parseUintParam(raw string) (uint, error) {
 		return 0, err
 	}
 	return uint(value), nil
+}
+
+func parsePositiveIntQuery(ctx *gin.Context, key string, fallback int) int {
+	value := strings.TrimSpace(ctx.Query(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 1 {
+		return fallback
+	}
+	return parsed
 }
 
 func parseOffset(raw string) int {
