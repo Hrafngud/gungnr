@@ -1,5 +1,15 @@
 ## Iteration Log
 
+- 2026-01-08: Removed deprecated env allowlist settings from config, compose, and docs.
+  - GitHub catalog payload no longer reports env allowlist data.
+  - Updated auth docs to reflect DB-backed allowlist only.
+- 2026-01-08: Added jobs pagination backend + UI support.
+  - Jobs list now accepts page/limit and returns total/page metadata.
+  - Jobs store tracks pagination state and the Jobs view shows previous/next controls with range info.
+- 2026-01-07: Added planning notes to auto-resolve GitHub App installation IDs via app JWT endpoints (avoid manual entry).
+- 2026-01-07: Added planning task for a Not Authorized screen after denied login attempts.
+- 2026-01-07: Added planning task for Jobs list pagination (backend + frontend).
+- 2026-01-07: Stacked Home GitHub-backed stack cards vertically, removed template source row from forward card, and added accent icon buttons.
 - 2026-01-07: Added allowlist add/remove support with role-aware access.
   - Added admin-only endpoints to create and delete allowlist users and opened user list to all authenticated roles.
   - Resolved GitHub usernames via the public API, preserved login casing, and blocked superuser removal.
@@ -193,6 +203,9 @@
   - Included user role in session encoding/decoding and surfaced it in `/auth/me` and test-token responses.
   - Added role-aware middleware helpers for RequireUser/RequireAdmin/RequireSuperUser with rank checks.
   - Introduced the admin role constant to round out RBAC scaffolding.
+- 2026-01-07: Updated the GitHub view allowlist summary to source users from `/api/v1/users`.
+  - Added allowlist loading to the GitHub view and replaced env-based labels with user list data.
+  - Refresh now pulls both catalog and allowlist users together for updated counts.
 
 ## Completed Task Snapshot
 

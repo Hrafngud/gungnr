@@ -26,8 +26,6 @@ type Config struct {
 	GitHubClientID      string
 	GitHubClientSecret  string
 	GitHubCallbackURL   string
-	GitHubAllowedUsers  []string
-	GitHubAllowedOrg    string
 	GitHubTemplateOwner string
 	GitHubTemplateRepo  string
 	GitHubRepoOwner     string
@@ -101,8 +99,6 @@ func Load() (Config, error) {
 		GitHubClientID:      v.GetString("GITHUB_CLIENT_ID"),
 		GitHubClientSecret:  v.GetString("GITHUB_CLIENT_SECRET"),
 		GitHubCallbackURL:   v.GetString("GITHUB_CALLBACK_URL"),
-		GitHubAllowedUsers:  parseCSV(v.GetString("GITHUB_ALLOWED_USERS")),
-		GitHubAllowedOrg:    v.GetString("GITHUB_ALLOWED_ORG"),
 		GitHubTemplateOwner: v.GetString("GITHUB_TEMPLATE_OWNER"),
 		GitHubTemplateRepo:  v.GetString("GITHUB_TEMPLATE_REPO"),
 		GitHubRepoOwner:     v.GetString("GITHUB_REPO_OWNER"),

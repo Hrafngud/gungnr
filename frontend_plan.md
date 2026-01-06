@@ -29,6 +29,7 @@ Status: Step 1 complete (theme tokens + AppShell). Page map + routing update com
 
 4) Routes and Information Architecture
 - `/login`: simple two-column layout, brief description left, GitHub auth button right, popup OAuth window.
+- `/not-authorized`: friendly explanation screen for users denied by backend allowlist; link back to login or support.
 - `/`: Home with Host Status and Quick Deploy sections.
 - `/overview`: in-depth host and container data.
 - `/host-settings`: cloudflared and Cloudflare machine setup only.
@@ -51,6 +52,7 @@ Status: Step 1 complete (theme tokens + AppShell). Page map + routing update com
     - Show multiple templates with repo owner/name + short description.
     - Allow empty state when no templates are configured.
 - Overview: container list, job timeline, last activity (remove resources section).
+- Jobs: add pagination controls for the jobs list to handle large histories.
 - Host Settings: cloudflared config path, token, tunnel setup status, validation and hints.
   - Add GitHub App credentials inputs (App ID, Client ID, Client Secret, Installation ID, Private Key) with guidance text.
   - Link to GitHub App creation: https://github.com/settings/apps/new

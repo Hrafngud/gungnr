@@ -19,6 +19,8 @@ type IconName =
   | 'stop'
   | 'restart'
   | 'trash'
+  | 'template'
+  | 'forward'
 
 const props = defineProps<{
   name: IconName
@@ -117,6 +119,17 @@ const paths: Record<IconName, string[]> = {
     'M3 6h18',
     'M8 6V4h8v2',
     'M6 6l1 14h10l1-14',
+  ],
+  template: [
+    'M6 3h8l4 4v10a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z',
+    'M14 3v4h4',
+    'M7 13h10',
+    'M7 9h5',
+  ],
+  forward: [
+    'M13 7l4 4l-4 4',
+    'M17 11H7',
+    'M7 7l-4 4l4 4',
   ],
 }
 </script>

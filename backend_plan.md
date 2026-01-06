@@ -67,6 +67,10 @@ Status: Replace notes CRUD with Warp Panel API, job runner, and integrations (AP
   - Permissions: Repository Administration (write), Contents (read), Metadata (read).
   - Installation must include the template repo and the target owner (org/user).
   - Store App ID, Client ID, Client Secret, Installation ID, and App Private Key in settings.
+- Auto-resolve installation ID (avoid manual UI entry):
+  - Use app JWT to fetch installation by org/user/repo or list all app installations.
+  - Prefer `GET /orgs/{org}/installation` or `GET /repos/{owner}/{repo}/installation` when owner/repo is known.
+  - Fall back to `GET /app/installations` and let the UI select the matching account.
 - Token minting flow (server-side):
   - Create JWT with App ID + private key.
   - Exchange JWT for installation token (or user access token if creating repos in user space).
@@ -108,6 +112,7 @@ Status: Replace notes CRUD with Warp Panel API, job runner, and integrations (AP
 - Auth: `/auth/login`, `/auth/callback`, `/auth/me`, `/auth/logout`.
 - Projects: list, create-from-template, deploy-existing, quick-service.
 - Jobs: list, get status, get logs.
+- Jobs: support pagination parameters (page/limit or cursor) for list endpoint.
 - Containers: list, stop, restart, remove (with optional volume deletion), logs.
 - Containers: list running + stopped (include status), filter support.
 - Containers: filter by project ID/name and include volumes/images scoped to project.

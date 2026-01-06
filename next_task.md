@@ -1,12 +1,12 @@
 ## Next Task
 
 Objective
-Update the GitHub page allowlist summary to reflect the DB-backed users list instead of env config.
+Add a responsive top bar layout for the Logs screen so controls fit across desktop and mobile widths.
 
 Success criteria
-- GitHub view shows allowlist users sourced from `/api/v1/users`.
-- The summary count and labels update after changes without a refresh.
-- No references to `GITHUB_ALLOWED_USERS`/`GITHUB_ALLOWED_ORG` remain in the GitHub view UI.
+- Logs view top controls wrap cleanly at smaller widths without overlap or clipping.
+- Primary actions (refresh/pause/filter) remain visible across breakpoints.
+- Layout changes do not alter log streaming behavior.
 
 Notes
 - Keep task lists in planning files only. Do not move tasks back into manager.md.

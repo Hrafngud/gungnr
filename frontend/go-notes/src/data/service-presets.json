@@ -219,7 +219,7 @@
     "id": "codeserver",
     "name": "Code-Server",
     "subdomain": "code",
-    "port": 8080,
+    "port": 8585,
     "image": "codercom/code-server:latest",
     "containerPort": 8080,
     "description": "VS Code in the browser",

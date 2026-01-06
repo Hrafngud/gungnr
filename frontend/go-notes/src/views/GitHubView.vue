@@ -10,24 +10,25 @@ import UiSkeleton from '@/components/ui/UiSkeleton.vue'
 import UiState from '@/components/ui/UiState.vue'
 import NavIcon from '@/components/NavIcon.vue'
 import { githubApi } from '@/services/github'
+import { usersApi } from '@/services/users'
 import { apiErrorMessage } from '@/services/api'
 import { usePageLoadingStore } from '@/stores/pageLoading'
 import { useAuthStore } from '@/stores/auth'
 import type { GitHubCatalog } from '@/types/github'
+import type { UserSummary } from '@/types/users'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
 const catalog = ref<GitHubCatalog | null>(null)
+const allowlistUsers = ref<UserSummary[]>([])
 const loading = ref(false)
+const allowlistLoading = ref(false)
 const error = ref<string | null>(null)
 const pageLoading = usePageLoadingStore()
 const authStore = useAuthStore()
 
 const templateConfigured = computed(() => Boolean(catalog.value?.template.configured))
 const isAdmin = computed(() => authStore.isAdmin)
-const allowlistMode = computed(() => catalog.value?.allowlist.mode ?? 'none')
-const allowlistUsers = computed(() => catalog.value?.allowlist.users ?? [])
-const allowlistOrg = computed(() => catalog.value?.allowlist.org ?? '')
 const appConfigured = computed(() => Boolean(catalog.value?.app?.configured))
 
 const installationTokenStatus = computed(() => {
@@ -76,24 +77,14 @@ const templateSyncLabel = computed(() => {
   return 'Ready'
 })
 
-const allowlistLabel = computed(() => {
-  if (!catalog.value) return 'Unknown'
-  switch (allowlistMode.value) {
-    case 'users':
-      return `Users (${allowlistUsers.value.length})`
-    case 'org':
-      return allowlistOrg.value ? `Org: ${allowlistOrg.value}` : 'Org allowlist'
-    default:
-      return 'Not configured'
-  }
-})
-
 const allowlistUsersLabel = computed(() => {
+  if (allowlistLoading.value && allowlistUsers.value.length === 0) return 'Checking'
   if (allowlistUsers.value.length === 0) return 'None'
+  const names = allowlistUsers.value.map((user) => `@${user.login}`)
   const limit = 3
-  const head = allowlistUsers.value.slice(0, limit).join(', ')
-  if (allowlistUsers.value.length > limit) {
-    return `${head} +${allowlistUsers.value.length - limit} more`
+  const head = names.slice(0, limit).join(', ')
+  if (names.length > limit) {
+    return `${head} +${names.length - limit} more`
   }
   return head
 })
@@ -165,21 +156,39 @@ const templateAccessError = computed(() => templateAccess.value?.repoAccess?.err
 const templateAccessRequestId = computed(() => templateAccess.value?.repoAccess?.requestId || '')
 
 const loadCatalog = async () => {
+  const { data } = await githubApi.catalog()
+  catalog.value = data.catalog
+}
+
+const loadAllowlist = async () => {
+  const { data } = await usersApi.list()
+  allowlistUsers.value = data.users ?? []
+}
+
+const loadGitHub = async () => {
   loading.value = true
+  allowlistLoading.value = true
   error.value = null
-  try {
-    const { data } = await githubApi.catalog()
-    catalog.value = data.catalog
-  } catch (err) {
-    error.value = apiErrorMessage(err)
-  } finally {
-    loading.value = false
+  const [catalogResult, allowlistResult] = await Promise.allSettled([
+    loadCatalog(),
+    loadAllowlist(),
+  ])
+
+  if (catalogResult.status === 'rejected') {
+    error.value = apiErrorMessage(catalogResult.reason)
   }
+
+  if (allowlistResult.status === 'rejected') {
+    error.value = error.value ?? apiErrorMessage(allowlistResult.reason)
+  }
+
+  loading.value = false
+  allowlistLoading.value = false
 }
 
 onMounted(async () => {
   pageLoading.start('Loading GitHub catalog...')
-  await loadCatalog()
+  await loadGitHub()
   pageLoading.stop()
 })
 </script>
@@ -199,7 +208,7 @@ onMounted(async () => {
         </p>
       </div>
       <div class="flex flex-wrap gap-3">
-        <UiButton variant="ghost" size="sm" :disabled="loading" @click="loadCatalog">
+        <UiButton variant="ghost" size="sm" :disabled="loading" @click="loadGitHub">
           <span class="flex items-center gap-2">
             <NavIcon name="refresh" class="h-3.5 w-3.5" />
             <UiInlineSpinner v-if="loading" />
@@ -263,27 +272,15 @@ onMounted(async () => {
             </span>
           </UiListRow>
           <UiListRow class="flex items-center justify-between gap-2">
-            <span>Allowlist mode</span>
+            <span>Allowlisted users</span>
             <span class="text-[color:var(--text)]">
-              {{ allowlistLabel }}
+              Users ({{ allowlistUsers.length }})
             </span>
           </UiListRow>
-          <UiListRow
-            v-if="allowlistMode === 'users'"
-            class="flex items-center justify-between gap-2"
-          >
-            <span>Allowed users</span>
+          <UiListRow class="flex items-center justify-between gap-2">
+            <span>Usernames</span>
             <span class="text-[color:var(--text)]">
               {{ allowlistUsersLabel }}
-            </span>
-          </UiListRow>
-          <UiListRow
-            v-else-if="allowlistMode === 'org'"
-            class="flex items-center justify-between gap-2"
-          >
-            <span>Allowed org</span>
-            <span class="text-[color:var(--text)]">
-              {{ allowlistOrg || '--' }}
             </span>
           </UiListRow>
         </div>

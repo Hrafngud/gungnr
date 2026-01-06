@@ -32,8 +32,6 @@
 - `GITHUB_CLIENT_ID=...`
 - `GITHUB_CLIENT_SECRET=...`
 - `GITHUB_CALLBACK_URL=https://panel.yourdomain/callback`
-- `GITHUB_ALLOWED_USERS=user1,user2`
-- `GITHUB_ALLOWED_ORG=your-org`
 - `GITHUB_TEMPLATE_OWNER=Hrafngud`
 - `GITHUB_TEMPLATE_REPO=go-ground`
 - `GITHUB_REPO_OWNER=your-org`
@@ -54,7 +52,7 @@ Note: UI-managed settings (domain, GitHub token, Cloudflare token, cloudflared c
 - OnboardingState: user_id, completed_at, dismissed_steps (JSON or bool flags).
 
 ### GitHub OAuth and API
-- Use OAuth login for UI access. Require allowlist (user or org membership).
+- Use OAuth login for UI access and enforce DB-backed allowlist entries.
 - Store GitHub access token encrypted at rest or in server session (short-lived).
 - Use template repo creation endpoint instead of `gh` CLI.
 

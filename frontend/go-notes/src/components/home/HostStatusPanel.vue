@@ -9,7 +9,6 @@ import UiState from '@/components/ui/UiState.vue'
 import NavIcon from '@/components/NavIcon.vue'
 import type { DockerHealth, TunnelHealth } from '@/types/health'
 import type { Settings } from '@/types/settings'
-import { ok } from 'assert'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
@@ -48,14 +47,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'refresh'): void
 }>()
-
-const jobTone = computed<BadgeTone>(() => {
-  if (props.jobCounts.failed > 0) return 'error'
-  if (props.jobCounts.running > 0) return 'warn'
-  if (props.jobCounts.pending > 0) return 'neutral'
-  if (props.jobCounts.completed > 0) return 'ok'
-  return 'neutral'
-})
 
 const lastServiceLabel = computed(() => props.lastProject?.name ?? 'n/a')
 
@@ -173,7 +164,7 @@ const formatDate = (value?: string | null) => {
                 Automation queue
               </p>
             </div>
-            <UiBadge :tone="ok">
+            <UiBadge :tone="healthTone(dockerHealth?.status)">
               {{ jobCounts.pending + jobCounts.running + jobCounts.completed + jobCounts.failed }} total
             </UiBadge>
           </div>

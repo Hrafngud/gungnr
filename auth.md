@@ -11,9 +11,7 @@ the same signed payload.
 3) GitHub redirects back to `/auth/callback` with `code` and `state`.
 4) The API validates the state cookie, exchanges the code for a token, and calls
    the GitHub API (`read:user` scope) to fetch the user profile.
-5) Access is allowed if the user is on the `GITHUB_ALLOWED_USERS` list or is a
-   member of `GITHUB_ALLOWED_ORG`. If no allowlist is configured, any GitHub user
-   is accepted.
+5) Access is allowed only if the user already exists in the database allowlist.
 6) The user record is upserted in the database, and a signed session cookie
    `warp_session` is set. The response redirects to `/`.
 

@@ -33,6 +33,17 @@ func (s *JobService) List(ctx context.Context) ([]models.Job, error) {
 	return s.repo.List(ctx)
 }
 
+func (s *JobService) ListPage(ctx context.Context, page int, pageSize int) ([]models.Job, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 1
+	}
+	offset := (page - 1) * pageSize
+	return s.repo.ListPage(ctx, offset, pageSize)
+}
+
 func (s *JobService) Get(ctx context.Context, id uint) (*models.Job, error) {
 	return s.repo.Get(ctx, id)
 }
