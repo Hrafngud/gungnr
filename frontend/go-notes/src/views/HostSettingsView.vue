@@ -45,6 +45,22 @@ const settingsForm = reactive<Settings>({
   cloudflaredConfigPath: '',
 })
 
+const settingsKeys = [
+  'baseDomain',
+  'githubAppId',
+  'githubAppClientId',
+  'githubAppClientSecret',
+  'githubAppInstallationId',
+  'githubAppPrivateKey',
+  'cloudflareToken',
+  'cloudflareAccountId',
+  'cloudflareZoneId',
+  'cloudflaredTunnel',
+  'cloudflaredConfigPath',
+] as const
+
+type SettingsKey = typeof settingsKeys[number]
+
 const settingsSources = ref<SettingsSources | null>(null)
 const cloudflaredTunnelName = ref<string | null>(null)
 const templatesDir = ref<string | null>(null)
@@ -62,6 +78,10 @@ const success = ref<string | null>(null)
 const preview = ref<CloudflaredPreview | null>(null)
 const previewLoading = ref(false)
 const previewError = ref<string | null>(null)
+
+const revealGitHubSecret = ref(false)
+const revealCloudflareToken = ref(false)
+const importInput = ref<HTMLInputElement | null>(null)
 
 const dockerHealth = ref<DockerHealth | null>(null)
 const tunnelHealth = ref<TunnelHealth | null>(null)
@@ -210,6 +230,57 @@ const healthTone = (status?: string): BadgeTone => {
     default:
       return 'neutral'
   }
+}
+
+const exportSettings = () => {
+  const payload = settingsKeys.reduce((acc, key) => {
+    acc[key] = settingsForm[key]
+    return acc
+  }, {} as Record<SettingsKey, string>)
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'warp-panel-settings.json'
+  link.click()
+  URL.revokeObjectURL(url)
+  toastStore.success('Config exported.', 'Download started')
+}
+
+const applyImportedSettings = (payload: Partial<Settings>) => {
+  settingsKeys.forEach((key) => {
+    const value = payload[key]
+    if (value !== undefined && value !== null) {
+      settingsForm[key] = String(value)
+    }
+  })
+}
+
+const onImportClick = () => {
+  importInput.value?.click()
+}
+
+const onImportFile = (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    try {
+      const payload = JSON.parse(String(reader.result ?? '{}')) as Partial<Settings>
+      applyImportedSettings(payload)
+      toastStore.success('Config imported.', 'Settings form updated')
+    } catch {
+      toastStore.error('Import failed.', 'Invalid JSON config')
+    } finally {
+      input.value = ''
+    }
+  }
+  reader.onerror = () => {
+    toastStore.error('Import failed.', 'Could not read config file')
+    input.value = ''
+  }
+  reader.readAsText(file)
 }
 
 const actionStateFor = (container: DockerContainer): ContainerActionState => {
@@ -1076,20 +1147,34 @@ watch(projectFilter, () => {
                   <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                     GitHub App client secret
                   </span>
-                  <UiInput
-                    v-model="settingsForm.githubAppClientSecret"
-                    type="password"
-                    placeholder="Client secret"
-                    :disabled="loading"
-                    @focus="fieldGuidance.show({
-                      title: 'GitHub App client secret',
-                      description: 'Client secret for GitHub App OAuth flows. Stored for future use.',
-                      links: [
-                        { label: 'GitHub App settings', href: 'https://github.com/settings/apps' },
-                      ],
-                    })"
-                    @blur="fieldGuidance.clear()"
-                  />
+                  <div class="relative">
+                    <UiInput
+                      v-model="settingsForm.githubAppClientSecret"
+                      :type="revealGitHubSecret ? 'text' : 'password'"
+                      class="pr-12"
+                      placeholder="Client secret"
+                      :disabled="loading"
+                      @focus="fieldGuidance.show({
+                        title: 'GitHub App client secret',
+                        description: 'Client secret for GitHub App OAuth flows. Stored for future use.',
+                        links: [
+                          { label: 'GitHub App settings', href: 'https://github.com/settings/apps' },
+                        ],
+                      })"
+                      @blur="fieldGuidance.clear()"
+                    />
+                    <UiButton
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      class="absolute right-2 top-1/2 h-8 w-8 -translate-y-1/2 px-0 py-0"
+                      :disabled="loading"
+                      :aria-label="revealGitHubSecret ? 'Hide GitHub App client secret' : 'Show GitHub App client secret'"
+                      @click="revealGitHubSecret = !revealGitHubSecret"
+                    >
+                      <NavIcon :name="revealGitHubSecret ? 'eye-off' : 'eye'" class="h-4 w-4" />
+                    </UiButton>
+                  </div>
                 </label>
 
                 <label class="grid gap-2">
@@ -1147,20 +1232,34 @@ watch(projectFilter, () => {
                 <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                   Cloudflare API token
                 </span>
-                <UiInput
-                  v-model="settingsForm.cloudflareToken"
-                  type="password"
-                  placeholder="cf_••••••"
-                  :disabled="loading"
-                  @focus="fieldGuidance.show({
-                    title: 'Cloudflare API token',
-                    description: 'Token with Tunnel:Edit and DNS:Edit for the selected account and zone.',
-                    links: [
-                      { label: 'Cloudflare API tokens', href: 'https://dash.cloudflare.com/profile/api-tokens' },
-                    ],
-                  })"
-                  @blur="fieldGuidance.clear()"
-                />
+                <div class="relative">
+                  <UiInput
+                    v-model="settingsForm.cloudflareToken"
+                    :type="revealCloudflareToken ? 'text' : 'password'"
+                    class="pr-12"
+                    placeholder="cf_••••••"
+                    :disabled="loading"
+                    @focus="fieldGuidance.show({
+                      title: 'Cloudflare API token',
+                      description: 'Token with Tunnel:Edit and DNS:Edit for the selected account and zone.',
+                      links: [
+                        { label: 'Cloudflare API tokens', href: 'https://dash.cloudflare.com/profile/api-tokens' },
+                      ],
+                    })"
+                    @blur="fieldGuidance.clear()"
+                  />
+                  <UiButton
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    class="absolute right-2 top-1/2 h-8 w-8 -translate-y-1/2 px-0 py-0"
+                    :disabled="loading"
+                    :aria-label="revealCloudflareToken ? 'Hide Cloudflare API token' : 'Show Cloudflare API token'"
+                    @click="revealCloudflareToken = !revealCloudflareToken"
+                  >
+                    <NavIcon :name="revealCloudflareToken ? 'eye-off' : 'eye'" class="h-4 w-4" />
+                  </UiButton>
+                </div>
               </label>
 
               <label class="grid gap-2">
@@ -1301,7 +1400,33 @@ watch(projectFilter, () => {
             {{ success }}
           </UiInlineFeedback>
 
-          <div class="flex flex-wrap gap-3">
+          <input
+            ref="importInput"
+            type="file"
+            accept="application/json"
+            class="hidden"
+            @change="onImportFile"
+          />
+
+          <div class="flex flex-wrap items-center gap-3">
+            <UiButton
+              type="button"
+              variant="ghost"
+              size="md"
+              :disabled="loading"
+              @click="exportSettings"
+            >
+              Export config
+            </UiButton>
+            <UiButton
+              type="button"
+              variant="ghost"
+              size="md"
+              :disabled="loading"
+              @click="onImportClick"
+            >
+              Import config
+            </UiButton>
             <UiButton
               type="submit"
               variant="primary"
