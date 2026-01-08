@@ -1,7 +1,7 @@
 ## Next Task
 
 Objective
-Add a responsive top bar layout for the Logs screen so controls fit across desktop and mobile widths.
+Return to the Logs screen top bar responsiveness pass (wrap controls cleanly across breakpoints).
 
 Success criteria
 - Logs view top controls wrap cleanly at smaller widths without overlap or clipping.

@@ -21,6 +21,8 @@ type IconName =
   | 'trash'
   | 'template'
   | 'forward'
+  | 'eye'
+  | 'eye-off'
 
 const props = defineProps<{
   name: IconName
@@ -130,6 +132,16 @@ const paths: Record<IconName, string[]> = {
     'M13 7l4 4l-4 4',
     'M17 11H7',
     'M7 7l-4 4l4 4',
+  ],
+  eye: [
+    'M2 12s3-7 10-7s10 7 10 7s-3 7-10 7s-10-7-10-7z',
+    'M12 15a3 3 0 1 0 0-6a3 3 0 0 0 0 6z',
+  ],
+  'eye-off': [
+    'M3 3l18 18',
+    'M2 12s3-7 10-7c2.3 0 4.3 0.7 5.9 1.7',
+    'M22 12s-3 7-10 7c-2.3 0-4.3-0.7-5.9-1.7',
+    'M9.9 9.9a3 3 0 0 0 4.2 4.2',
   ],
 }
 </script>

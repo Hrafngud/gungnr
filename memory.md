@@ -1,5 +1,8 @@
 ## Iteration Log
 
+- 2026-01-08: Added settings import/export and reveal controls in the Host Settings sidebar.
+  - Added eye toggle buttons for GitHub App client secret and Cloudflare API token fields.
+  - Added Export/Import config buttons with JSON download and file-based form population.
 - 2026-01-08: Removed deprecated env allowlist settings from config, compose, and docs.
   - GitHub catalog payload no longer reports env allowlist data.
   - Updated auth docs to reflect DB-backed allowlist only.
