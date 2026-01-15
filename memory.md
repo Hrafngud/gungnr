@@ -1,5 +1,12 @@
 ## Iteration Log
 
+- 2026-01-08: Desktop responsiveness pass across main views.
+  - Added flex-wrap + break-word handling to list rows and panel headers to prevent clipped labels/values.
+  - Switched key grids to minmax column definitions for safer shrink on desktop aspect ratios.
+  - Enabled word breaking in log/metadata output and set panels/list rows to allow shrink/wrap.
+- 2026-01-08: Improved Logs view top controls responsiveness.
+  - Reworked the log controls panel into a grid with wrapped control groups.
+  - Added flexible widths and basis rules to prevent overlap/clipping at desktop breakpoints.
 - 2026-01-08: Added settings import/export and reveal controls in the Host Settings sidebar.
   - Added eye toggle buttons for GitHub App client secret and Cloudflare API token fields.
   - Added Export/Import config buttons with JSON download and file-based form population.

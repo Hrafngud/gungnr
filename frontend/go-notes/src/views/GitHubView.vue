@@ -231,9 +231,9 @@ onMounted(async () => {
 
     <hr />
 
-    <div class="grid gap-6 lg:grid-cols-3">
+    <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
       <UiPanel as="article" class="space-y-5 p-6">
-        <div class="flex items-start justify-between gap-3">
+        <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
               App token
@@ -259,25 +259,25 @@ onMounted(async () => {
         </UiPanel>
 
         <div v-else class="space-y-3 text-xs text-[color:var(--muted)]">
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Repo creation</span>
             <span class="text-[color:var(--text)]">
               {{ appConfigured ? 'Enabled' : 'Needs app setup' }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Template sync</span>
             <span class="text-[color:var(--text)]">
               {{ templateSyncLabel }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Allowlisted users</span>
             <span class="text-[color:var(--text)]">
               Users ({{ allowlistUsers.length }})
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Usernames</span>
             <span class="text-[color:var(--text)]">
               {{ allowlistUsersLabel }}
@@ -287,7 +287,7 @@ onMounted(async () => {
       </UiPanel>
 
       <UiPanel as="article" variant="soft" class="space-y-5 p-6">
-        <div class="flex items-start justify-between gap-3">
+        <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
               GitHub App
@@ -313,19 +313,19 @@ onMounted(async () => {
         </UiPanel>
 
         <div v-else class="space-y-3 text-xs text-[color:var(--muted)]">
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>App ID</span>
             <span class="text-[color:var(--text)]">
               {{ appIdStatus }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Installation ID</span>
             <span class="text-[color:var(--text)]">
               {{ appInstallationStatus }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Private key</span>
             <span class="text-[color:var(--text)]">
               {{ appKeyStatus }}
@@ -335,7 +335,7 @@ onMounted(async () => {
       </UiPanel>
 
       <UiPanel as="article" variant="raise" class="space-y-5 p-6">
-        <div class="flex items-start justify-between gap-3">
+        <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
               Templates
@@ -360,31 +360,31 @@ onMounted(async () => {
         </div>
 
         <div v-else class="space-y-3 text-xs text-[color:var(--muted)]">
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Template repo</span>
             <span class="text-[color:var(--text)]">
               {{ templateSource }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Installation owner</span>
             <span class="text-[color:var(--text)]">
               {{ installationOwnerLabel }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Template access</span>
             <UiBadge :tone="templateAccessTone">
               {{ templateAccessStatus }}
             </UiBadge>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Target owner</span>
             <span class="text-[color:var(--text)]">
               {{ templateTargetOwner }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Visibility</span>
             <span class="text-[color:var(--text)]">
               {{ templateVisibility }}

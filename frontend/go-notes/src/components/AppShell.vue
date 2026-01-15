@@ -190,8 +190,8 @@ const isActive = (to: string) => {
       <div class="min-h-screen flex-1">
 
         <header class="sticky top-0 z-20 border-b border-[color:var(--border)] bg-[color:var(--bg-soft)] px-4 py-4">
-          <div class="mx-auto flex w-full max-w-7xl items-center justify-between">
-            <div>
+          <div class="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-4">
+            <div class="min-w-0">
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                 {{ pageTitle }}
               </p>
@@ -199,7 +199,7 @@ const isActive = (to: string) => {
                 Warp Panel
               </h1>
             </div>
-            <div class="flex items-center gap-3">
+            <div class="flex flex-wrap items-center gap-3">
               <span class="badge status-neutral">Host ready</span>
               <button
                 v-if="auth.user"

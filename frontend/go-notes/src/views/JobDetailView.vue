@@ -122,9 +122,9 @@ onBeforeUnmount(() => {
       Loading job details...
     </UiState>
 
-    <div v-else class="grid gap-6 lg:grid-cols-[1fr,1fr]">
+    <div v-else class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <UiPanel class="space-y-4 p-5">
-        <div class="flex items-start justify-between gap-3">
+        <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Job</p>
             <h2 class="mt-1 text-xl font-semibold text-[color:var(--text)]">

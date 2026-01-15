@@ -616,9 +616,9 @@ watch(projectFilter, () => {
           {{ usageError }}
         </UiState>
 
-        <div class="grid gap-3 lg:grid-cols-4">
+        <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
           <UiPanel variant="soft" class="space-y-2 p-3">
-            <div class="flex items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center justify-between gap-2 break-words">
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                 Disk usage
               </p>
@@ -714,14 +714,14 @@ watch(projectFilter, () => {
           No containers match the current filters.
         </UiState>
 
-        <div v-else class="grid gap-4 lg:grid-cols-2">
+        <div v-else class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <UiListRow
             v-for="container in filteredContainers"
             :key="container.id"
             as="article"
             class="space-y-4"
           >
-            <div class="flex items-start justify-between gap-3">
+            <div class="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                   {{ container.service || 'Container' }}
@@ -739,19 +739,19 @@ watch(projectFilter, () => {
             </div>
 
             <div class="space-y-2 text-xs text-[color:var(--muted)]">
-              <div class="flex items-center justify-between gap-2">
+              <div class="flex flex-wrap items-center justify-between gap-2 break-words">
                 <span>Ports</span>
                 <span class="text-[color:var(--text)]">
                   {{ container.ports || '—' }}
                 </span>
               </div>
-              <div class="flex items-center justify-between gap-2">
+              <div class="flex flex-wrap items-center justify-between gap-2 break-words">
                 <span>Project</span>
                 <span class="text-[color:var(--text)]">
                   {{ container.project || 'n/a' }}
                 </span>
               </div>
-              <div class="flex items-center justify-between gap-2">
+              <div class="flex flex-wrap items-center justify-between gap-2 break-words">
                 <span>Ownership</span>
                 <span class="text-[color:var(--text)]">
                   {{ ownershipLabel(container) }}
@@ -867,11 +867,11 @@ watch(projectFilter, () => {
           No local template folders detected.
         </UiState>
 
-        <div v-else class="grid gap-2 sm:grid-cols-2">
+        <div v-else class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <UiListRow
             v-for="project in localProjects"
             :key="project.path"
-            class="flex items-center justify-between gap-2 text-xs"
+            class="flex flex-wrap items-center justify-between gap-2 break-words text-xs"
           >
             <span class="text-[color:var(--text)]">{{ project.name }}</span>
             <span class="truncate text-[color:var(--muted)]" :title="project.path">
@@ -960,9 +960,9 @@ watch(projectFilter, () => {
           Checking host integrations...
         </UiState>
 
-        <div v-else class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div v-else class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
           <UiPanel variant="soft" class="space-y-2 p-3">
-            <div class="flex items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center justify-between gap-2 break-words">
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                 Docker
               </p>
@@ -990,7 +990,7 @@ watch(projectFilter, () => {
           </UiPanel>
 
           <UiPanel variant="soft" class="space-y-2 p-3">
-            <div class="flex items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center justify-between gap-2 break-words">
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                 Tunnel status
               </p>
@@ -1332,37 +1332,37 @@ watch(projectFilter, () => {
                 v-if="settingsSources || cloudflaredTunnelName"
                 class="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)]/80 p-3 text-[11px] text-[color:var(--muted)]"
               >
-                <UiListRow class="flex items-center justify-between gap-2">
+                <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
                   <span>Tunnel ref (resolved)</span>
                   <span class="text-[color:var(--text)]">
                     {{ cloudflaredTunnelName || '—' }}
                   </span>
                 </UiListRow>
-                <UiListRow class="flex items-center justify-between gap-2">
+                <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
                   <span>Tunnel source</span>
                   <span class="text-[color:var(--text)]">
                     {{ settingsSources?.cloudflaredTunnel || 'unset' }}
                   </span>
                 </UiListRow>
-                <UiListRow class="flex items-center justify-between gap-2">
+                <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
                   <span>Account ID source</span>
                   <span class="text-[color:var(--text)]">
                     {{ settingsSources?.cloudflareAccountId || 'unset' }}
                   </span>
                 </UiListRow>
-                <UiListRow class="flex items-center justify-between gap-2">
+                <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
                   <span>Zone ID source</span>
                   <span class="text-[color:var(--text)]">
                     {{ settingsSources?.cloudflareZoneId || 'unset' }}
                   </span>
                 </UiListRow>
-                <UiListRow class="flex items-center justify-between gap-2">
+                <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
                   <span>Token source</span>
                   <span class="text-[color:var(--text)]">
                     {{ settingsSources?.cloudflareToken || 'unset' }}
                   </span>
                 </UiListRow>
-                <UiListRow class="flex items-center justify-between gap-2">
+                <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
                   <span>Config path source</span>
                   <span class="text-[color:var(--text)]">
                     {{ settingsSources?.cloudflaredConfigPath || 'unset' }}
@@ -1455,7 +1455,7 @@ watch(projectFilter, () => {
       eyebrow="Ingress"
     >
       <div class="space-y-4">
-        <div class="flex items-center justify-between gap-2">
+        <div class="flex flex-wrap items-center justify-between gap-2 break-words">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
               Cloudflared config

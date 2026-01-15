@@ -426,7 +426,7 @@ onBeforeUnmount(() => {
           </p>
         </div>
 
-        <UiPanel v-if="selectedInfo" variant="soft" class="grid gap-3 p-4 text-xs text-[color:var(--muted)] md:grid-cols-3">
+        <UiPanel v-if="selectedInfo" variant="soft" class="grid gap-3 p-4 text-xs text-[color:var(--muted)] md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
           <div>
             <p class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Image</p>
             <p class="mt-1 text-sm text-[color:var(--text)]">{{ selectedInfo.image }}</p>
@@ -448,7 +448,7 @@ onBeforeUnmount(() => {
           variant="soft"
           class="flex flex-wrap items-center gap-3 p-3 text-xs text-[color:var(--muted)]"
         >
-          <div class="flex flex-wrap items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2 min-w-0 flex-1">
             <UiBadge :tone="streamBadge.tone">
               {{ streamBadge.label }}
             </UiBadge>
@@ -463,47 +463,54 @@ onBeforeUnmount(() => {
             </span>
           </div>
 
-          <div class="flex flex-wrap items-center gap-2">
-            <UiButton
-              variant="ghost"
-              size="xs"
-              :disabled="!hasSelection || streamState === 'paused'"
-              @click="pauseStream"
-            >
-              Pause
-            </UiButton>
-            <UiButton
-              variant="ghost"
-              size="xs"
-              :disabled="!hasSelection || streamState !== 'paused'"
-              @click="resumeStream"
-            >
-              Resume
-            </UiButton>
-          </div>
+          <div class="flex flex-wrap items-center gap-2 justify-end flex-1 min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <UiButton
+                variant="ghost"
+                size="xs"
+                :disabled="!hasSelection || streamState === 'paused'"
+                @click="pauseStream"
+              >
+                Pause
+              </UiButton>
+              <UiButton
+                variant="ghost"
+                size="xs"
+                :disabled="!hasSelection || streamState !== 'paused'"
+                @click="resumeStream"
+              >
+                Resume
+              </UiButton>
+            </div>
 
-          <label class="flex items-center gap-2">
-            <span>Tail</span>
-            <UiInput
-              v-model="tailInput"
-              type="number"
-              min="1"
-              max="5000"
-              class="w-24"
-            />
-          </label>
-          <UiToggle v-model="followLive">Follow live</UiToggle>
-          <UiToggle v-model="showTimestamps">Timestamps</UiToggle>
-          <div class="min-w-[180px] flex-1">
-            <UiInput v-model="filterQuery" placeholder="Filter log lines" />
-          </div>
-          <div class="flex flex-wrap items-center gap-2">
-            <UiButton variant="ghost" size="xs" :disabled="!hasSelection" @click="clearLogs">
-              Clear
-            </UiButton>
-            <UiButton variant="ghost" size="xs" :disabled="!hasSelection || !hasLogs" @click="copyLogs">
-              Copy to clipboard
-            </UiButton>
+            <label class="flex items-center gap-2 shrink-0">
+              <span>Tail</span>
+              <UiInput
+                v-model="tailInput"
+                type="number"
+                min="1"
+                max="5000"
+                class="w-20"
+              />
+            </label>
+            <UiToggle v-model="followLive" class="shrink-0">Follow live</UiToggle>
+            <UiToggle v-model="showTimestamps" class="shrink-0">Timestamps</UiToggle>
+            <div class="min-w-[220px] flex-1">
+              <UiInput v-model="filterQuery" placeholder="Filter log lines" class="w-full" />
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <UiButton variant="ghost" size="xs" :disabled="!hasSelection" @click="clearLogs">
+                Clear
+              </UiButton>
+              <UiButton
+                variant="ghost"
+                size="xs"
+                :disabled="!hasSelection || !hasLogs"
+                @click="copyLogs"
+              >
+                Copy to clipboard
+              </UiButton>
+            </div>
           </div>
         </UiPanel>
 
@@ -527,7 +534,7 @@ onBeforeUnmount(() => {
             <p v-if="filteredLines.length === 0" class="text-[color:var(--muted)]">
               No logs yet. Deploy a service or wait for new output.
             </p>
-            <pre v-else class="whitespace-pre-wrap">
+            <pre v-else class="whitespace-pre-wrap break-words">
 {{ filteredLines.join('\n') }}
             </pre>
           </div>

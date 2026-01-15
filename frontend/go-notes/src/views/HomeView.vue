@@ -522,7 +522,7 @@ watch(
           Open overview
         </UiButton>
       </UiPanel>
-      <div class="grid gap-6 lg:grid-cols-2">
+      <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <TemplateCardsSection
           :catalog="catalog"
           :catalog-error="catalogError"

@@ -140,7 +140,7 @@ const goToPage = async (nextPage: number) => {
     <UiPanel
       v-else-if="jobsStore.jobs.length === 0"
       variant="raise"
-      class="grid gap-6 p-6 lg:grid-cols-[1.05fr,0.95fr]"
+      class="grid gap-6 p-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]"
     >
       <div>
         <h2 class="text-xl font-semibold text-[color:var(--text)]">No jobs yet</h2>
@@ -188,7 +188,7 @@ const goToPage = async (nextPage: number) => {
         as="article"
         class="space-y-4"
       >
-        <div class="flex items-start justify-between gap-3">
+        <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Job</p>
             <h2 class="mt-1 text-lg font-semibold text-[color:var(--text)]">
