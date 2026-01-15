@@ -198,7 +198,7 @@ onMounted(async () => {
           <div class="flex flex-wrap items-center justify-end gap-2">
             <UiInput
               v-model="newLogin"
-              class="min-w-[200px]"
+              class="min-w-[200px] max-w-full flex-1"
               placeholder="GitHub username"
               :disabled="!canManage || adding"
               @keyup.enter="addUser"
@@ -216,7 +216,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="grid gap-3 text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)] sm:grid-cols-[1.4fr,0.8fr,1fr,auto,auto]">
+      <div class="grid min-w-0 gap-3 text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)] sm:grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_auto_auto]">
         <span>User</span>
         <span>Role</span>
         <span>Last login</span>
@@ -238,10 +238,10 @@ onMounted(async () => {
         <UiListRow
           v-for="entry in users"
           :key="entry.id"
-          class="grid items-center gap-3 sm:grid-cols-[1.4fr,0.8fr,1fr,auto,auto]"
+          class="grid min-w-0 items-center gap-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_auto_auto]"
         >
-          <div class="space-y-1">
-            <p class="text-sm font-semibold text-[color:var(--text)]">@{{ entry.login }}</p>
+          <div class="min-w-0 space-y-1">
+            <p class="truncate text-sm font-semibold text-[color:var(--text)]">@{{ entry.login }}</p>
             <p class="text-xs text-[color:var(--muted-2)]">ID {{ entry.id }}</p>
           </div>
 
@@ -251,7 +251,7 @@ onMounted(async () => {
             </UiBadge>
             <UiSelect
               v-else
-              class="min-w-[140px]"
+              class="min-w-[140px] max-w-full"
               :model-value="entry.role"
               :options="roleOptions"
               :disabled="!canManage || isSaving(entry.id)"

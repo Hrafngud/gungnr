@@ -218,7 +218,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
 
     <div class="grid gap-6">
       <UiPanel as="article" class="space-y-4 p-6">
-        <div class="flex items-start justify-between gap-3">
+        <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
               Tunnel
@@ -237,13 +237,13 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
         </UiState>
 
         <div v-else class="space-y-3 text-xs text-[color:var(--muted)]">
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Tunnel name</span>
             <span class="text-[color:var(--text)]">
               {{ tunnelHealth?.tunnel || '--' }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Connectors</span>
             <span class="text-[color:var(--text)]">
               {{
@@ -266,19 +266,19 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
           v-if="tunnelHealth?.diagnostics"
           class="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)]/80 p-3 text-[11px] text-[color:var(--muted)]"
         >
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Account ID</span>
             <span class="text-[color:var(--text)]">
               {{ tunnelHealth.diagnostics.accountId || '—' }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Zone ID</span>
             <span class="text-[color:var(--text)]">
               {{ tunnelHealth.diagnostics.zoneId || '—' }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Tunnel ref</span>
             <span class="text-[color:var(--text)]">
               {{
@@ -288,13 +288,13 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
               }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Token set</span>
             <span class="text-[color:var(--text)]">
               {{ tunnelHealth.diagnostics.tokenSet ? 'yes' : 'no' }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Source</span>
             <span class="text-[color:var(--text)]">
               {{
@@ -309,37 +309,37 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
           v-else-if="settingsSources || cloudflaredTunnelName"
           class="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)]/80 p-3 text-[11px] text-[color:var(--muted)]"
         >
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Tunnel ref (resolved)</span>
             <span class="text-[color:var(--text)]">
               {{ cloudflaredTunnelName || '—' }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Tunnel source</span>
             <span class="text-[color:var(--text)]">
               {{ settingsSources?.cloudflaredTunnel || 'unset' }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Account ID source</span>
             <span class="text-[color:var(--text)]">
               {{ settingsSources?.cloudflareAccountId || 'unset' }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Zone ID source</span>
             <span class="text-[color:var(--text)]">
               {{ settingsSources?.cloudflareZoneId || 'unset' }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Token source</span>
             <span class="text-[color:var(--text)]">
               {{ settingsSources?.cloudflareToken || 'unset' }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Config path source</span>
             <span class="text-[color:var(--text)]">
               {{ settingsSources?.cloudflaredConfigPath || 'unset' }}
@@ -352,9 +352,9 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
 
     <hr />
 
-    <div class="grid gap-6 lg:grid-cols-[1fr,1fr]">
+    <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <UiPanel as="article" class="space-y-4 p-6">
-        <div class="flex items-start justify-between gap-3">
+        <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
               DNS
@@ -385,7 +385,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
         </UiState>
 
         <div v-else class="space-y-2">
-          <div class="grid grid-cols-4 gap-3 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+          <div class="grid min-w-0 grid-cols-[minmax(0,0.8fr)_minmax(0,1.4fr)_minmax(0,0.6fr)_minmax(0,1.2fr)] gap-3 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
             <div>Subdomain</div>
             <div>Full hostname</div>
             <div>Type</div>
@@ -395,7 +395,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
             <div
               v-for="route in ingressRoutes"
               :key="route.hostname"
-              class="grid grid-cols-4 gap-3 rounded border border-[color:var(--border)] bg-[color:var(--bg-soft)] px-3 py-2 text-xs text-[color:var(--text)]"
+              class="grid min-w-0 grid-cols-[minmax(0,0.8fr)_minmax(0,1.4fr)_minmax(0,0.6fr)_minmax(0,1.2fr)] gap-3 rounded border border-[color:var(--border)] bg-[color:var(--bg-soft)] px-3 py-2 text-xs text-[color:var(--text)]"
             >
               <div class="truncate font-medium">
                 {{ route.hostname.split('.')[0] }}
@@ -415,7 +415,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
       </UiPanel>
 
       <UiPanel as="article" variant="raise" class="space-y-4 p-6">
-        <div class="flex items-start justify-between gap-3">
+        <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
               Cloudflare
@@ -459,19 +459,19 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
         </UiState>
 
         <div v-else class="space-y-3 text-xs text-[color:var(--muted)]">
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Base domain</span>
             <span class="text-[color:var(--text)]">
               {{ baseDomainLabel }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>API token</span>
             <span class="text-[color:var(--text)]">
               {{ cloudflareTokenConfigured ? 'Configured' : 'Missing' }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Tunnel name</span>
             <span class="text-[color:var(--text)]">
               {{ tunnelHealth?.tunnel || '--' }}
@@ -488,7 +488,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
         </UiState>
 
         <div v-else-if="preflight" class="space-y-3 text-xs text-[color:var(--muted)]">
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Token check</span>
             <UiBadge :tone="preflightTone(preflight.token.status)">
               {{ preflight.token.status }}
@@ -497,7 +497,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
           <p v-if="preflight.token.detail" class="text-[color:var(--muted)]">
             {{ preflight.token.detail }}
           </p>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Account check</span>
             <UiBadge :tone="preflightTone(preflight.account.status)">
               {{ preflight.account.status }}
@@ -506,7 +506,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
           <p v-if="preflight.account.detail" class="text-[color:var(--muted)]">
             {{ preflight.account.detail }}
           </p>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Zone check</span>
             <UiBadge :tone="preflightTone(preflight.zone.status)">
               {{ preflight.zone.status }}
@@ -515,7 +515,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
           <p v-if="preflight.zone.detail" class="text-[color:var(--muted)]">
             {{ preflight.zone.detail }}
           </p>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Tunnel ref</span>
             <span class="text-[color:var(--text)]">
               {{
@@ -525,7 +525,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
               }}
             </span>
           </UiListRow>
-          <UiListRow class="flex items-center justify-between gap-2">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Tunnel check</span>
             <UiBadge :tone="preflightTone(preflight.tunnel.status)">
               {{ preflight.tunnel.status }}
@@ -544,7 +544,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
       eyebrow="Ingress"
     >
       <div class="space-y-4">
-        <div class="flex items-center justify-between gap-2">
+        <div class="flex flex-wrap items-center justify-between gap-2 break-words">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
               Cloudflared config

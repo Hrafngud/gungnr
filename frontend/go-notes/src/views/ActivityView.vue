@@ -128,7 +128,7 @@ const formatMetadata = (raw: string) => {
           variant="soft"
           class="p-4 text-xs text-[color:var(--muted)]"
         >
-          <pre class="whitespace-pre-wrap font-mono">{{ formatMetadata(entry.metadata) }}</pre>
+          <pre class="whitespace-pre-wrap break-words font-mono">{{ formatMetadata(entry.metadata) }}</pre>
         </UiPanel>
       </UiListRow>
     </div>

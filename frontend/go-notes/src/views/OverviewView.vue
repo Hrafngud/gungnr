@@ -177,7 +177,7 @@ onMounted(async () => {
         No running containers detected yet.
       </UiState>
 
-      <div v-else class="grid gap-4 md:grid-cols-2">
+      <div v-else class="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <UiPanel
           v-for="container in containerHighlights"
           :key="container.id"
@@ -185,7 +185,7 @@ onMounted(async () => {
           variant="soft"
           class="space-y-3 p-4"
         >
-          <div class="flex items-start justify-between gap-3">
+          <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                 {{ container.service || 'Container' }}
@@ -262,7 +262,7 @@ onMounted(async () => {
       </UiState>
 
       <div v-else class="space-y-4">
-        <div class="grid gap-4 md:grid-cols-2">
+        <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <UiPanel variant="soft" class="space-y-2 p-4 text-xs text-[color:var(--muted)]">
             <div class="flex items-center justify-between">
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
@@ -320,7 +320,7 @@ onMounted(async () => {
             as="article"
             class="space-y-3"
           >
-            <div class="flex items-start justify-between gap-3">
+            <div class="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                   {{ job.type }}
@@ -398,7 +398,7 @@ onMounted(async () => {
           as="article"
           class="space-y-3"
         >
-          <div class="flex items-start justify-between gap-3">
+          <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                 {{ entry.action }}
