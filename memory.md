@@ -1,5 +1,10 @@
 ## Iteration Log
 
+- 2026-01-17: Added Gungnr logo usage in header/login and swapped loading spinners to use the new loading.gif.
+- 2026-01-17: Rebranded legacy product naming to Gungnr across docs, UI copy, and CLI naming.
+- 2026-01-17: Re-aligned plans to the bootstrap-first install approach.
+  - Updated overall, backend, and frontend plans to reflect install.sh + gungnr CLI + UI cleanup phases.
+  - Set the next task to implement the installer script; backend API/DB changes are frozen.
 - 2026-01-08: Desktop responsiveness pass across main views.
   - Added flex-wrap + break-word handling to list rows and panel headers to prevent clipped labels/values.
   - Switched key grids to minmax column definitions for safer shrink on desktop aspect ratios.

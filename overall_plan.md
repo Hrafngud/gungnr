@@ -1,79 +1,31 @@
 ## Overall Plan and Dependencies
 
-Current status: Core Warp Panel features are already working; we are proceeding with a Phase 2 security layer.
-Guiding principle: Mimic the behavior of `deploy.sh` end-to-end, but via the web UI + API (no manual shell steps).
+Current status: Pivot to bootstrap-first installation; backend API and DB schema are frozen.
+Guiding principle: one-time terminal bootstrap that leaves the panel fully wired on first run.
 
-1) Foundations
-- Align env variables for backend/frontend and host integrations.
-- Define `.env.example` with GitHub and Cloudflare settings.
-- Ensure Docker, cloudflared, and templates directory access on host.
-- Plan for runtime settings in DB (domain, tokens, cloudflared config path).
-- Decide host-installed `cloudflared` service as the only tunnel path (no compose cloudflared container).
-- Adopt an API-run Docker runner via socket for container operations (no host worker).
-- Treat `deploy.sh` as reference-only; do not modify it. The UI should first mirror its CLI behavior before advanced automation.
+1) Installer Script (install.sh)
+- Add `install.sh` at repo root.
+- Detect OS/arch and install the `gungnr` CLI binary into `/usr/local/bin/gungnr`.
+- Verify/install Docker, Docker Compose, and cloudflared.
+- Do not write config files or start services.
+- Print: `Run "gungnr bootstrap" to configure this machine.`
 
-2) Backend First
-- Scaffold backend structure and config loader.
-- Implement GitHub OAuth auth + access control (approach TBD).
-- Add integrations for GitHub, Cloudflare, Docker, and cloudflared.
-- Add GitHub template generation flow (App token + generate endpoint) and template catalog support.
-- Add local repo discovery (host filesystem) for stop/restart lifecycle actions.
-- Add Cloudflare-only forwarding for existing localhost services (no Docker involvement).
-- Build job runner and persistence models.
-- Add health endpoints for docker and tunnel checks.
-- Add settings endpoints and use them in workflows (domain/token/config path).
-- Add Docker runner job types for `docker run` and `docker compose` from the API.
-- Add container lifecycle controls (stop/restart/remove) with clear stop-vs-remove semantics.
-- Add container filtering by project (including volumes for multi-container templates).
-- Add automatic container naming for multiple instances of the same image (suffix with incrementing numbers).
-- Persist onboarding state per user to avoid repeated overlays.
+2) Gungnr CLI (Go binary)
+- Implement `gungnr bootstrap` as the only setup command.
+- Inspect environment and abort if an existing Gungnr install is detected.
+- Use GitHub device flow to identify and seed the SuperUser.
+- Run `cloudflared tunnel login`, create a tunnel, generate a full config.yml, and install/start the service.
+- Prompt for domain + Cloudflare API token, validate scopes, and create DNS routing.
+- Materialize filesystem paths and generate a complete `.env` (no placeholders).
+- Start Docker Compose, wait for API health, and print the panel URL.
 
-3) Frontend Setup
-- Create router, auth store, and base layout.
-- Build component system with variants, loading states, and animations.
-- Build sidebar navigation, top bar, and footer.
-- Implement Home, Overview, Host Settings, Networking, and GitHub pages.
-- Rework Host Settings layout: side panels for settings and ingress preview, and a slimmer status grid.
-- Update running container cards with stop/restart/remove/logs actions and confirmation flow.
-- Remove the Overview Resources section.
-- Wire API services with auth handling.
-- Add onboarding overlay journey and day-to-day flow polish.
-- Improve sidebar collapse UX (icon-only, toggle in sidebar only).
-- Replace native selects with a universal custom Select component.
-- Reduce horizontal padding/margins to maximize content width.
-- Fix login page layout and auto-redirect on `/auth/me` success.
-- Refactor Home Quick Deploy into card grids for Templates/Services with repo links and deploy actions.
-- Add a responsive top bar to the logs screen so controls fit on all widths.
-- **UX Refinement Phase:**
-  - Enhance Quick Services with icons, search bar, and fixed-height scrollable container.
-  - Replace onboarding overlay system with contextual form field guidance (focus-triggered, positioned left, with external links).
-  - Create ingress preview sidebar component for Networking and Host Settings visual cleanup.
-  - Convert Networking DNS records to 4-column grid layout.
-  - Simplify template forms: "Create from template" (project name + subdomain only, auto-infer ports), "Deploy existing" (forward ANY localhost service via Cloudflare-only, no Docker required).
-  - Add template repo selector and list available template repos on Home > Create from template.
-  - Add running/stopped container filters with icons and basic Docker usage stats in Host Settings.
-  - Add project-based container filtering and volume visibility per project.
-  - Replace sidebar logo header with GitHub auth indicator.
-  - Add global page-loading overlay and iconography for refresh/edit/login/logout.
-  - Redirect to login on logout action.
+3) UI Cleanup (no backend changes)
+- Remove/hide paths that imply missing Cloudflare or OAuth setup.
+- Keep Host Settings focused on inspection/validation and minor adjustments.
+- Label GitHub App settings as required only for "Create from template."
+- Disable template creation when GitHub App settings are missing.
+- Preserve existing deploy, logs, and RBAC behavior.
 
-4) Dockerization
-- Backend and frontend Dockerfiles (multi-stage).
-- Compose services: `db`, `api`, `web`.
-- Bind mounts for docker socket, templates dir, and cloudflared config.
-
-5) Polish and Docs
-- Update runbook and usage instructions.
-- Add Makefile targets for dev and compose.
-- QA: backend tests, frontend build, compose up.
-
-6) Observability
-- Add live container logs screen for all running containers (not just deploy jobs).
-- Provide filtering by container name and stream logs via SSE or WebSocket.
-
-7) Phase 2 - Security Layer (RBAC)
-- Replace allowlist env logic with DB-backed allowlist + roles.
-- Add SuperUser/Admin/User roles and enforce via middleware.
-- Seed SuperUser from env and block programmatic SuperUser assignment.
-- Add Users management UI for Admin/SuperUser.
-- Embed role in session payload and propagate to `/auth/me`.
+4) Docs/Runbook Alignment
+- Update README/process docs to describe install.sh + `gungnr bootstrap`.
+- Keep `deploy.sh` reference-only.

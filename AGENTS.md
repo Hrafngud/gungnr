@@ -1,4 +1,4 @@
-# Warp Panel Agent Guide
+# Gungnr Agent Guide
 
 Purpose
 - Keep the workflow simple, predictable, and low-duplication.

@@ -1,18 +1,19 @@
-## Warp Panel - Project State
+## Gungnr - Project State
 
 Scope
 - Web control panel to perform all deploy.sh tasks from a browser (deploy.sh is reference-only).
 - Runs on the host PC (Docker, filesystem, cloudflared access) and is accessible remotely via Cloudflare Tunnel.
 
 Current state
-- UX overhaul complete: dark zinc mono theme, expanded layout, sidebar-first navigation, custom components, consistent animations.
-- Core flows wired: create from template, deploy existing, forward local service, tunnel/DNS updates, Docker lifecycle controls.
-- GitHub App flow implemented end-to-end for template generation (App credentials, installation token minting, create-from-template).
-- Host Settings reworked with form side panels, ingress preview sidebar, and Docker usage/filters.
+- Planning pivot to a bootstrap-first setup (installer + CLI) with UI cleanup only.
+- Backend API and DB schema are frozen for this iteration.
+- Existing UI/flows remain functional; cleanup will remove setup-oriented guidance.
 
 Active decisions
 - Prefer API-run Docker socket runner; host-worker flow is retired.
 - Cloudflared runs on host (no compose cloudflared service).
+- Bootstrap is mandatory at install time; no optional setup paths.
+- GitHub App configuration remains inside the UI and is scoped to template creation only.
 
 Additional instructions
 - None for this iteration.

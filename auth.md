@@ -1,6 +1,6 @@
 # Authentication (OAuth) Strategy
 
-Warp Panel uses GitHub OAuth for interactive logins and a signed session cookie
+Gungnr uses GitHub OAuth for interactive logins and a signed session cookie
 for API access. The API accepts either the session cookie or a bearer token with
 the same signed payload.
 

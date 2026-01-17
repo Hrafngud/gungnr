@@ -45,7 +45,7 @@ const openLoginPopup = () => {
   const left = Math.max(window.screenX + (window.outerWidth - width) / 2, 0)
   const top = Math.max(window.screenY + (window.outerHeight - height) / 2, 0)
   const features = `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
-  const authWindow = window.open(loginHref.value, 'warp-panel-auth', features)
+  const authWindow = window.open(loginHref.value, 'gungnr-auth', features)
 
   if (!authWindow) {
     window.location.href = loginHref.value
@@ -93,8 +93,9 @@ onBeforeUnmount(() => {
   <section class="grid min-h-screen w-full lg:grid-cols-2">
     <div class="flex flex-col justify-center gap-10 bg-[color:var(--surface-3)] px-8 py-16 sm:px-12">
       <div class="space-y-6">
+        <img src="/logo.svg" alt="Gungnr logo" class="h-12 w-12" />
         <div class="inline-flex items-center gap-2 rounded-full border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-1 text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-          Warp Panel
+          Gungnr
         </div>
         <h1 class="text-4xl font-semibold leading-tight text-[color:var(--text)] sm:text-5xl">
           Orchestrate deployments, tunnels, and ports without touching the terminal.

@@ -241,7 +241,7 @@ const exportSettings = () => {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = 'warp-panel-settings.json'
+  link.download = 'gungnr-settings.json'
   link.click()
   URL.revokeObjectURL(url)
   toastStore.success('Config exported.', 'Download started')

@@ -19,7 +19,7 @@
 ### Configuration (env)
 - `APP_ENV=local|prod`
 - `PORT=8080`
-- `DATABASE_URL=postgres://user:pass@host:5432/warp?sslmode=disable`
+- `DATABASE_URL=postgres://user:pass@host:5432/gungnr?sslmode=disable`
 - `TEMPLATES_DIR=/templates`
 - `CLOUDFLARED_CONFIG=~/.cloudflared/config.yml`
 - `CLOUDFLARED_TUNNEL_NAME=sphynx-app`

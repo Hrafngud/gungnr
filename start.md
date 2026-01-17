@@ -1,8 +1,8 @@
-Workflow: Build a Dockerized "Warp Panel" web UI to perform all deploy.sh tasks from a browser.
-deploy.sh is reference-only; do not modify it. The UI must mirror its CLI behavior (local tunnel setup + deploy flows) before any advanced automation.
+Workflow: Build a Dockerized "Gungnr" web UI plus a bootstrap CLI to make setup one-command.
+deploy.sh is reference-only; do not modify it. During the bootstrap rework, the backend API and DB schema are frozen.
 Stack: Go backend + Vue 3 TS frontend + PostgreSQL, fully containerized via docker compose.
 The app runs on the host PC and controls local resources (Docker, filesystem, cloudflared).
-It is also accessible remotely via the existing Cloudflare tunnel.
+It is also accessible remotely via a Cloudflare tunnel configured during bootstrap.
 
 Core docs
 - AGENTS.md: Process rules and file responsibilities.

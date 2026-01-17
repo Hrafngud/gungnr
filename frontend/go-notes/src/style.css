@@ -584,22 +584,23 @@ h3 {
 }
 
 .state-spinner {
+  display: inline-block;
   width: 0.85rem;
   height: 0.85rem;
-  border-radius: 999px;
-  border: 2px solid rgba(228, 228, 231, 0.2);
-  border-top-color: var(--text);
-  animation: spin 0.8s linear infinite;
+  background-image: url('/loading.gif');
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
 }
 
 .inline-spinner {
   display: inline-block;
   width: 0.85rem;
   height: 0.85rem;
-  border-radius: 999px;
-  border: 2px solid rgba(228, 228, 231, 0.2);
-  border-top-color: var(--text);
-  animation: spin 0.8s linear infinite;
+  background-image: url('/loading.gif');
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
 }
 
 .skeleton {
