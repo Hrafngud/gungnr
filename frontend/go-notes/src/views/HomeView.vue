@@ -588,7 +588,7 @@ watch(
           :disabled="templateSelectionDisabled"
           @focusin="fieldGuidance.show({
             title: 'Template source',
-            description: 'Choose the GitHub template repo Warp Panel should clone and deploy.',
+            description: 'Choose the GitHub template repo Gungnr should clone and deploy.',
           })"
           @focusout="fieldGuidance.clear()"
         />
@@ -812,7 +812,7 @@ watch(
           :disabled="quickState.loading"
           @focus="fieldGuidance.show({
             title: 'Container image',
-            description: 'Optional image to run if you want Warp Panel to launch the service.',
+            description: 'Optional image to run if you want Gungnr to launch the service.',
           })"
           @blur="fieldGuidance.clear()"
         />

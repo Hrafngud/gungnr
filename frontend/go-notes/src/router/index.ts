@@ -123,7 +123,7 @@ router.beforeEach(async (to) => {
 
 router.afterEach((to) => {
   if (to.meta?.title) {
-    document.title = `${to.meta.title} • Warp Panel`
+    document.title = `${to.meta.title} • Gungnr`
   }
 })
 

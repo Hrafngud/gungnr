@@ -1,11 +1,12 @@
-# Warp Panel
+# Gungnr
 
-Warp Panel is a dockerized control panel for deploying template-based projects and
+Gungnr is a dockerized control panel for deploying template-based projects and
 exposing local services via Cloudflare Tunnel. It runs on the host machine with
 access to Docker, the templates directory, and the local cloudflared config, and
 serves a web UI behind an nginx proxy.
 
 Important: Do not edit `deploy.sh`. It is reference-only; the UI must mirror its CLI behavior before advanced automation.
+Setup is now driven by a one-time terminal bootstrap (`install.sh` + `gungnr bootstrap`).
 
 ## Architecture
 - Go API + Postgres + job runner.
@@ -16,55 +17,24 @@ Important: Do not edit `deploy.sh`. It is reference-only; the UI must mirror its
 - `deploy.sh` is reference-only; do not modify it. The UI must reproduce its CLI behavior before any advanced automation.
 
 ## Requirements
-- Docker + Docker Compose v2.
-- `cloudflared` installed on the host with config + credentials, running as a system service.
-- GitHub OAuth app for login.
-- Optional GitHub token for template creation.
-- Optional Cloudflare API token for API-managed tunnels (non-primary path).
+- Sudo access to install dependencies.
+- GitHub OAuth app credentials (Client ID/Secret + callback URL).
+- Cloudflare account, domain, and API token with tunnel + DNS edit permissions.
+- `install.sh` installs or verifies Docker, Docker Compose v2, and `cloudflared`.
 
-## Recommended tunnel setup (host-installed)
-This project assumes a locally-managed tunnel with `cloudflared` running as a system
-service on the host. This is the primary path; the panel updates DNS/ingress via
-the Cloudflare API when configured, but tunnel setup and service management stay
-on the host.
+## Bootstrap-managed tunnel setup
+The bootstrap CLI configures and runs a locally managed tunnel with `cloudflared`
+as a system service. Manual tunnel setup is no longer required for a standard
+install.
 
-1) Install `cloudflared` on the host.
-   - Follow the official install guide for your OS:
-     https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/create-local-tunnel/#1-download-and-install-cloudflared
-2) Authenticate the host with Cloudflare:
-   - `cloudflared tunnel login`
-3) Create a named tunnel:
-   - `cloudflared tunnel create <TUNNEL_NAME>`
-4) Create `~/.cloudflared/config.yml` with ingress rules.
-   - Example (note the required catch-all rule):
-     ```yml
-     tunnel: <TUNNEL_UUID>
-     credentials-file: /home/<user>/.cloudflared/<TUNNEL_UUID>.json
-     ingress:
-       - hostname: app.example.com
-         service: http://localhost:8080
-       - service: http_status:404
-     ```
-5) Create DNS records for hostnames you will use:
-   - `cloudflared tunnel route dns <UUID|NAME> app.example.com`
-   - This requires `cert.pem` in the default `.cloudflared` directory.
-6) Install and run `cloudflared` as a service:
-   - `cloudflared service install`
-   - `systemctl start cloudflared`
-   - Restart after config changes: `systemctl restart cloudflared`
-7) (Optional) Validate ingress rules before restarting:
-   - `cloudflared tunnel ingress validate`
-   - `cloudflared tunnel ingress rule https://app.example.com`
-
-## Warp Panel setup
-1) Copy `.env.example` to `.env` and fill in required values.
-2) Ensure the templates and cloudflared directories exist on the host.
-3) Start the stack: `make up`.
-4) Open `http://localhost` (or the tunnel hostname) and login via GitHub.
-5) When you deploy, the API executes Docker commands over the host socket and then
-   applies Cloudflare DNS/ingress updates.
+## Gungnr setup
+1) Run `./install.sh` to install the CLI and prerequisites.
+2) Run `gungnr bootstrap` and follow the prompts to configure the machine.
+3) Open the printed panel URL and login via GitHub.
+4) Configure GitHub App settings in the UI if you want to enable template creation.
 
 ## Environment configuration
+The bootstrap CLI generates a complete `.env`. Reference values:
 Required for login:
 - `SESSION_SECRET`
 - `GITHUB_CLIENT_ID`
@@ -113,7 +83,7 @@ Use the returned token as `Authorization: Bearer <token>` for `/api/v1/*` routes
 - `make down-v`
 
 ## Workflows
-- Create from template: choose a name and subdomain; Warp Panel creates the repo
+- Create from template: choose a name and subdomain; Gungnr creates the repo
   and deploys it.
 - Deploy existing: select a local template project, set a subdomain, and start
   compose.

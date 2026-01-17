@@ -16,14 +16,16 @@ const handleLogout = async () => {
   <header class="border-b border-black/10 bg-white/70 backdrop-blur">
     <div class="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-4">
       <div class="flex items-center gap-4">
-        <div
-          class="flex h-11 w-11 items-center justify-center rounded-2xl bg-[color:var(--accent)] text-lg font-semibold text-white shadow-lg shadow-[color:var(--accent)]/30"
-        >
-          WP
+        <div class="flex h-11 w-11 items-center justify-center">
+          <img
+            src="/logo.svg"
+            alt="Gungnr logo"
+            class="h-11 w-11 rounded-2xl shadow-lg shadow-[color:var(--accent)]/30"
+          />
         </div>
         <div>
           <p class="text-xs uppercase tracking-[0.3em] text-neutral-500">
-            Warp Panel
+            Gungnr
           </p>
           <p class="text-base font-semibold text-neutral-900">
             Deploy orchestration for the host stack

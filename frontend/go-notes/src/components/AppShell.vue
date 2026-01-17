@@ -68,7 +68,7 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const pageLoading = usePageLoadingStore()
-const SIDEBAR_KEY = 'warp-panel.sidebar'
+const SIDEBAR_KEY = 'gungnr.sidebar'
 const sidebarMode = ref<'expanded' | 'collapsed'>('expanded')
 
 const isSidebarCollapsed = computed(() => sidebarMode.value === 'collapsed')
@@ -99,7 +99,7 @@ watch(sidebarMode, (value) => {
 
 const pageTitle = computed(() => {
   const title = route.meta?.title as string | undefined
-  return title ?? 'Warp Panel'
+  return title ?? 'Gungnr'
 })
 
 const isActive = (to: string) => {
@@ -196,7 +196,7 @@ const isActive = (to: string) => {
                 {{ pageTitle }}
               </p>
               <h1 class="text-lg font-semibold text-[color:var(--text)]">
-                Warp Panel
+                Gungnr
               </h1>
             </div>
             <div class="flex flex-wrap items-center gap-3">
