@@ -14,7 +14,7 @@ Guiding principle: one-time terminal bootstrap that leaves the panel fully wired
 - Implement `gungnr bootstrap` as the only setup command.
 - Inspect environment and abort if an existing Gungnr install is detected.
 - Use GitHub device flow to identify and seed the SuperUser.
-- Run `cloudflared tunnel login`, create a tunnel, generate a full config.yml, and install/start the service.
+- Run `cloudflared tunnel login`, create a tunnel, generate a full config.yml, and start the tunnel as a user-managed process.
 - Prompt for domain + Cloudflare API token, validate scopes, and create DNS routing.
 - Materialize filesystem paths and generate a complete `.env` (no placeholders).
 - Start Docker Compose, wait for API health, and print the panel URL.

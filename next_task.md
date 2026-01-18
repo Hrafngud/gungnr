@@ -1,7 +1,7 @@
 ## Next Task
 
 Objective
-Review UI states and labels that still imply post-bootstrap setup steps and adjust them to inspection/availability language only.
+Review Home, Host Settings, Networking, and GitHub UI states/labels that still imply post-bootstrap setup steps and adjust them to inspection/availability language only.
 
 Success criteria
 - No UI labels or empty states imply that Cloudflare or OAuth setup must be done after bootstrap.

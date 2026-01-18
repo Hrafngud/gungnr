@@ -1,5 +1,12 @@
 ## Iteration Log
 
+- 2026-01-20: Redirected bootstrap cloudflared tunnel logs to a file so the CLI remains usable.
+  - `gungnr bootstrap` now writes tunnel output to `~/.cloudflared/cloudflared.log` and prints the path in the summary.
+- 2026-01-20: Adjusted bootstrap tunnel readiness check to accept active connectors from `cloudflared tunnel info`.
+  - Treats connector rows as a successful tunnel signal when active-connection counters are absent.
+- 2026-01-17: Improved bootstrap CLI prompts for GitHub and Cloudflare inputs.
+  - Added GitHub OAuth App link before device flow client ID prompt.
+  - Added Cloudflare API token links/permissions and normalized token input to strip Authorization/Bearer prefixes.
 - 2026-01-17: Cleaned Cloudflare/OAuth setup copy to assume bootstrap-complete state.
   - Reframed Host Settings and Networking guidance as inspection/rotation-only.
   - Updated Home and Templates copy to reference the host tunnel without setup phrasing.
@@ -14,6 +21,10 @@
   - Bootstrapping creates `~/gungnr` with `templates` and `state` subfolders and writes the `.env` there.
   - Added summary output and new prompts for GitHub client secret + callback URL.
 - 2026-01-18: Added cloudflared config generation to `gungnr bootstrap`, install/start as a system service, and tunnel status validation.
+- 2026-01-18: Switched `gungnr bootstrap` to run cloudflared via CLI (no systemd).
+  - Removed cloudflared service install/start logic and sudo/systemctl usage.
+  - Start tunnel with `cloudflared tunnel run --config <path> <tunnel-name>` and keep health check via `tunnel info`.
+- 2026-01-18: Added explicit CLI output note that cloudflared runs as the current user and persistence is out of scope.
 - 2026-01-18: Added Cloudflare DNS routing to `gungnr bootstrap`, prompting for base domain + API token, validating zone/account access, creating the DNS route, and confirming the record.
 - 2026-01-17: Implemented cloudflared tunnel login + creation in `gungnr bootstrap`, including credential wait and tunnel UUID/name output.
 - 2026-01-17: Extended `gungnr bootstrap` preflight checks to detect existing installs and validate default filesystem paths.

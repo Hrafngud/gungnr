@@ -57,11 +57,11 @@ Note: UI-managed settings (domain, GitHub token, Cloudflare token, cloudflared c
 - Use template repo creation endpoint instead of `gh` CLI.
 
 ### Cloudflare Integration
-- Primary path: host-installed `cloudflared` service with local `~/.cloudflared/config.yml`.
+- Primary path: host-run `cloudflared` CLI process with local `~/.cloudflared/config.yml`.
 - `deploy.sh` is reference-only; do not modify it. The UI should mirror its CLI behavior before advanced automation.
 - Add DNS records via `cloudflared tunnel route dns <UUID|NAME> <hostname>` (requires `cert.pem`).
 - Update local `config.yml` ingress rules (insert after `ingress:`) and always keep a catch-all rule (`http_status:404`).
-- Restart the host service after updates (`systemctl restart cloudflared`); validate with `cloudflared tunnel ingress validate`.
+- Restart the host process after updates; validate with `cloudflared tunnel ingress validate`.
 - Prefer API-run Docker socket execution for deploy actions; host-worker flow is removed.
 - Keep API-managed remote tunnels optional and explicitly non-primary.
 

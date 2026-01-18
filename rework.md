@@ -180,8 +180,8 @@ Implementation:
 
    * Panel ingress
    * Required catch-all rule
-8. Install cloudflared as a system service.
-9. Start the service and verify it is running.
+8. Start the tunnel as a user-managed process (`cloudflared tunnel run --config <path> <name>`).
+9. Verify the tunnel is running.
 
 ---
 

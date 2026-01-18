@@ -12,7 +12,7 @@ Setup is now driven by a one-time terminal bootstrap (`install.sh` + `gungnr boo
 - Go API + Postgres + job runner.
 - Vue 3 UI served by nginx.
 - Single nginx proxy on port 80 routes /, /api, and /auth.
-- `cloudflared` runs on the host as a system service (primary path).
+- `cloudflared` runs on the host as a user-managed CLI process (primary path).
 - Deploy actions run inside the API container via the Docker socket (no host-worker flow).
 - `deploy.sh` is reference-only; do not modify it. The UI must reproduce its CLI behavior before any advanced automation.
 
@@ -24,8 +24,9 @@ Setup is now driven by a one-time terminal bootstrap (`install.sh` + `gungnr boo
 
 ## Bootstrap-managed tunnel setup
 The bootstrap CLI configures and runs a locally managed tunnel with `cloudflared`
-as a system service. Manual tunnel setup is no longer required for a standard
-install.
+as a user-managed process. Manual tunnel setup is no longer required for a
+standard install.
+Persistence and auto-restart are out of scope for now.
 
 ## Gungnr setup
 1) Run `./install.sh` to install the CLI and prerequisites.
@@ -63,8 +64,8 @@ zone.
 
 If you are managing ingress via the Cloudflare API, ensure the tunnel is
 remote-managed (`config_src=cloudflare`) and `cloudflared` is running on the
-host as a service. This is an optional, non-primary path. Locally managed
-tunnels (`config_src=local`) cannot be updated via the Cloudflare API.
+host as a user-managed process. This is an optional, non-primary path. Locally
+managed tunnels (`config_src=local`) cannot be updated via the Cloudflare API.
 
 ## Test token auth (optional)
 If `ADMIN_LOGIN` and `ADMIN_PASSWORD` are set, you can request a bearer token:
