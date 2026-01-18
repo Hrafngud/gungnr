@@ -939,7 +939,7 @@ watch(projectFilter, () => {
               Status + settings
             </p>
             <p class="mt-1 text-xs text-[color:var(--muted)]">
-              Keep Docker and cloudflared healthy, then update the overrides that drive deploys.
+              Keep Docker and cloudflared healthy, then adjust overrides only when you rotate credentials or paths.
             </p>
           </div>
           <UiButton
@@ -1096,10 +1096,10 @@ watch(projectFilter, () => {
           <div class="space-y-6">
             <div class="space-y-4">
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                GitHub access
+                GitHub App (template creation only)
               </p>
               <p class="text-xs text-[color:var(--muted)]">
-                Create-from-template uses GitHub App installation tokens minted from the credentials below.
+                Required only when creating new repos from templates. Deploys and forwarding work without it.
               </p>
 
               <div class="grid gap-4">
@@ -1241,10 +1241,7 @@ watch(projectFilter, () => {
                     :disabled="loading"
                     @focus="fieldGuidance.show({
                       title: 'Cloudflare API token',
-                      description: 'Token with Tunnel:Edit and DNS:Edit for the selected account and zone.',
-                      links: [
-                        { label: 'Cloudflare API tokens', href: 'https://dash.cloudflare.com/profile/api-tokens' },
-                      ],
+                      description: 'Used for DNS automation; rotate here if the host token changes. Requires Tunnel:Edit and DNS:Edit scopes.',
                     })"
                     @blur="fieldGuidance.clear()"
                   />
@@ -1274,9 +1271,6 @@ watch(projectFilter, () => {
                   @focus="fieldGuidance.show({
                     title: 'Cloudflare account ID',
                     description: 'Account identifier that owns the tunnel and DNS zone.',
-                    links: [
-                      { label: 'Cloudflare dashboard', href: 'https://dash.cloudflare.com' },
-                    ],
                   })"
                   @blur="fieldGuidance.clear()"
                 />
@@ -1294,9 +1288,6 @@ watch(projectFilter, () => {
                   @focus="fieldGuidance.show({
                     title: 'Cloudflare zone ID',
                     description: 'Zone identifier for the base domain you are routing.',
-                    links: [
-                      { label: 'Cloudflare dashboard', href: 'https://dash.cloudflare.com' },
-                    ],
                   })"
                   @blur="fieldGuidance.clear()"
                 />
@@ -1314,18 +1305,14 @@ watch(projectFilter, () => {
                   @focus="fieldGuidance.show({
                     title: 'Cloudflared tunnel',
                     description: 'Name or UUID used to resolve and update ingress rules.',
-                    links: [
-                      { label: 'Tunnel guide', href: 'https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/' },
-                    ],
                   })"
                   @blur="fieldGuidance.clear()"
                 />
               </label>
 
               <p class="text-xs text-[color:var(--muted)]">
-                Use a Cloudflare API token (not a global API key) with
-                Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit for the configured account
-                and zone.
+                The bootstrap flow seeds Cloudflare access. Update only when rotating credentials or swapping tunnels.
+                Required scopes: Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit.
               </p>
 
               <div
@@ -1384,9 +1371,6 @@ watch(projectFilter, () => {
               @focus="fieldGuidance.show({
                 title: 'Cloudflared config path',
                 description: 'Path to the config.yml used by the host cloudflared service.',
-                links: [
-                  { label: 'Tunnel guide', href: 'https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/' },
-                ],
               })"
               @blur="fieldGuidance.clear()"
             />

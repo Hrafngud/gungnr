@@ -58,14 +58,14 @@ const appTone = computed<BadgeTone>(() => {
 const templateStatus = computed(() => {
   if (loading.value && !catalog.value) return 'Checking'
   if (!catalog.value) return 'Unknown'
-  if (!appConfigured.value) return 'Needs app setup'
-  if (!templateConfigured.value) return 'Not configured'
+  if (!appConfigured.value) return 'App missing'
+  if (!templateConfigured.value) return 'Template not set'
   return 'Ready'
 })
 
 const templateTone = computed<BadgeTone>(() => {
   if (templateStatus.value === 'Ready') return 'ok'
-  if (templateStatus.value === 'Needs app setup' || templateStatus.value === 'Not configured') {
+  if (templateStatus.value === 'App missing' || templateStatus.value === 'Template not set') {
     return 'warn'
   }
   return 'neutral'

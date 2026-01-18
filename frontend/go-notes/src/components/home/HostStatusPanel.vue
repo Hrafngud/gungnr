@@ -264,15 +264,15 @@ const formatDate = (value?: string | null) => {
       <UiListRow class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-            Next steps
+            Host settings
           </p>
           <p class="mt-1 text-sm text-[color:var(--muted)]">
-            Finish host setup to unlock host tunnel automation and DNS updates.
+            Review tunnel health, DNS automation, and configuration details.
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <UiButton :as="RouterLink" to="/host-settings" variant="primary" size="sm">
-            Configure host
+            Open host settings
           </UiButton>
         </div>
       </UiListRow>

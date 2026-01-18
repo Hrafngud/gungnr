@@ -187,8 +187,16 @@ const templateEmptyStateMessage = computed(() => {
   return 'No template repositories configured yet.'
 })
 
+const templateCreateBlocked = computed(
+  () => Boolean(catalog.value) && !catalog.value?.app?.configured,
+)
+
 const templateSelectionDisabled = computed(
-  () => templateState.loading || !isAuthenticated.value || templateOptions.value.length === 0,
+  () =>
+    templateState.loading ||
+    !isAuthenticated.value ||
+    templateOptions.value.length === 0 ||
+    templateCreateBlocked.value,
 )
 
 const selectedServiceName = ref<string>('')
@@ -261,6 +269,10 @@ const refreshAll = async () => {
 const submitTemplate = async () => {
   if (templateState.loading || !isAuthenticated.value) return
   resetState(templateState)
+  if (templateCreateBlocked.value) {
+    templateState.error = 'GitHub App credentials are required to create templates.'
+    return
+  }
   if (templateOptions.value.length === 0) {
     templateState.error = isAuthenticated.value
       ? 'Template source is not configured.'
@@ -375,6 +387,7 @@ const submitQuick = async () => {
 }
 
 const selectTemplateCard = async (id: TemplateCardId) => {
+  if (id === 'create' && templateCreateBlocked.value) return
   if (selectedTemplateCard.value === id) {
     selectedTemplateCard.value = null
     if (id === 'create') {
@@ -577,6 +590,28 @@ watch(
           </span>
         </UiButton>
       </UiPanel>
+      <UiPanel
+        v-else-if="templateCreateBlocked"
+        variant="soft"
+        class="flex flex-wrap items-center justify-between gap-3 p-3 text-xs text-[color:var(--muted)]"
+      >
+        <div>
+          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+            Template creation
+          </p>
+          <p class="mt-1 text-sm text-[color:var(--muted)]">
+            GitHub App credentials are required to create new repos from templates.
+          </p>
+        </div>
+        <UiButton
+          :as="RouterLink"
+          to="/github"
+          variant="ghost"
+          size="sm"
+        >
+          GitHub settings
+        </UiButton>
+      </UiPanel>
       <label class="grid gap-2 text-sm">
         <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
           Template repo <span class="text-[color:var(--danger)]">*</span>
@@ -605,7 +640,7 @@ watch(
           type="text"
           placeholder="my-project"
           required
-          :disabled="templateState.loading || !isAuthenticated || templateOptions.length === 0"
+          :disabled="templateSelectionDisabled"
           @focus="fieldGuidance.show({
             title: 'Project name',
             description: 'Used for the GitHub repo and the local folder. Keep it short and DNS-safe.',
@@ -625,15 +660,15 @@ watch(
           type="text"
           placeholder="my-project"
           required
-          :disabled="templateState.loading || !isAuthenticated || templateOptions.length === 0"
+          :disabled="templateSelectionDisabled"
           @focus="fieldGuidance.show({
             title: 'Subdomain',
-            description: 'Becomes the hostname prepended to your base domain in Cloudflare.',
+            description: 'Becomes the hostname prepended to your base domain.',
           })"
           @blur="fieldGuidance.clear()"
         />
         <p class="text-xs text-[color:var(--muted)]">
-          Subdomain for web access via your Cloudflare tunnel.
+          Subdomain for web access through the host tunnel.
         </p>
       </label>
       <UiInlineFeedback v-if="templateState.error" tone="error">
@@ -646,7 +681,7 @@ watch(
         <UiButton
           type="submit"
           variant="primary"
-          :disabled="templateState.loading || !isAuthenticated || templateOptions.length === 0"
+          :disabled="templateSelectionDisabled"
         >
           {{ templateState.loading ? 'Queueing...' : 'Queue template job' }}
         </UiButton>
@@ -668,7 +703,7 @@ watch(
     <form class="space-y-5" @submit.prevent="submitExisting">
       <div class="space-y-2">
         <p class="text-xs text-[color:var(--muted)]">
-          Forward any running localhost service (Docker or not) through your Cloudflare tunnel for web access.
+          Forward any running localhost service (Docker or not) through the host tunnel for web access.
         </p>
       </div>
       <label class="grid gap-2 text-sm">
@@ -703,12 +738,12 @@ watch(
           :disabled="existingState.loading"
           @focus="fieldGuidance.show({
             title: 'Subdomain',
-            description: 'The public hostname to route through your Cloudflare tunnel.',
+            description: 'The public hostname to route through the host tunnel.',
           })"
           @blur="fieldGuidance.clear()"
         />
         <p class="text-xs text-[color:var(--muted)]">
-          Subdomain for web access via your Cloudflare tunnel.
+          Subdomain for web access through the host tunnel.
         </p>
       </label>
       <label class="grid gap-2 text-sm">

@@ -36,7 +36,7 @@ const templateCards: TemplateCard[] = [
   {
     id: 'existing',
     title: 'Forward localhost service',
-    description: 'Expose any running localhost port via Cloudflare tunnel.',
+    description: 'Expose any running localhost port via the host tunnel.',
     actionLabel: 'Configure Forward',
   },
 ]
@@ -74,6 +74,20 @@ const templateRepoUrl = computed(() => {
   if (!template) return ''
   return `https://github.com/${template.owner}/${template.repo}`
 })
+
+const createDisabled = computed(() => Boolean(props.catalog) && !props.catalog?.app?.configured)
+
+const badgeLabel = (card: TemplateCard) => {
+  if (props.selectedCard === card.id) return 'Selected'
+  if (card.id === 'create' && createDisabled.value) return 'Needs app'
+  return 'Ready'
+}
+
+const badgeTone = (card: TemplateCard) => {
+  if (props.selectedCard === card.id) return 'ok'
+  if (card.id === 'create' && createDisabled.value) return 'warn'
+  return 'neutral'
+}
 </script>
 
 <template>
@@ -114,8 +128,8 @@ const templateRepoUrl = computed(() => {
               {{ card.description }}
             </p>
           </div>
-          <UiBadge :tone="selectedCard === card.id ? 'ok' : 'neutral'">
-            {{ selectedCard === card.id ? 'Selected' : 'Ready' }}
+          <UiBadge :tone="badgeTone(card)">
+            {{ badgeLabel(card) }}
           </UiBadge>
         </div>
         <div
@@ -151,6 +165,7 @@ const templateRepoUrl = computed(() => {
           type="button"
           variant="primary"
           size="sm"
+          :disabled="card.id === 'create' && createDisabled"
           @click="emit('select-card', card.id)"
         >
           <span class="flex items-center gap-2">
@@ -161,6 +176,15 @@ const templateRepoUrl = computed(() => {
             {{ card.actionLabel }}
           </span>
         </UiButton>
+        <p
+          v-if="card.id === 'create' && createDisabled"
+          class="text-xs text-[color:var(--muted)]"
+        >
+          GitHub App credentials are required to create template repos.
+          <RouterLink class="text-[color:var(--text)] hover:text-[color:var(--accent-ink)]" to="/github">
+            Open GitHub settings.
+          </RouterLink>
+        </p>
       </UiPanel>
     </div>
   </UiPanel>

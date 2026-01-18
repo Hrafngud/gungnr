@@ -46,7 +46,7 @@ const greeting = computed(() => {
         <div class="rounded-2xl border border-black/10 bg-white/90 p-4">
           <p class="text-sm font-semibold text-neutral-800">Tunnel routes</p>
           <p class="mt-2 text-xs text-neutral-600">
-            Add DNS records and update ingress rules from one view.
+            Review DNS records and ingress rules from one view.
           </p>
         </div>
         <div class="rounded-2xl border border-black/10 bg-white/90 p-4">
