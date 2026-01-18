@@ -446,8 +446,8 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
           Cloudflare credentials power DNS automation for the host-managed tunnel.
         </p>
         <p class="text-xs text-[color:var(--muted)]">
-          Use a Cloudflare API token with Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit for the
-          configured account and zone.
+          Tokens are seeded during bootstrap; update them in Host Settings only when rotating. Required scopes:
+          Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit.
         </p>
 
         <UiState v-if="settingsLoading" loading>

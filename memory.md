@@ -1,10 +1,33 @@
 ## Iteration Log
 
+- 2026-01-17: Cleaned Cloudflare/OAuth setup copy to assume bootstrap-complete state.
+  - Reframed Host Settings and Networking guidance as inspection/rotation-only.
+  - Updated Home and Templates copy to reference the host tunnel without setup phrasing.
+- 2026-01-20: Aligned README with bootstrap-first flow.
+  - Reframed requirements as bootstrap inputs and kept Host Settings as inspection/adjustments only.
+  - Removed post-bootstrap OAuth callback and cloudflared config troubleshooting steps.
+- 2026-01-05: Scoped GitHub App setup to template creation.
+  - Labeled GitHub App settings as template-only, disabled create-from-template when app credentials are missing, and added concise guidance in the template card and form.
+- 2026-01-17: Wired `gungnr bootstrap` to start Docker Compose with the generated `.env`, wait for `/healthz`, and print the panel URL after services are ready.
+- 2026-01-18: Added bootstrap `.env` generation and Gungnr data directory creation in the CLI.
+  - `gungnr bootstrap` now builds a complete `.env` with GitHub identity, Cloudflare tunnel details, domain, and cloudflared paths.
+  - Bootstrapping creates `~/gungnr` with `templates` and `state` subfolders and writes the `.env` there.
+  - Added summary output and new prompts for GitHub client secret + callback URL.
+- 2026-01-18: Added cloudflared config generation to `gungnr bootstrap`, install/start as a system service, and tunnel status validation.
+- 2026-01-18: Added Cloudflare DNS routing to `gungnr bootstrap`, prompting for base domain + API token, validating zone/account access, creating the DNS route, and confirming the record.
+- 2026-01-17: Implemented cloudflared tunnel login + creation in `gungnr bootstrap`, including credential wait and tunnel UUID/name output.
+- 2026-01-17: Extended `gungnr bootstrap` preflight checks to detect existing installs and validate default filesystem paths.
+- 2026-01-17: Added initial Go `gungnr` CLI with `bootstrap` preflight checks for Docker access, Docker Compose availability, and cloudflared presence.
+- 2026-01-17: Added repo-root `install.sh` to install the Gungnr CLI, detect OS/arch, and verify/install Docker, Docker Compose, and cloudflared.
+- 2026-01-19: Removed setup-oriented copy from the Home host status panel and softened GitHub status labels away from “setup” language.
 - 2026-01-17: Added Gungnr logo usage in header/login and swapped loading spinners to use the new loading.gif.
 - 2026-01-17: Rebranded legacy product naming to Gungnr across docs, UI copy, and CLI naming.
 - 2026-01-17: Re-aligned plans to the bootstrap-first install approach.
   - Updated overall, backend, and frontend plans to reflect install.sh + gungnr CLI + UI cleanup phases.
   - Set the next task to implement the installer script; backend API/DB changes are frozen.
+- 2026-01-17: Implemented GitHub device flow in the CLI bootstrap.
+  - Added device authorization prompt, polling, and GitHub user lookup.
+  - Captured and printed the GitHub login and numeric user ID for later bootstrap steps.
 - 2026-01-08: Desktop responsiveness pass across main views.
   - Added flex-wrap + break-word handling to list rows and panel headers to prevent clipped labels/values.
   - Switched key grids to minmax column definitions for safer shrink on desktop aspect ratios.

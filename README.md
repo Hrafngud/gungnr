@@ -18,8 +18,8 @@ Setup is now driven by a one-time terminal bootstrap (`install.sh` + `gungnr boo
 
 ## Requirements
 - Sudo access to install dependencies.
-- GitHub OAuth app credentials (Client ID/Secret + callback URL).
-- Cloudflare account, domain, and API token with tunnel + DNS edit permissions.
+- GitHub OAuth app credentials (Client ID/Secret + callback URL) for bootstrap input.
+- Cloudflare account, domain, and API token with tunnel + DNS edit permissions for bootstrap input.
 - `install.sh` installs or verifies Docker, Docker Compose v2, and `cloudflared`.
 
 ## Bootstrap-managed tunnel setup
@@ -39,8 +39,7 @@ Required for login:
 - `SESSION_SECRET`
 - `GITHUB_CLIENT_ID`
 - `GITHUB_CLIENT_SECRET`
-- `GITHUB_CALLBACK_URL` (use `http://localhost/auth/callback` when using the
-  proxy, or your public host)
+- `GITHUB_CALLBACK_URL`
 Optional access control:
 Manage access via the Users allowlist in the panel (SuperUser/Admin only).
 Admin test token (optional):
@@ -55,8 +54,9 @@ Host integration defaults:
 - `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID` (required for API-managed tunnels)
 - `VITE_API_BASE_URL=/` when building the web container so the UI uses same-origin HTTPS.
 
-Note: Settings in the UI (domain, GitHub token, Cloudflare token, cloudflared
-tunnel ref, cloudflared config path) override env defaults.
+Note: Host Settings are for inspection and minor adjustments only. Settings in
+the UI (domain, GitHub token, Cloudflare token, cloudflared tunnel ref,
+cloudflared config path) override env defaults.
 Cloudflare tokens should be API tokens (not global API keys) with
 Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit for the configured account and
 zone.
@@ -105,8 +105,5 @@ VITE_API_BASE_URL=http://localhost:8080 npm run dev`
 
 ## Troubleshooting
 - Check service health: `make ps`, `make logs`
-- OAuth callback mismatch: update `GITHUB_CALLBACK_URL` to match the public host.
-- cloudflared config missing: confirm `CLOUDFLARED_DIR` and
-  `CLOUDFLARED_CONFIG`.
 - Validate ingress rules: `cloudflared tunnel ingress validate`
 - Test rule matching: `cloudflared tunnel ingress rule https://sub.example.com`
