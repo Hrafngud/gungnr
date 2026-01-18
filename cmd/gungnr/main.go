@@ -161,7 +161,7 @@ func runBootstrap() {
 	}
 
 	env := bootstrapEnv{
-		AppEnv:              "production",
+		AppEnv:              "prod",
 		Port:                "8080",
 		DatabaseURL:         buildDatabaseURL(defaultPostgresUser, defaultPostgresPassword, defaultPostgresDB),
 		DBMaxOpenConns:      20,

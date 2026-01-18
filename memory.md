@@ -244,6 +244,8 @@
 - 2026-01-07: Updated the GitHub view allowlist summary to source users from `/api/v1/users`.
   - Added allowlist loading to the GitHub view and replaced env-based labels with user list data.
   - Refresh now pulls both catalog and allowlist users together for updated counts.
+- 2026-01-07: Fixed bootstrap APP_ENV value to align with secure cookie enforcement.
+  - Updated generated `.env` to use `APP_ENV=prod` so backend secure cookies enable in production.
 
 ## Completed Task Snapshot
 
