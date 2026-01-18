@@ -123,17 +123,21 @@ func runBootstrap() {
 		os.Exit(1)
 	}
 
-	if err := installAndStartCloudflaredService(configPath); err != nil {
-		fmt.Fprintf(os.Stderr, "Cloudflared service setup failed: %s\n", err.Error())
+	logPath, err := startCloudflaredTunnel(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cloudflared tunnel start failed: %s\n", err.Error())
 		os.Exit(1)
 	}
+
+	fmt.Printf("Cloudflared tunnel logs: %s\n", logPath)
 
 	if err := waitForTunnelRunning(tunnel.ID); err != nil {
 		fmt.Fprintf(os.Stderr, "Cloudflared tunnel did not report as running: %s\n", err.Error())
 		os.Exit(1)
 	}
 
-	fmt.Println("Cloudflared service is running.")
+	fmt.Println("Cloudflared tunnel is running.")
+	fmt.Println("Note: cloudflared runs as the current user; persistence and auto-restart are out of scope.")
 
 	dataPaths, err := prepareDataDir(dataDir)
 	if err != nil {
@@ -222,7 +226,7 @@ func runBootstrap() {
 	}
 
 	fmt.Printf("Panel is ready: https://%s\n", dnsSetup.Hostname)
-	printBootstrapSummary(dataPaths, env, dnsSetup.Hostname, configPath)
+	printBootstrapSummary(dataPaths, env, dnsSetup.Hostname, configPath, logPath)
 }
 
 func defaultPaths() (string, string, string, error) {
@@ -461,10 +465,14 @@ func setupCloudflareDNS(tunnel *tunnelInfo) (*cloudflareSetup, error) {
 		return nil, err
 	}
 
-	apiToken, err := promptNonEmpty("Cloudflare API token: ")
+	fmt.Println("Create a Cloudflare API token with Account: Cloudflare Tunnel: Edit and Zone: DNS: Edit.")
+	fmt.Println("Token page: https://dash.cloudflare.com/profile/api-tokens")
+	fmt.Println("Docs: https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/deployment-guides/terraform/#3-create-a-cloudflare-api-token")
+	apiToken, err := promptNonEmpty("Cloudflare API token (paste token only): ")
 	if err != nil {
 		return nil, err
 	}
+	apiToken = normalizeCloudflareToken(apiToken)
 
 	zone, err := fetchCloudflareZone(apiToken, baseDomain)
 	if err != nil {
@@ -542,29 +550,23 @@ func copyFile(src, dest string) error {
 	return output.Sync()
 }
 
-func installAndStartCloudflaredService(configPath string) error {
-	fmt.Println("Installing cloudflared as a system service.")
-	if err := runPrivilegedCommand("cloudflared", "--config", configPath, "service", "install"); err != nil {
-		return fmt.Errorf("cloudflared service install failed: %w", err)
+func startCloudflaredTunnel(configPath string) (string, error) {
+	fmt.Println("Starting cloudflared tunnel.")
+	logPath := filepath.Join(filepath.Dir(configPath), "cloudflared.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("open cloudflared log file: %w", err)
 	}
-
-	fmt.Println("Starting cloudflared service.")
-	if err := runPrivilegedCommand("cloudflared", "--config", configPath, "service", "start"); err != nil {
-		return fmt.Errorf("cloudflared service start failed: %w", err)
+	cmd := exec.Command("cloudflared", "--config", configPath, "tunnel", "run")
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.Stdin = nil
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		return "", fmt.Errorf("cloudflared tunnel run failed: %w", err)
 	}
-
-	return nil
-}
-
-func runPrivilegedCommand(name string, args ...string) error {
-	if os.Geteuid() == 0 {
-		return runInteractiveCommand(name, args...)
-	}
-	if _, err := exec.LookPath("sudo"); err != nil {
-		return fmt.Errorf("sudo not found; re-run as root to execute %s %s", name, strings.Join(args, " "))
-	}
-	sudoArgs := append([]string{name}, args...)
-	return runInteractiveCommand("sudo", sudoArgs...)
+	_ = logFile.Close()
+	return logPath, nil
 }
 
 func waitForTunnelRunning(tunnelID string) error {
@@ -579,6 +581,11 @@ func waitForTunnelRunning(tunnelID string) error {
 					return nil
 				}
 				lastErr = fmt.Errorf("active connections reported as %d", connections)
+			} else if connectors, ok := parseConnectorCount(output); ok {
+				if connectors > 0 {
+					return nil
+				}
+				lastErr = fmt.Errorf("tunnel reported %d connectors", connectors)
 			} else if strings.Contains(strings.ToLower(output), "status: healthy") {
 				return nil
 			} else {
@@ -609,6 +616,18 @@ func parseActiveConnections(output string) (int, bool) {
 		return 0, false
 	}
 	return value, true
+}
+
+func parseConnectorCount(output string) (int, bool) {
+	if !strings.Contains(output, "CONNECTOR ID") {
+		return 0, false
+	}
+	re := regexp.MustCompile(`(?m)^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`)
+	matches := re.FindAllString(output, -1)
+	if len(matches) == 0 {
+		return 0, false
+	}
+	return len(matches), true
 }
 
 func runInteractiveCommand(name string, args ...string) error {
@@ -685,6 +704,20 @@ func promptNonEmpty(prompt string) (string, error) {
 		}
 		fmt.Println("Value is required.")
 	}
+}
+
+func normalizeCloudflareToken(token string) string {
+	value := strings.TrimSpace(token)
+	value = strings.Trim(value, "\"'")
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "authorization:") {
+		value = strings.TrimSpace(value[len("authorization:"):])
+		lower = strings.ToLower(value)
+	}
+	if strings.HasPrefix(lower, "bearer ") {
+		value = strings.TrimSpace(value[len("bearer "):])
+	}
+	return value
 }
 
 func parseTunnelID(output string) (string, error) {
@@ -935,6 +968,8 @@ func resolveGitHubClientID() (string, error) {
 		return clientID, nil
 	}
 
+	fmt.Println("GitHub device flow uses an OAuth App client ID.")
+	fmt.Println("Create one at https://github.com/settings/developers (OAuth Apps).")
 	fmt.Print("GitHub OAuth Client ID for device flow: ")
 	reader := bufio.NewReader(os.Stdin)
 	value, err := reader.ReadString('\n')
@@ -1221,7 +1256,7 @@ func promptWithDefault(label, defaultValue string) (string, error) {
 	}
 }
 
-func printBootstrapSummary(paths dataPaths, env bootstrapEnv, hostname, configPath string) {
+func printBootstrapSummary(paths dataPaths, env bootstrapEnv, hostname, configPath, logPath string) {
 	fmt.Println("Bootstrap configuration written.")
 	fmt.Printf("- Data directory: %s\n", paths.Root)
 	fmt.Printf("- Templates directory: %s\n", paths.TemplatesDir)
@@ -1229,6 +1264,7 @@ func printBootstrapSummary(paths dataPaths, env bootstrapEnv, hostname, configPa
 	fmt.Printf("- .env path: %s\n", paths.EnvPath)
 	fmt.Printf("- Panel hostname: https://%s\n", hostname)
 	fmt.Printf("- Cloudflared config: %s\n", configPath)
+	fmt.Printf("- Cloudflared log: %s\n", logPath)
 	fmt.Printf("- Cloudflare tunnel: %s (%s)\n", env.CloudflaredTunnel, env.CloudflareTunnelID)
 }
 
