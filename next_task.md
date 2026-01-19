@@ -1,13 +1,11 @@
 ## Next Task
 
 Objective
-Review remaining shared UI components (AppShell, headers, cards, side panels) for copy that implies post-bootstrap setup; adjust to availability/inspection language only.
+Document secondary-domain support and the Networking > Domains config flow in the README.
 
 Success criteria
-- Shared UI components avoid implying Cloudflare or OAuth setup after bootstrap.
-- Status/helper labels communicate availability/health rather than setup.
-- Changes stay concise and avoid new guidance or workflows.
+- README notes that additional domains can be added post-bootstrap in Networking.
+- Guidance is concise and matches the existing bootstrap-first workflow language.
 
 Notes
 - Keep task lists in planning files only. Do not move tasks back into manager.md.
-- Carryover after the runtime signals layout cleanup.

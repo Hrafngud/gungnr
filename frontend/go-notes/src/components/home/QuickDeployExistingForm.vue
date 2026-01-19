@@ -4,6 +4,7 @@ import UiButton from '@/components/ui/UiButton.vue'
 import UiFormSidePanel from '@/components/ui/UiFormSidePanel.vue'
 import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
 import UiInput from '@/components/ui/UiInput.vue'
+import UiSelect from '@/components/ui/UiSelect.vue'
 
 type QueueState = {
   loading: boolean
@@ -17,13 +18,21 @@ type GuidancePayload = {
   description: string
 }
 
+type SelectOption = {
+  value: string | number
+  label: string
+  disabled?: boolean
+}
+
 defineProps<{
   open: boolean
   isAuthenticated: boolean
   state: QueueState
   name: string
   subdomain: string
+  domain: string
   port: string
+  domainOptions: SelectOption[]
   showGuidance: (payload: GuidancePayload) => void
   clearGuidance: () => void
 }>()
@@ -32,6 +41,7 @@ const emit = defineEmits<{
   'update:open': [boolean]
   'update:name': [string]
   'update:subdomain': [string]
+  'update:domain': [string]
   'update:port': [string]
   submit: []
 }>()
@@ -89,6 +99,26 @@ const emit = defineEmits<{
         />
         <p class="text-xs text-[color:var(--muted)]">
           Subdomain for web access through the host tunnel.
+        </p>
+      </label>
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+          Domain <span class="text-[color:var(--danger)]">*</span>
+        </span>
+        <UiSelect
+          :model-value="domain"
+          :options="domainOptions"
+          placeholder="Select a domain"
+          :disabled="state.loading"
+          @update:model-value="emit('update:domain', String($event))"
+          @focusin="showGuidance({
+            title: 'Domain',
+            description: 'Choose which available domain should receive this subdomain.',
+          })"
+          @focusout="clearGuidance()"
+        />
+        <p class="text-xs text-[color:var(--muted)]">
+          Uses the base domain by default if no secondary domain is selected.
         </p>
       </label>
       <label class="grid gap-2 text-sm">

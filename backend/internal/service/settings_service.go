@@ -17,6 +17,7 @@ const defaultCloudflaredConfigPath = "~/.cloudflared/config.yml"
 
 type SettingsPayload struct {
 	BaseDomain              string                 `json:"baseDomain"`
+	AdditionalDomains       []string               `json:"additionalDomains"`
 	GitHubTemplates         []GitHubTemplateSource `json:"githubTemplates,omitempty"`
 	GitHubAppID             string                 `json:"githubAppId"`
 	GitHubAppClientID       string                 `json:"githubAppClientId"`
@@ -107,10 +108,31 @@ func (s *SettingsService) Update(ctx context.Context, input SettingsPayload) (Se
 		return SettingsPayload{}, err
 	}
 	if stored == nil {
-	stored = &models.Settings{}
-}
+		stored = &models.Settings{}
+	}
 
 	stored.BaseDomain = strings.TrimSpace(input.BaseDomain)
+	if input.AdditionalDomains != nil {
+		normalized := normalizeDomainList(input.AdditionalDomains)
+		for _, domain := range normalized {
+			if err := ValidateDomain(domain); err != nil {
+				return SettingsPayload{}, fmt.Errorf("additional domain %q: %w", domain, err)
+			}
+		}
+		baseDomain := normalizeDomain(input.BaseDomain)
+		filtered := make([]string, 0, len(normalized))
+		for _, domain := range normalized {
+			if domain == baseDomain {
+				continue
+			}
+			filtered = append(filtered, domain)
+		}
+		raw, err := json.Marshal(filtered)
+		if err != nil {
+			return SettingsPayload{}, fmt.Errorf("encode additional domains: %w", err)
+		}
+		stored.AdditionalDomains = string(raw)
+	}
 	stored.GitHubAppID = strings.TrimSpace(input.GitHubAppID)
 	stored.GitHubAppClientID = strings.TrimSpace(input.GitHubAppClientID)
 	stored.GitHubAppClientSecret = strings.TrimSpace(input.GitHubAppClientSecret)
@@ -351,6 +373,7 @@ func (s *SettingsService) resolve(stored *models.Settings) SettingsPayload {
 	cloudflareZoneID := strings.TrimSpace(s.cfg.CloudflareZoneID)
 	cloudflaredTunnel := strings.TrimSpace(s.cfg.CloudflaredTunnel)
 	cloudflaredConfigPath := strings.TrimSpace(s.cfg.CloudflaredConfig)
+	additionalDomains := []string{}
 	if cloudflaredConfigPath == "" {
 		cloudflaredConfigPath = defaultCloudflaredConfigPath
 	}
@@ -359,6 +382,12 @@ func (s *SettingsService) resolve(stored *models.Settings) SettingsPayload {
 	if stored != nil {
 		if strings.TrimSpace(stored.BaseDomain) != "" {
 			baseDomain = strings.TrimSpace(stored.BaseDomain)
+		}
+		if strings.TrimSpace(stored.AdditionalDomains) != "" {
+			parsed, err := parseDomainList(stored.AdditionalDomains)
+			if err == nil {
+				additionalDomains = parsed
+			}
 		}
 		if strings.TrimSpace(stored.GitHubAppID) != "" {
 			githubAppID = strings.TrimSpace(stored.GitHubAppID)
@@ -394,6 +423,7 @@ func (s *SettingsService) resolve(stored *models.Settings) SettingsPayload {
 
 	return SettingsPayload{
 		BaseDomain:              baseDomain,
+		AdditionalDomains:       normalizeDomainList(additionalDomains),
 		GitHubTemplates:         templates,
 		GitHubAppID:             githubAppID,
 		GitHubAppClientID:       githubAppClientID,
@@ -406,6 +436,25 @@ func (s *SettingsService) resolve(stored *models.Settings) SettingsPayload {
 		CloudflaredTunnel:       cloudflaredTunnel,
 		CloudflaredConfigPath:   expandUserPath(cloudflaredConfigPath),
 	}
+}
+
+func (s *SettingsService) ResolveDomains(ctx context.Context) (string, []string, error) {
+	settings, err := s.Get(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	base := normalizeDomain(settings.BaseDomain)
+	additional := normalizeDomainList(settings.AdditionalDomains)
+	if base != "" {
+		filtered := make([]string, 0, len(additional))
+		for _, domain := range additional {
+			if domain != base {
+				filtered = append(filtered, domain)
+			}
+		}
+		additional = filtered
+	}
+	return base, additional, nil
 }
 
 func expandUserPath(input string) string {
@@ -510,6 +559,17 @@ func parseTemplateSources(raw string) ([]GitHubTemplateSource, error) {
 		return nil, fmt.Errorf("decode github templates: %w", err)
 	}
 	return parsed, nil
+}
+
+func parseDomainList(raw string) ([]string, error) {
+	var parsed []string
+	if strings.TrimSpace(raw) == "" {
+		return parsed, nil
+	}
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return nil, fmt.Errorf("decode additional domains: %w", err)
+	}
+	return normalizeDomainList(parsed), nil
 }
 
 func normalizeTemplateSources(input []GitHubTemplateSource) []GitHubTemplateSource {

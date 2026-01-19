@@ -35,6 +35,7 @@
   "GET /api/v1/settings": {
     "settings": {
       "baseDomain": "mock.example.com",
+      "additionalDomains": ["mock-secondary.example.com"],
       "githubAppId": "123456",
       "githubAppClientId": "mock-client-id",
       "githubAppClientSecret": "mock-client-secret",

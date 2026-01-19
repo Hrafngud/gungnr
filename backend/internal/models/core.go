@@ -64,6 +64,7 @@ type AuditLog struct {
 type Settings struct {
 	gorm.Model
 	BaseDomain              string `gorm:"size:255"`
+	AdditionalDomains       string `gorm:"type:text"`
 	GitHubTemplates         string `gorm:"type:text"`
 	GitHubAppID             string `gorm:"size:64"`
 	GitHubAppClientID       string `gorm:"size:128"`

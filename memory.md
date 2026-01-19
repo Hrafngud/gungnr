@@ -1,5 +1,8 @@
 ## Iteration Log
 
+- 2026-01-19: Added secondary domain support for tunnel ingress and UI selection.
+  - Stored additional domains in settings with validation, and used selected domain when updating tunnel ingress.
+  - Added Networking domains config sidebar/listing and domain selectors in quick deploy forms.
 - 2026-01-19: Split Home > Quick Deploy forms into dedicated components.
   - Added template, existing-forward, and quick service form components to reduce HomeView complexity.
   - Kept form behavior, field guidance, and job feedback unchanged while decoupling UI sections.

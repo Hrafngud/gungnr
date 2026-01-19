@@ -33,6 +33,7 @@ type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
 const settingsForm = reactive<Settings>({
   baseDomain: '',
+  additionalDomains: [],
   githubAppId: '',
   githubAppClientId: '',
   githubAppClientSecret: '',
