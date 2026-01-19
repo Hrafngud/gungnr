@@ -2,16 +2,15 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import UiButton from '@/components/ui/UiButton.vue'
-import UiFormSidePanel from '@/components/ui/UiFormSidePanel.vue'
 import UiFieldGuidance from '@/components/ui/UiFieldGuidance.vue'
-import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
-import UiInput from '@/components/ui/UiInput.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
-import UiSelect from '@/components/ui/UiSelect.vue'
 import NavIcon from '@/components/NavIcon.vue'
 import HostStatusPanel from '@/components/home/HostStatusPanel.vue'
 import TemplateCardsSection from '@/components/home/TemplateCardsSection.vue'
 import ServiceCardsSection from '@/components/home/ServiceCardsSection.vue'
+import QuickDeployTemplateForm from '@/components/home/QuickDeployTemplateForm.vue'
+import QuickDeployExistingForm from '@/components/home/QuickDeployExistingForm.vue'
+import QuickDeployQuickForm from '@/components/home/QuickDeployQuickForm.vue'
 import { useProjectsStore } from '@/stores/projects'
 import { useJobsStore } from '@/stores/jobs'
 import { useAuthStore } from '@/stores/auth'
@@ -94,8 +93,6 @@ const templateForm = reactive({
   templateRef: '',
   name: '',
   subdomain: '',
-  proxyPort: '',
-  dbPort: '',
 })
 
 const existingForm = reactive({
@@ -173,18 +170,18 @@ const templateOptions = computed(() => {
 const templateRepoLabel = computed(() => {
   if (catalogError.value) return 'Template source unavailable'
   if (templateOptions.value.length === 0) {
-    return isAuthenticated.value ? 'Template source not configured' : 'Sign in to load templates'
+    return isAuthenticated.value ? 'Template source unavailable' : 'Sign in to load templates'
   }
   const selected = templateOptions.value.find(
     (option) => option.value === templateForm.templateRef,
   )
-  return selected?.label ?? templateOptions.value[0]?.label ?? 'Template source not configured'
+  return selected?.label ?? templateOptions.value[0]?.label ?? 'Template source unavailable'
 })
 
 const templateEmptyStateMessage = computed(() => {
   if (catalogError.value) return 'Template catalog failed to load.'
   if (!isAuthenticated.value) return 'Sign in to load template repositories.'
-  return 'No template repositories configured yet.'
+  return 'No template repositories available yet.'
 })
 
 const templateCreateBlocked = computed(
@@ -275,7 +272,7 @@ const submitTemplate = async () => {
   }
   if (templateOptions.value.length === 0) {
     templateState.error = isAuthenticated.value
-      ? 'Template source is not configured.'
+      ? 'Template source is unavailable.'
       : 'Sign in to load template sources.'
     return
   }
@@ -287,20 +284,12 @@ const submitTemplate = async () => {
     templateState.error = 'Project name is required.'
     return
   }
-  const proxyPort = parsePort(templateForm.proxyPort, false)
-  const dbPort = parsePort(templateForm.dbPort, false)
-  if (proxyPort === null || dbPort === null) {
-    templateState.error = 'Ports must be numeric.'
-    return
-  }
   templateState.loading = true
   try {
     const { data } = await projectsApi.createFromTemplate({
       template: templateForm.templateRef,
       name: templateForm.name,
       subdomain: templateForm.subdomain || undefined,
-      proxyPort,
-      dbPort,
     })
     templateState.jobId = data.job.id
     templateState.success = 'Template job queued. Automation started.'
@@ -492,24 +481,27 @@ watch(
     @refresh="refreshAll"
   />
   <hr />
-    <section class="space-y-6">
-      <div class="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-            Quick deploy
-          </p>
-          <h2 class="mt-2 text-2xl font-semibold text-[color:var(--text)]">
-            Launch templates and services
+  <section class="space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <h2 class="text-2xl font-semibold text-[color:var(--text)]">
+          Quick deploy
           </h2>
           <p class="mt-2 text-sm text-[color:var(--muted)]">
-            Queue new stacks or forward local services through the host cloudflared service. Jobs start automatically after queueing.
+            Run a well known 
+            <b>Quick Service</b>,
+            forward a 
+            <b>Local Port</b> 
+            to the cloud, or a new fresh project from 
+             <b>a Template</b>, 
+            in seconds!
           </p>
         </div>
       </div>
       <UiPanel
         v-if="!isAuthenticated"
         variant="soft"
-        class="flex flex-wrap items-center justify-between gap-4 p-4 text-sm text-[color:var(--muted)]"
+        class="flex flex-wrap items-center justify-between gap-2 p-4 text-sm text-[color:var(--muted)]"
       >
         <span>Sign in to queue deploy jobs and host tunnel actions.</span>
         <UiButton :as="RouterLink" to="/login" variant="primary">
@@ -517,22 +509,6 @@ watch(
             <NavIcon name="login" class="h-4 w-4" />
             Sign in
           </span>
-        </UiButton>
-      </UiPanel>
-      <UiPanel
-        variant="soft"
-        class="flex flex-wrap items-center justify-between gap-3 p-4 text-xs text-[color:var(--muted)]"
-      >
-        <div>
-          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-            Day-to-day flow
-          </p>
-          <p class="mt-1 text-sm text-[color:var(--muted)]">
-            Queue a template or service forward, then confirm progress in Jobs and Activity.
-          </p>
-        </div>
-        <UiButton :as="RouterLink" to="/overview" variant="ghost" size="sm">
-          Open overview
         </UiButton>
       </UiPanel>
       <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -552,351 +528,44 @@ watch(
     :model-value="fieldGuidance.open.value"
     :content="fieldGuidance.content.value"
   />
-  <UiFormSidePanel
-    v-model="templateFormOpen"
-    title="Create from template"
-  >
-    <form class="space-y-5" @submit.prevent="submitTemplate">
-      <div class="space-y-2">
-        <p class="text-xs text-[color:var(--muted)]">
-          Create a new GitHub repo from your template and deploy it locally with automatic port configuration.
-        </p>
-        <p class="text-xs text-[color:var(--muted)]">
-          Template source: {{ templateRepoLabel }}
-        </p>
-      </div>
-      <UiPanel
-        v-if="templateOptions.length === 0"
-        variant="soft"
-        class="flex flex-wrap items-center justify-between gap-3 p-3 text-xs text-[color:var(--muted)]"
-      >
-        <div>
-          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-            Template sources
-          </p>
-          <p class="mt-1 text-sm text-[color:var(--muted)]">
-            {{ templateEmptyStateMessage }}
-          </p>
-        </div>
-        <UiButton
-          :as="RouterLink"
-          :to="isAuthenticated ? '/github' : '/login'"
-          variant="ghost"
-          size="sm"
-        >
-          <span class="flex items-center gap-2">
-            <NavIcon v-if="!isAuthenticated" name="login" class="h-3.5 w-3.5" />
-            {{ isAuthenticated ? 'GitHub settings' : 'Sign in' }}
-          </span>
-        </UiButton>
-      </UiPanel>
-      <UiPanel
-        v-else-if="templateCreateBlocked"
-        variant="soft"
-        class="flex flex-wrap items-center justify-between gap-3 p-3 text-xs text-[color:var(--muted)]"
-      >
-        <div>
-          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-            Template creation
-          </p>
-          <p class="mt-1 text-sm text-[color:var(--muted)]">
-            GitHub App credentials are required to create new repos from templates.
-          </p>
-        </div>
-        <UiButton
-          :as="RouterLink"
-          to="/github"
-          variant="ghost"
-          size="sm"
-        >
-          GitHub settings
-        </UiButton>
-      </UiPanel>
-      <label class="grid gap-2 text-sm">
-        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-          Template repo <span class="text-[color:var(--danger)]">*</span>
-        </span>
-        <UiSelect
-          v-model="templateForm.templateRef"
-          :options="templateOptions"
-          placeholder="Select a template"
-          :disabled="templateSelectionDisabled"
-          @focusin="fieldGuidance.show({
-            title: 'Template source',
-            description: 'Choose the GitHub template repo Gungnr should clone and deploy.',
-          })"
-          @focusout="fieldGuidance.clear()"
-        />
-        <p class="text-xs text-[color:var(--muted)]">
-          Pick the repository that seeds the new project.
-        </p>
-      </label>
-      <label class="grid gap-2 text-sm">
-        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-          Project name <span class="text-[color:var(--danger)]">*</span>
-        </span>
-        <UiInput
-          v-model="templateForm.name"
-          type="text"
-          placeholder="my-project"
-          required
-          :disabled="templateSelectionDisabled"
-          @focus="fieldGuidance.show({
-            title: 'Project name',
-            description: 'Used for the GitHub repo and the local folder. Keep it short and DNS-safe.',
-          })"
-          @blur="fieldGuidance.clear()"
-        />
-        <p class="text-xs text-[color:var(--muted)]">
-          Name for the GitHub repo and local folder.
-        </p>
-      </label>
-      <label class="grid gap-2 text-sm">
-        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-          Subdomain <span class="text-[color:var(--danger)]">*</span>
-        </span>
-        <UiInput
-          v-model="templateForm.subdomain"
-          type="text"
-          placeholder="my-project"
-          required
-          :disabled="templateSelectionDisabled"
-          @focus="fieldGuidance.show({
-            title: 'Subdomain',
-            description: 'Becomes the hostname prepended to your base domain.',
-          })"
-          @blur="fieldGuidance.clear()"
-        />
-        <p class="text-xs text-[color:var(--muted)]">
-          Subdomain for web access through the host tunnel.
-        </p>
-      </label>
-      <UiInlineFeedback v-if="templateState.error" tone="error">
-        {{ templateState.error }}
-      </UiInlineFeedback>
-      <UiInlineFeedback v-if="templateState.success" tone="ok">
-        {{ templateState.success }}
-      </UiInlineFeedback>
-      <div class="flex flex-wrap items-center gap-3">
-        <UiButton
-          type="submit"
-          variant="primary"
-          :disabled="templateSelectionDisabled"
-        >
-          {{ templateState.loading ? 'Queueing...' : 'Queue template job' }}
-        </UiButton>
-        <UiButton
-          v-if="templateState.jobId"
-          :as="RouterLink"
-          :to="`/jobs/${templateState.jobId}`"
-          variant="ghost"
-        >
-          View job log
-        </UiButton>
-      </div>
-    </form>
-  </UiFormSidePanel>
-  <UiFormSidePanel
-    v-model="existingFormOpen"
-    title="Forward localhost service"
-  >
-    <form class="space-y-5" @submit.prevent="submitExisting">
-      <div class="space-y-2">
-        <p class="text-xs text-[color:var(--muted)]">
-          Forward any running localhost service (Docker or not) through the host tunnel for web access.
-        </p>
-      </div>
-      <label class="grid gap-2 text-sm">
-        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-          Service name <span class="text-[color:var(--danger)]">*</span>
-        </span>
-        <UiInput
-          v-model="existingForm.name"
-          type="text"
-          placeholder="my-service"
-          required
-          :disabled="existingState.loading"
-          @focus="fieldGuidance.show({
-            title: 'Service name',
-            description: 'Used for tracking this forwarded service in jobs and activity.',
-          })"
-          @blur="fieldGuidance.clear()"
-        />
-        <p class="text-xs text-[color:var(--muted)]">
-          Internal identifier for tracking this forwarded service.
-        </p>
-      </label>
-      <label class="grid gap-2 text-sm">
-        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-          Subdomain <span class="text-[color:var(--danger)]">*</span>
-        </span>
-        <UiInput
-          v-model="existingForm.subdomain"
-          type="text"
-          placeholder="my-service"
-          required
-          :disabled="existingState.loading"
-          @focus="fieldGuidance.show({
-            title: 'Subdomain',
-            description: 'The public hostname to route through the host tunnel.',
-          })"
-          @blur="fieldGuidance.clear()"
-        />
-        <p class="text-xs text-[color:var(--muted)]">
-          Subdomain for web access through the host tunnel.
-        </p>
-      </label>
-      <label class="grid gap-2 text-sm">
-        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-          Running at (localhost port) <span class="text-[color:var(--danger)]">*</span>
-        </span>
-        <UiInput
-          v-model="existingForm.port"
-          type="text"
-          placeholder="3000"
-          required
-          :disabled="existingState.loading"
-          @focus="fieldGuidance.show({
-            title: 'Localhost port',
-            description: 'Enter the port your service is already listening on (for example 3000).',
-          })"
-          @blur="fieldGuidance.clear()"
-        />
-        <p class="text-xs text-[color:var(--muted)]">
-          The localhost port where your service is currently running.
-        </p>
-      </label>
-      <UiInlineFeedback v-if="existingState.error" tone="error">
-        {{ existingState.error }}
-      </UiInlineFeedback>
-      <UiInlineFeedback v-if="existingState.success" tone="ok">
-        {{ existingState.success }}
-      </UiInlineFeedback>
-      <div class="flex flex-wrap items-center gap-3">
-        <UiButton
-          type="submit"
-          variant="primary"
-          :disabled="existingState.loading || !isAuthenticated"
-        >
-          {{ existingState.loading ? 'Queueing...' : 'Queue forward job' }}
-        </UiButton>
-        <UiButton
-          v-if="existingState.jobId"
-          :as="RouterLink"
-          :to="`/jobs/${existingState.jobId}`"
-          variant="ghost"
-        >
-          View job log
-        </UiButton>
-      </div>
-    </form>
-  </UiFormSidePanel>
-  <UiFormSidePanel
-    v-model="quickFormOpen"
+  <QuickDeployTemplateForm
+    v-model:open="templateFormOpen"
+    v-model:template-ref="templateForm.templateRef"
+    v-model:name="templateForm.name"
+    v-model:subdomain="templateForm.subdomain"
+    :is-authenticated="isAuthenticated"
+    :template-options="templateOptions"
+    :template-repo-label="templateRepoLabel"
+    :template-empty-state-message="templateEmptyStateMessage"
+    :template-create-blocked="templateCreateBlocked"
+    :template-selection-disabled="templateSelectionDisabled"
+    :state="templateState"
+    :show-guidance="fieldGuidance.show"
+    :clear-guidance="fieldGuidance.clear"
+    @submit="submitTemplate"
+  />
+  <QuickDeployExistingForm
+    v-model:open="existingFormOpen"
+    v-model:name="existingForm.name"
+    v-model:subdomain="existingForm.subdomain"
+    v-model:port="existingForm.port"
+    :is-authenticated="isAuthenticated"
+    :state="existingState"
+    :show-guidance="fieldGuidance.show"
+    :clear-guidance="fieldGuidance.clear"
+    @submit="submitExisting"
+  />
+  <QuickDeployQuickForm
+    v-model:open="quickFormOpen"
+    v-model:subdomain="quickForm.subdomain"
+    v-model:port="quickForm.port"
+    v-model:image="quickForm.image"
+    v-model:container-port="quickForm.containerPort"
     :title="selectedServiceName ? `Forward ${selectedServiceName}` : 'Quick service'"
-  >
-    <form class="space-y-5" @submit.prevent="submitQuick">
-      <div class="space-y-2">
-        <p class="text-xs text-[color:var(--muted)]">
-          Expose a running port through the host tunnel service instantly.
-        </p>
-      </div>
-      <label class="grid gap-2 text-sm">
-        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-          Subdomain
-        </span>
-        <UiInput
-          v-model="quickForm.subdomain"
-          type="text"
-          placeholder="preview"
-          :disabled="quickState.loading"
-          @focus="fieldGuidance.show({
-            title: 'Subdomain',
-            description: 'Set the hostname Cloudflare should route to this service.',
-          })"
-          @blur="fieldGuidance.clear()"
-        />
-      </label>
-      <label class="grid gap-2 text-sm">
-        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-          Local port
-        </span>
-        <UiInput
-          v-model="quickForm.port"
-          type="text"
-          placeholder="5173"
-          :disabled="quickState.loading"
-          @focus="fieldGuidance.show({
-            title: 'Local port',
-            description: 'Port already exposed on this host that you want to publish.',
-          })"
-          @blur="fieldGuidance.clear()"
-        />
-        <p class="text-xs text-[color:var(--muted)]">
-          Host port exposed by Docker on this machine.
-        </p>
-      </label>
-      <label class="grid gap-2 text-sm">
-        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-          Container image (optional)
-        </span>
-        <UiInput
-          v-model="quickForm.image"
-          type="text"
-          placeholder="excalidraw/excalidraw:latest"
-          :disabled="quickState.loading"
-          @focus="fieldGuidance.show({
-            title: 'Container image',
-            description: 'Optional image to run if you want Gungnr to launch the service.',
-          })"
-          @blur="fieldGuidance.clear()"
-        />
-        <p class="text-xs text-[color:var(--muted)]">
-          Leave blank to use the default image.
-        </p>
-      </label>
-      <label class="grid gap-2 text-sm">
-        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-          Container port (optional)
-        </span>
-        <UiInput
-          v-model="quickForm.containerPort"
-          type="text"
-          placeholder="80"
-          :disabled="quickState.loading"
-          @focus="fieldGuidance.show({
-            title: 'Container port',
-            description: 'Port inside the container that the host port maps to.',
-          })"
-          @blur="fieldGuidance.clear()"
-        />
-        <p class="text-xs text-[color:var(--muted)]">
-          Port inside the container (default 80). Host port maps to this.
-        </p>
-      </label>
-      <UiInlineFeedback v-if="quickState.error" tone="error">
-        {{ quickState.error }}
-      </UiInlineFeedback>
-      <UiInlineFeedback v-if="quickState.success" tone="ok">
-        {{ quickState.success }}
-      </UiInlineFeedback>
-      <div class="flex flex-wrap items-center gap-3">
-        <UiButton
-          type="submit"
-          variant="primary"
-          :disabled="quickState.loading || !isAuthenticated"
-        >
-          {{ quickState.loading ? 'Queueing...' : 'Forward service' }}
-        </UiButton>
-        <UiButton
-          v-if="quickState.jobId"
-          :as="RouterLink"
-          :to="`/jobs/${quickState.jobId}`"
-          variant="ghost"
-        >
-          View job log
-        </UiButton>
-      </div>
-    </form>
-  </UiFormSidePanel>
+    :is-authenticated="isAuthenticated"
+    :state="quickState"
+    :show-guidance="fieldGuidance.show"
+    :clear-guidance="fieldGuidance.clear"
+    @submit="submitQuick"
+  />
 </template>

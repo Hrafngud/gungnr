@@ -93,7 +93,7 @@ const goToPage = async (nextPage: number) => {
           Automation timeline
         </h1>
         <p class="mt-2 text-sm text-[color:var(--muted)]">
-          Deployment tasks will surface here with status and logs.
+          Automation tasks surface here with status and logs.
         </p>
       </div>
       <UiButton
@@ -145,8 +145,7 @@ const goToPage = async (nextPage: number) => {
       <div>
         <h2 class="text-xl font-semibold text-[color:var(--text)]">No jobs yet</h2>
         <p class="mt-2 text-sm text-[color:var(--muted)]">
-          Once you run a template build, deploy, or tunnel update, the job status
-          and logs will appear here.
+          After template builds, deploys, or tunnel updates, job status and logs appear here.
         </p>
         <div class="mt-4 flex flex-wrap gap-3 text-xs text-[color:var(--muted)]">
           <UiButton as="span" variant="chip" size="chip">

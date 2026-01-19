@@ -1,5 +1,27 @@
 ## Iteration Log
 
+- 2026-01-19: Split Home > Quick Deploy forms into dedicated components.
+  - Added template, existing-forward, and quick service form components to reduce HomeView complexity.
+  - Kept form behavior, field guidance, and job feedback unchanged while decoupling UI sections.
+- 2026-01-19: Simplified Home > Live runtime signals layout using Tailwind-only flex rows.
+  - Removed custom runtime-signal column CSS.
+  - Placed Automation queue on its own row with inline status counts.
+  - Compact layout to keep the host status panel slimmer.
+- 2026-01-21: Updated the global loading overlay presentation.
+  - Replaced the overlay card/spinner with a centered loading.gif.
+  - Switched the overlay background to solid black and tuned gif sizing.
+- 2026-01-19: Reduced Host Settings to template-only credentials and softened UI language around bootstrap-complete Cloudflare status.
+  - Removed base domain/Cloudflare overrides, config import/export, and related copy from Host Settings.
+  - Routed template configuration links to Host Settings and updated Home/GitHub/Networking copy to focus on availability.
+- 2026-01-19: Refined Home > Host status runtime signals layout to reduce vertical bloat.
+  - Replaced the grid with a flex-based column layout for denser, more balanced card stacking.
+  - Grouped related signals into three columns to minimize blank space.
+- 2026-01-19: Softened remaining dashboard/overview/jobs/logs copy to avoid post-bootstrap setup language.
+  - Reframed dashboard, job timeline, and log guidance to availability/monitoring language.
+  - Shifted GitHub status labels to availability wording and removed PAT mentions.
+- 2026-01-19: Cleaned Home and Host Settings copy to remove setup phrasing and removed unused template port fields.
+  - Reworded template empty states to availability language.
+  - Dropped proxy/db port fields from template form payload and trimmed Host Settings header copy.
 - 2026-01-20: Redirected bootstrap cloudflared tunnel logs to a file so the CLI remains usable.
   - `gungnr bootstrap` now writes tunnel output to `~/.cloudflared/cloudflared.log` and prints the path in the summary.
 - 2026-01-20: Adjusted bootstrap tunnel readiness check to accept active connectors from `cloudflared tunnel info`.
@@ -257,6 +279,10 @@
   - Refresh now pulls both catalog and allowlist users together for updated counts.
 - 2026-01-07: Fixed bootstrap APP_ENV value to align with secure cookie enforcement.
   - Updated generated `.env` to use `APP_ENV=prod` so backend secure cookies enable in production.
+- 2026-01-18: Wired the favicon assets into the frontend entry HTML.
+  - Replaced the default Vite icon links with the favicon set from `public/favicon_io`.
+- 2026-01-18: Added a five-click mock login path with a prompt-based passphrase and local mock API data.
+  - Added `mock.json` plus a localStorage flag to return mock API responses and bypass OAuth for frontend tweaks.
 
 ## Completed Task Snapshot
 

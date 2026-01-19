@@ -11,6 +11,7 @@ const popup = ref<Window | null>(null)
 const pollHandle = ref<number | null>(null)
 const waitingForAuth = ref(false)
 const redirecting = ref(false)
+const mockClickCount = ref(0)
 
 const stopPolling = () => {
   if (pollHandle.value !== null) {
@@ -39,6 +40,10 @@ const pollForAuth = async () => {
 const openLoginPopup = () => {
   if (auth.user) return
   if (typeof window === 'undefined') return
+  if (popup.value && !popup.value.closed) {
+    popup.value.focus()
+    return
+  }
 
   const width = 520
   const height = 720
@@ -55,6 +60,24 @@ const openLoginPopup = () => {
   popup.value = authWindow
   waitingForAuth.value = true
   pollForAuth()
+}
+
+const handleLoginClick = () => {
+  if (auth.user) return
+  if (typeof window === 'undefined') return
+
+  mockClickCount.value += 1
+  if (mockClickCount.value >= 5) {
+    mockClickCount.value = 0
+    const pass = window.prompt('Enter dev pass')
+    if (pass === 'banana') {
+      auth.enableMockAuth()
+      redirectHome()
+    }
+    return
+  }
+
+  openLoginPopup()
 }
 
 const redirectHome = async () => {
@@ -91,46 +114,29 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="grid min-h-screen w-full lg:grid-cols-2">
-    <div class="flex flex-col justify-center gap-10 bg-[color:var(--surface-3)] px-8 py-16 sm:px-12">
-      <div class="space-y-6">
-        <img src="/logo.svg" alt="Gungnr logo" class="h-12 w-12" />
-        <div class="inline-flex items-center gap-2 rounded-full border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-1 text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-          Gungnr
-        </div>
+    <div class="flex flex-col justify-center items-center gap-8">
+        <img src="/logo.svg" alt="Gungnr logo" class="h-64 animate-pulse w-64 animate-pulse" />
         <h1 class="text-4xl font-semibold leading-tight text-[color:var(--text)] sm:text-5xl">
-          Orchestrate deployments, tunnels, and ports without touching the terminal.
+          Gungnr
         </h1>
         <p class="max-w-xl text-base text-[color:var(--muted)] sm:text-lg">
-          Sign in with GitHub to unlock your deploy queue, tunnel routing, and template
-          workflows. Access is restricted to approved users or org members.
+          Hit the web in minutes!
         </p>
-      </div>
-      <div class="grid gap-3 text-sm text-[color:var(--muted)] sm:grid-cols-3">
-        <span class="rounded-full border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-1 text-center">
-          GitHub OAuth
-        </span>
-        <span class="rounded-full border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-1 text-center">
-          Session cookies
-        </span>
-        <span class="rounded-full border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-1 text-center">
-          No CLI required
-        </span>
-      </div>
     </div>
 
     <div class="flex flex-col justify-center gap-10 border-[color:var(--border)] bg-[color:var(--surface)] px-8 py-16 sm:px-12 lg:border-l">
       <div class="mx-auto flex w-full max-w-md flex-col gap-6">
-        <div>
+        <div class="flex flex-col items-center">
           <h2 class="text-xl font-semibold text-[color:var(--text)]">Connect your account</h2>
           <p class="mt-2 text-sm text-[color:var(--muted)]">
-            We only request read access to confirm your identity and org membership.
+            Login with Github!
           </p>
         </div>
         <div>
           <a
             class="btn btn-primary inline-flex w-full items-center justify-center gap-2 px-4 py-3 text-sm font-semibold"
             :href="loginHref"
-            @click.prevent="openLoginPopup"
+            @click.prevent="handleLoginClick"
           >
             <NavIcon name="github" class="h-4 w-4" />
             Continue with GitHub

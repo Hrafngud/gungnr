@@ -39,7 +39,7 @@ const pageLoading = usePageLoadingStore()
 
 const hasPreview = computed(() => Boolean(preview.value?.contents))
 const cloudflareTokenConfigured = computed(() => Boolean(settings.value?.cloudflareToken))
-const baseDomainLabel = computed(() => settings.value?.baseDomain || 'Not set')
+const baseDomainLabel = computed(() => settings.value?.baseDomain || 'Unavailable')
 
 type IngressRoute = {
   hostname: string
@@ -381,7 +381,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
         </UiState>
 
         <UiState v-else-if="ingressRoutes.length === 0">
-          No ingress hostnames found yet.
+          No ingress hostnames reported yet.
         </UiState>
 
         <div v-else class="space-y-2">
@@ -421,12 +421,12 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
               Cloudflare
             </p>
             <h2 class="mt-2 text-base font-semibold text-[color:var(--text)]">
-              API readiness
+              API availability
             </h2>
           </div>
           <div class="flex items-center gap-2">
             <UiBadge :tone="cloudflareTokenConfigured ? 'ok' : 'warn'">
-              {{ cloudflareTokenConfigured ? 'Token set' : 'Token missing' }}
+              {{ cloudflareTokenConfigured ? 'Token available' : 'Token unavailable' }}
             </UiBadge>
             <UiButton
               variant="ghost"
@@ -446,7 +446,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
           Cloudflare credentials power DNS automation for the host-managed tunnel.
         </p>
         <p class="text-xs text-[color:var(--muted)]">
-          Tokens are seeded during bootstrap; update them in Host Settings only when rotating. Required scopes:
+          Credentials are seeded during bootstrap; this panel reports availability. Required scopes:
           Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit.
         </p>
 
@@ -468,7 +468,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
           <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>API token</span>
             <span class="text-[color:var(--text)]">
-              {{ cloudflareTokenConfigured ? 'Configured' : 'Missing' }}
+              {{ cloudflareTokenConfigured ? 'Available' : 'Unavailable' }}
             </span>
           </UiListRow>
           <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">

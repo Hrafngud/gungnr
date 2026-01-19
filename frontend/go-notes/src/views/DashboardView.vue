@@ -30,9 +30,8 @@ const greeting = computed(() => {
           Deployment runway
         </h1>
         <p class="mt-3 max-w-2xl text-sm text-neutral-600">
-          This dashboard will soon orchestrate template creation, local service
-          exposure, and host cloudflared service updates. For now it verifies your GitHub
-          session and surfaces the next tasks.
+          Track template creation, local service exposure, and tunnel activity in one place.
+          This view confirms your GitHub session and highlights recent activity.
         </p>
       </div>
 

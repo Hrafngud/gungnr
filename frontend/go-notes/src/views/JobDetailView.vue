@@ -106,7 +106,7 @@ onBeforeUnmount(() => {
           Execution log
         </h1>
         <p class="mt-2 text-sm text-[color:var(--muted)]">
-          Follow along as the workflow updates the local stack and tunnel.
+          Follow along as the workflow updates the local stack and routing.
         </p>
       </div>
       <UiButton :as="RouterLink" to="/jobs" variant="ghost" size="sm">
