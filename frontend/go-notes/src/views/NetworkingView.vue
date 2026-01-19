@@ -3,8 +3,10 @@ import { computed, onMounted, ref } from 'vue'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiFormSidePanel from '@/components/ui/UiFormSidePanel.vue'
+import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
+import UiInput from '@/components/ui/UiInput.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
 import NavIcon from '@/components/NavIcon.vue'
@@ -35,11 +37,34 @@ const preflight = ref<CloudflarePreflight | null>(null)
 const preflightLoading = ref(false)
 const preflightError = ref<string | null>(null)
 const ingressPreviewOpen = ref(false)
+const domainFormOpen = ref(false)
+const domainInput = ref('')
+const domainSaving = ref(false)
+const domainError = ref<string | null>(null)
+const domainSuccess = ref<string | null>(null)
 const pageLoading = usePageLoadingStore()
 
 const hasPreview = computed(() => Boolean(preview.value?.contents))
 const cloudflareTokenConfigured = computed(() => Boolean(settings.value?.cloudflareToken))
 const baseDomainLabel = computed(() => settings.value?.baseDomain || 'Unavailable')
+const baseDomainValue = computed(() => settings.value?.baseDomain?.trim().toLowerCase() || '')
+const additionalDomains = computed(() => {
+  const normalized = (settings.value?.additionalDomains ?? [])
+    .map((domain) => domain.trim().toLowerCase())
+    .filter(Boolean)
+  const seen = new Set<string>()
+  const output: string[] = []
+  normalized.forEach((domain) => {
+    if (domain === baseDomainValue.value || seen.has(domain)) return
+    seen.add(domain)
+    output.push(domain)
+  })
+  return output
+})
+const domainCountLabel = computed(() => {
+  const total = (baseDomainValue.value ? 1 : 0) + additionalDomains.value.length
+  return total === 1 ? '1 domain' : `${total} domains`
+})
 
 type IngressRoute = {
   hostname: string
@@ -124,6 +149,59 @@ const loadSettings = async () => {
   }
 }
 
+const saveDomains = async (domains: string[]) => {
+  if (!settings.value) {
+    domainError.value = 'Settings are unavailable.'
+    return
+  }
+  domainSaving.value = true
+  domainError.value = null
+  domainSuccess.value = null
+  try {
+    const { data } = await settingsApi.update({
+      ...settings.value,
+      additionalDomains: domains,
+    })
+    settings.value = data.settings
+    settingsSources.value = data.sources ?? null
+    cloudflaredTunnelName.value = data.cloudflaredTunnelName ?? null
+    domainSuccess.value = 'Domains updated.'
+  } catch (err) {
+    domainError.value = apiErrorMessage(err)
+  } finally {
+    domainSaving.value = false
+  }
+}
+
+const addDomain = async () => {
+  domainError.value = null
+  domainSuccess.value = null
+  const candidate = domainInput.value.trim().toLowerCase()
+  if (!candidate) {
+    domainError.value = 'Domain is required.'
+    return
+  }
+  if (candidate === baseDomainValue.value) {
+    domainError.value = 'That domain is already the base domain.'
+    return
+  }
+  if (additionalDomains.value.includes(candidate)) {
+    domainError.value = 'That domain is already listed.'
+    return
+  }
+  await saveDomains([...additionalDomains.value, candidate])
+  if (!domainError.value) {
+    domainInput.value = ''
+  }
+}
+
+const removeDomain = async (domain: string) => {
+  domainError.value = null
+  domainSuccess.value = null
+  const next = additionalDomains.value.filter((item) => item !== domain)
+  await saveDomains(next)
+}
+
 const loadPreflight = async () => {
   preflightLoading.value = true
   preflightError.value = null
@@ -203,6 +281,9 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
             <UiInlineSpinner v-if="healthLoading" />
             Refresh status
           </span>
+        </UiButton>
+        <UiButton variant="ghost" size="sm" @click="domainFormOpen = true">
+          Domains config
         </UiButton>
         <UiButton variant="ghost" size="sm" @click="ingressPreviewOpen = true">
           Ingress preview
@@ -348,6 +429,60 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
         </div>
       </UiPanel>
 
+      <UiPanel as="article" class="space-y-4 p-6">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              Domains
+            </p>
+            <h2 class="mt-2 text-base font-semibold text-[color:var(--text)]">
+              Available domains
+            </h2>
+          </div>
+          <UiBadge :tone="baseDomainValue ? 'ok' : 'warn'">
+            {{ domainCountLabel }}
+          </UiBadge>
+        </div>
+
+        <p class="text-xs text-[color:var(--muted)]">
+          Base domain plus any additional domains you add. All domains must be in the same Cloudflare
+          zone and tunnel account.
+        </p>
+
+        <UiState v-if="settingsLoading" loading>
+          Loading domains...
+        </UiState>
+
+        <UiState v-else-if="settingsError" tone="error">
+          {{ settingsError }}
+        </UiState>
+
+        <UiState v-else-if="!baseDomainValue && additionalDomains.length === 0">
+          No domains configured yet.
+        </UiState>
+
+        <div v-else class="space-y-2 text-xs text-[color:var(--muted)]">
+          <UiListRow
+            v-if="baseDomainValue"
+            class="flex flex-wrap items-center justify-between gap-2 break-words"
+          >
+            <span>Base domain</span>
+            <span class="text-[color:var(--text)]">
+              {{ baseDomainValue }}
+            </span>
+          </UiListRow>
+          <UiListRow
+            v-for="domain in additionalDomains"
+            :key="domain"
+            class="flex flex-wrap items-center justify-between gap-2 break-words"
+          >
+            <span>Secondary domain</span>
+            <span class="text-[color:var(--text)]">
+              {{ domain }}
+            </span>
+          </UiListRow>
+        </div>
+      </UiPanel>
     </div>
 
     <hr />
@@ -369,7 +504,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
         </div>
 
         <p class="text-xs text-[color:var(--muted)]">
-          Based on ingress rules in {{ baseDomainLabel }}.
+          Based on the current ingress rules reported by cloudflared.
         </p>
 
         <UiState v-if="previewLoading" loading>
@@ -537,6 +672,76 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
         </div>
       </UiPanel>
     </div>
+
+    <UiFormSidePanel
+      v-model="domainFormOpen"
+      title="Domains config"
+      eyebrow="Domains"
+    >
+      <form class="space-y-4" @submit.prevent="addDomain">
+        <div class="space-y-2">
+          <p class="text-xs text-[color:var(--muted)]">
+            Add secondary domains that share the same Cloudflare zone and tunnel account. The base
+            domain remains required for the panel itself.
+          </p>
+        </div>
+
+        <label class="grid gap-2 text-sm">
+          <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+            New domain
+          </span>
+          <div class="flex flex-wrap gap-2">
+            <UiInput
+              v-model="domainInput"
+              type="text"
+              placeholder="secondary.example.com"
+              :disabled="domainSaving"
+            />
+            <UiButton type="submit" variant="ghost" :disabled="domainSaving">
+              {{ domainSaving ? 'Saving...' : 'Add domain' }}
+            </UiButton>
+          </div>
+          <p class="text-xs text-[color:var(--muted)]">
+            Domains must already exist in Cloudflare and belong to the configured account/zone.
+          </p>
+        </label>
+
+        <UiInlineFeedback v-if="domainError" tone="error">
+          {{ domainError }}
+        </UiInlineFeedback>
+        <UiInlineFeedback v-if="domainSuccess" tone="ok">
+          {{ domainSuccess }}
+        </UiInlineFeedback>
+
+        <div class="space-y-2 text-xs text-[color:var(--muted)]">
+          <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
+            <span>Base domain</span>
+            <span class="text-[color:var(--text)]">
+              {{ baseDomainValue || 'Unavailable' }}
+            </span>
+          </UiListRow>
+          <UiState v-if="additionalDomains.length === 0">
+            No secondary domains added yet.
+          </UiState>
+          <UiListRow
+            v-for="domain in additionalDomains"
+            :key="domain"
+            class="flex flex-wrap items-center justify-between gap-2 break-words"
+          >
+            <span>{{ domain }}</span>
+            <UiButton
+              type="button"
+              variant="ghost"
+              size="xs"
+              :disabled="domainSaving"
+              @click="removeDomain(domain)"
+            >
+              Remove
+            </UiButton>
+          </UiListRow>
+        </div>
+      </form>
+    </UiFormSidePanel>
 
     <UiFormSidePanel
       v-model="ingressPreviewOpen"

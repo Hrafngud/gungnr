@@ -68,6 +68,7 @@ func (c *SettingsController) Update(ctx *gin.Context) {
 
 	c.logAudit(ctx, "settings.update", "settings", map[string]any{
 		"baseDomain":               req.BaseDomain,
+		"additionalDomainsCount":   len(req.AdditionalDomains),
 		"githubTemplatesCount":     templateCount(req.GitHubTemplates),
 		"githubAppId":              req.GitHubAppID,
 		"githubAppClientId":        req.GitHubAppClientID,

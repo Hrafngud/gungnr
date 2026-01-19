@@ -8,16 +8,18 @@ export const projectsApi = {
   createFromTemplate: (payload: {
     name: string
     subdomain?: string
+    domain?: string
     proxyPort?: number
     dbPort?: number
     template?: string
   }) => api.post<{ job: Job }>('/api/v1/projects/template', payload),
-  deployExisting: (payload: { name: string; subdomain: string; port?: number }) =>
+  deployExisting: (payload: { name: string; subdomain: string; domain?: string; port?: number }) =>
     api.post<{ job: Job }>('/api/v1/projects/existing', payload),
-  forwardLocal: (payload: { name: string; subdomain: string; port?: number }) =>
+  forwardLocal: (payload: { name: string; subdomain: string; domain?: string; port?: number }) =>
     api.post<{ job: Job }>('/api/v1/projects/forward', payload),
   quickService: (payload: {
     subdomain: string
+    domain?: string
     port: number
     image?: string
     containerPort?: number

@@ -4,6 +4,7 @@ import UiButton from '@/components/ui/UiButton.vue'
 import UiFormSidePanel from '@/components/ui/UiFormSidePanel.vue'
 import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
 import UiInput from '@/components/ui/UiInput.vue'
+import UiSelect from '@/components/ui/UiSelect.vue'
 
 type QueueState = {
   loading: boolean
@@ -17,15 +18,23 @@ type GuidancePayload = {
   description: string
 }
 
+type SelectOption = {
+  value: string | number
+  label: string
+  disabled?: boolean
+}
+
 defineProps<{
   open: boolean
   title: string
   isAuthenticated: boolean
   state: QueueState
   subdomain: string
+  domain: string
   port: string
   image: string
   containerPort: string
+  domainOptions: SelectOption[]
   showGuidance: (payload: GuidancePayload) => void
   clearGuidance: () => void
 }>()
@@ -33,6 +42,7 @@ defineProps<{
 const emit = defineEmits<{
   'update:open': [boolean]
   'update:subdomain': [string]
+  'update:domain': [string]
   'update:port': [string]
   'update:image': [string]
   'update:containerPort': [string]
@@ -67,6 +77,23 @@ const emit = defineEmits<{
             description: 'Set the hostname Cloudflare should route to this service.',
           })"
           @blur="clearGuidance()"
+        />
+      </label>
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+          Domain
+        </span>
+        <UiSelect
+          :model-value="domain"
+          :options="domainOptions"
+          placeholder="Select a domain"
+          :disabled="state.loading"
+          @update:model-value="emit('update:domain', String($event))"
+          @focusin="showGuidance({
+            title: 'Domain',
+            description: 'Pick which configured domain should receive this hostname.',
+          })"
+          @focusout="clearGuidance()"
         />
       </label>
       <label class="grid gap-2 text-sm">

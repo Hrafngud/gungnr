@@ -8,6 +8,7 @@ import (
 var (
 	projectNameRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$`)
 	subdomainRe   = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+	domainRe      = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
 )
 
 func ValidateProjectName(name string) error {
@@ -43,6 +44,16 @@ func ValidateSubdomain(subdomain string) error {
 func ValidatePort(port int) error {
 	if port < 1 || port > 65535 {
 		return fmt.Errorf("port must be between 1 and 65535")
+	}
+	return nil
+}
+
+func ValidateDomain(domain string) error {
+	if domain == "" {
+		return fmt.Errorf("domain is required")
+	}
+	if !domainRe.MatchString(domain) {
+		return fmt.Errorf("domain must be a valid hostname")
 	}
 	return nil
 }

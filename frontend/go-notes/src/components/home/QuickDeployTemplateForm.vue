@@ -38,6 +38,8 @@ const props = defineProps<{
   templateRef: string
   name: string
   subdomain: string
+  domain: string
+  domainOptions: SelectOption[]
   showGuidance: (payload: GuidancePayload) => void
   clearGuidance: () => void
 }>()
@@ -47,6 +49,7 @@ const emit = defineEmits<{
   'update:templateRef': [string]
   'update:name': [string]
   'update:subdomain': [string]
+  'update:domain': [string]
   submit: []
 }>()
 </script>
@@ -173,6 +176,26 @@ const emit = defineEmits<{
         />
         <p class="text-xs text-[color:var(--muted)]">
           Subdomain for web access through the host tunnel.
+        </p>
+      </label>
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+          Domain <span class="text-[color:var(--danger)]">*</span>
+        </span>
+        <UiSelect
+          :model-value="domain"
+          :options="domainOptions"
+          placeholder="Select a domain"
+          :disabled="templateSelectionDisabled"
+          @update:model-value="emit('update:domain', String($event))"
+          @focusin="showGuidance({
+            title: 'Domain',
+            description: 'Choose which configured domain should receive this subdomain.',
+          })"
+          @focusout="clearGuidance()"
+        />
+        <p class="text-xs text-[color:var(--muted)]">
+          Defaults to the base domain configured during bootstrap.
         </p>
       </label>
       <UiInlineFeedback v-if="state.error" tone="error">

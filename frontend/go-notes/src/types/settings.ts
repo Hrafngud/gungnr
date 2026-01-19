@@ -1,5 +1,6 @@
 export interface Settings {
   baseDomain: string
+  additionalDomains: string[]
   githubAppId: string
   githubAppClientId: string
   githubAppClientSecret: string

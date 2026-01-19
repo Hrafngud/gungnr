@@ -93,16 +93,19 @@ const templateForm = reactive({
   templateRef: '',
   name: '',
   subdomain: '',
+  domain: '',
 })
 
 const existingForm = reactive({
   name: '',
   subdomain: '',
+  domain: '',
   port: '80',
 })
 
 const quickForm = reactive({
   subdomain: '',
+  domain: '',
   port: '',
   image: '',
   containerPort: '',
@@ -165,6 +168,26 @@ const templateOptions = computed(() => {
     }
   }
   return []
+})
+
+const domainOptions = computed(() => {
+  const base = settings.value?.baseDomain?.trim().toLowerCase()
+  const extras = (settings.value?.additionalDomains ?? [])
+    .map((domain) => domain.trim().toLowerCase())
+    .filter(Boolean)
+  const seen = new Set<string>()
+  const options: { value: string; label: string }[] = []
+  if (base) {
+    seen.add(base)
+    options.push({ value: base, label: `${base} (base)` })
+  }
+  extras.forEach((domain) => {
+    if (!seen.has(domain)) {
+      seen.add(domain)
+      options.push({ value: domain, label: domain })
+    }
+  })
+  return options
 })
 
 const templateRepoLabel = computed(() => {
@@ -284,12 +307,17 @@ const submitTemplate = async () => {
     templateState.error = 'Project name is required.'
     return
   }
+  if (!templateForm.domain.trim()) {
+    templateState.error = 'Select a domain.'
+    return
+  }
   templateState.loading = true
   try {
     const { data } = await projectsApi.createFromTemplate({
       template: templateForm.templateRef,
       name: templateForm.name,
       subdomain: templateForm.subdomain || undefined,
+      domain: templateForm.domain,
     })
     templateState.jobId = data.job.id
     templateState.success = 'Template job queued. Automation started.'
@@ -311,6 +339,10 @@ const submitExisting = async () => {
     existingState.error = 'Service name and subdomain are required.'
     return
   }
+  if (!existingForm.domain.trim()) {
+    existingState.error = 'Select a domain.'
+    return
+  }
   const port = parsePort(existingForm.port, true)
   if (port === null || port === undefined) {
     existingState.error = 'Port must be numeric.'
@@ -321,6 +353,7 @@ const submitExisting = async () => {
     const { data } = await projectsApi.forwardLocal({
       name: existingForm.name,
       subdomain: existingForm.subdomain,
+      domain: existingForm.domain,
       port,
     })
     existingState.jobId = data.job.id
@@ -343,6 +376,10 @@ const submitQuick = async () => {
     quickState.error = 'Subdomain is required.'
     return
   }
+  if (!quickForm.domain.trim()) {
+    quickState.error = 'Select a domain.'
+    return
+  }
   const port = parsePort(quickForm.port, true)
   if (port === null || port === undefined) {
     quickState.error = 'Port must be numeric.'
@@ -358,6 +395,7 @@ const submitQuick = async () => {
   try {
     const { data } = await projectsApi.quickService({
       subdomain: quickForm.subdomain,
+      domain: quickForm.domain,
       port,
       image: image ? image : undefined,
       containerPort: containerPort ?? undefined,
@@ -433,6 +471,23 @@ onMounted(async () => {
     machineName.value = window.location.hostname || 'localhost'
   }
 })
+
+watch(
+  () => domainOptions.value,
+  (options) => {
+    const fallback = options[0]?.value ?? ''
+    if (!options.find((option) => option.value === templateForm.domain)) {
+      templateForm.domain = fallback
+    }
+    if (!options.find((option) => option.value === existingForm.domain)) {
+      existingForm.domain = fallback
+    }
+    if (!options.find((option) => option.value === quickForm.domain)) {
+      quickForm.domain = fallback
+    }
+  },
+  { immediate: true },
+)
 
 watch(
   () => templateOptions.value,
@@ -533,12 +588,14 @@ watch(
     v-model:template-ref="templateForm.templateRef"
     v-model:name="templateForm.name"
     v-model:subdomain="templateForm.subdomain"
+    v-model:domain="templateForm.domain"
     :is-authenticated="isAuthenticated"
     :template-options="templateOptions"
     :template-repo-label="templateRepoLabel"
     :template-empty-state-message="templateEmptyStateMessage"
     :template-create-blocked="templateCreateBlocked"
     :template-selection-disabled="templateSelectionDisabled"
+    :domain-options="domainOptions"
     :state="templateState"
     :show-guidance="fieldGuidance.show"
     :clear-guidance="fieldGuidance.clear"
@@ -548,8 +605,10 @@ watch(
     v-model:open="existingFormOpen"
     v-model:name="existingForm.name"
     v-model:subdomain="existingForm.subdomain"
+    v-model:domain="existingForm.domain"
     v-model:port="existingForm.port"
     :is-authenticated="isAuthenticated"
+    :domain-options="domainOptions"
     :state="existingState"
     :show-guidance="fieldGuidance.show"
     :clear-guidance="fieldGuidance.clear"
@@ -558,11 +617,13 @@ watch(
   <QuickDeployQuickForm
     v-model:open="quickFormOpen"
     v-model:subdomain="quickForm.subdomain"
+    v-model:domain="quickForm.domain"
     v-model:port="quickForm.port"
     v-model:image="quickForm.image"
     v-model:container-port="quickForm.containerPort"
     :title="selectedServiceName ? `Forward ${selectedServiceName}` : 'Quick service'"
     :is-authenticated="isAuthenticated"
+    :domain-options="domainOptions"
     :state="quickState"
     :show-guidance="fieldGuidance.show"
     :clear-guidance="fieldGuidance.clear"

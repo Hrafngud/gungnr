@@ -99,6 +99,7 @@ func (c *ProjectsController) CreateFromTemplate(ctx *gin.Context) {
 	c.logAudit(ctx, "project.create_template", req.Name, map[string]any{
 		"template":  req.Template,
 		"subdomain": subdomain,
+		"domain":    req.Domain,
 		"proxyPort": req.ProxyPort,
 		"dbPort":    req.DBPort,
 		"jobId":     job.ID,
@@ -127,6 +128,7 @@ func (c *ProjectsController) DeployExisting(ctx *gin.Context) {
 
 	c.logAudit(ctx, "project.deploy_existing", req.Name, map[string]any{
 		"subdomain": req.Subdomain,
+		"domain":    req.Domain,
 		"port":      req.Port,
 		"jobId":     job.ID,
 	})
@@ -154,6 +156,7 @@ func (c *ProjectsController) ForwardLocal(ctx *gin.Context) {
 
 	c.logAudit(ctx, "project.forward_local", req.Name, map[string]any{
 		"subdomain": req.Subdomain,
+		"domain":    req.Domain,
 		"port":      req.Port,
 		"jobId":     job.ID,
 	})
@@ -180,6 +183,7 @@ func (c *ProjectsController) QuickService(ctx *gin.Context) {
 	}
 
 	c.logAudit(ctx, "project.quick_service", req.Subdomain, map[string]any{
+		"domain": req.Domain,
 		"port":  req.Port,
 		"jobId": job.ID,
 	})

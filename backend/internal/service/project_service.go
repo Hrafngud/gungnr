@@ -37,6 +37,7 @@ type CreateTemplateRequest struct {
 	Template  string `json:"template,omitempty"`
 	Name      string `json:"name"`
 	Subdomain string `json:"subdomain"`
+	Domain    string `json:"domain,omitempty"`
 	ProxyPort int    `json:"proxyPort"`
 	DBPort    int    `json:"dbPort"`
 }
@@ -44,17 +45,20 @@ type CreateTemplateRequest struct {
 type DeployExistingRequest struct {
 	Name      string `json:"name"`
 	Subdomain string `json:"subdomain"`
+	Domain    string `json:"domain,omitempty"`
 	Port      int    `json:"port"`
 }
 
 type ForwardLocalRequest struct {
 	Name      string `json:"name"`
 	Subdomain string `json:"subdomain"`
+	Domain    string `json:"domain,omitempty"`
 	Port      int    `json:"port"`
 }
 
 type QuickServiceRequest struct {
 	Subdomain     string `json:"subdomain"`
+	Domain        string `json:"domain,omitempty"`
 	Port          int    `json:"port"`
 	Image         string `json:"image,omitempty"`
 	ContainerPort int    `json:"containerPort,omitempty"`
@@ -101,6 +105,11 @@ func (s *ProjectService) CreateFromTemplate(ctx context.Context, req CreateTempl
 	if err := ValidateSubdomain(req.Subdomain); err != nil {
 		return nil, err
 	}
+	domain, err := s.resolveDomain(ctx, req.Domain)
+	if err != nil {
+		return nil, err
+	}
+	req.Domain = domain
 	if req.ProxyPort != 0 {
 		if err := ValidatePort(req.ProxyPort); err != nil {
 			return nil, err
@@ -128,6 +137,11 @@ func (s *ProjectService) DeployExisting(ctx context.Context, req DeployExistingR
 	if err := ValidateSubdomain(req.Subdomain); err != nil {
 		return nil, err
 	}
+	domain, err := s.resolveDomain(ctx, req.Domain)
+	if err != nil {
+		return nil, err
+	}
+	req.Domain = domain
 	if req.Port == 0 {
 		req.Port = 80
 	}
@@ -146,6 +160,11 @@ func (s *ProjectService) ForwardLocal(ctx context.Context, req ForwardLocalReque
 	if err := ValidateSubdomain(req.Subdomain); err != nil {
 		return nil, err
 	}
+	domain, err := s.resolveDomain(ctx, req.Domain)
+	if err != nil {
+		return nil, err
+	}
+	req.Domain = domain
 	if req.Port == 0 {
 		req.Port = 80
 	}
@@ -160,6 +179,11 @@ func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceReque
 	if err := ValidateSubdomain(req.Subdomain); err != nil {
 		return nil, err
 	}
+	domain, err := s.resolveDomain(ctx, req.Domain)
+	if err != nil {
+		return nil, err
+	}
+	req.Domain = domain
 	if err := ValidatePort(req.Port); err != nil {
 		return nil, err
 	}
@@ -180,6 +204,18 @@ func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceReque
 		}
 	}
 	return s.jobs.Create(ctx, JobTypeQuickService, req)
+}
+
+func (s *ProjectService) resolveDomain(ctx context.Context, requested string) (string, error) {
+	if s.settings != nil {
+		base, additional, err := s.settings.ResolveDomains(ctx)
+		if err != nil {
+			return "", err
+		}
+		return selectDomain(requested, base, additional)
+	}
+	base := normalizeDomain(s.cfg.Domain)
+	return selectDomain(requested, base, nil)
 }
 
 func (s *ProjectService) resolveTemplateSelection(ctx context.Context, templateRef string) (string, error) {
