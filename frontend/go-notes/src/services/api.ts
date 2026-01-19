@@ -1,4 +1,5 @@
 import axios from 'axios'
+import mockData from '@/mock.json'
 
 export class ApiError extends Error {
   fields?: Record<string, string>
@@ -116,6 +117,43 @@ export const api = axios.create({
   },
   withCredentials: true,
   timeout: 15000,
+})
+
+const mockFlagKey = 'gungnr:mock'
+
+function isMockEnabled(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.localStorage.getItem(mockFlagKey) === '1'
+  } catch {
+    return false
+  }
+}
+
+function getMockKey(method: string, url?: string | null): string | null {
+  if (!url) return null
+  return `${method.toUpperCase()} ${url}`
+}
+
+api.interceptors.request.use((config) => {
+  if (!isMockEnabled()) return config
+
+  const method = config.method || 'get'
+  const key = getMockKey(method, config.url)
+  if (!key) return config
+
+  const mockResponse = (mockData as Record<string, unknown>)[key]
+  if (!mockResponse) return config
+
+  config.adapter = async () => ({
+    data: mockResponse,
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config,
+  })
+
+  return config
 })
 
 api.interceptors.response.use(

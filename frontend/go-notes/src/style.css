@@ -19,10 +19,10 @@
   --text: #e4e4e7;
   --muted: #a1a1aa;
   --muted-2: #71717a;
-  --accent: #49d3c7;
-  --accent-strong: #66ded4;
-  --accent-soft: #122624;
-  --accent-ink: #8fe5dd;
+  --accent: #89c2d9;
+  --accent-strong: #a9d6e5;
+  --accent-soft: #2a6f97;
+  --accent-ink: #61a5c2;
   --success: #6ed3a2;
   --warning: #e4b764;
   --danger: #f07f7f;
@@ -47,12 +47,15 @@ body {
   color: var(--text);
   background: var(--bg);
 }
+input[type='number'] {
+    -moz-appearance: textfield;
+}
 
 hr {
   border: 0;
   height: 1px;
   background: var(--border);
-  margin: 3rem 0;
+  margin: 1rem 0;
 }
 
 a {
@@ -104,8 +107,7 @@ h3 {
 }
 
 .panel {
-  border-radius: 0;
-  border: 1px solid var(--border);
+  border-radius: 5px;
   background: var(--surface);
   box-shadow: none;
   min-width: 0;
@@ -113,8 +115,7 @@ h3 {
 }
 
 .panel-soft {
-  border-radius: 0;
-  border: 1px solid var(--border-soft);
+  border-radius: 5px;
   background: var(--surface-2);
   box-shadow: none;
   min-width: 0;
@@ -122,8 +123,7 @@ h3 {
 }
 
 .panel-raise {
-  border-radius: 0;
-  border: 1px solid var(--border);
+  border-radius: 5px;
   background: var(--surface-3);
   box-shadow: none;
   min-width: 0;
@@ -179,8 +179,7 @@ h3 {
 
 .input {
   width: 100%;
-  border-radius: 16px;
-  border: 1px solid var(--border);
+  border-radius: 5px;
   background: var(--surface);
   color: var(--text);
   padding: 0.6rem 0.9rem;
@@ -243,7 +242,7 @@ h3 {
 .select-option {
   width: 100%;
   text-align: left;
-  border-radius: 12px;
+  border-radius: 5px;
   border: 1px solid transparent;
   padding: 0.45rem 0.65rem;
   font-size: 0.8rem;
@@ -389,8 +388,7 @@ h3 {
 }
 
 .list-row {
-  border-radius: 0;
-  border: 1px solid var(--border-soft);
+  border-radius: 5px;
   background: var(--surface-2);
   box-shadow: none;
   padding: 0.75rem 0.9rem;
@@ -639,17 +637,16 @@ h3 {
   align-items: center;
   justify-content: center;
   padding: 1.5rem;
-  background: rgba(6, 6, 10, 0.78);
+  background: #000;
 }
 
-.page-overlay-card {
-  display: grid;
-  gap: 0.5rem;
-  border-radius: 0;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  padding: 1.5rem 2rem;
-  text-align: center;
+.page-overlay-gif {
+  width: clamp(90px, 12vw, 160px);
+  height: clamp(90px, 12vw, 160px);
+  background-image: url('/loading.gif');
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
 }
 
 .modal-panel {

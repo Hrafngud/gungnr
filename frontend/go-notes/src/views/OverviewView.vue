@@ -258,7 +258,7 @@ onMounted(async () => {
       </UiState>
 
       <UiState v-else-if="jobsStore.jobs.length === 0">
-        No automation jobs yet. Queue a template deploy to populate the timeline.
+        No automation jobs yet. Deploys and forwards appear once they run.
       </UiState>
 
       <div v-else class="space-y-4">
@@ -290,26 +290,27 @@ onMounted(async () => {
             </div>
           </UiPanel>
 
-          <UiPanel variant="soft" class="space-y-2 p-4 text-xs text-[color:var(--muted)]">
+          <UiPanel variant="soft" class="flex flex-col gap-4 p-4 text-xs text-[color:var(--muted)]">
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
               Latest job
             </p>
             <p class="text-sm font-semibold text-[color:var(--text)]">
               {{ latestJob ? latestJob.type : 'No job history yet' }}
             </p>
-            <p>
+            <p class="mb-2">
               {{ latestJob ? `Created ${formatDate(latestJob.createdAt)}` : 'Run a deploy to generate logs.' }}
             </p>
+            <div class="w-64">
             <UiButton
               v-if="latestJob"
               :as="RouterLink"
               :to="`/jobs/${latestJob.id}`"
               variant="ghost"
               size="sm"
-              class="mt-2"
             >
               View latest log
             </UiButton>
+            </div>
           </UiPanel>
         </div>
 

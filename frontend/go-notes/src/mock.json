@@ -1,0 +1,298 @@
+{
+  "GET /auth/me": {
+    "id": 1,
+    "login": "mock-admin",
+    "avatarUrl": "https://avatars.githubusercontent.com/u/1?v=4",
+    "role": "superuser",
+    "expiresAt": "2099-01-01T00:00:00Z"
+  },
+  "POST /auth/logout": {},
+  "GET /health/docker": {
+    "status": "ok",
+    "detail": "Docker connected",
+    "containers": 3
+  },
+  "GET /health/tunnel": {
+    "status": "ok",
+    "detail": "Tunnel connected",
+    "tunnel": "mock-tunnel",
+    "connections": 2,
+    "configPath": "/home/mock/.cloudflared/config.yml",
+    "diagnostics": {
+      "accountId": "mock-account",
+      "zoneId": "mock-zone",
+      "tunnel": "mock-tunnel",
+      "domain": "mock.example.com",
+      "configPath": "/home/mock/.cloudflared/config.yml",
+      "tokenSet": true,
+      "tunnelRefType": "name",
+      "sources": {
+        "baseDomain": "env",
+        "cloudflaredTunnel": "env"
+      }
+    }
+  },
+  "GET /api/v1/settings": {
+    "settings": {
+      "baseDomain": "mock.example.com",
+      "githubAppId": "123456",
+      "githubAppClientId": "mock-client-id",
+      "githubAppClientSecret": "mock-client-secret",
+      "githubAppInstallationId": "987654",
+      "githubAppPrivateKey": "-----BEGIN PRIVATE KEY-----\\nMOCKKEY\\n-----END PRIVATE KEY-----",
+      "cloudflareToken": "mock-token",
+      "cloudflareAccountId": "mock-account",
+      "cloudflareZoneId": "mock-zone",
+      "cloudflaredTunnel": "mock-tunnel",
+      "cloudflaredConfigPath": "/home/mock/.cloudflared/config.yml"
+    },
+    "sources": {
+      "baseDomain": "env",
+      "cloudflareToken": "env",
+      "cloudflaredTunnel": "env",
+      "cloudflaredConfigPath": "env"
+    },
+    "cloudflaredTunnelName": "mock-tunnel",
+    "templatesDir": "/templates"
+  },
+  "GET /api/v1/settings/cloudflared/preview": {
+    "preview": {
+      "path": "/home/mock/.cloudflared/config.yml",
+      "contents": "tunnel: mock-tunnel\ncredentials-file: /home/mock/.cloudflared/mock.json\ningress:\n  - hostname: app.mock.example.com\n    service: http://localhost:3000\n  - service: http_status:404\n"
+    }
+  },
+  "GET /api/v1/github/catalog": {
+    "catalog": {
+      "tokenConfigured": true,
+      "template": {
+        "configured": true,
+        "owner": "acme",
+        "repo": "starter-template",
+        "targetOwner": "acme",
+        "private": true
+      },
+      "templates": [
+        {
+          "configured": true,
+          "owner": "acme",
+          "repo": "starter-template",
+          "targetOwner": "acme",
+          "private": true
+        }
+      ],
+      "app": {
+        "configured": true,
+        "appIdConfigured": true,
+        "installationIdConfigured": true,
+        "privateKeyConfigured": true
+      },
+      "templateAccess": {
+        "installationOwner": "acme",
+        "installationOwnerType": "Organization",
+        "repoAccess": {
+          "checked": true,
+          "available": true
+        }
+      }
+    }
+  },
+  "GET /api/v1/projects": {
+    "projects": [
+      {
+        "id": 1,
+        "name": "mock-service",
+        "repoUrl": "https://github.com/acme/mock-service",
+        "path": "/templates/mock-service",
+        "proxyPort": 3000,
+        "dbPort": 5432,
+        "status": "running",
+        "createdAt": "2026-01-01T10:00:00Z",
+        "updatedAt": "2026-01-02T10:00:00Z"
+      },
+            {
+        "id": 1,
+        "name": "mock-service",
+        "repoUrl": "https://github.com/acme/mock-service",
+        "path": "/templates/mock-service",
+        "proxyPort": 3000,
+        "dbPort": 5432,
+        "status": "running",
+        "createdAt": "2026-01-01T10:00:00Z",
+        "updatedAt": "2026-01-02T10:00:00Z"
+      }
+    ]
+  },
+  "GET /api/v1/projects/local": {
+    "projects": [
+      {
+        "name": "mock-service",
+        "path": "/templates/mock-service"
+      }
+    ]
+  },
+  "GET /api/v1/jobs": {
+    "jobs": [
+      {
+        "id": 1,
+        "type": "deploy",
+        "status": "success",
+        "startedAt": "2026-01-02T12:00:00Z",
+        "finishedAt": "2026-01-02T12:02:00Z",
+        "error": null,
+        "createdAt": "2026-01-02T11:59:00Z"
+      }
+    ],
+    "page": 1,
+    "pageSize": 20,
+    "total": 1,
+    "totalPages": 1
+  },
+  "GET /api/v1/jobs/1": {
+    "id": 1,
+    "type": "deploy",
+    "status": "success",
+    "startedAt": "2026-01-02T12:00:00Z",
+    "finishedAt": "2026-01-02T12:02:00Z",
+    "error": null,
+    "createdAt": "2026-01-02T11:59:00Z",
+    "logLines": [
+      "Cloning repo...",
+      "Building containers...",
+      "Deployment complete."
+    ]
+  },
+  "GET /api/v1/audit-logs": {
+    "logs": [
+      {
+        "id": 1,
+        "userId": 1,
+        "userLogin": "mock-admin",
+        "action": "deploy",
+        "target": "mock-service",
+        "metadata": "{\"subdomain\":\"app\"}",
+        "createdAt": "2026-01-02T12:03:00Z"
+      }
+    ]
+  },
+  "GET /api/v1/host/docker": {
+    "containers": [
+      {
+        "id": "abc123",
+        "name": "mock-service",
+        "image": "acme/mock-service:latest",
+        "status": "running",
+        "ports": "3000/tcp",
+        "createdAt": "2026-01-02T11:58:00Z",
+        "runningFor": "3 minutes",
+        "service": "web",
+        "project": "mock-service",
+        "portBindings": [
+          {
+            "hostIp": "0.0.0.0",
+            "hostPort": 3000,
+            "containerPort": 3000,
+            "proto": "tcp",
+            "published": true
+          }
+        ]
+      }
+    ]
+  },
+  "GET /api/v1/host/docker/usage": {
+    "summary": {
+      "totalSize": "1.2GB",
+      "images": {
+        "count": 6,
+        "size": "700MB"
+      },
+      "containers": {
+        "count": 3,
+        "size": "180MB"
+      },
+      "volumes": {
+        "count": 4,
+        "size": "320MB"
+      },
+      "buildCache": {
+        "count": 2,
+        "size": "24MB"
+      },
+      "project": "mock-service",
+      "projectCounts": {
+        "containers": 2,
+        "images": 3,
+        "volumes": 1
+      }
+    }
+  },
+  "GET /api/v1/users": {
+    "users": [
+      {
+        "id": 1,
+        "login": "mock-admin",
+        "role": "superuser",
+        "lastLoginAt": "2026-01-02T12:05:00Z"
+      }
+    ]
+  },
+  "GET /api/v1/cloudflare/preflight": {
+    "token": {
+      "status": "ok"
+    },
+    "account": {
+      "status": "ok"
+    },
+    "zone": {
+      "status": "ok"
+    },
+    "tunnel": {
+      "status": "ok"
+    },
+    "tunnelRef": "mock-tunnel",
+    "tunnelRefType": "name"
+  },
+  "POST /api/v1/projects/template": {
+    "job": {
+      "id": 2,
+      "type": "template",
+      "status": "queued",
+      "startedAt": null,
+      "finishedAt": null,
+      "error": null,
+      "createdAt": "2026-01-02T12:10:00Z"
+    }
+  },
+  "POST /api/v1/projects/existing": {
+    "job": {
+      "id": 3,
+      "type": "existing",
+      "status": "queued",
+      "startedAt": null,
+      "finishedAt": null,
+      "error": null,
+      "createdAt": "2026-01-02T12:11:00Z"
+    }
+  },
+  "POST /api/v1/projects/forward": {
+    "job": {
+      "id": 4,
+      "type": "forward",
+      "status": "queued",
+      "startedAt": null,
+      "finishedAt": null,
+      "error": null,
+      "createdAt": "2026-01-02T12:12:00Z"
+    }
+  },
+  "POST /api/v1/projects/quick": {
+    "job": {
+      "id": 5,
+      "type": "quick",
+      "status": "queued",
+      "startedAt": null,
+      "finishedAt": null,
+      "error": null,
+      "createdAt": "2026-01-02T12:13:00Z"
+    }
+  }
+}

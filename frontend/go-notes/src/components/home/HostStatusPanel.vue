@@ -4,7 +4,6 @@ import { RouterLink } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
-import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
 import NavIcon from '@/components/NavIcon.vue'
 import type { DockerHealth, TunnelHealth } from '@/types/health'
@@ -82,20 +81,17 @@ const formatDate = (value?: string | null) => {
 </script>
 
 <template>
-  <section class="space-y-12">
-    <div class="flex flex-wrap items-center justify-between gap-4">
-      <div>
-        <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-          Home
-        </p>
+  <section class="space-y-2">
+    <div class="flex flex-wrap items-center justify-between gap-1">
         <h1 class="mt-2 text-3xl font-semibold text-[color:var(--text)]">
           Host status
         </h1>
-        <p class="mt-2 text-sm text-[color:var(--muted)]">
-          Monitor the deploy surface and keep automation primed for your next stack.
-        </p>
-      </div>
-      <div class="flex flex-wrap gap-3">
+      <div class="flex flex-wrap gap-2">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <UiBadge tone="neutral">
+            {{ hostLoading ? 'Refreshing' : 'Live snapshot' }}
+          </UiBadge>
+         </div>
         <UiButton variant="ghost" @click="emit('refresh')">
           <span class="flex items-center gap-2">
             <NavIcon name="refresh" class="h-3.5 w-3.5" />
@@ -111,21 +107,6 @@ const formatDate = (value?: string | null) => {
         </UiButton>
       </div>
     </div>
-    <hr />
-    <UiPanel variant="soft" class="space-y-4 p-4">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-            Host status
-          </p>
-          <h2 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
-            Live runtime signals
-          </h2>
-        </div>
-        <UiBadge tone="neutral">
-          {{ hostLoading ? 'Refreshing' : 'Live snapshot' }}
-        </UiBadge>
-      </div>
       <UiState v-if="settingsError" tone="error">
         {{ settingsError }}
       </UiState>
@@ -135,27 +116,89 @@ const formatDate = (value?: string | null) => {
       <UiState v-if="projectsError" tone="error">
         {{ projectsError }}
       </UiState>
-      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <UiListRow as="article" class="space-y-2">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Containers
-              </p>
-              <p class="mt-1 text-xl font-semibold text-[color:var(--text)]">
-                {{ dockerHealth?.containers ?? 'n/a' }}
-              </p>
+      <div class="flex flex-col gap-3">
+        <div class="flex flex-wrap gap-3">
+          <UiListRow as="article" class="flex min-w-[210px] flex-1 flex-col gap-2">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Containers
+                </p>
+                <p class="mt-1 text-lg font-semibold text-[color:var(--text)]">
+                  {{ dockerHealth?.containers ?? 'n/a' }}
+                </p>
+              </div>
+              <UiBadge :tone="healthTone(dockerHealth?.status)">
+                {{ dockerHealth?.status || 'unknown' }}
+              </UiBadge>
             </div>
-            <UiBadge :tone="healthTone(dockerHealth?.status)">
-              {{ dockerHealth?.status || 'unknown' }}
-            </UiBadge>
-          </div>
-          <p class="text-xs text-[color:var(--muted)]">
-            {{ dockerHealth?.detail || 'No container data available yet.' }}
-          </p>
-        </UiListRow>
-        <UiListRow as="article" class="space-y-2">
-          <div class="flex items-center justify-between gap-3">
+            <p class="text-xs text-[color:var(--muted)]">
+              {{ dockerHealth?.detail || 'No container data available yet.' }}
+            </p>
+          </UiListRow>
+          <UiListRow as="article" class="flex min-w-[210px] flex-1 flex-col gap-2">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Machine
+                </p>
+                <p class="mt-1 text-base font-semibold text-[color:var(--text)]">
+                  {{ machineName || 'n/a' }}
+                </p>
+              </div>
+              <UiBadge tone="neutral">Panel host</UiBadge>
+            </div>
+          </UiListRow>
+          <UiListRow as="article" class="flex min-w-[210px] flex-1 flex-col gap-2">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Tunnel
+                </p>
+                <p class="mt-1 text-base font-semibold text-[color:var(--text)]">
+                  {{ tunnelHealth?.tunnel || 'n/a' }}
+                </p>
+              </div>
+              <UiBadge :tone="healthTone(tunnelHealth?.status)">
+                {{ tunnelHealth?.status || 'unknown' }}
+              </UiBadge>
+            </div>
+            <p class="text-xs text-[color:var(--muted)]">
+              {{ tunnelHealth?.detail || 'Cloudflared status unavailable.' }}
+            </p>
+          </UiListRow>
+          <UiListRow as="article" class="flex min-w-[210px] flex-1 flex-col gap-2">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Base Domain
+                </p>
+                <p class="mt-1 text-base font-semibold text-[color:var(--text)]">
+                  {{ domainLabel }}
+                </p>
+              </div>
+              <UiBadge tone="neutral">Primary</UiBadge>
+            </div>
+          </UiListRow>
+          <UiListRow as="article" class="flex min-w-[210px] flex-1 flex-col gap-2">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Last service
+                </p>
+                <p class="mt-1 text-base font-semibold text-[color:var(--text)]">
+                  {{ lastServiceLabel }}
+                </p>
+              </div>
+              <UiBadge tone="neutral">Deploy</UiBadge>
+            </div>
+            <p class="text-xs text-[color:var(--muted)]">
+              {{ lastServiceTime }}
+            </p>
+          </UiListRow>
+        </div>
+        <UiListRow as="article" class="flex flex-wrap items-center justify-between gap-4">
+          <div class="flex items-center gap-4">
             <div>
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                 Jobs
@@ -164,27 +207,31 @@ const formatDate = (value?: string | null) => {
                 Automation queue
               </p>
             </div>
-            <UiBadge :tone="healthTone(dockerHealth?.status)">
-              {{ jobCounts.pending + jobCounts.running + jobCounts.completed + jobCounts.failed }} total
-            </UiBadge>
           </div>
-          <div class="grid gap-1 text-xs text-[color:var(--muted)]">
-            <div class="flex items-center justify-between">
+          <div class="flex flex-wrap items-center gap-4 text-xs text-[color:var(--muted)]">
+            <span class="flex items-center gap-2">
+              <span>Total</span>
+              <span class="text-[color:var(--text)]">
+                {{ jobCounts.pending + jobCounts.running + jobCounts.completed + jobCounts.failed }}
+              </span>
+            </span>
+            <span class="flex items-center gap-2">
               <span>Queued</span>
               <span class="text-[color:var(--text)]">{{ jobCounts.pending }}</span>
-            </div>
-            <div class="flex items-center justify-between">
+            </span>
+            
+            <span class="flex items-center gap-2">
               <span>Running</span>
               <span class="text-[color:var(--text)]">{{ jobCounts.running }}</span>
-            </div>
-            <div class="flex items-center justify-between">
+            </span>
+            <span class="flex items-center gap-2">
               <span>Completed</span>
               <span class="text-[color:var(--text)]">{{ jobCounts.completed }}</span>
-            </div>
-            <div class="flex items-center justify-between">
+            </span>
+            <span class="flex items-center gap-2">
               <span>Failed</span>
               <span class="text-[color:var(--text)]">{{ jobCounts.failed }}</span>
-            </div>
+            </span>
           </div>
           <p class="text-xs text-[color:var(--muted)]">
             {{
@@ -194,88 +241,6 @@ const formatDate = (value?: string | null) => {
             }}
           </p>
         </UiListRow>
-        <UiListRow as="article" class="space-y-2">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Machine
-              </p>
-              <p class="mt-1 text-base font-semibold text-[color:var(--text)]">
-                {{ machineName || 'n/a' }}
-              </p>
-            </div>
-            <UiBadge tone="neutral">Panel host</UiBadge>
-          </div>
-          <p class="text-xs text-[color:var(--muted)]">
-            Hostname pulled from the active panel URL.
-          </p>
-        </UiListRow>
-        <UiListRow as="article" class="space-y-2">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Tunnel
-              </p>
-              <p class="mt-1 text-base font-semibold text-[color:var(--text)]">
-                {{ tunnelHealth?.tunnel || 'n/a' }}
-              </p>
-            </div>
-            <UiBadge :tone="healthTone(tunnelHealth?.status)">
-              {{ tunnelHealth?.status || 'unknown' }}
-            </UiBadge>
-          </div>
-          <p class="text-xs text-[color:var(--muted)]">
-            {{ tunnelHealth?.detail || 'Cloudflared status unavailable.' }}
-          </p>
-        </UiListRow>
-        <UiListRow as="article" class="space-y-2">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Domain
-              </p>
-              <p class="mt-1 text-base font-semibold text-[color:var(--text)]">
-                {{ domainLabel }}
-              </p>
-            </div>
-            <UiBadge tone="neutral">Primary</UiBadge>
-          </div>
-          <p class="text-xs text-[color:var(--muted)]">
-            Used for new subdomains and host tunnel ingress.
-          </p>
-        </UiListRow>
-        <UiListRow as="article" class="space-y-2">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Last service
-              </p>
-              <p class="mt-1 text-base font-semibold text-[color:var(--text)]">
-                {{ lastServiceLabel }}
-              </p>
-            </div>
-            <UiBadge tone="neutral">Deploy</UiBadge>
-          </div>
-          <p class="text-xs text-[color:var(--muted)]">
-            {{ lastServiceTime }}
-          </p>
-        </UiListRow>
       </div>
-      <UiListRow class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-            Host settings
-          </p>
-          <p class="mt-1 text-sm text-[color:var(--muted)]">
-            Review tunnel health, DNS automation, and configuration details.
-          </p>
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <UiButton :as="RouterLink" to="/host-settings" variant="primary" size="sm">
-            Open host settings
-          </UiButton>
-        </div>
-      </UiListRow>
-    </UiPanel>
   </section>
 </template>

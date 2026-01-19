@@ -5,7 +5,6 @@ import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiInput from '@/components/ui/UiInput.vue'
-import UiListRow from '@/components/ui/UiListRow.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiState from '@/components/ui/UiState.vue'
@@ -334,7 +333,7 @@ onBeforeUnmount(() => {
           Day-to-day guidance
         </p>
         <p class="mt-1 text-sm text-[color:var(--muted)]">
-          Keep this open while you deploy templates or update tunnel routes to confirm container health.
+          Keep this open while deploys or routing changes run to confirm container health.
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -351,7 +350,7 @@ onBeforeUnmount(() => {
       {{ error }}
     </UiState>
 
-    <div class="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
+    <div class="gap-6 flex flex-col">
       <UiPanel class="space-y-4 p-4">
         <div class="flex items-center justify-between">
           <div>
@@ -375,22 +374,27 @@ onBeforeUnmount(() => {
         </UiState>
 
         <div v-else class="space-y-3">
+          <div class="flex flex-row gap-2 flex-warp">
+          <div class="w-10/12">
           <UiInput
             v-model="containerFilter"
             placeholder="Filter containers"
           />
+          </div>
+          <div class="w-2/12">
           <UiSelect
             v-model="selectedContainer"
-            class="w-full"
             placeholder="Select a container"
             :options="containerOptions"
           />
 
-          <div class="space-y-2">
-            <UiListRow
+          </div>
+          </div>
+          <div class="space-y-2 flex flex-row flex-wrap">
+            <div
+              class="w-1/6 cursor-pointer flex flex-col gap-2 p-4"
               v-for="container in filteredContainers"
               :key="container.id"
-              class="cursor-pointer flex flex-col gap-2"
               :class="selectedContainer === container.name
                 ? 'border border-[color:var(--accent)]/40 bg-[color:var(--surface-2)]'
                 : ''"
@@ -408,7 +412,7 @@ onBeforeUnmount(() => {
               <p class="text-xs text-[color:var(--muted-2)]">
                 {{ container.ports || 'No published ports' }}
               </p>
-            </UiListRow>
+            </div>
           </div>
         </div>
       </UiPanel>
@@ -425,94 +429,135 @@ onBeforeUnmount(() => {
             {{ selectedInfo?.service || 'No compose service detected' }}
           </p>
         </div>
-
-        <UiPanel v-if="selectedInfo" variant="soft" class="grid gap-3 p-4 text-xs text-[color:var(--muted)] md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+        <div class="flex flex-row gap-2">
+          <div class="w-3/12 flex flex-col gap-4">       
           <div>
             <p class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Image</p>
-            <p class="mt-1 text-sm text-[color:var(--text)]">{{ selectedInfo.image }}</p>
+            <p class="mt-1 text-sm text-[color:var(--text)]">{{ selectedInfo?.image }}</p>
           </div>
-          <div>
-            <p class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Runtime</p>
-            <p class="mt-1 text-sm text-[color:var(--text)]">{{ selectedInfo.runningFor || 'Unknown' }}</p>
-            <p class="mt-1 text-[color:var(--muted-2)]">{{ selectedInfo.status }}</p>
+          <div class="flex flex-row justify-between">
+          <div class="flex flex-row gap-4 items-center">
+            <div>
+            <p class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              Runtime
+            </p>
+            <p class=" text-[color:var(--muted-2)]">{{ selectedInfo?.status }}</p>
+                        </div>
+
+            <p class="text-xs text-[color:var(--text)]">
+              ({{ selectedInfo?.runningFor || 'Unknown' }})
+            </p>
           </div>
           <div>
             <p class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Ports</p>
-            <p class="mt-1 text-sm text-[color:var(--text)]">
-              {{ selectedInfo.ports || 'No published ports' }}
+            <p class="text-sm text-[color:var(--text)]">
+              {{ selectedInfo?.ports || 'No published ports' }}
             </p>
           </div>
-        </UiPanel>
-
-        <UiPanel
-          variant="soft"
-          class="flex flex-wrap items-center gap-3 p-3 text-xs text-[color:var(--muted)]"
-        >
-          <div class="flex flex-wrap items-center gap-2 min-w-0 flex-1">
-            <UiBadge :tone="streamBadge.tone">
-              {{ streamBadge.label }}
-            </UiBadge>
-            <span class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Stream
-            </span>
-            <span class="text-[color:var(--muted-2)]">·</span>
-            <span>{{ filteredLines.length }} lines · tail {{ tailValue }}</span>
-            <span v-if="streamState === 'connecting'" class="flex items-center gap-2">
-              <UiInlineSpinner />
-              Connecting...
-            </span>
           </div>
-
-          <div class="flex flex-wrap items-center gap-2 justify-end flex-1 min-w-0">
-            <div class="flex flex-wrap items-center gap-2">
-              <UiButton
-                variant="ghost"
-                size="xs"
-                :disabled="!hasSelection || streamState === 'paused'"
-                @click="pauseStream"
-              >
-                Pause
-              </UiButton>
-              <UiButton
-                variant="ghost"
-                size="xs"
-                :disabled="!hasSelection || streamState !== 'paused'"
-                @click="resumeStream"
-              >
-                Resume
-              </UiButton>
-            </div>
-
-            <label class="flex items-center gap-2 shrink-0">
-              <span>Tail</span>
-              <UiInput
-                v-model="tailInput"
-                type="number"
-                min="1"
-                max="5000"
-                class="w-20"
-              />
-            </label>
-            <UiToggle v-model="followLive" class="shrink-0">Follow live</UiToggle>
-            <UiToggle v-model="showTimestamps" class="shrink-0">Timestamps</UiToggle>
-            <div class="min-w-[220px] flex-1">
-              <UiInput v-model="filterQuery" placeholder="Filter log lines" class="w-full" />
-            </div>
-            <div class="flex flex-wrap items-center gap-2">
-              <UiButton variant="ghost" size="xs" :disabled="!hasSelection" @click="clearLogs">
-                Clear
-              </UiButton>
-              <UiButton
-                variant="ghost"
-                size="xs"
-                :disabled="!hasSelection || !hasLogs"
-                @click="copyLogs"
-              >
-                Copy to clipboard
-              </UiButton>
-            </div>
           </div>
-        </UiPanel>
+      <div class="w-9/12">
+<UiPanel
+  variant="soft"
+  class="flex flex-col gap-3 p-3 text-xs text-[color:var(--muted)]"
+>
+  <!-- Row 1: Stream status -->
+  <div class="flex flex-row items-center gap-2 w-full">
+    <UiBadge :tone="streamBadge.tone">
+      {{ streamBadge.label }}
+    </UiBadge>
+
+    <span class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+      Stream
+    </span>
+
+    <span class="text-[color:var(--muted-2)]">·</span>
+
+    <span>
+      {{ filteredLines.length }} lines · tail {{ tailValue }}
+    </span>
+
+    <span
+      v-if="streamState === 'connecting'"
+      class="flex flex-row items-center gap-2"
+    >
+      <UiInlineSpinner />
+      Connecting...
+    </span>
+  </div>
+
+  <!-- Row 2: Controls -->
+  <div class="flex flex-col items-center gap-3 w-full">
+    <!-- Left: playback + tail -->
+    <div class="flex flex-row items-center justify-around gap-2 w-full">
+      <UiButton
+        variant="ghost"
+        size="xs"
+        :disabled="!hasSelection || streamState === 'paused'"
+        @click="pauseStream"
+      >
+        Pause
+      </UiButton>
+
+      <UiButton
+        variant="ghost"
+        size="xs"
+        :disabled="!hasSelection || streamState !== 'paused'"
+        @click="resumeStream"
+      >
+        Resume
+      </UiButton>
+            <UiButton
+        variant="ghost"
+        size="xs"
+        :disabled="!hasSelection"
+        @click="clearLogs"
+      >
+        Clear
+      </UiButton>
+
+      <UiButton
+        variant="ghost"
+        size="xs"
+        :disabled="!hasSelection || !hasLogs"
+        @click="copyLogs"
+      >
+        Copy
+      </UiButton>
+      <UiToggle v-model="followLive">Follow live</UiToggle>
+      <UiToggle v-model="showTimestamps">Timestamps</UiToggle>
+
+      <label class="flex flex-row gap-2 items-center">
+        <span class="text-nowrap">Tail</span>
+        <UiInput
+          v-model="tailInput"
+          type="number"
+          min="1"
+          max="5000"
+        />
+      </label>
+    </div>
+
+    <!-- Middle: toggles + filter -->
+    <div class="flex flex-row items-center gap-3 w-full">
+
+      <UiInput
+        v-model="filterQuery"
+        placeholder="Filter log lines"
+        class="w-full"
+      />
+    </div>
+
+    <!-- Right: actions -->
+    <div class="flex flex-row items-center justify-end gap-2 w-full">
+
+    </div>
+  </div>
+</UiPanel>
+
+</div>
+        </div>
+
 
         <UiState v-if="!hasSelection" class="flex-1">
           Choose a running container to start streaming logs.

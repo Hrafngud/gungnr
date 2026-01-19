@@ -34,46 +34,46 @@ const appConfigured = computed(() => Boolean(catalog.value?.app?.configured))
 const installationTokenStatus = computed(() => {
   if (loading.value && !catalog.value) return 'Checking'
   if (!catalog.value) return 'Unknown'
-  return appConfigured.value ? 'Configured' : 'Missing'
+  return appConfigured.value ? 'Available' : 'Unavailable'
 })
 
 const installationTokenTone = computed<BadgeTone>(() => {
-  if (installationTokenStatus.value === 'Configured') return 'ok'
-  if (installationTokenStatus.value === 'Missing') return 'warn'
+  if (installationTokenStatus.value === 'Available') return 'ok'
+  if (installationTokenStatus.value === 'Unavailable') return 'warn'
   return 'neutral'
 })
 
 const appStatus = computed(() => {
   if (loading.value && !catalog.value) return 'Checking'
   if (!catalog.value) return 'Unknown'
-  return appConfigured.value ? 'Configured' : 'Missing'
+  return appConfigured.value ? 'Available' : 'Unavailable'
 })
 
 const appTone = computed<BadgeTone>(() => {
-  if (appStatus.value === 'Configured') return 'ok'
-  if (appStatus.value === 'Missing') return 'warn'
+  if (appStatus.value === 'Available') return 'ok'
+  if (appStatus.value === 'Unavailable') return 'warn'
   return 'neutral'
 })
 
 const templateStatus = computed(() => {
   if (loading.value && !catalog.value) return 'Checking'
   if (!catalog.value) return 'Unknown'
-  if (!appConfigured.value) return 'App missing'
-  if (!templateConfigured.value) return 'Template not set'
+  if (!appConfigured.value) return 'App unavailable'
+  if (!templateConfigured.value) return 'Template unavailable'
   return 'Ready'
 })
 
 const templateTone = computed<BadgeTone>(() => {
   if (templateStatus.value === 'Ready') return 'ok'
-  if (templateStatus.value === 'App missing' || templateStatus.value === 'Template not set') {
+  if (templateStatus.value === 'App unavailable' || templateStatus.value === 'Template unavailable') {
     return 'warn'
   }
   return 'neutral'
 })
 
 const templateSyncLabel = computed(() => {
-  if (!appConfigured.value) return 'Waiting'
-  if (!templateConfigured.value) return 'Needs template'
+  if (!appConfigured.value) return 'Unavailable'
+  if (!templateConfigured.value) return 'No template'
   return 'Ready'
 })
 
@@ -92,26 +92,26 @@ const allowlistUsersLabel = computed(() => {
 const appIdStatus = computed(() => {
   if (loading.value && !catalog.value) return 'Checking'
   if (!catalog.value) return 'Unknown'
-  return catalog.value.app.appIdConfigured ? 'Configured' : 'Missing'
+  return catalog.value.app.appIdConfigured ? 'Available' : 'Unavailable'
 })
 
 const appInstallationStatus = computed(() => {
   if (loading.value && !catalog.value) return 'Checking'
   if (!catalog.value) return 'Unknown'
-  return catalog.value.app.installationIdConfigured ? 'Configured' : 'Missing'
+  return catalog.value.app.installationIdConfigured ? 'Available' : 'Unavailable'
 })
 
 const appKeyStatus = computed(() => {
   if (loading.value && !catalog.value) return 'Checking'
   if (!catalog.value) return 'Unknown'
-  return catalog.value.app.privateKeyConfigured ? 'Configured' : 'Missing'
+  return catalog.value.app.privateKeyConfigured ? 'Available' : 'Unavailable'
 })
 
 const templateSource = computed(() => {
-  if (!catalog.value?.template.configured) return 'Not configured'
+  if (!catalog.value?.template.configured) return 'Unavailable'
   const owner = catalog.value.template.owner
   const repo = catalog.value.template.repo
-  if (!owner || !repo) return 'Not configured'
+  if (!owner || !repo) return 'Unavailable'
   return `${owner}/${repo}`
 })
 
@@ -137,7 +137,7 @@ const templateVisibility = computed(() => {
 const templateAccessStatus = computed(() => {
   if (loading.value && !catalog.value) return 'Checking'
   if (!catalog.value) return 'Unknown'
-  if (!templateConfigured.value) return 'Not configured'
+  if (!templateConfigured.value) return 'Unavailable'
   const access = templateAccess.value?.repoAccess
   if (!access?.checked) {
     if (access?.error) return 'Error'
@@ -216,7 +216,7 @@ onMounted(async () => {
           </span>
         </UiButton>
         <UiButton :as="RouterLink" to="/host-settings" variant="primary" size="sm">
-          Open host settings
+          Open template settings
         </UiButton>
       </div>
     </div>
@@ -226,7 +226,7 @@ onMounted(async () => {
     </UiState>
 
     <UiState v-if="!isAdmin" tone="warn">
-      Read-only access: admin permissions are required to update GitHub settings.
+      Read-only access: admin permissions are required to update template settings.
     </UiState>
 
     <hr />
@@ -262,7 +262,7 @@ onMounted(async () => {
           <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
             <span>Repo creation</span>
             <span class="text-[color:var(--text)]">
-              {{ appConfigured ? 'Enabled' : 'Needs app setup' }}
+              {{ appConfigured ? 'Enabled' : 'Unavailable' }}
             </span>
           </UiListRow>
           <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
@@ -302,8 +302,7 @@ onMounted(async () => {
         </div>
 
         <p class="text-sm text-[color:var(--muted)]">
-          App credentials unlock installation tokens for template generation
-          when a PAT is not set.
+          App credentials unlock installation tokens for template generation.
         </p>
 
         <UiPanel v-if="loading && !catalog" variant="soft" class="space-y-3 p-4">

@@ -45,22 +45,6 @@ const settingsForm = reactive<Settings>({
   cloudflaredConfigPath: '',
 })
 
-const settingsKeys = [
-  'baseDomain',
-  'githubAppId',
-  'githubAppClientId',
-  'githubAppClientSecret',
-  'githubAppInstallationId',
-  'githubAppPrivateKey',
-  'cloudflareToken',
-  'cloudflareAccountId',
-  'cloudflareZoneId',
-  'cloudflaredTunnel',
-  'cloudflaredConfigPath',
-] as const
-
-type SettingsKey = typeof settingsKeys[number]
-
 const settingsSources = ref<SettingsSources | null>(null)
 const cloudflaredTunnelName = ref<string | null>(null)
 const templatesDir = ref<string | null>(null)
@@ -80,9 +64,6 @@ const previewLoading = ref(false)
 const previewError = ref<string | null>(null)
 
 const revealGitHubSecret = ref(false)
-const revealCloudflareToken = ref(false)
-const importInput = ref<HTMLInputElement | null>(null)
-
 const dockerHealth = ref<DockerHealth | null>(null)
 const tunnelHealth = ref<TunnelHealth | null>(null)
 const healthLoading = ref(false)
@@ -217,72 +198,6 @@ const statusTone = (status: string): BadgeTone => {
   return 'neutral'
 }
 
-const healthTone = (status?: string): BadgeTone => {
-  switch (status) {
-    case 'ok':
-      return 'ok'
-    case 'warning':
-      return 'warn'
-    case 'missing':
-      return 'neutral'
-    case 'error':
-      return 'error'
-    default:
-      return 'neutral'
-  }
-}
-
-const exportSettings = () => {
-  const payload = settingsKeys.reduce((acc, key) => {
-    acc[key] = settingsForm[key]
-    return acc
-  }, {} as Record<SettingsKey, string>)
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = 'gungnr-settings.json'
-  link.click()
-  URL.revokeObjectURL(url)
-  toastStore.success('Config exported.', 'Download started')
-}
-
-const applyImportedSettings = (payload: Partial<Settings>) => {
-  settingsKeys.forEach((key) => {
-    const value = payload[key]
-    if (value !== undefined && value !== null) {
-      settingsForm[key] = String(value)
-    }
-  })
-}
-
-const onImportClick = () => {
-  importInput.value?.click()
-}
-
-const onImportFile = (event: Event) => {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  const reader = new FileReader()
-  reader.onload = () => {
-    try {
-      const payload = JSON.parse(String(reader.result ?? '{}')) as Partial<Settings>
-      applyImportedSettings(payload)
-      toastStore.success('Config imported.', 'Settings form updated')
-    } catch {
-      toastStore.error('Import failed.', 'Invalid JSON config')
-    } finally {
-      input.value = ''
-    }
-  }
-  reader.onerror = () => {
-    toastStore.error('Import failed.', 'Could not read config file')
-    input.value = ''
-  }
-  reader.readAsText(file)
-}
-
 const actionStateFor = (container: DockerContainer): ContainerActionState => {
   if (!actionStates[container.id]) {
     actionStates[container.id] = {
@@ -324,7 +239,7 @@ const loadSettings = async () => {
 
 const saveSettings = async () => {
   if (!isAdmin.value) {
-    error.value = 'Admin access is required to update host or GitHub settings.'
+    error.value = 'Admin access is required to update template settings.'
     toastStore.error('Admin access required.', 'Read-only access')
     return
   }
@@ -529,11 +444,10 @@ watch(projectFilter, () => {
           Host settings
         </p>
         <h1 class="mt-2 text-3xl font-semibold text-[color:var(--text)]">
-          Runtime configuration
+          Runtime overview
         </h1>
         <p class="mt-2 text-sm text-[color:var(--muted)]">
-          Override the backend defaults that power template deploys and host
-          integrations.
+          Review host integrations and template credentials that power deploy workflows.
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
@@ -557,7 +471,7 @@ watch(projectFilter, () => {
         >
           <span class="flex items-center gap-2">
             <NavIcon name="edit" class="h-3.5 w-3.5" />
-            Edit settings
+            Template settings
           </span>
         </UiButton>
         <UiButton
@@ -571,7 +485,7 @@ watch(projectFilter, () => {
     </div>
 
     <UiInlineFeedback v-if="!isAdmin" tone="warn">
-      Read-only access: admin permissions are required to update host and GitHub settings.
+      Read-only access: admin permissions are required to update template settings.
     </UiInlineFeedback>
 
     <UiInlineFeedback v-if="error" tone="error">
@@ -839,7 +753,7 @@ watch(projectFilter, () => {
             <p class="mt-2 text-xs text-[color:var(--muted)]">
               These folders live in the templates directory. Lifecycle actions are safest for
               containers whose compose project matches one of these names.
-            </p>
+            </p> 
           </div>
           <UiButton
             variant="ghost"
@@ -930,168 +844,18 @@ watch(projectFilter, () => {
 
     <UiFormSidePanel
       v-model="settingsFormOpen"
-      title="Host configuration"
+      title="Host status & templates"
     >
       <div class="space-y-6">
-        <div class="space-y-4">
-          <div>
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Status + settings
-            </p>
-            <p class="mt-1 text-xs text-[color:var(--muted)]">
-              Keep Docker and cloudflared healthy, then adjust overrides only when you rotate credentials or paths.
-            </p>
-          </div>
-          <UiButton
-            variant="ghost"
-            size="sm"
-            :disabled="healthLoading"
-            @click="loadHealth"
-          >
-            <span class="flex items-center gap-2">
-              <NavIcon name="refresh" class="h-3.5 w-3.5" />
-              <UiInlineSpinner v-if="healthLoading" />
-              Refresh status
-            </span>
-          </UiButton>
-        </div>
-
-        <UiState v-if="healthLoading" loading>
-          Checking host integrations...
-        </UiState>
-
-        <div v-else class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
-          <UiPanel variant="soft" class="space-y-2 p-3">
-            <div class="flex flex-wrap items-center justify-between gap-2 break-words">
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Docker
-              </p>
-              <UiBadge :tone="healthTone(dockerHealth?.status)">
-                {{ dockerHealth?.status || 'unknown' }}
-              </UiBadge>
-            </div>
-            <p class="text-xs text-[color:var(--muted)]">
-              Containers
-              <span class="ml-1 text-[color:var(--text)]">
-                {{
-                  dockerHealth && dockerHealth.status === 'ok'
-                    ? dockerHealth.containers
-                    : '—'
-                }}
-              </span>
-            </p>
-            <p
-              v-if="dockerHealth?.detail"
-              class="truncate text-xs text-[color:var(--muted)]"
-              :title="dockerHealth.detail"
-            >
-              {{ dockerHealth.detail }}
-            </p>
-          </UiPanel>
-
-          <UiPanel variant="soft" class="space-y-2 p-3">
-            <div class="flex flex-wrap items-center justify-between gap-2 break-words">
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Tunnel status
-              </p>
-              <UiBadge :tone="healthTone(tunnelHealth?.status)">
-                {{ tunnelHealth?.status || 'unknown' }}
-              </UiBadge>
-            </div>
-            <p class="text-xs text-[color:var(--muted)]">
-              Connectors
-              <span class="ml-1 text-[color:var(--text)]">
-                {{
-                  tunnelHealth &&
-                  (tunnelHealth.status === 'ok' || tunnelHealth.status === 'warning')
-                    ? tunnelHealth.connections
-                    : '—'
-                }}
-              </span>
-            </p>
-            <p
-              v-if="tunnelHealth?.detail"
-              class="truncate text-xs text-[color:var(--muted)]"
-              :title="tunnelHealth.detail"
-            >
-              {{ tunnelHealth.detail }}
-            </p>
-          </UiPanel>
-
-          <UiPanel variant="soft" class="space-y-2 p-3">
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Tunnel ref
-            </p>
-            <p
-              class="truncate text-sm font-semibold text-[color:var(--text)]"
-              :title="tunnelHealth?.tunnel || '—'"
-            >
-              {{ tunnelHealth?.tunnel || '—' }}
-            </p>
-            <p class="text-xs text-[color:var(--muted)]">
-              Source: {{ settingsSources?.cloudflaredTunnel || 'unset' }}
-            </p>
-          </UiPanel>
-
-          <UiPanel variant="soft" class="space-y-2 p-3">
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Config path
-            </p>
-            <p
-              class="truncate text-sm font-semibold text-[color:var(--text)]"
-              :title="tunnelHealth?.configPath || '—'"
-            >
-              {{ tunnelHealth?.configPath || '—' }}
-            </p>
-            <p class="text-xs text-[color:var(--muted)]">
-              Source: {{ settingsSources?.cloudflaredConfigPath || 'unset' }}
-            </p>
-          </UiPanel>
-
-          <UiPanel variant="soft" class="space-y-2 p-3">
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Templates dir
-            </p>
-            <p
-              class="truncate text-sm font-semibold text-[color:var(--text)]"
-              :title="templatesDir || '—'"
-            >
-              {{ templatesDir || '—' }}
-            </p>
-            <p class="text-xs text-[color:var(--muted)]">
-              Source: {{ settingsSources?.templatesDir || 'unset' }}
-            </p>
-          </UiPanel>
-        </div>
-
-        <hr />
-
         <form class="space-y-5" @submit.prevent="saveSettings">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
               Settings
             </p>
             <h3 class="mt-2 text-base font-semibold text-[color:var(--text)]">
-              Panel overrides
+              Template configuration
             </h3>
           </div>
-
-          <label class="grid gap-2">
-            <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Base domain
-            </span>
-            <UiInput
-              v-model="settingsForm.baseDomain"
-              type="text"
-              placeholder="example.com"
-              :disabled="loading"
-              @focus="fieldGuidance.show({
-                title: 'Base domain',
-                description: 'Primary domain used to build subdomains for new services.',
-              })"
-              @blur="fieldGuidance.clear()"
-            />
-          </label>
 
           <div class="space-y-6">
             <div class="space-y-4">
@@ -1223,158 +987,7 @@ watch(projectFilter, () => {
               </p>
             </div>
 
-            <div class="space-y-4">
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Cloudflare access
-              </p>
-
-              <label class="grid gap-2">
-                <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                  Cloudflare API token
-                </span>
-                <div class="relative">
-                  <UiInput
-                    v-model="settingsForm.cloudflareToken"
-                    :type="revealCloudflareToken ? 'text' : 'password'"
-                    class="pr-12"
-                    placeholder="cf_••••••"
-                    :disabled="loading"
-                    @focus="fieldGuidance.show({
-                      title: 'Cloudflare API token',
-                      description: 'Used for DNS automation; rotate here if the host token changes. Requires Tunnel:Edit and DNS:Edit scopes.',
-                    })"
-                    @blur="fieldGuidance.clear()"
-                  />
-                  <UiButton
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    class="absolute right-2 top-1/2 h-8 w-8 -translate-y-1/2 px-0 py-0"
-                    :disabled="loading"
-                    :aria-label="revealCloudflareToken ? 'Hide Cloudflare API token' : 'Show Cloudflare API token'"
-                    @click="revealCloudflareToken = !revealCloudflareToken"
-                  >
-                    <NavIcon :name="revealCloudflareToken ? 'eye-off' : 'eye'" class="h-4 w-4" />
-                  </UiButton>
-                </div>
-              </label>
-
-              <label class="grid gap-2">
-                <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                  Cloudflare account ID
-                </span>
-                <UiInput
-                  v-model="settingsForm.cloudflareAccountId"
-                  type="text"
-                  placeholder="Account ID"
-                  :disabled="loading"
-                  @focus="fieldGuidance.show({
-                    title: 'Cloudflare account ID',
-                    description: 'Account identifier that owns the tunnel and DNS zone.',
-                  })"
-                  @blur="fieldGuidance.clear()"
-                />
-              </label>
-
-              <label class="grid gap-2">
-                <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                  Cloudflare zone ID
-                </span>
-                <UiInput
-                  v-model="settingsForm.cloudflareZoneId"
-                  type="text"
-                  placeholder="Zone ID"
-                  :disabled="loading"
-                  @focus="fieldGuidance.show({
-                    title: 'Cloudflare zone ID',
-                    description: 'Zone identifier for the base domain you are routing.',
-                  })"
-                  @blur="fieldGuidance.clear()"
-                />
-              </label>
-
-              <label class="grid gap-2">
-                <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                  Cloudflared tunnel (name or ID)
-                </span>
-                <UiInput
-                  v-model="settingsForm.cloudflaredTunnel"
-                  type="text"
-                  placeholder="Tunnel name or UUID"
-                  :disabled="loading"
-                  @focus="fieldGuidance.show({
-                    title: 'Cloudflared tunnel',
-                    description: 'Name or UUID used to resolve and update ingress rules.',
-                  })"
-                  @blur="fieldGuidance.clear()"
-                />
-              </label>
-
-              <p class="text-xs text-[color:var(--muted)]">
-                The bootstrap flow seeds Cloudflare access. Update only when rotating credentials or swapping tunnels.
-                Required scopes: Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit.
-              </p>
-
-              <div
-                v-if="settingsSources || cloudflaredTunnelName"
-                class="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)]/80 p-3 text-[11px] text-[color:var(--muted)]"
-              >
-                <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
-                  <span>Tunnel ref (resolved)</span>
-                  <span class="text-[color:var(--text)]">
-                    {{ cloudflaredTunnelName || '—' }}
-                  </span>
-                </UiListRow>
-                <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
-                  <span>Tunnel source</span>
-                  <span class="text-[color:var(--text)]">
-                    {{ settingsSources?.cloudflaredTunnel || 'unset' }}
-                  </span>
-                </UiListRow>
-                <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
-                  <span>Account ID source</span>
-                  <span class="text-[color:var(--text)]">
-                    {{ settingsSources?.cloudflareAccountId || 'unset' }}
-                  </span>
-                </UiListRow>
-                <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
-                  <span>Zone ID source</span>
-                  <span class="text-[color:var(--text)]">
-                    {{ settingsSources?.cloudflareZoneId || 'unset' }}
-                  </span>
-                </UiListRow>
-                <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
-                  <span>Token source</span>
-                  <span class="text-[color:var(--text)]">
-                    {{ settingsSources?.cloudflareToken || 'unset' }}
-                  </span>
-                </UiListRow>
-                <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
-                  <span>Config path source</span>
-                  <span class="text-[color:var(--text)]">
-                    {{ settingsSources?.cloudflaredConfigPath || 'unset' }}
-                  </span>
-                </UiListRow>
-              </div>
-            </div>
           </div>
-
-          <label class="grid gap-2">
-            <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Cloudflared config path
-            </span>
-            <UiInput
-              v-model="settingsForm.cloudflaredConfigPath"
-              type="text"
-              placeholder="~/.cloudflared/config.yml"
-              :disabled="loading"
-              @focus="fieldGuidance.show({
-                title: 'Cloudflared config path',
-                description: 'Path to the config.yml used by the host cloudflared service.',
-              })"
-              @blur="fieldGuidance.clear()"
-            />
-          </label>
 
           <UiInlineFeedback v-if="error" tone="error">
             {{ error }}
@@ -1384,33 +997,7 @@ watch(projectFilter, () => {
             {{ success }}
           </UiInlineFeedback>
 
-          <input
-            ref="importInput"
-            type="file"
-            accept="application/json"
-            class="hidden"
-            @change="onImportFile"
-          />
-
           <div class="flex flex-wrap items-center gap-3">
-            <UiButton
-              type="button"
-              variant="ghost"
-              size="md"
-              :disabled="loading"
-              @click="exportSettings"
-            >
-              Export config
-            </UiButton>
-            <UiButton
-              type="button"
-              variant="ghost"
-              size="md"
-              :disabled="loading"
-              @click="onImportClick"
-            >
-              Import config
-            </UiButton>
             <UiButton
               type="submit"
               variant="primary"

@@ -104,8 +104,8 @@ const badgeTone = (card: TemplateCard) => {
           Create new repos from templates or deploy existing folders.
         </p>
       </div>
-      <UiButton :as="RouterLink" to="/github" variant="ghost" size="sm">
-        GitHub settings
+      <UiButton :as="RouterLink" to="/host-settings" variant="ghost" size="sm">
+        Template settings
       </UiButton>
     </div>
     <div class="flex flex-1 flex-col gap-4">
@@ -181,8 +181,8 @@ const badgeTone = (card: TemplateCard) => {
           class="text-xs text-[color:var(--muted)]"
         >
           GitHub App credentials are required to create template repos.
-          <RouterLink class="text-[color:var(--text)] hover:text-[color:var(--accent-ink)]" to="/github">
-            Open GitHub settings.
+          <RouterLink class="text-[color:var(--text)] hover:text-[color:var(--accent-ink)]" to="/host-settings">
+            Open template settings.
           </RouterLink>
         </p>
       </UiPanel>
