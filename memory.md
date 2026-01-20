@@ -1,5 +1,20 @@
 ## Iteration Log
 
+- 2026-01-19: Moved the CLI TUI logo to a centered header layout.
+  - Centered the ASCII logo at the top and placed the rest of the UI below it.
+  - Adjusted layout sizing so the logo only renders when it fits the viewport.
+- 2026-01-19: Addressed CLI cancellation and log visibility regressions.
+  - Short-circuited the step loop when the run context is canceled.
+  - Auto-scrolled the TUI log viewport to keep new messages visible.
+- 2026-01-19: Repositioned the CLI TUI logo to avoid clipping.
+  - Rendered the logo in its own right-side column spanning full height.
+  - Recomputed layout sizing so the log/prompt panel fits the terminal height.
+- 2026-01-19: Added the ASCII logo to the bootstrap TUI.
+  - Embedded `cmd/gungnr/ascii-art.txt` in the CLI and wired it into the TUI.
+  - Rendered the logo alongside the log/prompt panel with width-aware layout.
+- 2026-01-21: Added a detailed CLI restructure + Bubbletea TUI plan.
+  - Documented package layout, step runner, standardized messaging, and TUI flow in cli_plan.md.
+  - Updated next_task.md to focus on implementing the CLI refactor and TUI.
 - 2026-01-19: Added secondary domain support for tunnel ingress and UI selection.
   - Stored additional domains in settings with validation, and used selected domain when updating tunnel ingress.
   - Added Networking domains config sidebar/listing and domain selectors in quick deploy forms.
@@ -322,3 +337,7 @@
 - GH-APP-1: Store GitHub App credentials in settings (App ID, Client ID, Client Secret, Installation ID, Private Key).
 - GH-APP-2: Implement GitHub App token minting (JWT -> installation/user token) and use it for create-from-template.
 - GH-APP-3: Update Host Settings UI to accept GitHub App credentials with setup guidance + permissions.
+- 2026-01-21: Refactored the Gungnr CLI into layered packages and added a Bubbletea TUI.
+  - Split bootstrap logic into app steps, integrations, prompts, validation, and shared strings.
+  - Added a Bubbletea-driven TUI with step progress, prompts, and summary, plus a --plain fallback.
+  - Updated Go module dependencies to Go 1.25 with Bubbletea v1.3.x and related UI libs.

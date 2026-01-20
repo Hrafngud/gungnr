@@ -1,11 +1,12 @@
 ## Next Task
 
 Objective
-Document secondary-domain support and the Networking > Domains config flow in the README.
+Add manual log viewport scrolling controls and key hints to the TUI.
 
 Success criteria
-- README notes that additional domains can be added post-bootstrap in Networking.
-- Guidance is concise and matches the existing bootstrap-first workflow language.
+- When no prompt is active, Up/Down/PageUp/PageDown adjust the log viewport.
+- The footer shows concise key hints for scrolling and quitting.
+- Prompt input remains unaffected.
 
 Notes
 - Keep task lists in planning files only. Do not move tasks back into manager.md.
