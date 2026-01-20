@@ -1,5 +1,41 @@
 ## Iteration Log
 
+- 2026-01-23: Moved legal notice into a dedicated page with continuous copy.
+  - Removed the legal notice section from the docs sidebar/content and pointed the footer to a standalone page.
+  - Added `docs/legal-notice.html` with uninterrupted legal text and the requested acknowledgment line.
+- 2026-01-23: Added a Legal Notice section to the docs and simplified the footer.
+  - Added a dedicated legal notice page section with ownership, usage, and privacy terms.
+  - Replaced the footer copy with a single GitHub credit link and a Legal Notice link.
+- 2026-01-22: Added docs search shortcut focus + pulse highlight.
+  - Intercepted Ctrl/Cmd+F to focus the docs search input and trigger a single glow pulse.
+  - Added a search field pulse animation to visually confirm focus.
+- 2026-01-22: Added official prerequisite install links and commands to docs.
+  - Linked to cloudflared, GitHub CLI, Docker Engine, and Docker Compose official install pages.
+  - Added quick install command blocks for cloudflared, GitHub CLI, and Docker Engine + Compose.
+- 2026-01-22: Linked prerequisite bullets to official Cloudflare and GitHub docs.
+  - Added smart links for Cloudflare account setup, API token creation, and GitHub OAuth app creation.
+- 2026-01-22: Noted that GitHub OAuth apps must enable device flow for bootstrap.
+- 2026-01-22: Reinforced device flow requirements in docs and CLI help.
+  - Added device flow mention to the bootstrap step in docs and the CLI GitHub prompt guidance.
+- 2026-01-22: Promoted GitHub callback + device flow notes into the prerequisites list.
+- 2026-01-22: Simplified prerequisites install docs layout.
+  - Removed quick install command block and emphasized the official install docs section.
+- 2026-01-20: Simplified docs header/logo and rebuilt docs navigation/search layout.
+  - Replaced the logo header with a single clickable logo and hover pulse animation.
+  - Moved search to the top bar with dropdown results linking directly to sections.
+  - Flattened the docs layout, made the sidebar sticky/full-height, and stacked install steps.
+- 2026-01-20: Refreshed docs layout with cleaner spacing and Cloudflare-inspired structure.
+  - Replaced mx-auto/space-y layout with flex + gap wrappers and centered frames via justify.
+  - Added a docs header with search input, JS filtering, and slash-to-focus support.
+  - Simplified visual styling (lighter shadows, flatter cards) and added hero stats to improve readability.
+- 2026-01-20: Split external docs into hero vs documentation views and updated install command/linking.
+  - Added CSS-driven navigation toggle to switch between hero and docs sections without mixing layouts.
+  - Updated docs to use the wget-based installer command and pointed repo links to GitHub.
+  - Documented external docs hosting and location in README.
+- 2026-01-20: Rewrote the docs hero section into a clean, stacked layout with direct copy.
+  - Replaced the hero grid/cards with a simple left-copy/right-logo layout and a full-width startup commands row.
+  - Added mission/vision/values lines and updated the headline to “Hit the clouds from home.”
+  - Introduced header actions for GitHub starring and Stripe donations with compact logo links.
 - 2026-01-19: Moved the CLI TUI logo to a centered header layout.
   - Centered the ASCII logo at the top and placed the rest of the UI below it.
   - Adjusted layout sizing so the logo only renders when it fits the viewport.
@@ -301,6 +337,15 @@
   - Replaced the default Vite icon links with the favicon set from `public/favicon_io`.
 - 2026-01-18: Added a five-click mock login path with a prompt-based passphrase and local mock API data.
   - Added `mock.json` plus a localStorage flag to return mock API responses and bypass OAuth for frontend tweaks.
+- 2026-01-19: Added TUI log viewport scrolling and footer hints.
+  - Added Up/Down/PageUp/PageDown controls for the log viewport when no prompt is active.
+  - Updated footer copy to include scrolling and quit key hints, plus prompt-specific hints.
+- 2026-01-19: Built the external Gungnr documentation page.
+  - Added a standalone docs site with Tailwind HTML, custom styling, and minimal JS for copy buttons and scrollspy.
+  - Documented installation, how it works/why, and troubleshooting mapped to real bootstrap errors.
+- 2026-01-19: Reworked the docs page into a dark, standardized documentation layout.
+  - Added a sidebar table of contents with topic sections for Introduction, Installation, Usage, and Errors.
+  - Replaced the marketing layout with structured docs content and a minimal hero + CTA area.
 
 ## Completed Task Snapshot
 
@@ -341,3 +386,4 @@
   - Split bootstrap logic into app steps, integrations, prompts, validation, and shared strings.
   - Added a Bubbletea-driven TUI with step progress, prompts, and summary, plus a --plain fallback.
   - Updated Go module dependencies to Go 1.25 with Bubbletea v1.3.x and related UI libs.
+- 2026-01-21: Docs hero spear animation now triggers on mouse movement instead of looping.
