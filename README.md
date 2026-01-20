@@ -34,6 +34,11 @@ Persistence and auto-restart are out of scope for now.
 3) Open the printed panel URL and login via GitHub.
 4) Configure GitHub App settings in the UI if you want to enable template creation.
 
+## Documentation
+External docs are published from `docs/` via GitHub Pages.
+Live URL: https://hrafngud.github.io/gungnr/
+Local source: `docs/index.html`.
+
 ## Environment configuration
 The bootstrap CLI generates a complete `.env`. Reference values:
 Required for login:

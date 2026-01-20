@@ -248,6 +248,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		}
+		if isScrollKey(msg) {
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+		}
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -451,13 +456,16 @@ func (m model) renderLogoTop() string {
 }
 
 func (m model) renderFooter() string {
+	if m.prompt.active {
+		return footerStyle.Render("Enter to submit | Esc to clear | Quit: Ctrl+C")
+	}
 	if m.done {
 		if m.err != nil {
-			return footerStyle.Render("Press q to quit.")
+			return footerStyle.Render("Bootstrap failed. Scroll: Up/Down/PageUp/PageDown | Quit: q")
 		}
-		return footerStyle.Render("Bootstrap complete. Press q to quit.")
+		return footerStyle.Render("Bootstrap complete. Scroll: Up/Down/PageUp/PageDown | Quit: q")
 	}
-	return footerStyle.Render("Running... (Ctrl+C to quit)")
+	return footerStyle.Render("Running... Scroll: Up/Down/PageUp/PageDown | Quit: Ctrl+C")
 }
 
 func statusLabel(status stepStatus) (string, lipgloss.Style) {
@@ -529,6 +537,15 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func isScrollKey(msg tea.KeyMsg) bool {
+	switch msg.Type {
+	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
+		return true
+	default:
+		return false
+	}
 }
 
 var (
