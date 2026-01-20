@@ -11,6 +11,19 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 .gocache
 .claude
+AGENTS.md
+start.md
+manager.md
+next_task.md
+memory.md
+overall_plan.md
+backend_plan.md
+frontend_plan.md
+backend_guidelines.md
+frontend_guidelines.md
+cli_plan.md
+rework.md
+review.md
 
 
 # Runtime data
