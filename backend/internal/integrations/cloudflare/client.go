@@ -179,12 +179,11 @@ func (c *Client) VerifyToken(ctx context.Context) (TokenStatus, error) {
 }
 
 func (c *Client) ListZones(ctx context.Context) ([]ZoneInfo, error) {
-	if err := c.ensureAuth(); err != nil {
+	if err := c.ensureToken(); err != nil {
 		return nil, err
 	}
 
 	query := url.Values{}
-	query.Set("account.id", c.cfg.CloudflareAccountID)
 	query.Set("per_page", "200")
 	path := fmt.Sprintf("/zones?%s", query.Encode())
 
