@@ -31,6 +31,7 @@ func (c *SettingsController) Register(r gin.IRoutes) {
 	r.GET("/settings", c.Get)
 	r.PUT("/settings", c.Update)
 	r.GET("/settings/cloudflared/preview", c.CloudflaredPreview)
+	r.POST("/settings/cloudflare/sync", c.SyncCloudflareFromEnv)
 }
 
 func (c *SettingsController) Get(ctx *gin.Context) {
@@ -99,6 +100,36 @@ func (c *SettingsController) CloudflaredPreview(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"preview": preview})
+}
+
+func (c *SettingsController) SyncCloudflareFromEnv(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "admin role required"})
+		return
+	}
+
+	settings, err := c.service.SyncCloudflareFromEnv(ctx.Request.Context())
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to sync Cloudflare settings"})
+		return
+	}
+
+	c.logAudit(ctx, "settings.cloudflare.sync", "settings", map[string]any{
+		"cloudflareTokenSet":    settings.CloudflareToken != "",
+		"cloudflareAccountId":   settings.CloudflareAccountID,
+		"cloudflareZoneId":      settings.CloudflareZoneID,
+		"cloudflaredTunnel":     settings.CloudflaredTunnel,
+		"cloudflaredConfigPath": settings.CloudflaredConfigPath,
+	})
+
+	response, err := c.buildResponse(ctx, settings)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load settings sources"})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, response)
 }
 
 func (c *SettingsController) logAudit(ctx *gin.Context, action, target string, metadata map[string]any) {

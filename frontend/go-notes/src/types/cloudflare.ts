@@ -18,3 +18,12 @@ export interface CloudflarePreflight {
   tunnelRef?: string
   tunnelRefType?: string
 }
+
+export interface CloudflareZone {
+  id: string
+  name: string
+}
+
+export interface CloudflareZonesResponse {
+  zones: CloudflareZone[]
+}

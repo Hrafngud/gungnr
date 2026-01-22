@@ -19,6 +19,7 @@ type State struct {
 	CloudflaredLogPath string
 	Env                BootstrapEnv
 	ComposeFile        string
+	ComposeLogPath     string
 	PanelHostname      string
 	PanelURL           string
 }
@@ -40,6 +41,7 @@ type Summary struct {
 	PanelURL            string
 	CloudflaredConfig   string
 	CloudflaredLog      string
+	ComposeLog          string
 	CloudflaredTunnel   string
 	CloudflaredTunnelID string
 }
@@ -53,6 +55,7 @@ func (s State) Summary() Summary {
 		PanelURL:            s.PanelURL,
 		CloudflaredConfig:   s.CloudflaredConfig,
 		CloudflaredLog:      s.CloudflaredLogPath,
+		ComposeLog:          s.ComposeLogPath,
 		CloudflaredTunnel:   s.Env.CloudflaredTunnel,
 		CloudflaredTunnelID: s.Env.CloudflareTunnelID,
 	}

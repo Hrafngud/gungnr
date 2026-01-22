@@ -72,7 +72,7 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
 	}
-	domain, err := w.resolveDomain(ctx, req.Domain)
+	selection, err := w.resolveDomainSelection(ctx, req.Domain)
 	if err != nil {
 		return err
 	}
@@ -202,10 +202,10 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 		return err
 	}
 
-	hostname := fmt.Sprintf("%s.%s", req.Subdomain, domain)
+	hostname := fmt.Sprintf("%s.%s", req.Subdomain, selection.Domain)
 	logger.Logf("configuring tunnel ingress for %s", hostname)
 	cloudflareClient := cloudflare.NewClient(runtimeCfg)
-	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, hostname, domain, proxyPort); err != nil {
+	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, hostname, selection.Domain, selection.ZoneID, proxyPort); err != nil {
 		return err
 	}
 
@@ -242,7 +242,7 @@ func (w *ProjectWorkflows) handleDeployExisting(ctx context.Context, job models.
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
 	}
-	domain, err := w.resolveDomain(ctx, req.Domain)
+	selection, err := w.resolveDomainSelection(ctx, req.Domain)
 	if err != nil {
 		return err
 	}
@@ -264,10 +264,10 @@ func (w *ProjectWorkflows) handleDeployExisting(ctx context.Context, job models.
 		return err
 	}
 
-	hostname := fmt.Sprintf("%s.%s", req.Subdomain, domain)
+	hostname := fmt.Sprintf("%s.%s", req.Subdomain, selection.Domain)
 	logger.Logf("configuring tunnel ingress for %s", hostname)
 	cloudflareClient := cloudflare.NewClient(runtimeCfg)
-	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, hostname, domain, req.Port); err != nil {
+	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, hostname, selection.Domain, selection.ZoneID, req.Port); err != nil {
 		return err
 	}
 
@@ -309,15 +309,15 @@ func (w *ProjectWorkflows) handleForwardLocal(ctx context.Context, job models.Jo
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
 	}
-	domain, err := w.resolveDomain(ctx, req.Domain)
+	selection, err := w.resolveDomainSelection(ctx, req.Domain)
 	if err != nil {
 		return err
 	}
 
-	hostname := fmt.Sprintf("%s.%s", req.Subdomain, domain)
+	hostname := fmt.Sprintf("%s.%s", req.Subdomain, selection.Domain)
 	logger.Logf("configuring tunnel ingress for %s", hostname)
 	cloudflareClient := cloudflare.NewClient(runtimeCfg)
-	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, hostname, domain, req.Port); err != nil {
+	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, hostname, selection.Domain, selection.ZoneID, req.Port); err != nil {
 		return err
 	}
 
@@ -358,7 +358,7 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
 	}
-	domain, err := w.resolveDomain(ctx, req.Domain)
+	selection, err := w.resolveDomainSelection(ctx, req.Domain)
 	if err != nil {
 		return err
 	}
@@ -367,10 +367,10 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 		return err
 	}
 
-	hostname := fmt.Sprintf("%s.%s", req.Subdomain, domain)
+	hostname := fmt.Sprintf("%s.%s", req.Subdomain, selection.Domain)
 	logger.Logf("configuring tunnel ingress for %s", hostname)
 	cloudflareClient := cloudflare.NewClient(runtimeCfg)
-	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, hostname, domain, req.Port); err != nil {
+	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, hostname, selection.Domain, selection.ZoneID, req.Port); err != nil {
 		return err
 	}
 
@@ -397,7 +397,7 @@ func (w *ProjectWorkflows) runContainer(ctx context.Context, logger jobs.Logger,
 	return w.dockerRunner.RunContainer(ctx, logger, dockerReq)
 }
 
-func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, logger jobs.Logger, cfg config.Config, cloudfl *cloudflare.Client, hostname, domain string, port int) error {
+func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, logger jobs.Logger, cfg config.Config, cloudfl *cloudflare.Client, hostname, domain, zoneID string, port int) error {
 	if strings.TrimSpace(domain) == "" {
 		return fmt.Errorf("domain not configured")
 	}
@@ -405,30 +405,50 @@ func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, logger jobs.Logg
 		return fmt.Errorf("cloudflare client unavailable")
 	}
 
-	logger.Logf("cloudflare settings: account_id=%s zone_id=%s tunnel=%s domain=%s hostname=%s", describeSetting(cfg.CloudflareAccountID), describeSetting(cfg.CloudflareZoneID), describeSetting(cfg.CloudflaredTunnel), domain, hostname)
+	dnsZoneID := strings.TrimSpace(zoneID)
+	if dnsZoneID == "" {
+		dnsZoneID = strings.TrimSpace(cfg.CloudflareZoneID)
+	}
+
+	logger.Logf("cloudflare settings: account_id=%s zone_id=%s tunnel=%s domain=%s hostname=%s", describeSetting(cfg.CloudflareAccountID), describeSetting(dnsZoneID), describeSetting(cfg.CloudflaredTunnel), domain, hostname)
 	logger.Log("updating Cloudflare DNS record")
-	if err := cloudfl.EnsureDNS(ctx, hostname); err != nil {
+	if err := cloudfl.EnsureDNSForZone(ctx, hostname, dnsZoneID); err != nil {
 		logger.Logf("cloudflare dns error: %v", err)
 		return fmt.Errorf("cloudflare dns: %w", err)
 	}
 	logger.Log("updating Cloudflare tunnel ingress")
 	if err := cloudfl.UpdateIngress(ctx, hostname, port); err != nil {
+		if errors.Is(err, cloudflare.ErrTunnelNotRemote) {
+			logger.Log("tunnel is locally managed; updating local cloudflared config instead")
+			if updateErr := cloudflare.UpdateLocalIngress(cfg.CloudflaredConfig, hostname, port); updateErr != nil {
+				logger.Logf("cloudflared config update error: %v", updateErr)
+				return fmt.Errorf("cloudflared ingress: %w", updateErr)
+			}
+			return nil
+		}
 		logger.Logf("cloudflare ingress error: %v", err)
 		return fmt.Errorf("cloudflare ingress: %w", err)
+	}
+	if updateErr := cloudflare.UpdateLocalIngress(cfg.CloudflaredConfig, hostname, port); updateErr != nil {
+		logger.Logf("cloudflared config update skipped: %v", updateErr)
 	}
 	return nil
 }
 
-func (w *ProjectWorkflows) resolveDomain(ctx context.Context, requested string) (string, error) {
+func (w *ProjectWorkflows) resolveDomainSelection(ctx context.Context, requested string) (DomainSelection, error) {
 	if w.settings != nil {
-		base, additional, err := w.settings.ResolveDomains(ctx)
+		selection, err := w.settings.ResolveDomainSelection(ctx, requested)
 		if err != nil {
-			return "", err
+			return DomainSelection{}, err
 		}
-		return selectDomain(requested, base, additional)
+		return selection, nil
 	}
 	base := normalizeDomain(w.cfg.Domain)
-	return selectDomain(requested, base, nil)
+	selected, err := selectDomain(requested, base, nil)
+	if err != nil {
+		return DomainSelection{}, err
+	}
+	return DomainSelection{Domain: selected, ZoneID: strings.TrimSpace(w.cfg.CloudflareZoneID)}, nil
 }
 
 func (w *ProjectWorkflows) upsertProject(ctx context.Context, project *models.Project) (*models.Project, error) {
@@ -682,7 +702,7 @@ func logComposePatchOutcome(logger jobs.Logger, label string, containerPort, hos
 }
 
 var (
-	envVarPattern  = regexp.MustCompile(`^\$\{[^}]+\}$`)
+	envVarPattern   = regexp.MustCompile(`^\$\{[^}]+\}$`)
 	ipv4HostPattern = regexp.MustCompile(`^(\d{1,3}(?:\.\d{1,3}){3}):`)
 )
 

@@ -134,3 +134,15 @@ func (s *CloudflareService) Preflight(ctx context.Context) (CloudflarePreflight,
 
 	return result, nil
 }
+
+func (s *CloudflareService) Zones(ctx context.Context) ([]cloudflare.ZoneInfo, error) {
+	if s.settings == nil {
+		return nil, fmt.Errorf("settings service unavailable")
+	}
+	cfg, _, err := s.settings.ResolveConfigWithSources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	client := cloudflare.NewClient(cfg)
+	return client.ListZones(ctx)
+}

@@ -36,3 +36,21 @@ func RunInteractiveInDir(dir, name string, args ...string) error {
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
 }
+
+func RunLoggedInDir(dir, name, logPath string, args ...string) error {
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		return fmt.Errorf("open log file %s: %w", logPath, err)
+	}
+	defer logFile.Close()
+
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.Stdin = os.Stdin
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s %s failed: %w", name, strings.Join(args, " "), err)
+	}
+	return nil
+}

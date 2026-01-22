@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"go-notes/internal/config"
+	"go-notes/internal/integrations/cloudflare"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
 )
@@ -73,6 +74,11 @@ type SettingsService struct {
 	repo repository.SettingsRepository
 }
 
+type DomainSelection struct {
+	Domain string
+	ZoneID string
+}
+
 func NewSettingsService(cfg config.Config, repo repository.SettingsRepository) *SettingsService {
 	return &SettingsService{cfg: cfg, repo: repo}
 }
@@ -127,6 +133,9 @@ func (s *SettingsService) Update(ctx context.Context, input SettingsPayload) (Se
 			}
 			filtered = append(filtered, domain)
 		}
+		if err := s.validateAdditionalDomains(ctx, input, filtered); err != nil {
+			return SettingsPayload{}, err
+		}
 		raw, err := json.Marshal(filtered)
 		if err != nil {
 			return SettingsPayload{}, fmt.Errorf("encode additional domains: %w", err)
@@ -156,6 +165,58 @@ func (s *SettingsService) Update(ctx context.Context, input SettingsPayload) (Se
 		return SettingsPayload{}, err
 	}
 	return s.resolve(stored), nil
+}
+
+func (s *SettingsService) SyncCloudflareFromEnv(ctx context.Context) (SettingsPayload, error) {
+	stored, err := s.repo.Get(ctx)
+	if err != nil {
+		if err == repository.ErrNotFound {
+			stored = &models.Settings{}
+		} else {
+			return SettingsPayload{}, err
+		}
+	}
+
+	stored.CloudflareToken = strings.TrimSpace(s.cfg.CloudflareAPIToken)
+	stored.CloudflareAccountID = strings.TrimSpace(s.cfg.CloudflareAccountID)
+	stored.CloudflareZoneID = strings.TrimSpace(s.cfg.CloudflareZoneID)
+	stored.CloudflaredTunnel = strings.TrimSpace(s.cfg.CloudflaredTunnel)
+	stored.CloudflaredConfigPath = strings.TrimSpace(s.cfg.CloudflaredConfig)
+
+	if err := s.repo.Save(ctx, stored); err != nil {
+		return SettingsPayload{}, err
+	}
+	return s.resolve(stored), nil
+}
+
+func (s *SettingsService) validateAdditionalDomains(ctx context.Context, input SettingsPayload, domains []string) error {
+	if len(domains) == 0 {
+		return nil
+	}
+	cfg := s.cfg
+	cfg.CloudflareAPIToken = strings.TrimSpace(input.CloudflareToken)
+	cfg.CloudflareAccountID = strings.TrimSpace(input.CloudflareAccountID)
+	if cfg.CloudflareAPIToken == "" || cfg.CloudflareAccountID == "" {
+		return fmt.Errorf("cloudflare token and account are required to validate additional domains")
+	}
+	client := cloudflare.NewClient(cfg)
+	zones, err := client.ListZones(ctx)
+	if err != nil {
+		return fmt.Errorf("list cloudflare zones: %w", err)
+	}
+	allowed := make(map[string]bool, len(zones))
+	for _, zone := range zones {
+		normalized := normalizeDomain(zone.Name)
+		if normalized != "" {
+			allowed[normalized] = true
+		}
+	}
+	for _, domain := range domains {
+		if !allowed[normalizeDomain(domain)] {
+			return fmt.Errorf("additional domain %q is not available in the Cloudflare account", domain)
+		}
+	}
+	return nil
 }
 
 func (s *SettingsService) ResolveConfig(ctx context.Context) (config.Config, error) {
@@ -455,6 +516,54 @@ func (s *SettingsService) ResolveDomains(ctx context.Context) (string, []string,
 		additional = filtered
 	}
 	return base, additional, nil
+}
+
+func (s *SettingsService) ResolveDomainSelection(ctx context.Context, requested string) (DomainSelection, error) {
+	settings, err := s.Get(ctx)
+	if err != nil {
+		return DomainSelection{}, err
+	}
+	base := normalizeDomain(settings.BaseDomain)
+	normalizedRequested := normalizeDomain(requested)
+	if normalizedRequested == "" {
+		if base == "" {
+			return DomainSelection{}, errBaseDomainUnset()
+		}
+		normalizedRequested = base
+	}
+	if err := ValidateDomain(normalizedRequested); err != nil {
+		return DomainSelection{}, err
+	}
+
+	cfg, err := s.ResolveConfig(ctx)
+	if err != nil {
+		return DomainSelection{}, err
+	}
+	if strings.TrimSpace(cfg.CloudflareAPIToken) != "" && strings.TrimSpace(cfg.CloudflareAccountID) != "" {
+		client := cloudflare.NewClient(cfg)
+		zones, err := client.ListZones(ctx)
+		if err != nil {
+			return DomainSelection{}, fmt.Errorf("list cloudflare zones: %w", err)
+		}
+		for _, zone := range zones {
+			if normalizeDomain(zone.Name) == normalizedRequested {
+				return DomainSelection{
+					Domain: normalizedRequested,
+					ZoneID: zone.ID,
+				}, nil
+			}
+		}
+		return DomainSelection{}, errDomainNotConfigured(normalizedRequested)
+	}
+
+	selected, err := selectDomain(normalizedRequested, base, settings.AdditionalDomains)
+	if err != nil {
+		return DomainSelection{}, err
+	}
+	return DomainSelection{
+		Domain: selected,
+		ZoneID: strings.TrimSpace(cfg.CloudflareZoneID),
+	}, nil
 }
 
 func expandUserPath(input string) string {

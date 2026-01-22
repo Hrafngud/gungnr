@@ -73,7 +73,7 @@ func FindComposeFile() (string, error) {
 	return "", fmt.Errorf("docker-compose.yml not found from %s upward; run bootstrap from the repo root", startDir)
 }
 
-func StartCompose(composeFile, envFile string) error {
+func StartCompose(composeFile, envFile, logPath string) error {
 	commandName, baseArgs, err := ResolveComposeCommand()
 	if err != nil {
 		return err
@@ -82,5 +82,17 @@ func StartCompose(composeFile, envFile string) error {
 	composeDir := filepath.Dir(composeFile)
 	args := append([]string{}, baseArgs...)
 	args = append(args, "--env-file", envFile, "-f", composeFile, "up", "-d", "--build")
+	return command.RunLoggedInDir(composeDir, commandName, logPath, args...)
+}
+
+func StopCompose(composeFile, envFile string) error {
+	commandName, baseArgs, err := ResolveComposeCommand()
+	if err != nil {
+		return err
+	}
+
+	composeDir := filepath.Dir(composeFile)
+	args := append([]string{}, baseArgs...)
+	args = append(args, "--env-file", envFile, "-f", composeFile, "down")
 	return command.RunInteractiveInDir(composeDir, commandName, args...)
 }

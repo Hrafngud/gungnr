@@ -3,10 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiFormSidePanel from '@/components/ui/UiFormSidePanel.vue'
-import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
-import UiInput from '@/components/ui/UiInput.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
 import NavIcon from '@/components/NavIcon.vue'
@@ -15,7 +13,9 @@ import { healthApi } from '@/services/health'
 import { settingsApi } from '@/services/settings'
 import { apiErrorMessage } from '@/services/api'
 import { usePageLoadingStore } from '@/stores/pageLoading'
-import type { CloudflarePreflight } from '@/types/cloudflare'
+import { useToastStore } from '@/stores/toasts'
+import { useAuthStore } from '@/stores/auth'
+import type { CloudflarePreflight, CloudflareZone } from '@/types/cloudflare'
 import type { CloudflaredPreview, Settings, SettingsSources } from '@/types/settings'
 import type { TunnelHealth } from '@/types/health'
 
@@ -36,33 +36,52 @@ const settingsError = ref<string | null>(null)
 const preflight = ref<CloudflarePreflight | null>(null)
 const preflightLoading = ref(false)
 const preflightError = ref<string | null>(null)
+const syncLoading = ref(false)
+const zones = ref<CloudflareZone[]>([])
+const zonesLoading = ref(false)
+const zonesError = ref<string | null>(null)
 const ingressPreviewOpen = ref(false)
 const domainFormOpen = ref(false)
-const domainInput = ref('')
-const domainSaving = ref(false)
-const domainError = ref<string | null>(null)
-const domainSuccess = ref<string | null>(null)
 const pageLoading = usePageLoadingStore()
+const toastStore = useToastStore()
+const authStore = useAuthStore()
 
 const hasPreview = computed(() => Boolean(preview.value?.contents))
 const cloudflareTokenConfigured = computed(() => Boolean(settings.value?.cloudflareToken))
 const baseDomainLabel = computed(() => settings.value?.baseDomain || 'Unavailable')
 const baseDomainValue = computed(() => settings.value?.baseDomain?.trim().toLowerCase() || '')
-const additionalDomains = computed(() => {
-  const normalized = (settings.value?.additionalDomains ?? [])
-    .map((domain) => domain.trim().toLowerCase())
-    .filter(Boolean)
+const availableDomains = computed(() => {
+  const normalized = zones.value
+    .map((zone) => zone.name?.trim().toLowerCase())
+    .filter(Boolean) as string[]
   const seen = new Set<string>()
   const output: string[] = []
   normalized.forEach((domain) => {
-    if (domain === baseDomainValue.value || seen.has(domain)) return
+    if (seen.has(domain)) return
     seen.add(domain)
     output.push(domain)
   })
   return output
 })
+const listedDomains = computed(() => {
+  const seen = new Set<string>()
+  const output: string[] = []
+  if (baseDomainValue.value) {
+    seen.add(baseDomainValue.value)
+    output.push(baseDomainValue.value)
+  }
+  availableDomains.value.forEach((domain) => {
+    if (seen.has(domain)) return
+    seen.add(domain)
+    output.push(domain)
+  })
+  return output
+})
+const secondaryDomains = computed(() =>
+  listedDomains.value.filter((domain) => domain !== baseDomainValue.value),
+)
 const domainCountLabel = computed(() => {
-  const total = (baseDomainValue.value ? 1 : 0) + additionalDomains.value.length
+  const total = listedDomains.value.length
   return total === 1 ? '1 domain' : `${total} domains`
 })
 
@@ -104,6 +123,8 @@ const preflightTone = (status?: string): BadgeTone => {
       return 'neutral'
   }
 }
+
+const canSyncCloudflare = computed(() => authStore.isAdmin)
 
 const loadHealth = async () => {
   healthLoading.value = true
@@ -149,59 +170,6 @@ const loadSettings = async () => {
   }
 }
 
-const saveDomains = async (domains: string[]) => {
-  if (!settings.value) {
-    domainError.value = 'Settings are unavailable.'
-    return
-  }
-  domainSaving.value = true
-  domainError.value = null
-  domainSuccess.value = null
-  try {
-    const { data } = await settingsApi.update({
-      ...settings.value,
-      additionalDomains: domains,
-    })
-    settings.value = data.settings
-    settingsSources.value = data.sources ?? null
-    cloudflaredTunnelName.value = data.cloudflaredTunnelName ?? null
-    domainSuccess.value = 'Domains updated.'
-  } catch (err) {
-    domainError.value = apiErrorMessage(err)
-  } finally {
-    domainSaving.value = false
-  }
-}
-
-const addDomain = async () => {
-  domainError.value = null
-  domainSuccess.value = null
-  const candidate = domainInput.value.trim().toLowerCase()
-  if (!candidate) {
-    domainError.value = 'Domain is required.'
-    return
-  }
-  if (candidate === baseDomainValue.value) {
-    domainError.value = 'That domain is already the base domain.'
-    return
-  }
-  if (additionalDomains.value.includes(candidate)) {
-    domainError.value = 'That domain is already listed.'
-    return
-  }
-  await saveDomains([...additionalDomains.value, candidate])
-  if (!domainError.value) {
-    domainInput.value = ''
-  }
-}
-
-const removeDomain = async (domain: string) => {
-  domainError.value = null
-  domainSuccess.value = null
-  const next = additionalDomains.value.filter((item) => item !== domain)
-  await saveDomains(next)
-}
-
 const loadPreflight = async () => {
   preflightLoading.value = true
   preflightError.value = null
@@ -216,9 +184,41 @@ const loadPreflight = async () => {
   }
 }
 
+const syncCloudflareEnv = async () => {
+  if (!canSyncCloudflare.value || syncLoading.value) return
+  syncLoading.value = true
+  try {
+    const { data } = await settingsApi.syncCloudflareEnv()
+    settings.value = data.settings
+    settingsSources.value = data.sources ?? null
+    cloudflaredTunnelName.value = data.cloudflaredTunnelName ?? null
+    toastStore.success('Cloudflare settings synced from env.', 'Sync complete')
+    await loadPreflight()
+    await loadHealth()
+  } catch (err) {
+    toastStore.error(apiErrorMessage(err), 'Sync failed')
+  } finally {
+    syncLoading.value = false
+  }
+}
+
+const loadZones = async () => {
+  zonesLoading.value = true
+  zonesError.value = null
+  try {
+    const { data } = await cloudflareApi.zones()
+    zones.value = data.zones ?? []
+  } catch (err) {
+    zonesError.value = apiErrorMessage(err)
+    zones.value = []
+  } finally {
+    zonesLoading.value = false
+  }
+}
+
 onMounted(async () => {
   pageLoading.start('Loading networking status...')
-  await Promise.all([loadHealth(), loadPreview(), loadSettings(), loadPreflight()])
+  await Promise.all([loadHealth(), loadPreview(), loadSettings(), loadPreflight(), loadZones()])
   pageLoading.stop()
 })
 
@@ -445,8 +445,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
         </div>
 
         <p class="text-xs text-[color:var(--muted)]">
-          Base domain plus any additional domains you add. All domains must be in the same Cloudflare
-          zone and tunnel account.
+          Base domain plus Cloudflare-managed domains available in the configured account.
         </p>
 
         <UiState v-if="settingsLoading" loading>
@@ -457,7 +456,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
           {{ settingsError }}
         </UiState>
 
-        <UiState v-else-if="!baseDomainValue && additionalDomains.length === 0">
+        <UiState v-else-if="listedDomains.length === 0">
           No domains configured yet.
         </UiState>
 
@@ -472,7 +471,7 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
             </span>
           </UiListRow>
           <UiListRow
-            v-for="domain in additionalDomains"
+            v-for="domain in secondaryDomains"
             :key="domain"
             class="flex flex-wrap items-center justify-between gap-2 break-words"
           >
@@ -563,6 +562,17 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
             <UiBadge :tone="cloudflareTokenConfigured ? 'ok' : 'warn'">
               {{ cloudflareTokenConfigured ? 'Token available' : 'Token unavailable' }}
             </UiBadge>
+            <UiButton
+              variant="ghost"
+              size="xs"
+              :disabled="syncLoading || !canSyncCloudflare"
+              @click="syncCloudflareEnv"
+            >
+              <span class="flex items-center gap-2">
+                <UiInlineSpinner v-if="syncLoading" />
+                Sync env
+              </span>
+            </UiButton>
             <UiButton
               variant="ghost"
               size="xs"
@@ -678,40 +688,13 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
       title="Domains config"
       eyebrow="Domains"
     >
-      <form class="space-y-4" @submit.prevent="addDomain">
+      <div class="space-y-4">
         <div class="space-y-2">
           <p class="text-xs text-[color:var(--muted)]">
-            Add secondary domains that share the same Cloudflare zone and tunnel account. The base
-            domain remains required for the panel itself.
+            Domains are discovered from the configured Cloudflare account. The base domain remains
+            required for the panel itself.
           </p>
         </div>
-
-        <label class="grid gap-2 text-sm">
-          <span class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-            New domain
-          </span>
-          <div class="flex flex-wrap gap-2">
-            <UiInput
-              v-model="domainInput"
-              type="text"
-              placeholder="secondary.example.com"
-              :disabled="domainSaving"
-            />
-            <UiButton type="submit" variant="ghost" :disabled="domainSaving">
-              {{ domainSaving ? 'Saving...' : 'Add domain' }}
-            </UiButton>
-          </div>
-          <p class="text-xs text-[color:var(--muted)]">
-            Domains must already exist in Cloudflare and belong to the configured account/zone.
-          </p>
-        </label>
-
-        <UiInlineFeedback v-if="domainError" tone="error">
-          {{ domainError }}
-        </UiInlineFeedback>
-        <UiInlineFeedback v-if="domainSuccess" tone="ok">
-          {{ domainSuccess }}
-        </UiInlineFeedback>
 
         <div class="space-y-2 text-xs text-[color:var(--muted)]">
           <UiListRow class="flex flex-wrap items-center justify-between gap-2 break-words">
@@ -720,27 +703,27 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
               {{ baseDomainValue || 'Unavailable' }}
             </span>
           </UiListRow>
-          <UiState v-if="additionalDomains.length === 0">
-            No secondary domains added yet.
+          <UiState v-if="zonesLoading" loading>
+            Loading domains from Cloudflare...
           </UiState>
-          <UiListRow
-            v-for="domain in additionalDomains"
-            :key="domain"
-            class="flex flex-wrap items-center justify-between gap-2 break-words"
-          >
-            <span>{{ domain }}</span>
-            <UiButton
-              type="button"
-              variant="ghost"
-              size="xs"
-              :disabled="domainSaving"
-              @click="removeDomain(domain)"
+          <UiState v-else-if="zonesError" tone="error">
+            {{ zonesError }}
+          </UiState>
+          <UiState v-else-if="availableDomains.length === 0">
+            No Cloudflare domains available yet.
+          </UiState>
+          <div v-else class="space-y-2">
+            <UiListRow
+              v-for="domain in availableDomains"
+              :key="domain"
+              class="flex flex-wrap items-center justify-between gap-2 break-words"
             >
-              Remove
-            </UiButton>
-          </UiListRow>
+              <span>{{ domain }}</span>
+              <UiBadge v-if="domain === baseDomainValue" tone="ok">Base</UiBadge>
+            </UiListRow>
+          </div>
         </div>
-      </form>
+      </div>
     </UiFormSidePanel>
 
     <UiFormSidePanel

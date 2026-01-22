@@ -20,11 +20,13 @@ import { projectsApi } from '@/services/projects'
 import { healthApi } from '@/services/health'
 import { settingsApi } from '@/services/settings'
 import { githubApi } from '@/services/github'
+import { cloudflareApi } from '@/services/cloudflare'
 import { apiErrorMessage } from '@/services/api'
 import { isPendingJob } from '@/utils/jobStatus'
 import type { DockerHealth, TunnelHealth } from '@/types/health'
 import type { Settings } from '@/types/settings'
 import type { GitHubCatalog } from '@/types/github'
+import type { CloudflareZone } from '@/types/cloudflare'
 import { useFieldGuidance } from '@/composables/useFieldGuidance'
 
 type QueueState = {
@@ -64,6 +66,7 @@ const hostLoading = ref(false)
 const settingsError = ref<string | null>(null)
 const catalog = ref<GitHubCatalog | null>(null)
 const catalogError = ref<string | null>(null)
+const zones = ref<CloudflareZone[]>([])
 const templateFormOpen = ref(false)
 const existingFormOpen = ref(false)
 const quickFormOpen = ref(false)
@@ -172,16 +175,16 @@ const templateOptions = computed(() => {
 
 const domainOptions = computed(() => {
   const base = settings.value?.baseDomain?.trim().toLowerCase()
-  const extras = (settings.value?.additionalDomains ?? [])
-    .map((domain) => domain.trim().toLowerCase())
-    .filter(Boolean)
+  const zonesList = zones.value
+    .map((zone) => zone.name?.trim().toLowerCase())
+    .filter(Boolean) as string[]
   const seen = new Set<string>()
   const options: { value: string; label: string }[] = []
   if (base) {
     seen.add(base)
     options.push({ value: base, label: `${base} (base)` })
   }
-  extras.forEach((domain) => {
+  zonesList.forEach((domain) => {
     if (!seen.has(domain)) {
       seen.add(domain)
       options.push({ value: domain, label: domain })
@@ -277,9 +280,23 @@ const loadCatalog = async () => {
   }
 }
 
+const loadZones = async () => {
+  if (!isAuthenticated.value) {
+    zones.value = []
+    return
+  }
+  try {
+    const { data } = await cloudflareApi.zones()
+    zones.value = data.zones ?? []
+  } catch (err) {
+    zones.value = []
+  }
+}
+
 const refreshAll = async () => {
   await Promise.allSettled([
     loadHostStatus(),
+    loadZones(),
     loadCatalog(),
     jobsStore.fetchJobs(),
     projectsStore.fetchProjects(),
@@ -465,6 +482,7 @@ onMounted(async () => {
     !projectsStore.initialized ? projectsStore.fetchProjects() : Promise.resolve(),
     !jobsStore.initialized ? jobsStore.fetchJobs() : Promise.resolve(),
     loadHostStatus(),
+    loadZones(),
   ])
   pageLoading.stop()
   if (typeof window !== 'undefined') {
@@ -511,9 +529,11 @@ watch(
   (value) => {
     if (value) {
       loadCatalog()
+      loadZones()
     } else {
       catalog.value = null
       catalogError.value = null
+      zones.value = []
     }
   },
   { immediate: true },

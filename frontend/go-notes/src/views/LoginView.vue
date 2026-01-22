@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import NavIcon from '@/components/NavIcon.vue'
+import UiHeroMark from '@/components/ui/UiHeroMark.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -115,13 +116,13 @@ onBeforeUnmount(() => {
 <template>
   <section class="grid min-h-screen w-full lg:grid-cols-2">
     <div class="flex flex-col justify-center items-center gap-8">
-        <img src="/logo.svg" alt="Gungnr logo" class="h-64 animate-pulse w-64 animate-pulse" />
-        <h1 class="text-4xl font-semibold leading-tight text-[color:var(--text)] sm:text-5xl">
-          Gungnr
-        </h1>
-        <p class="max-w-xl text-base text-[color:var(--muted)] sm:text-lg">
-          Hit the web in minutes!
-        </p>
+      <UiHeroMark class="w-full max-w-[320px] text-[color:var(--accent-strong)]" />
+      <h1 class="text-4xl font-semibold leading-tight text-[color:var(--text)] sm:text-5xl">
+        Gungnr
+      </h1>
+      <p class="max-w-xl text-base text-[color:var(--muted)] sm:text-lg">
+        Hit the web in minutes!
+      </p>
     </div>
 
     <div class="flex flex-col justify-center gap-10 border-[color:var(--border)] bg-[color:var(--surface)] px-8 py-16 sm:px-12 lg:border-l">

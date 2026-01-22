@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	_ "embed"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"gungnr-cli/internal/cli/app"
@@ -26,6 +28,10 @@ func main() {
 	switch os.Args[1] {
 	case "bootstrap":
 		runBootstrap(os.Args[2:])
+	case "restart":
+		runRestart(os.Args[2:])
+	case "uninstall":
+		runUninstall(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
 		printUsage()
@@ -36,6 +42,8 @@ func main() {
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  gungnr bootstrap [--plain]")
+	fmt.Fprintln(os.Stderr, "  gungnr restart")
+	fmt.Fprintln(os.Stderr, "  gungnr uninstall [--yes]")
 }
 
 func runBootstrap(args []string) {
@@ -65,4 +73,55 @@ func runBootstrap(args []string) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func runRestart(args []string) {
+	flags := flag.NewFlagSet("restart", flag.ExitOnError)
+	_ = flags.Parse(args)
+
+	if err := app.Restart(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func runUninstall(args []string) {
+	flags := flag.NewFlagSet("uninstall", flag.ExitOnError)
+	yes := flags.Bool("yes", false, "Skip confirmation prompt")
+	flags.BoolVar(yes, "y", false, "Skip confirmation prompt")
+	_ = flags.Parse(args)
+
+	plan, err := app.BuildUninstallPlan()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	if len(plan.Targets) == 0 {
+		fmt.Fprintln(os.Stdout, "Nothing to remove.")
+		return
+	}
+
+	fmt.Fprintln(os.Stdout, "The following Gungnr files/directories will be removed:")
+	for _, target := range plan.Targets {
+		fmt.Fprintf(os.Stdout, "- %s\n", target)
+	}
+
+	if !*yes {
+		fmt.Fprint(os.Stdout, "Proceed? [y/N]: ")
+		reader := bufio.NewReader(os.Stdin)
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(strings.ToLower(input))
+		if input != "y" && input != "yes" {
+			fmt.Fprintln(os.Stdout, "Aborted.")
+			return
+		}
+	}
+
+	if err := app.ExecuteUninstall(plan); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	fmt.Fprintln(os.Stdout, "Gungnr uninstall complete.")
 }

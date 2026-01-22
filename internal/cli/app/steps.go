@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -347,7 +348,9 @@ func runComposeStart(ctx context.Context, state *State, ui UI) error {
 	state.ComposeFile = composeFile
 
 	ui.StepProgress("compose_start", "Starting Docker Compose services")
-	if err := docker.StartCompose(composeFile, state.DataPaths.EnvPath); err != nil {
+	logPath := filepath.Join(state.DataPaths.StateDir, "docker-compose.log")
+	state.ComposeLogPath = logPath
+	if err := docker.StartCompose(composeFile, state.DataPaths.EnvPath, logPath); err != nil {
 		return err
 	}
 

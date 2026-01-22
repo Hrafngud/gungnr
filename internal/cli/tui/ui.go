@@ -359,6 +359,7 @@ func (m *model) appendSummary(summary app.Summary) {
 	m.appendLog("- Panel hostname: " + summary.PanelURL)
 	m.appendLog("- Cloudflared config: " + summary.CloudflaredConfig)
 	m.appendLog("- Cloudflared log: " + summary.CloudflaredLog)
+	m.appendLog("- Docker build log: " + summary.ComposeLog)
 	m.appendLog("- Cloudflare tunnel: " + summary.CloudflaredTunnel + " (" + summary.CloudflaredTunnelID + ")")
 }
 

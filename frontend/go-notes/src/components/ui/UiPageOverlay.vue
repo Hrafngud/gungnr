@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import UiHeroMark from '@/components/ui/UiHeroMark.vue'
+
 defineProps<{
   show: boolean
   message?: string
@@ -8,7 +10,7 @@ defineProps<{
 <template>
   <Transition name="page-fade">
     <div v-if="show" class="page-overlay" role="status" aria-live="polite">
-      <div class="page-overlay-gif" aria-hidden="true" />
+      <UiHeroMark />
       <span class="sr-only">{{ message || 'Loading...' }}</span>
     </div>
   </Transition>

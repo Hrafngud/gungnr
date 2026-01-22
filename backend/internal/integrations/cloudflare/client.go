@@ -67,13 +67,17 @@ func NewClient(cfg config.Config) *Client {
 }
 
 func (c *Client) EnsureDNS(ctx context.Context, hostname string) error {
+	return c.EnsureDNSForZone(ctx, hostname, strings.TrimSpace(c.cfg.CloudflareZoneID))
+}
+
+func (c *Client) EnsureDNSForZone(ctx context.Context, hostname, zoneID string) error {
 	if strings.TrimSpace(hostname) == "" {
 		return ErrMissingHostname
 	}
 	if err := c.ensureAuth(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(c.cfg.CloudflareZoneID) == "" {
+	if strings.TrimSpace(zoneID) == "" {
 		return ErrMissingZoneID
 	}
 
@@ -82,7 +86,7 @@ func (c *Client) EnsureDNS(ctx context.Context, hostname string) error {
 		return err
 	}
 
-	record, err := c.selectDNSRecord(ctx, hostname)
+	record, err := c.selectDNSRecord(ctx, hostname, zoneID)
 	if err != nil {
 		return err
 	}
@@ -92,7 +96,7 @@ func (c *Client) EnsureDNS(ctx context.Context, hostname string) error {
 		if record.Content == content && record.Proxied {
 			return nil
 		}
-		return c.updateDNSRecord(ctx, record.ID, dnsRecordRequest{
+		return c.updateDNSRecord(ctx, zoneID, record.ID, dnsRecordRequest{
 			Type:    "CNAME",
 			Name:    hostname,
 			Content: content,
@@ -100,7 +104,7 @@ func (c *Client) EnsureDNS(ctx context.Context, hostname string) error {
 		})
 	}
 
-	return c.createDNSRecord(ctx, dnsRecordRequest{
+	return c.createDNSRecord(ctx, zoneID, dnsRecordRequest{
 		Type:    "CNAME",
 		Name:    hostname,
 		Content: content,
@@ -170,6 +174,23 @@ func (c *Client) VerifyToken(ctx context.Context) (TokenStatus, error) {
 	var result TokenStatus
 	if err := c.do(ctx, http.MethodGet, "/user/tokens/verify", nil, &result); err != nil {
 		return TokenStatus{}, err
+	}
+	return result, nil
+}
+
+func (c *Client) ListZones(ctx context.Context) ([]ZoneInfo, error) {
+	if err := c.ensureAuth(); err != nil {
+		return nil, err
+	}
+
+	query := url.Values{}
+	query.Set("account.id", c.cfg.CloudflareAccountID)
+	query.Set("per_page", "200")
+	path := fmt.Sprintf("/zones?%s", query.Encode())
+
+	var result []ZoneInfo
+	if err := c.do(ctx, http.MethodGet, path, nil, &result); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -323,8 +344,8 @@ type dnsRecordRequest struct {
 	Proxied bool   `json:"proxied"`
 }
 
-func (c *Client) selectDNSRecord(ctx context.Context, hostname string) (*dnsRecord, error) {
-	records, err := c.listDNSRecordsByName(ctx, hostname)
+func (c *Client) selectDNSRecord(ctx context.Context, hostname, zoneID string) (*dnsRecord, error) {
+	records, err := c.listDNSRecordsByName(ctx, hostname, zoneID)
 	if err != nil {
 		return nil, err
 	}
@@ -350,11 +371,11 @@ func (c *Client) selectDNSRecord(ctx context.Context, hostname string) (*dnsReco
 	return nil, fmt.Errorf("multiple DNS records exist for %s (%s); remove conflicting records before creating a CNAME", hostname, describeDNSRecords(records))
 }
 
-func (c *Client) listDNSRecordsByName(ctx context.Context, hostname string) ([]dnsRecord, error) {
+func (c *Client) listDNSRecordsByName(ctx context.Context, hostname, zoneID string) ([]dnsRecord, error) {
 	query := url.Values{}
 	query.Set("name", hostname)
 
-	path := fmt.Sprintf("/zones/%s/dns_records?%s", c.cfg.CloudflareZoneID, query.Encode())
+	path := fmt.Sprintf("/zones/%s/dns_records?%s", zoneID, query.Encode())
 	var result []dnsRecord
 	if err := c.do(ctx, http.MethodGet, path, nil, &result); err != nil {
 		return nil, err
@@ -362,13 +383,13 @@ func (c *Client) listDNSRecordsByName(ctx context.Context, hostname string) ([]d
 	return result, nil
 }
 
-func (c *Client) createDNSRecord(ctx context.Context, req dnsRecordRequest) error {
-	path := fmt.Sprintf("/zones/%s/dns_records", c.cfg.CloudflareZoneID)
+func (c *Client) createDNSRecord(ctx context.Context, zoneID string, req dnsRecordRequest) error {
+	path := fmt.Sprintf("/zones/%s/dns_records", zoneID)
 	return c.do(ctx, http.MethodPost, path, req, nil)
 }
 
-func (c *Client) updateDNSRecord(ctx context.Context, id string, req dnsRecordRequest) error {
-	path := fmt.Sprintf("/zones/%s/dns_records/%s", c.cfg.CloudflareZoneID, id)
+func (c *Client) updateDNSRecord(ctx context.Context, zoneID, id string, req dnsRecordRequest) error {
+	path := fmt.Sprintf("/zones/%s/dns_records/%s", zoneID, id)
 	return c.do(ctx, http.MethodPut, path, req, nil)
 }
 

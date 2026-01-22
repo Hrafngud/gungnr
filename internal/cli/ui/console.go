@@ -124,5 +124,6 @@ func (c *ConsoleUI) FinalSummary(summary app.Summary) {
 	fmt.Fprintf(c.out, "- Panel hostname: %s\n", summary.PanelURL)
 	fmt.Fprintf(c.out, "- Cloudflared config: %s\n", summary.CloudflaredConfig)
 	fmt.Fprintf(c.out, "- Cloudflared log: %s\n", summary.CloudflaredLog)
+	fmt.Fprintf(c.out, "- Docker build log: %s\n", summary.ComposeLog)
 	fmt.Fprintf(c.out, "- Cloudflare tunnel: %s (%s)\n", summary.CloudflaredTunnel, summary.CloudflaredTunnelID)
 }

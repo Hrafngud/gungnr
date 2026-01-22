@@ -239,6 +239,7 @@
                 <a class="sidebar-link" data-nav-link href="#installation">Installation</a>
                 <div class="sidebar-sub">
                   <a data-nav-link href="#install-prereqs">Prerequisites</a>
+                  <a data-nav-link href="#install-compatibility">Compatibility</a>
                   <a data-nav-link href="#install-steps">Step-by-step</a>
                   <a data-nav-link href="#install-outputs">Bootstrap outputs</a>
                 </div>
@@ -457,6 +458,23 @@
                   </ul>
                 </div>
               </div>
+            </div>
+
+            <div
+              id="install-compatibility"
+              class="mt-6 card p-6"
+              data-doc-section
+              data-doc-title="Compatibility"
+              data-doc-group="installation"
+              data-doc-tags="compatibility linux macos windows shell"
+            >
+              <h3 class="text-xl font-semibold">Compatibility</h3>
+              <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                <li>Linux (amd64/arm64) with <code>apt</code>, <code>dnf</code>, <code>yum</code>, <code>pacman</code>, <code>apk</code>, or <code>zypper</code>.</li>
+                <li>macOS (amd64/arm64) via Homebrew.</li>
+                <li>The installer is Bash-based. Run <code>install.sh</code> with Bash even if your login shell is zsh.</li>
+                <li>Windows and PowerShell are not supported yet.</li>
+              </ul>
             </div>
 
             <div

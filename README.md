@@ -22,6 +22,12 @@ Setup is now driven by a one-time terminal bootstrap (`install.sh` + `gungnr boo
 - Cloudflare account, domain, and API token with tunnel + DNS edit permissions for bootstrap input.
 - `install.sh` installs or verifies Docker, Docker Compose v2, and `cloudflared`.
 
+## Compatibility
+- Linux (amd64/arm64) with `apt`, `dnf`, `yum`, `pacman`, `apk`, or `zypper` package managers.
+- macOS (amd64/arm64) via Homebrew.
+- Installer requires Bash (`install.sh` is a bash script). Run it from Bash even if your login shell is zsh.
+- Windows and PowerShell are not supported at this time.
+
 ## Bootstrap-managed tunnel setup
 The bootstrap CLI configures and runs a locally managed tunnel with `cloudflared`
 as a user-managed process. Manual tunnel setup is no longer required for a
@@ -38,6 +44,20 @@ Persistence and auto-restart are out of scope for now.
 External docs are published from `docs/` via GitHub Pages.
 Live URL: https://hrafngud.github.io/gungnr/
 Local source: `docs/index.html`.
+
+## Roadmap
+Current features
+- One-command installer + `gungnr bootstrap` to configure tunnel, DNS, and env.
+- GitHub OAuth login with allowlist access control.
+- Template-based deploys, existing project deploys, and quick local service forwarding.
+- Cloudflared-managed ingress with local tunnel config.
+- Docker-based runtime with logs and job history in the UI.
+
+Future planning
+- Compatibility layer for Windows and PowerShell-based install flows.
+- Expanded distro/arch coverage beyond the current Linux/macOS set.
+- Hardening the bootstrap for idempotent re-runs and safe upgrades.
+- Optional daemon/service management for cloudflared auto-restart.
 
 ## Environment configuration
 The bootstrap CLI generates a complete `.env`. Reference values:

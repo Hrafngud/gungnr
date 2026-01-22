@@ -208,11 +208,11 @@ func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceReque
 
 func (s *ProjectService) resolveDomain(ctx context.Context, requested string) (string, error) {
 	if s.settings != nil {
-		base, additional, err := s.settings.ResolveDomains(ctx)
+		selection, err := s.settings.ResolveDomainSelection(ctx, requested)
 		if err != nil {
 			return "", err
 		}
-		return selectDomain(requested, base, additional)
+		return selection.Domain, nil
 	}
 	base := normalizeDomain(s.cfg.Domain)
 	return selectDomain(requested, base, nil)
