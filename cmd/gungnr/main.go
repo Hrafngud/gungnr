@@ -30,6 +30,8 @@ func main() {
 		runBootstrap(os.Args[2:])
 	case "restart":
 		runRestart(os.Args[2:])
+	case "tunnel":
+		runTunnel(os.Args[2:])
 	case "uninstall":
 		runUninstall(os.Args[2:])
 	default:
@@ -43,6 +45,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  gungnr bootstrap [--plain]")
 	fmt.Fprintln(os.Stderr, "  gungnr restart")
+	fmt.Fprintln(os.Stderr, "  gungnr tunnel run")
 	fmt.Fprintln(os.Stderr, "  gungnr uninstall [--yes]")
 }
 
@@ -82,6 +85,30 @@ func runRestart(args []string) {
 	if err := app.Restart(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+func runTunnel(args []string) {
+	flags := flag.NewFlagSet("tunnel", flag.ExitOnError)
+	_ = flags.Parse(args)
+
+	subcommand := ""
+	if flags.NArg() > 0 {
+		subcommand = flags.Arg(0)
+	}
+
+	switch subcommand {
+	case "run":
+		logPath, err := app.RunTunnel()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stdout, "Cloudflared tunnel started. Logs: %s\n", logPath)
+	default:
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "  gungnr tunnel run")
+		os.Exit(2)
 	}
 }
 

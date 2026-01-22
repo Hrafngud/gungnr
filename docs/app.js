@@ -1,5 +1,30 @@
 const copyButtons = document.querySelectorAll('[data-copy-target]');
 
+const normalizeBaseUrl = (value) => value.trim().replace(/\/+$/, '');
+const appBaseUrl =
+  typeof window !== 'undefined' && window.APP_BASE_URL
+    ? normalizeBaseUrl(String(window.APP_BASE_URL))
+    : '';
+
+const updateBaseLinks = () => {
+  if (!appBaseUrl) return;
+
+  const baseLinks = [
+    { selector: '[data-legal-notice-link]', path: '/legal-notice.html' },
+    { selector: '[data-docs-home-link]', path: '/index.html' },
+  ];
+
+  baseLinks.forEach(({ selector, path }) => {
+    document.querySelectorAll(selector).forEach((link) => {
+      if (link instanceof HTMLAnchorElement) {
+        link.href = `${appBaseUrl}${path}`;
+      }
+    });
+  });
+};
+
+updateBaseLinks();
+
 copyButtons.forEach((button) => {
   const original = button.textContent;
   button.addEventListener('click', async () => {

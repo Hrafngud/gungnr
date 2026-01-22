@@ -424,6 +424,7 @@ func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, logger jobs.Logg
 				logger.Logf("cloudflared config update error: %v", updateErr)
 				return fmt.Errorf("cloudflared ingress: %w", updateErr)
 			}
+			logger.Log("restart the local tunnel to apply ingress updates: gungnr tunnel run")
 			return nil
 		}
 		logger.Logf("cloudflare ingress error: %v", err)
@@ -432,6 +433,7 @@ func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, logger jobs.Logg
 	if updateErr := cloudflare.UpdateLocalIngress(cfg.CloudflaredConfig, hostname, port); updateErr != nil {
 		logger.Logf("cloudflared config update skipped: %v", updateErr)
 	}
+	logger.Log("restart the local tunnel to apply ingress updates: gungnr tunnel run")
 	return nil
 }
 
