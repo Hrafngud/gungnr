@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Sora:wght@500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Sora:wght@500;600;700&display=swap"
       rel="stylesheet"
     />
     <script src="https://cdn.tailwindcss.com"></script>
@@ -469,11 +469,11 @@
               data-doc-tags="compatibility linux macos windows shell"
             >
               <h3 class="text-xl font-semibold">Compatibility</h3>
+              <div class="mt-2 border-t border-[color:var(--muted)] pt-4">
+                <p class="text-sm text-[color:var(--muted)]">Currently, Gungnr is <b>only supported on Linux</b>, we are looking foward to introduce a compatibility layer for other OS soon:</p>
+              </div>
               <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
                 <li>Linux (amd64/arm64) with <code>apt</code>, <code>dnf</code>, <code>yum</code>, <code>pacman</code>, <code>apk</code>, or <code>zypper</code>.</li>
-                <li>macOS (amd64/arm64) via Homebrew.</li>
-                <li>The installer is Bash-based. Run <code>install.sh</code> with Bash even if your login shell is zsh.</li>
-                <li>Windows and PowerShell are not supported yet.</li>
               </ul>
             </div>
 
@@ -487,6 +487,86 @@
             >
               <div class="step-card">
                 <p class="step-index">Step 01</p>
+                <h3 class="mt-2 text-lg font-semibold">Set up external services</h3>
+                <p class="mt-2 text-sm text-[color:var(--muted)]">
+                  Configure GitHub OAuth app and Cloudflare credentials before running the installer.
+                </p>
+                
+                <div class="mt-6 flex flex-col gap-8">
+                  <div class="rounded-xl bg-[color:var(--surface-2)] p-6">
+                    <p class="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent-ink)]">GitHub OAuth Setup</p>
+                    <p class="mt-3 text-xs text-[color:var(--muted)]">Create a GitHub OAuth app for panel authentication.</p>
+                    <div class="mt-6 flex flex-col gap-6 text-sm text-[color:var(--muted)]">
+                      <div class="flex flex-row justify-between">
+                        <div>
+                          <p class="font-semibold text-[color:var(--text)]">1. Create OAuth App</p>
+                          <p class="mt-1 text-xs">Go to GitHub Settings → Developer settings → OAuth Apps → New OAuth App</p>
+                        </div>
+                        <img src="https://placehold.net/600x400.png" alt="GitHub OAuth App creation" class="w-1/2 h-fit">
+                      </div>
+                      <div class="flex flex-row justify-between">
+                        <div>
+                          <p class="font-semibold text-[color:var(--text)]">2. Configure URLs</p>
+                          <p class="mt-1 text-xs">Authorization callback URL: <code class="bg-[color:var(--surface-1)] px-1 py-0.5 rounded">https://panel.your-domain/auth/callback</code></p>
+                        </div>
+                        <img src="https://placehold.net/600x400.png" alt="GitHub OAuth URL configuration" class="w-1/2 h-fit">
+                      </div>
+                      <div class="flex flex-row justify-between">
+                        <div>
+                          <p class="font-semibold text-[color:var(--text)]">3. Enable Device Flow</p>
+                          <p class="mt-1 text-xs">Toggle "Enable Device Flow" in the app settings for CLI bootstrap support.</p>
+                        </div>
+                        <img src="https://placehold.net/600x400.png" alt="GitHub Device Flow settings" class="w-1/2 h-fit">
+                      </div>
+                      <div class="flex flex-row justify-between">
+                        <div>
+                          <p class="font-semibold text-[color:var(--text)]">4. Save Credentials</p>
+                          <p class="mt-1 text-xs">Copy the Client ID and Client Secret for bootstrap.</p>
+                        </div>
+                        <img src="https://placehold.net/600x400.png" alt="GitHub OAuth credentials" class="w-1/2 h-fit">
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div class="rounded-xl bg-[color:var(--surface-2)] p-6">
+                    <p class="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent-ink)]">Cloudflare Setup</p>
+                    <p class="mt-3 text-xs text-[color:var(--muted)]">Configure Cloudflare for tunnel routing and DNS management.</p>
+                    <div class="mt-6 flex flex-col gap-6 text-sm text-[color:var(--muted)]">
+                      <div class="flex flex-row justify-between">
+                        <div>
+                          <p class="font-semibold text-[color:var(--text)]">1. Add Domain</p>
+                          <p class="mt-1 text-xs">Ensure your domain is added to a Cloudflare account and nameservers are configured.</p>
+                        </div>
+                        <img src="https://placehold.net/600x400.png" alt="Cloudflare domain setup" class="w-1/2 h-fit">
+                      </div>
+                      <div class="flex flex-row justify-between">
+                        <div>
+                          <p class="font-semibold text-[color:var(--text)]">2. Create API Token</p>
+                          <p class="mt-1 text-xs">Go to My Profile → API Tokens → Create Token. Use "Edit Tunnel" and "Edit Zone DNS" templates.</p>
+                        </div>
+                        <img src="https://placehold.net/600x400.png" alt="Cloudflare API token creation" class="w-1/2 h-fit">
+                      </div>
+                      <div class="flex flex-row justify-between">
+                        <div>
+                          <p class="font-semibold text-[color:var(--text)]">3. Grant Permissions</p>
+                          <p class="mt-1 text-xs">Ensure permissions for Tunnel read/write and DNS edit on your zone.</p>
+                        </div>
+                        <img src="https://placehold.net/600x400.png" alt="Cloudflare permissions setup" class="w-1/2 h-fit">
+                      </div>
+                      <div class="flex flex-row justify-between">
+                        <div>
+                          <p class="font-semibold text-[color:var(--text)]">4. Save Token</p>
+                          <p class="mt-1 text-xs">Copy the token before leaving the page. You'll need it during bootstrap.</p>
+                        </div>
+                        <img src="https://placehold.net/600x400.png" alt="Cloudflare API token credentials" class="w-1/2 h-fit">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="step-card">
+                <p class="step-index">Step 02</p>
                 <h3 class="mt-2 text-lg font-semibold">Run the installer</h3>
                 <p class="mt-2 text-sm text-[color:var(--muted)]">
                   Downloads and runs install.sh to verify dependencies.
@@ -497,7 +577,7 @@
                 </div>
               </div>
               <div class="step-card">
-                <p class="step-index">Step 02</p>
+                <p class="step-index">Step 03</p>
                 <h3 class="mt-2 text-lg font-semibold">Run bootstrap</h3>
                 <p class="mt-2 text-sm text-[color:var(--muted)]">
                   The CLI prompts for GitHub, Cloudflare, and DNS inputs.
@@ -631,17 +711,34 @@
               data-doc-group="usage"
               data-doc-tags="ops commands"
             >
-              <h3 class="text-xl font-semibold">Operations commands</h3>
+              <h3 class="text-xl font-semibold">CLI commands</h3>
               <p class="mt-2 text-sm text-[color:var(--muted)]">
-                Run these from the repo root to manage the stack directly.
+                Gungnr has a few cli commands available, those can be used to controll the compose, tunnel and overall states
               </p>
+              <span class="text-sm text-[color:var(--muted)]">Remove containers and restart compose:</span>
               <div class="mt-4 code-block" id="cmd-ops">
                 <button class="copy-button" data-copy-target="#cmd-ops code">Copy</button>
-                <pre class="m-0 text-sm"><code>make up
-make up-d
-make logs
-make down
-make down-v</code></pre>
+                <pre class="m-0 text-sm"><code>
+                  gungnr restart
+                </code></pre>
+              </div>
+                <span class="text-sm text-[color:var(--muted)]">Run the cloudflared tunnel:</span>
+              <div class="mt-4 code-block" id="cmd-ops">
+                <button class="copy-button" data-copy-target="#cmd-ops code">Copy</button>
+                <pre class="m-0 text-sm"><code>
+                  gungnr tunnel run
+                </code></pre>
+              </div>
+              <span class="text-sm text-[color:var(--muted)]">Uninstall</span>
+              <div class="mt-4 code-block" id="cmd-ops">
+                <button class="copy-button" data-copy-target="#cmd-ops code">Copy</button>
+                <pre class="m-0 text-sm"><code>
+                  gungnr uninstall
+                </code></pre>
+              </div>
+
+              <div class="mt-2 border-t border-[color:var(--muted)] pt-4">
+                <p> We are looking foward to introduce new CLI methods in the future</p>
               </div>
             </div>
           </section>
