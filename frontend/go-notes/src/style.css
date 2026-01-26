@@ -581,23 +581,56 @@ h3 {
   transition: transform 0.2s ease;
 }
 
-.state-spinner {
+.spinner-mark {
+  --spinner-size: 1.2rem;
+  --spinner-stroke: 2px;
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.25rem;
-  height: 2.25rem;
+  width: var(--spinner-size);
+  height: var(--spinner-size);
   color: var(--accent-strong);
+  animation: spinner-rotate 0.95s linear infinite;
+}
+
+.spinner-mark::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  border: var(--spinner-stroke) solid rgba(169, 214, 229, 0.2);
+  border-top-color: currentColor;
+  border-right-color: rgba(169, 214, 229, 0.45);
+}
+
+.spinner-mark::after {
+  content: '';
+  position: absolute;
+  width: calc(var(--spinner-size) * 0.22);
+  height: calc(var(--spinner-size) * 0.22);
+  border-radius: 999px;
+  background: currentColor;
+  top: calc(var(--spinner-size) * 0.04);
+  left: 50%;
+  transform: translateX(-50%);
+  box-shadow: 0 0 10px rgba(169, 214, 229, 0.45);
+}
+
+.state-spinner {
+  --spinner-size: 2.05rem;
+  --spinner-stroke: 2.5px;
 }
 
 .inline-spinner {
-  display: inline-block;
-  width: 0.85rem;
-  height: 0.85rem;
-  background-image: url('/loading.gif');
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: contain;
+  --spinner-size: 0.85rem;
+  --spinner-stroke: 1.5px;
+}
+
+@keyframes spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .skeleton {

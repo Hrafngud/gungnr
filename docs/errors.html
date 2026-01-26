@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Gungnr troubleshooting: diagnostics and fixes for installer, bootstrap, and panel errors."
+    />
+    <title>Gungnr Errors</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Sora:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              display: ['Sora', 'Manrope', 'sans-serif'],
+              body: ['Manrope', 'sans-serif'],
+            },
+          },
+        },
+      };
+    </script>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="font-body">
+    <header class="border-b border-[color:var(--border)] bg-[#0b0f14]">
+      <div class="flex justify-center px-6">
+        <div class="w-full flex flex-row justify-around p-2">
+          <a class="logo-link" href="./index.html" aria-label="Gungnr home" data-home-link>
+            <span class="logo-mark">
+              <svg viewBox="124 82 252 338" class="h-6 w-6" aria-hidden="true" focusable="false">
+                <path
+                  d="M263.00,342.00 L235.00,343.00 L229.00,352.00 L248.00,417.00 L253.00,414.00 L268.00,361.00 L269.00,352.00 Z"
+                  fill="currentColor"
+                  fill-rule="evenodd"
+                />
+                <path
+                  d="M175.00,308.00 L181.00,316.00 L196.00,324.00 L236.00,332.00 L264.00,332.00 L297.00,326.00 L318.00,316.00 L324.00,307.00 L320.00,298.00 L303.00,289.00 L276.00,284.00 L275.00,287.00 L296.00,295.00 L300.00,299.00 L300.00,305.00 L289.00,311.00 L273.00,315.00 L227.00,315.00 L200.00,306.00 L199.00,299.00 L208.00,292.00 L224.00,288.00 L224.00,284.00 L189.00,292.00 L177.00,300.00 Z"
+                  fill="currentColor"
+                  fill-rule="evenodd"
+                />
+                <path
+                  d="M248.00,244.00 L242.00,248.00 L242.00,255.00 L246.00,259.00 L246.00,270.00 L236.00,279.00 L236.00,304.00 L262.00,305.00 L263.00,279.00 L253.00,270.00 L253.00,260.00 L257.00,256.00 L257.00,248.00 Z"
+                  fill="currentColor"
+                  fill-rule="evenodd"
+                />
+                <path
+                  d="M277.00,139.00 L281.00,159.00 L312.00,175.00 L332.00,195.00 L347.00,221.00 L353.00,248.00 L352.00,277.00 L341.00,307.00 L331.00,322.00 L314.00,339.00 L303.00,347.00 L281.00,356.00 L276.00,376.00 L282.00,376.00 L318.00,360.00 L331.00,350.00 L350.00,329.00 L367.00,296.00 L371.00,280.00 L373.00,253.00 L371.00,236.00 L358.00,199.00 L342.00,177.00 L329.00,164.00 L310.00,151.00 L288.00,141.00 Z"
+                  fill="currentColor"
+                  fill-rule="evenodd"
+                />
+                <path
+                  d="M217.00,139.00 L201.00,145.00 L175.00,160.00 L151.00,184.00 L138.00,205.00 L130.00,227.00 L126.00,266.00 L130.00,290.00 L138.00,311.00 L156.00,338.00 L186.00,363.00 L207.00,373.00 L222.00,376.00 L218.00,356.00 L189.00,342.00 L164.00,317.00 L152.00,295.00 L145.00,264.00 L149.00,230.00 L160.00,205.00 L173.00,188.00 L187.00,175.00 L199.00,167.00 L217.00,160.00 L222.00,139.00 Z"
+                  fill="currentColor"
+                  fill-rule="evenodd"
+                />
+                <path
+                  d="M246.00,84.00 L216.00,217.00 L222.00,226.00 L222.00,231.00 L211.00,233.00 L208.00,249.00 L231.00,267.00 L237.00,263.00 L236.00,247.00 L240.00,242.00 L246.00,104.00 L247.00,96.00 L252.00,95.00 L258.00,240.00 L263.00,248.00 L261.00,262.00 L268.00,267.00 L287.00,253.00 L291.00,246.00 L287.00,231.00 L277.00,231.00 L277.00,226.00 L282.00,220.00 L279.00,199.00 L253.00,84.00 Z"
+                  fill="currentColor"
+                  fill-rule="evenodd"
+                />
+              </svg>
+            </span>
+          </a>
+          <nav class="header-nav" aria-label="Docs navigation">
+            <a class="nav-link" href="./index.html" data-home-link>Home</a>
+            <a class="nav-link" href="./docs.html" data-docs-link>Docs</a>
+            <a class="nav-link" href="./errors.html" data-errors-link data-active="true">Errors</a>
+          </nav>
+          <div class="header-search">
+            <form class="search-form" role="search">
+              <label class="sr-only" for="doc-search">Search errors</label>
+              <div class="search-field">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    d="M11 2a9 9 0 0 1 6.32 15.32l4.18 4.18-1.41 1.41-4.18-4.18A9 9 0 1 1 11 2Zm0 2a7 7 0 1 0 0 14a7 7 0 0 0 0-14Z"
+                    fill="currentColor"
+                  />
+                </svg>
+                <input
+                  id="doc-search"
+                  type="search"
+                  placeholder="Search errors: docker, tunnel, dns"
+                  autocomplete="off"
+                />
+              </div>
+            </form>
+            <div
+              id="doc-search-results"
+              class="search-results"
+              role="listbox"
+              aria-label="Error search results"
+              aria-live="polite"
+              hidden
+            ></div>
+          </div>
+          <div class="header-actions">
+            <div class="header-action">
+              <span class="header-label">Give me a star on:</span>
+              <a
+                class="brand-link"
+                href="https://github.com/Hrafngud/gungnr"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Star Gungnr on GitHub"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    d="M12 2.5c-5.25 0-9.5 4.25-9.5 9.5c0 4.2 2.72 7.75 6.48 9.02c0.47 0.08 0.64-0.2 0.64-0.45v-1.58c-2.63 0.57-3.18-1.13-3.18-1.13c-0.43-1.1-1.05-1.4-1.05-1.4c-0.86-0.59 0.07-0.58 0.07-0.58c0.95 0.06 1.45 0.98 1.45 0.98c0.85 1.45 2.22 1.03 2.76 0.79c0.09-0.62 0.33-1.03 0.6-1.27c-2.1-0.24-4.31-1.05-4.31-4.66c0-1.03 0.37-1.88 0.98-2.54c-0.1-0.24-0.43-1.2 0.09-2.5c0 0 0.8-0.26 2.62 0.97c0.76-0.21 1.58-0.32 2.39-0.32c0.81 0 1.63 0.11 2.39 0.32c1.82-1.23 2.62-0.97 2.62-0.97c0.52 1.3 0.19 2.26 0.09 2.5c0.61 0.66 0.98 1.51 0.98 2.54c0 3.62-2.21 4.42-4.32 4.66c0.35 0.3 0.66 0.9 0.66 1.82v2.7c0 0.25 0.17 0.54 0.65 0.45c3.76-1.27 6.47-4.82 6.47-9.02c0-5.25-4.25-9.5-9.5-9.5Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </a>
+            </div>
+            <div class="header-action">
+              <span class="header-label">Donate using:</span>
+              <a
+                class="brand-link stripe-link"
+                href="https://wise.com/pay/me/joaooliveiras5"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Donate with Wise"
+              >
+                <span class="stripe-text bg-white rounded-full"><img class="w-8 h-fit" src="./wise.png" alt="stripe"></span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="page-shell pb-24 pt-12">
+      <section class="docs-shell">
+        <div class="docs-frame">
+          <div class="docs-header flex flex-col gap-2 border-b border-[color:var(--border)] pb-6">
+            <p class="section-label">Troubleshooting</p>
+            <h2 class="text-3xl font-semibold">Errors &amp; diagnostics</h2>
+            <p class="text-sm text-[color:var(--muted)]">
+              Search for an error message or browse by category. Each entry includes the fastest recovery steps.
+            </p>
+            <div class="callout mt-4">
+              Need setup guidance? Start with the
+              <a class="text-[color:var(--accent-ink)] hover:underline" href="./docs.html" data-docs-link>
+                installation &amp; usage docs
+              </a>
+              before troubleshooting.
+            </div>
+          </div>
+
+          <div class="docs-layout grid gap-8 lg:grid-cols-[260px_1fr]">
+            <aside class="sidebar">
+              <p class="sidebar-title">Troubleshooting</p>
+              <div class="sidebar-section" data-doc-group="triage" data-doc-title="Quick triage">
+                <a class="sidebar-link" data-nav-link href="#errors-triage">Quick triage</a>
+              </div>
+              <div class="sidebar-section" data-doc-group="install-dependencies" data-doc-title="Install & Dependencies">
+                <a class="sidebar-link" data-nav-link href="#errors-install">Install &amp; dependencies</a>
+              </div>
+              <div class="sidebar-section" data-doc-group="cloudflared-tunnel" data-doc-title="Cloudflared & Tunnels">
+                <a class="sidebar-link" data-nav-link href="#errors-tunnel">Cloudflared &amp; tunnels</a>
+              </div>
+              <div class="sidebar-section" data-doc-group="dns-domains" data-doc-title="DNS & Domains">
+                <a class="sidebar-link" data-nav-link href="#errors-dns">DNS &amp; domains</a>
+              </div>
+              <div class="sidebar-section" data-doc-group="panel-auth" data-doc-title="Panel & Auth">
+                <a class="sidebar-link" data-nav-link href="#errors-panel">Panel &amp; auth</a>
+              </div>
+            </aside>
+
+            <div class="flex flex-col gap-14">
+              <section
+                id="errors-triage"
+                class="scroll-mt-24"
+                data-doc-section
+                data-doc-group="triage"
+                data-doc-title="Quick triage"
+                data-doc-tags="triage logs diagnostics"
+              >
+                <p class="section-label">Quick triage</p>
+                <h2 class="mt-2 text-3xl font-semibold">Start with these checks</h2>
+                <p class="mt-3 text-[color:var(--muted)]">
+                  Grab the logs and validate ingress before digging into specific errors.
+                </p>
+                <div class="mt-6 grid gap-4 lg:grid-cols-3">
+                  <div class="code-block" id="cmd-logs-compose">
+                    <button class="copy-button" data-copy-target="#cmd-logs-compose code">Copy</button>
+                    <pre class="m-0 text-sm"><code>docker compose ps
+make logs</code></pre>
+                  </div>
+                  <div class="code-block" id="cmd-logs-cloudflared">
+                    <button class="copy-button" data-copy-target="#cmd-logs-cloudflared code">Copy</button>
+                    <pre class="m-0 text-sm"><code>cloudflared tunnel list
+cloudflared tunnel info &lt;tunnel-uuid&gt;</code></pre>
+                  </div>
+                  <div class="code-block" id="cmd-logs-ingress">
+                    <button class="copy-button" data-copy-target="#cmd-logs-ingress code">Copy</button>
+                    <pre class="m-0 text-sm"><code>cloudflared tunnel ingress validate
+cloudflared tunnel ingress rule https://panel.your-domain</code></pre>
+                  </div>
+                  <div class="code-block" id="cmd-logs-files">
+                    <button class="copy-button" data-copy-target="#cmd-logs-files code">Copy</button>
+                    <pre class="m-0 text-sm"><code>cd ~/.cloudflared
+cat cloudflared.log
+
+docker compose ps
+docker inspect -f '{{.LogPath}}' &lt;container-id&gt;
+sudo cat "$(docker inspect -f '{{.LogPath}}' &lt;container-id&gt;)"</code></pre>
+                  </div>
+                </div>
+              </section>
+
+              <section id="errors-install" class="scroll-mt-24">
+                <p class="section-label">Install &amp; dependencies</p>
+                <h2 class="mt-2 text-3xl font-semibold">Installer and host prerequisites</h2>
+                <p class="mt-3 text-[color:var(--muted)]">
+                  These errors indicate a missing package, binary, or an unsupported host configuration.
+                </p>
+                <div class="mt-6 grid gap-4">
+                  <details
+                    class="details-card"
+                    id="error-docker-not-found"
+                    data-doc-section
+                    data-doc-group="install-dependencies"
+                    data-doc-title="docker not found in PATH"
+                    data-doc-tags="docker install path"
+                  >
+                    <summary>docker not found in PATH. Install Docker and retry</summary>
+                    <p>
+                      Docker is missing or not running. Install Docker Engine and ensure <code>docker info</code> works.
+                      Restart the Docker service and re-run the installer.
+                    </p>
+                  </details>
+                  <details
+                    class="details-card"
+                    id="error-compose-not-found"
+                    data-doc-section
+                    data-doc-group="install-dependencies"
+                    data-doc-title="docker compose not available"
+                    data-doc-tags="docker compose install"
+                  >
+                    <summary>docker compose not available. Install Docker Compose v2 (docker compose) or docker-compose</summary>
+                    <p>
+                      Upgrade Docker or install the Compose plugin. Run <code>docker compose version</code> to verify.
+                    </p>
+                  </details>
+                  <details
+                    class="details-card"
+                    id="error-compose-missing-file"
+                    data-doc-section
+                    data-doc-group="install-dependencies"
+                    data-doc-title="docker-compose.yml not found"
+                    data-doc-tags="compose root directory"
+                  >
+                    <summary>docker-compose.yml not found from ... upward; run bootstrap from the repo root</summary>
+                    <p>
+                      Run <code>gungnr bootstrap</code> from the repo root so the CLI can find <code>docker-compose.yml</code>.
+                    </p>
+                  </details>
+                  <details
+                    class="details-card"
+                    id="error-cloudflared-not-found"
+                    data-doc-section
+                    data-doc-group="install-dependencies"
+                    data-doc-title="cloudflared not found in PATH"
+                    data-doc-tags="cloudflared install path"
+                  >
+                    <summary>cloudflared not found in PATH. Install cloudflared and retry</summary>
+                    <p>
+                      Install cloudflared and confirm <code>cloudflared --version</code> succeeds.
+                    </p>
+                  </details>
+                </div>
+              </section>
+
+              <section id="errors-tunnel" class="scroll-mt-24">
+                <p class="section-label">Cloudflared &amp; tunnels</p>
+                <h2 class="mt-2 text-3xl font-semibold">Tunnel login, credentials, and runtime</h2>
+                <p class="mt-3 text-[color:var(--muted)]">
+                  Tunnel setup issues are usually caused by missing credentials, invalid config, or process failures.
+                </p>
+                <div class="mt-6 grid gap-4">
+                  <details
+                    class="details-card"
+                    id="error-tunnel-login-failed"
+                    data-doc-section
+                    data-doc-group="cloudflared-tunnel"
+                    data-doc-title="cloudflared tunnel login failed"
+                    data-doc-tags="tunnel login browser"
+                  >
+                    <summary>cloudflared tunnel login failed</summary>
+                    <p>
+                      Re-run <code>cloudflared tunnel login</code> manually and complete the browser auth. Confirm the
+                      correct Cloudflare account is selected.
+                    </p>
+                  </details>
+                  <details
+                    class="details-card"
+                    id="error-cert-missing"
+                    data-doc-section
+                    data-doc-group="cloudflared-tunnel"
+                    data-doc-title="cloudflared credentials not found"
+                    data-doc-tags="cert.pem credentials"
+                  >
+                    <summary>cloudflared credentials not found after login</summary>
+                    <p>
+                      The CLI expects <code>~/.cloudflared/cert.pem</code>. Confirm the file exists and is readable.
+                      Use the same directory during login and bootstrap.
+                    </p>
+                  </details>
+                  <details
+                    class="details-card"
+                    id="error-tunnel-credentials-missing"
+                    data-doc-section
+                    data-doc-group="cloudflared-tunnel"
+                    data-doc-title="cloudflared tunnel credentials not found"
+                    data-doc-tags="tunnel json credentials"
+                  >
+                    <summary>cloudflared tunnel credentials not found after create</summary>
+                    <p>
+                      The tunnel JSON should appear under <code>~/.cloudflared</code>. Check permissions and retry
+                      tunnel creation.
+                    </p>
+                  </details>
+                  <details
+                    class="details-card"
+                    id="error-tunnel-run-failed"
+                    data-doc-section
+                    data-doc-group="cloudflared-tunnel"
+                    data-doc-title="cloudflared tunnel run failed"
+                    data-doc-tags="tunnel run config"
+                  >
+                    <summary>cloudflared tunnel run failed</summary>
+                    <p>
+                      Check <code>~/.cloudflared/cloudflared.log</code> for errors. Verify the tunnel ID exists and
+                      the config points to the correct credentials file.
+                    </p>
+                  </details>
+                  <details
+                    class="details-card"
+                    id="error-tunnel-not-active"
+                    data-doc-section
+                    data-doc-group="cloudflared-tunnel"
+                    data-doc-title="tunnel did not report active connections"
+                    data-doc-tags="tunnel active connections timeout"
+                  >
+                    <summary>tunnel did not report active connections before timeout</summary>
+                    <p>
+                      The tunnel process did not report connections. Run <code>cloudflared tunnel info</code>, verify
+                      outbound network access, and confirm the process is running.
+                    </p>
+                  </details>
+                </div>
+              </section>
+
+              <section id="errors-dns" class="scroll-mt-24">
+                <p class="section-label">DNS &amp; domains</p>
+                <h2 class="mt-2 text-3xl font-semibold">Cloudflare zone and DNS routing</h2>
+                <p class="mt-3 text-[color:var(--muted)]">
+                  These errors occur when the API token cannot read zones or update DNS records.
+                </p>
+                <div class="mt-6 grid gap-4">
+                  <details
+                    class="details-card"
+                    id="error-zone-lookup-failed"
+                    data-doc-section
+                    data-doc-group="dns-domains"
+                    data-doc-title="Cloudflare zone lookup failed"
+                    data-doc-tags="zone lookup token"
+                  >
+                    <summary>Cloudflare zone lookup failed / no active zone found</summary>
+                    <p>
+                      Ensure the domain is added to Cloudflare and the token has Zone read access. Use the root
+                      domain (example.com), not a subdomain.
+                    </p>
+                  </details>
+                  <details
+                    class="details-card"
+                    id="error-dns-record-not-found"
+                    data-doc-section
+                    data-doc-group="dns-domains"
+                    data-doc-title="Cloudflare DNS lookup failed"
+                    data-doc-tags="dns route token"
+                  >
+                    <summary>Cloudflare DNS lookup failed / DNS record not found after routing</summary>
+                    <p>
+                      Confirm the token includes DNS edit permissions. Re-run
+                      <code>cloudflared tunnel route dns &lt;tunnel-uuid&gt; panel.example.com</code> and check the DNS
+                      record in Cloudflare.
+                    </p>
+                  </details>
+                </div>
+              </section>
+
+              <section id="errors-panel" class="scroll-mt-24">
+                <p class="section-label">Panel &amp; auth</p>
+                <h2 class="mt-2 text-3xl font-semibold">Panel startup and access</h2>
+                <p class="mt-3 text-[color:var(--muted)]">
+                  If the stack is running but the panel is unavailable or login loops, use these fixes.
+                </p>
+                <div class="mt-6 grid gap-4">
+                  <details
+                    class="details-card"
+                    id="error-health-timeout"
+                    data-doc-section
+                    data-doc-group="panel-auth"
+                    data-doc-title="timed out waiting for API health"
+                    data-doc-tags="health timeout api"
+                  >
+                    <summary>timed out waiting for API health / health check returned 500</summary>
+                    <p>
+                      The stack started but the API did not become healthy. Check <code>make logs</code>, confirm
+                      Postgres is up, and ensure port 80 is free on the host.
+                    </p>
+                  </details>
+                  <details
+                    class="details-card"
+                    id="error-template-disabled"
+                    data-doc-section
+                    data-doc-group="panel-auth"
+                    data-doc-title="template catalog not configured"
+                    data-doc-tags="template creation github app"
+                  >
+                    <summary>template catalog not configured / template creation disabled</summary>
+                    <p>
+                      Configure the GitHub App in Host Settings. Template creation is disabled until App ID, client
+                      credentials, installation ID, and private key are set.
+                    </p>
+                  </details>
+                  <details
+                    class="details-card"
+                    id="error-login-loop"
+                    data-doc-section
+                    data-doc-group="panel-auth"
+                    data-doc-title="login loop or access denied"
+                    data-doc-tags="login access allowlist"
+                  >
+                    <summary>login loop or access denied after GitHub login</summary>
+                    <p>
+                      Confirm the user is on the allowlist. The bootstrap user is seeded as SuperUser, but
+                      additional users must be added in the panel.
+                    </p>
+                  </details>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="border-t border-[color:var(--border)] bg-[#0b0f14]">
+      <div class="flex justify-center px-6">
+        <div class="flex w-full max-w-6xl flex-col items-start justify-between gap-4 py-8 text-sm text-[color:var(--muted)] md:flex-row">
+          <p>
+            Made by
+            <a
+              class="text-[color:var(--accent-ink)] hover:underline"
+              href="https://github.com/Hrafngud"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Hrafngud
+            </a>
+          </p>
+          <div class="flex items-center gap-6">
+            <a
+              class="text-[color:var(--accent-ink)] hover:underline"
+              href="./docs.html"
+              data-docs-link
+            >
+              Docs
+            </a>
+            <a
+              class="text-[color:var(--accent-ink)] hover:underline"
+              href="./legal-notice.html"
+              data-legal-notice-link
+            >
+              Legal Notice
+            </a>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

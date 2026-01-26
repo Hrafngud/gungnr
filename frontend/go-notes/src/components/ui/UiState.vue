@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import UiHeroMark from '@/components/ui/UiHeroMark.vue'
 
 defineOptions({ inheritAttrs: false })
 
@@ -19,7 +18,7 @@ const toneClass = computed(() => `state-${props.tone}`)
 
 <template>
   <div class="state" :class="toneClass" v-bind="$attrs">
-    <UiHeroMark v-if="loading" class="state-spinner" />
+    <span v-if="loading" class="spinner-mark state-spinner" aria-hidden="true" />
     <slot />
   </div>
 </template>
