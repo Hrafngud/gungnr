@@ -3,5 +3,5 @@ defineOptions({ inheritAttrs: false })
 </script>
 
 <template>
-  <span class="inline-spinner" aria-hidden="true" v-bind="$attrs" />
+  <span class="spinner-mark inline-spinner" aria-hidden="true" v-bind="$attrs" />
 </template>

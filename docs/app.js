@@ -10,8 +10,10 @@ const updateBaseLinks = () => {
   if (!appBaseUrl) return;
 
   const baseLinks = [
+    { selector: '[data-home-link]', path: '/index.html' },
+    { selector: '[data-docs-link]', path: '/docs.html' },
+    { selector: '[data-errors-link]', path: '/errors.html' },
     { selector: '[data-legal-notice-link]', path: '/legal-notice.html' },
-    { selector: '[data-docs-home-link]', path: '/index.html' },
   ];
 
   baseLinks.forEach(({ selector, path }) => {
@@ -78,20 +80,17 @@ const sections = navLinks
 
 const docSections = Array.from(document.querySelectorAll('[data-doc-section]'));
 
-const setDocsVisibility = () => {
+const openDetailsFromHash = () => {
   const hash = window.location.hash;
-  if (!hash) {
-    document.body.dataset.docsVisible = 'false';
-    return;
+  if (!hash) return;
+  const target = document.querySelector(hash);
+  if (target && target.tagName === 'DETAILS') {
+    target.open = true;
   }
-
-  const isDocs =
-    hash === '#docs' || docSections.some((section) => `#${section.id}` === hash);
-  document.body.dataset.docsVisible = isDocs ? 'true' : 'false';
 };
 
-setDocsVisibility();
-window.addEventListener('hashchange', setDocsVisibility);
+openDetailsFromHash();
+window.addEventListener('hashchange', openDetailsFromHash);
 
 const heroLogoMark = document.querySelector('.hero-logo-mark');
 if (heroLogoMark) {

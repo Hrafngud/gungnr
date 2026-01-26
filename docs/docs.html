@@ -1,0 +1,822 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Gungnr documentation: introduction, installation, and usage guides for the bootstrap-first panel."
+    />
+    <title>Gungnr Docs</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Sora:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              display: ['Sora', 'Manrope', 'sans-serif'],
+              body: ['Manrope', 'sans-serif'],
+            },
+          },
+        },
+      };
+    </script>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="font-body">
+    <header class="border-b border-[color:var(--border)] bg-[#0b0f14]">
+      <div class="flex justify-center px-6">
+        <div class="w-full flex flex-row justify-around p-2">
+          <a class="logo-link" href="./index.html" aria-label="Gungnr home" data-home-link>
+            <span class="logo-mark">
+              <svg viewBox="124 82 252 338" class="h-6 w-6" aria-hidden="true" focusable="false">
+                <path
+                  d="M263.00,342.00 L235.00,343.00 L229.00,352.00 L248.00,417.00 L253.00,414.00 L268.00,361.00 L269.00,352.00 Z"
+                  fill="currentColor"
+                  fill-rule="evenodd"
+                />
+                <path
+                  d="M175.00,308.00 L181.00,316.00 L196.00,324.00 L236.00,332.00 L264.00,332.00 L297.00,326.00 L318.00,316.00 L324.00,307.00 L320.00,298.00 L303.00,289.00 L276.00,284.00 L275.00,287.00 L296.00,295.00 L300.00,299.00 L300.00,305.00 L289.00,311.00 L273.00,315.00 L227.00,315.00 L200.00,306.00 L199.00,299.00 L208.00,292.00 L224.00,288.00 L224.00,284.00 L189.00,292.00 L177.00,300.00 Z"
+                  fill="currentColor"
+                  fill-rule="evenodd"
+                />
+                <path
+                  d="M248.00,244.00 L242.00,248.00 L242.00,255.00 L246.00,259.00 L246.00,270.00 L236.00,279.00 L236.00,304.00 L262.00,305.00 L263.00,279.00 L253.00,270.00 L253.00,260.00 L257.00,256.00 L257.00,248.00 Z"
+                  fill="currentColor"
+                  fill-rule="evenodd"
+                />
+                <path
+                  d="M277.00,139.00 L281.00,159.00 L312.00,175.00 L332.00,195.00 L347.00,221.00 L353.00,248.00 L352.00,277.00 L341.00,307.00 L331.00,322.00 L314.00,339.00 L303.00,347.00 L281.00,356.00 L276.00,376.00 L282.00,376.00 L318.00,360.00 L331.00,350.00 L350.00,329.00 L367.00,296.00 L371.00,280.00 L373.00,253.00 L371.00,236.00 L358.00,199.00 L342.00,177.00 L329.00,164.00 L310.00,151.00 L288.00,141.00 Z"
+                  fill="currentColor"
+                  fill-rule="evenodd"
+                />
+                <path
+                  d="M217.00,139.00 L201.00,145.00 L175.00,160.00 L151.00,184.00 L138.00,205.00 L130.00,227.00 L126.00,266.00 L130.00,290.00 L138.00,311.00 L156.00,338.00 L186.00,363.00 L207.00,373.00 L222.00,376.00 L218.00,356.00 L189.00,342.00 L164.00,317.00 L152.00,295.00 L145.00,264.00 L149.00,230.00 L160.00,205.00 L173.00,188.00 L187.00,175.00 L199.00,167.00 L217.00,160.00 L222.00,139.00 Z"
+                  fill="currentColor"
+                  fill-rule="evenodd"
+                />
+                <path
+                  d="M246.00,84.00 L216.00,217.00 L222.00,226.00 L222.00,231.00 L211.00,233.00 L208.00,249.00 L231.00,267.00 L237.00,263.00 L236.00,247.00 L240.00,242.00 L246.00,104.00 L247.00,96.00 L252.00,95.00 L258.00,240.00 L263.00,248.00 L261.00,262.00 L268.00,267.00 L287.00,253.00 L291.00,246.00 L287.00,231.00 L277.00,231.00 L277.00,226.00 L282.00,220.00 L279.00,199.00 L253.00,84.00 Z"
+                  fill="currentColor"
+                  fill-rule="evenodd"
+                />
+              </svg>
+            </span>
+          </a>
+          <nav class="header-nav" aria-label="Docs navigation">
+            <a class="nav-link" href="./index.html" data-home-link>Home</a>
+            <a class="nav-link" href="./docs.html" data-docs-link data-active="true">Docs</a>
+            <a class="nav-link" href="./errors.html" data-errors-link>Errors</a>
+          </nav>
+          <div class="header-search">
+            <form class="search-form" role="search">
+              <label class="sr-only" for="doc-search">Search docs</label>
+              <div class="search-field">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    d="M11 2a9 9 0 0 1 6.32 15.32l4.18 4.18-1.41 1.41-4.18-4.18A9 9 0 1 1 11 2Zm0 2a7 7 0 1 0 0 14a7 7 0 0 0 0-14Z"
+                    fill="currentColor"
+                  />
+                </svg>
+                <input
+                  id="doc-search"
+                  type="search"
+                  placeholder="Search docs: install, tunnel, oauth"
+                  autocomplete="off"
+                />
+              </div>
+            </form>
+            <div
+              id="doc-search-results"
+              class="search-results"
+              role="listbox"
+              aria-label="Docs search results"
+              aria-live="polite"
+              hidden
+            ></div>
+          </div>
+          <div class="header-actions">
+            <div class="header-action">
+              <span class="header-label">Give me a star on:</span>
+              <a
+                class="brand-link"
+                href="https://github.com/Hrafngud/gungnr"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Star Gungnr on GitHub"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    d="M12 2.5c-5.25 0-9.5 4.25-9.5 9.5c0 4.2 2.72 7.75 6.48 9.02c0.47 0.08 0.64-0.2 0.64-0.45v-1.58c-2.63 0.57-3.18-1.13-3.18-1.13c-0.43-1.1-1.05-1.4-1.05-1.4c-0.86-0.59 0.07-0.58 0.07-0.58c0.95 0.06 1.45 0.98 1.45 0.98c0.85 1.45 2.22 1.03 2.76 0.79c0.09-0.62 0.33-1.03 0.6-1.27c-2.1-0.24-4.31-1.05-4.31-4.66c0-1.03 0.37-1.88 0.98-2.54c-0.1-0.24-0.43-1.2 0.09-2.5c0 0 0.8-0.26 2.62 0.97c0.76-0.21 1.58-0.32 2.39-0.32c0.81 0 1.63 0.11 2.39 0.32c1.82-1.23 2.62-0.97 2.62-0.97c0.52 1.3 0.19 2.26 0.09 2.5c0.61 0.66 0.98 1.51 0.98 2.54c0 3.62-2.21 4.42-4.32 4.66c0.35 0.3 0.66 0.9 0.66 1.82v2.7c0 0.25 0.17 0.54 0.65 0.45c3.76-1.27 6.47-4.82 6.47-9.02c0-5.25-4.25-9.5-9.5-9.5Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </a>
+            </div>
+            <div class="header-action">
+              <span class="header-label">Donate using:</span>
+              <a
+                class="brand-link stripe-link"
+                href="https://wise.com/pay/me/joaooliveiras5"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Donate with Wise"
+              >
+                <span class="stripe-text bg-white rounded-full"><img class="w-8 h-fit" src="./wise.png" alt="stripe"></span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="page-shell pb-24 pt-12">
+      <section id="docs" class="docs-shell">
+        <div class="docs-frame">
+          <div class="docs-header flex flex-col gap-2 border-b border-[color:var(--border)] pb-6">
+            <p class="section-label">Documentation</p>
+            <h2 class="text-3xl font-semibold">Gungnr docs</h2>
+            <p class="text-sm text-[color:var(--muted)]">
+              Install, bootstrap, and daily operations in one place.
+            </p>
+            <div class="callout mt-4">
+              Looking for troubleshooting? Visit the
+              <a class="text-[color:var(--accent-ink)] hover:underline" href="./errors.html" data-errors-link>
+                Errors &amp; troubleshooting page
+              </a>
+              for diagnostics and fixes.
+            </div>
+          </div>
+          <div class="docs-layout grid gap-8 lg:grid-cols-[260px_1fr]">
+            <aside class="sidebar">
+              <p class="sidebar-title">Documentation</p>
+              <div class="sidebar-section" data-doc-group="introduction" data-doc-title="Introduction">
+                <a class="sidebar-link" data-nav-link href="#introduction">Introduction</a>
+                <div class="sidebar-sub">
+                  <a data-nav-link href="#intro-architecture">Architecture</a>
+                </div>
+              </div>
+              <div class="sidebar-section" data-doc-group="installation" data-doc-title="Installation">
+                <a class="sidebar-link" data-nav-link href="#installation">Installation</a>
+                <div class="sidebar-sub">
+                  <a data-nav-link href="#install-prereqs">Prerequisites</a>
+                  <a data-nav-link href="#install-compatibility">Compatibility</a>
+                  <a data-nav-link href="#install-steps">Step-by-step</a>
+                  <a data-nav-link href="#install-outputs">Bootstrap outputs</a>
+                </div>
+              </div>
+              <div class="sidebar-section" data-doc-group="usage" data-doc-title="Usage">
+                <a class="sidebar-link" data-nav-link href="#usage">Usage</a>
+                <div class="sidebar-sub">
+                  <a data-nav-link href="#usage-first-login">First login</a>
+                  <a data-nav-link href="#usage-deploy">Deploy flows</a>
+                  <a data-nav-link href="#usage-ops">Operations</a>
+                </div>
+              </div>
+            </aside>
+
+            <div class="flex flex-col gap-14">
+            <section
+              id="introduction"
+              class="scroll-mt-24"
+              data-doc-section
+              data-doc-group="introduction"
+              data-doc-title="Introduction"
+              data-doc-tags="scope architecture overview"
+            >
+              <p class="section-label">Introduction</p>
+              <h2 class="mt-2 text-3xl font-semibold">What Gungnr is</h2>
+              <p class="mt-3 text-[color:var(--muted)]">
+                Gungnr is a dockerized control panel for deploying template-based projects and exposing services
+                through a Cloudflare Tunnel. It runs on the host and uses Docker, local templates, and a user-managed
+                cloudflared tunnel.
+              </p>
+
+              <div
+                id="intro-architecture"
+                class="mt-6 card p-6"
+                data-doc-section
+                data-doc-title="Architecture overview"
+                data-doc-group="introduction"
+                data-doc-tags="architecture overview"
+              >
+                <h3 class="text-xl font-semibold">Architecture overview</h3>
+                <div class="mt-4 grid gap-4 md:grid-cols-2">
+                  <div class="rounded-xl bg-[color:var(--surface-2)] p-4">
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Host</p>
+                    <p class="mt-2 text-sm text-[color:var(--muted)]">
+                      Runs Docker, stores templates, and executes cloudflared locally.
+                    </p>
+                  </div>
+                  <div class="rounded-xl bg-[color:var(--surface-2)] p-4">
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Docker Compose</p>
+                    <p class="mt-2 text-sm text-[color:var(--muted)]">
+                      Boots API, UI, and Postgres using the generated <code>.env</code>.
+                    </p>
+                  </div>
+                  <div class="rounded-xl bg-[color:var(--surface-2)] p-4">
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Cloudflare Tunnel</p>
+                    <p class="mt-2 text-sm text-[color:var(--muted)]">
+                      Routes <code>https://panel.domain</code> to the local Nginx proxy on port 80.
+                    </p>
+                  </div>
+                  <div class="rounded-xl bg-[color:var(--surface-2)] p-4">
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">GitHub OAuth</p>
+                    <p class="mt-2 text-sm text-[color:var(--muted)]">
+                      Controls login and allowlisted access to the panel.
+                    </p>
+                  </div>
+                </div>
+              </div>
+          </section>
+
+          <section
+            id="installation"
+            class="scroll-mt-24"
+            data-doc-section
+            data-doc-group="installation"
+            data-doc-title="Installation"
+            data-doc-tags="install bootstrap prerequisites"
+          >
+            <p class="section-label">Installation</p>
+            <h2 class="mt-2 text-3xl font-semibold">Bootstrap the host</h2>
+            <p class="mt-3 text-[color:var(--muted)]">
+              The installer verifies dependencies. The bootstrap CLI creates a tunnel, configures DNS, writes
+              environ
+              ment variables, and starts the stack.
+            </p>
+
+            <div
+              id="install-prereqs"
+              class="mt-6 card p-6"
+              data-doc-section
+              data-doc-title="Prerequisites"
+              data-doc-group="installation"
+              data-doc-tags="requirements prerequisites"
+            >
+              <h3 class="text-xl font-semibold">Prerequisites</h3>
+              <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                <li>Sudo access on the host machine.</li>
+                <li>
+                  <a
+                    class="text-[color:var(--accent-ink)] hover:underline"
+                    href="https://developers.cloudflare.com/fundamentals/account-and-billing/account-setup/create-account/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Cloudflare account
+                  </a>
+                  with a domain already added.
+                </li>
+                <li>
+                  <a
+                    class="text-[color:var(--accent-ink)] hover:underline"
+                    href="https://developers.cloudflare.com/fundamentals/api/get-started/create-token/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Cloudflare API token
+                  </a>
+                  with Tunnel edit and DNS edit permissions.
+                </li>
+                <li>
+                  <a
+                    class="text-[color:var(--accent-ink)] hover:underline"
+                    href="https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    GitHub OAuth app credentials
+                  </a>
+                  (Client ID and Client Secret).
+                </li>
+                <li>
+                  GitHub callback URL set to <code>https://panel.your-domain/auth/callback</code>.
+                </li>
+                <li>
+                  GitHub OAuth app has
+                  <a
+                    class="text-[color:var(--accent-ink)] hover:underline"
+                    href="https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Enable Device Flow
+                  </a>
+                  toggled on for CLI bootstrap.
+                </li>
+                <li>Access to the host network for outbound Cloudflare requests.</li>
+              </ul>
+              <div class="mt-6">
+                <div class="rounded-xl bg-[color:var(--surface-2)] p-6">
+                  <p class="text-sm font-semibold uppercase tracking-[0.3em] text-[color:var(--accent-ink)] font-display">
+                    Official install docs
+                  </p>
+                  <ul class="mt-4 flex flex-col gap-3 text-base text-[color:var(--muted)] list-disc pl-4">
+                    <li>
+                      <a
+                        class="text-[color:var(--accent-ink)] hover:underline"
+                        href="https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Cloudflared downloads
+                      </a>
+                    </li>
+                    <li>
+                      <a
+                        class="text-[color:var(--accent-ink)] hover:underline"
+                        href="https://github.com/cli/cli#installation"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        GitHub CLI installation
+                      </a>
+                    </li>
+                    <li>
+                      <a
+                        class="text-[color:var(--accent-ink)] hover:underline"
+                        href="https://docs.docker.com/engine/install/ubuntu/"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Docker Engine install (Ubuntu)
+                      </a>
+                    </li>
+                    <li>
+                      <a
+                        class="text-[color:var(--accent-ink)] hover:underline"
+                        href="https://docs.docker.com/compose/install/linux/#install-the-docker-compose-plugin"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Docker Compose plugin install
+                      </a>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div
+              id="install-compatibility"
+              class="mt-6 card p-6"
+              data-doc-section
+              data-doc-title="Compatibility"
+              data-doc-group="installation"
+              data-doc-tags="compatibility linux macos windows shell"
+            >
+              <h3 class="text-xl font-semibold">Compatibility</h3>
+              <div class="mt-2 border-t border-[color:var(--muted)] pt-4">
+                <p class="text-sm text-[color:var(--muted)]">Currently, Gungnr is <b>only supported on Linux</b>, we are looking foward to introduce a compatibility layer for other OS soon:</p>
+              </div>
+              <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                <li>Linux (amd64/arm64) with <code>apt</code>, <code>dnf</code>, <code>yum</code>, <code>pacman</code>, <code>apk</code>, or <code>zypper</code>.</li>
+              </ul>
+            </div>
+
+            <div
+              id="install-steps"
+              class="mt-6 flex flex-col gap-6"
+              data-doc-section
+              data-doc-title="Step-by-step"
+              data-doc-group="installation"
+              data-doc-tags="steps install bootstrap"
+            >
+              <div class="step-card">
+                <p class="step-index">Step 01</p>
+                <h3 class="mt-2 text-lg font-semibold">Set up external services</h3>
+                <p class="mt-2 text-md text-[color:var(--muted)]">
+
+                  Gungnr relies on external services for authentication, tunneling and DNS management.
+                  We strongly recommend configuring GitHub OAuth app and Cloudflare credentials before running the installer.
+                  This will ensure a blazingly fast bootstrap experience.
+                </p>
+                
+                <div class="mt-6 flex flex-col gap-8">
+                  <div class="rounded-xl bg-[color:var(--surface-2)] p-6">
+                    <p class="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent-ink)]">GitHub OAuth Setup</p>
+                    <p class="mt-3 text-xs text-[color:var(--muted)]">Create a GitHub OAuth app for panel authentication.</p>
+                    <div class="mt-6 flex flex-col gap-6 text-lg text-[color:var(--muted)]">
+                      <div class="flex flex-row gap-4 text-lg divide-x justify-between">
+                        <div class="w-1/2 p-2 flex flex-col gap-2">
+                          <p class="font-semibold text-[color:var(--text)]">1. Create OAuth App</p>
+                          <p class="mt-1 text-lg">
+                            Open
+                            <a
+                              class="text-[color:var(--accent-ink)] hover:underline"
+                              href="https://github.com/settings/developers"
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              GitHub Developer Settings
+                            </a>
+                            and click <span class="font-semibold">New OAuth App</span> to register the panel.
+                            Those will be used as identity provider and RBAC for the panel, through allowlists.
+                          </p>
+                        </div>
+                        <img src="screenshots/gh1.png" alt="GitHub OAuth App creation" class="w-1/2 h-fit">
+                      </div>
+                      <div class="flex flex-row justify-between gap-2">
+                        <div class="w-1/2 flex flex-col gap-2 p-2">
+                          <p class="font-semibold text-[color:var(--text)]">2. Configure URLs</p>
+                          <p class="mt-1 text-lg">
+                            On the OAuth App form in
+                            <a
+                              class="text-[color:var(--accent-ink)] hover:underline"
+                              href="https://github.com/settings/developers"
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              GitHub Developer Settings
+                            </a>
+                            , set the <span class="font-semibold">Homepage URL</span> to your panel base URL and set the
+                            <span class="font-semibold">Authorization callback URL</span> to
+                            <code class="bg-[color:var(--surface-1)] px-1 py-0.5 rounded">https://panel.your-domain/auth/callback</code>.
+                            These must match the domain that will front the panel.
+                          </p>
+                        </div>
+                        <img src="screenshots/gh2.png" alt="GitHub OAuth URL configuration" class="w-1/2 h-fit">
+                      </div>
+                      <div class="flex flex-row justify-between gap-2">
+                        <div class="w-1/2 flex flex-col gap-2 p-2">
+                          <p class="font-semibold text-[color:var(--text)]">3. Enable Device Flow</p>
+                          <p class="mt-1 text-lg">
+                            After the app is created, open it from the OAuth Apps list in
+                            <a
+                              class="text-[color:var(--accent-ink)] hover:underline"
+                              href="https://github.com/settings/developers"
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              GitHub Developer Settings
+                            </a>
+                            and enable <span class="font-semibold">Device Flow</span> so the CLI bootstrap can authenticate without a browser session.
+                          </p>
+                        </div>
+                        <img src="screenshots/gh3.png" alt="GitHub Device Flow settings" class="w-1/2 h-fit">
+                      </div>
+                      <div class="flex flex-row justify-between gap-2">
+                        <div class="w-1/2 flex flex-col gap-2 p-2">
+                          <p class="font-semibold text-[color:var(--text)]">4. Save Credentials</p>
+                          <p class="mt-1 text-lg">
+                            On the same OAuth App settings page in
+                            <a
+                              class="text-[color:var(--accent-ink)] hover:underline"
+                              href="https://github.com/settings/developers"
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              GitHub Developer Settings
+                            </a>
+                            , copy the <span class="font-semibold">Client ID</span>, then generate a
+                            <span class="font-semibold">Client Secret</span> and store it safely for the bootstrap prompts.
+                          </p>
+                        </div>
+                        <img src="screenshots/gh4.png" alt="GitHub OAuth credentials" class="w-1/2 h-fit">
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div class="rounded-xl bg-[color:var(--surface-2)] p-6">
+                    <p class="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent-ink)]">Cloudflare Setup</p>
+                    <p class="mt-3 text-xs text-[color:var(--muted)]">Configure Cloudflare for tunnel routing and DNS management.</p>
+                    <div class="mt-6 flex flex-col gap-6 text-sm text-[color:var(--muted)]">
+                      <div class="flex flex-row justify-between gap-2">
+                        <div class="w-1/2 flex flex-col gap-2 p-2">
+                          <p class="font-semibold text-[color:var(--text)]">1. Add Domain</p>
+                          <p class="mt-1 text-lg">
+                            Log in to the
+                            <a
+                              class="text-[color:var(--accent-ink)] hover:underline"
+                              href="https://dash.cloudflare.com/"
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Cloudflare dashboard
+                            </a>
+                            and use <span class="font-semibold">Onboard a domain</span> to add your apex domain. Update your registrar
+                            nameservers so the zone becomes Active.
+                          </p>
+                        </div>
+                        <img src="screenshots/cl1.png" alt="Cloudflare domain setup" class="w-1/2 h-fit">
+                      </div>
+                      <div class="flex flex-row justify-between gap-2">
+                        <div class="w-1/2 flex flex-col gap-2 p-2">
+                          <p class="font-semibold text-[color:var(--text)]">2. Create API Token</p>
+                          <p class="mt-1 text-lg p-2">
+                            Open
+                            <a
+                              class="text-[color:var(--accent-ink)] hover:underline"
+                              href="https://dash.cloudflare.com/profile/api-tokens"
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              API Tokens
+                            </a>
+                            in your Cloudflare profile and click <span class="font-semibold">Create Token</span>.   </p>
+                        </div>
+                        <img src="screenshots/cl2.png" alt="Cloudflare API token creation" class="w-1/2 h-fit">
+                      </div>
+                      <div class="flex flex-row justify-between gap-2">
+                        <div class="w-1/2 flex flex-col gap-2 p-2">
+                          <p class="font-semibold text-[color:var(--text)]">3. Grant Permissions</p>
+                          <p class="mt-1 text-lg">
+                            During token setup in
+                            <a
+                              class="text-[color:var(--accent-ink)] hover:underline"
+                              href="https://dash.cloudflare.com/profile/api-tokens"
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              API Tokens
+                            </a>
+                            , scope the token to the account that will host the panel and scope to all zones. Aditionally, scope to all accounts to fetch authorized zones from other Cloudflare accounts you're admin if needed. Confirm the token can
+                            <span class="font-semibold">correct Scopes listed here:</span>
+
+                            
+                          <ul class="flex flex-col gap-2 mt-2">
+                          <li class="flex flex-col gap-2">
+                            <strong>All accounts</strong>
+                            <ul class="flex flex-col gap-2 p-2 font-semibold text-white">
+                              <li>Registrar: Domains — Read</li>
+                              <li>DNS Views — Edit</li>
+                              <li>DNS Settings — Edit</li>
+                              <li>Cloudflare Tunnel — Edit</li>
+                            </ul>
+                          </li>
+
+                          <li class="flex flex-col gap-2">
+                            <strong>All zones</strong>
+                            <ul class="flex flex-col gap-2 p-2 font-semibold text-white">
+                              <li>DNS Settings — Edit</li>
+                              <li>Zone — Read</li>
+                            </ul>
+                          </li>
+
+                          <li class="flex flex-col gap-2">
+                            <strong>All users</strong>
+                            <ul class="flex flex-col gap-2 p-2 font-semibold text-white">
+                              <li>API Tokens — Read</li>
+                            </ul>
+                          </li>
+                          </ul>
+
+                          </p>
+                        </div>
+                        <img src="screenshots/cl3.png" alt="Cloudflare permissions setup" class="w-1/2 h-fit">
+                      </div>
+                      <div class="flex flex-row justify-between gap-2">
+                        <div class="w-1/2 flex flex-col gap-2 p-2">
+                          <p class="font-semibold text-[color:var(--text)]">4. Save Token</p>
+                          <p class="mt-1 text-lg">
+                            Copy the token value and store it safely, before leaving the
+                            <a
+                              class="text-[color:var(--accent-ink)] hover:underline"
+                              href="https://dash.cloudflare.com/profile/api-tokens"
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              API Tokens
+                            </a>
+                            page. You will paste it during bootstrap, and it is only shown once.
+                          </p>
+                        </div>
+                        <img src="screenshots/cl4.png" alt="Cloudflare API token credentials" class="w-1/2 h-fit">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="step-card">
+                <p class="step-index">Step 02</p>
+                <h3 class="mt-2 text-lg font-semibold">Run the installer</h3>
+                <p class="mt-2 text-sm text-[color:var(--muted)]">
+                  Downloads and runs install.sh to verify dependencies.
+                </p>
+                <div class="mt-4 code-block" id="cmd-install-2">
+                  <button class="copy-button" data-copy-target="#cmd-install-2 code">Copy</button>
+                  <pre class="m-0 text-sm"><code>wget -qO /tmp/gungnr-install.sh https://raw.githubusercontent.com/Hrafngud/gungnr/main/install.sh && chmod +x /tmp/gungnr-install.sh && /tmp/gungnr-install.sh</code></pre>
+                </div>
+              </div>
+              <div class="step-card">
+                <p class="step-index">Step 03</p>
+                <h3 class="mt-2 text-lg font-semibold">Run bootstrap</h3>
+                <p class="mt-2 text-sm text-[color:var(--muted)]">
+                  The CLI prompts for GitHub, Cloudflare, and DNS inputs.
+                </p>
+                <p class="mt-2 text-xs text-[color:var(--muted-2)]">
+                  Ensure your GitHub OAuth app has
+                  <a
+                    class="text-[color:var(--accent-ink)] hover:underline"
+                    href="https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Enable Device Flow
+                  </a>
+                  toggled on before continuing.
+                </p>
+                <div class="mt-4 code-block" id="cmd-bootstrap-2">
+                  <button class="copy-button" data-copy-target="#cmd-bootstrap-2 code">Copy</button>
+                  <pre class="m-0 text-sm"><code>gungnr bootstrap</code></pre>
+                </div>
+              </div>
+              <div class="step-card">
+                <p class="step-index">Step 03</p>
+                <h3 class="mt-2 text-lg font-semibold">Open the panel</h3>
+                <p class="mt-2 text-sm text-[color:var(--muted)]">
+                  The CLI prints the panel URL after the health check succeeds.
+                </p>
+                <div class="mt-4 code-block" id="cmd-panel-url">
+                  <button class="copy-button" data-copy-target="#cmd-panel-url code">Copy</button>
+                  <pre class="m-0 text-sm"><code>https://panel.your-domain</code></pre>
+                </div>
+              </div>
+            </div>
+
+            <div
+              id="install-outputs"
+              class="mt-6 card p-6"
+              data-doc-section
+              data-doc-title="Bootstrap outputs"
+              data-doc-group="installation"
+              data-doc-tags="outputs env config"
+            >
+              <h3 class="text-xl font-semibold">Bootstrap outputs</h3>
+              <div class="mt-4 grid gap-4 md:grid-cols-2">
+                <div class="rounded-xl bg-[color:var(--surface-2)] p-4">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Data root</p>
+                  <p class="mt-2 text-sm font-semibold text-[color:var(--text)]">~/gungnr</p>
+                  <p class="mt-1 text-xs text-[color:var(--muted)]">Templates, state, and .env live here.</p>
+                </div>
+                <div class="rounded-xl bg-[color:var(--surface-2)] p-4">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Cloudflared</p>
+                  <p class="mt-2 text-sm font-semibold text-[color:var(--text)]">~/.cloudflared/config.yml</p>
+                  <p class="mt-1 text-xs text-[color:var(--muted)]">Ingress rules with a 404 catch-all.</p>
+                </div>
+                <div class="rounded-xl bg-[color:var(--surface-2)] p-4">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Panel env</p>
+                  <p class="mt-2 text-sm font-semibold text-[color:var(--text)]">~/gungnr/.env</p>
+                  <p class="mt-1 text-xs text-[color:var(--muted)]">OAuth, Cloudflare, and paths.</p>
+                </div>
+                <div class="rounded-xl bg-[color:var(--surface-2)] p-4">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Panel URL</p>
+                  <p class="mt-2 text-sm font-semibold text-[color:var(--text)]">https://panel.your-domain</p>
+                  <p class="mt-1 text-xs text-[color:var(--muted)]">Printed at the end of bootstrap.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section
+            id="usage"
+            class="scroll-mt-24"
+            data-doc-section
+            data-doc-group="usage"
+            data-doc-title="Usage"
+            data-doc-tags="login deploy operations"
+          >
+            <p class="section-label">Usage</p>
+            <h2 class="mt-2 text-3xl font-semibold">Operate the panel confidently</h2>
+            <p class="mt-3 text-[color:var(--muted)]">
+              Once bootstrap completes, the panel is ready. The key flows are listed here so you can run daily
+              operations without digging through UI menus.
+            </p>
+
+            <div
+              id="usage-first-login"
+              class="mt-6 card p-6"
+              data-doc-section
+              data-doc-title="First login"
+              data-doc-group="usage"
+              data-doc-tags="login access"
+            >
+              <h3 class="text-xl font-semibold">First login</h3>
+              <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                <li>Open the panel URL printed by bootstrap.</li>
+                <li>Log in with GitHub. The bootstrap user is seeded as SuperUser.</li>
+                <li>Add additional users from the allowlist in the panel if needed.</li>
+
+                <p>
+                  OBS: Gungnr currently have a simple RBAC implementation where SuperUsers can manage everything, Admins have quite same privileges, but can't assign roles, and normal users can perform deployments and jobs, but can't add people to the allowlist.
+                  This feature is planned to be expanded in future releases. But you can feel free to fork and customize the middleware permissions to your personal needs.
+                </p>
+              </ul>
+            </div>
+
+            <div
+              id="usage-deploy"
+              class="mt-6 grid gap-6 lg:grid-cols-2"
+              data-doc-section
+              data-doc-title="Deploy flows"
+              data-doc-group="usage"
+              data-doc-tags="deploy quick service"
+            >
+              <div class="card-soft p-6">
+                <h3 class="text-lg font-semibold">Deploy flows</h3>
+                <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                  <li>Create from template: uses the GitHub App configuration to start a fresh project from a curated fullstack template. Currently we only feature a Vue + Go + PostgreSQL opinated template, but further, new templates will be added with different stacks.</li>
+                  <li>Deploy existing: forwards a local application running on localhost:PORT to a subdomain. Useful to front-end quick view from multiple devices</li>
+                  <li>Quick services: Pulls a docker registry official image/compose and fowards to a tunnel. You can do some quite intresting setups quickly, test services</li>
+                </ul>
+              </div>
+              <div class="card-soft p-6">
+                <h3 class="text-lg font-semibold">Logs + status</h3>
+                <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                  <li>Use the Jobs page to monitor deployments and tunnel changes.</li>
+                  <li>Container logs stream under Host Settings.</li>
+                  <li>Audit log records each system action.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div
+              id="usage-ops"
+              class="mt-6 card p-6"
+              data-doc-section
+              data-doc-title="Operations commands"
+              data-doc-group="usage"
+              data-doc-tags="ops commands"
+            >
+              <h3 class="text-xl font-semibold">CLI commands</h3>
+              <p class="mt-2 text-sm text-[color:var(--muted)]">
+                Gungnr has a few cli commands available, those can be used to controll the compose, tunnel and overall states
+              </p>
+              <span class="text-sm text-[color:var(--muted)]">Remove containers and restart compose:</span>
+              <div class="mt-4 p-0 code-block" id="cmd-ops">
+                <button class="copy-button" data-copy-target="#cmd-ops code">Copy</button>
+                <pre class="text-sm"><code>
+                  gungnr restart
+                </code></pre>
+              </div>
+                <span class="text-sm text-[color:var(--muted)]">Run the cloudflared tunnel:</span>
+              <div class="mt-4 p-0 code-block" id="cmd-ops">
+                <button class="copy-button" data-copy-target="#cmd-ops code">Copy</button>
+                <pre class="text-sm"><code>
+                  gungnr tunnel run
+                </code></pre>
+              </div>
+              <span class="text-sm text-[color:var(--muted)]">Uninstall</span>
+              <div class="mt-4 p-0 code-block" id="cmd-ops">
+                <button class="copy-button" data-copy-target="#cmd-ops code">Copy</button>
+                <pre class="text-sm"><code>
+                  gungnr uninstall
+                </code></pre>
+              </div>
+
+              <div class="mt-2 border-t border-[color:var(--muted)] pt-4">
+                <p> We are looking foward to introduce new CLI methods in the future</p>
+              </div>
+            </div>
+          </section>
+
+            </div>
+          </div>
+        </div>
+      </section>
+  </main>
+
+    <footer class="border-t border-[color:var(--border)] bg-[#0b0f14]">
+      <div class="flex justify-center px-6">
+        <div class="flex w-full max-w-6xl flex-col items-start justify-between gap-4 py-8 text-sm text-[color:var(--muted)] md:flex-row">
+          <p>
+            Made by
+            <a
+              class="text-[color:var(--accent-ink)] hover:underline"
+              href="https://github.com/Hrafngud"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Hrafngud
+            </a>
+          </p>
+          <div class="flex items-center gap-6">
+            <a class="text-[color:var(--accent-ink)] hover:underline" href="./index.html" data-home-link>
+              Home
+            </a>
+            <a class="text-[color:var(--accent-ink)] hover:underline" href="./errors.html" data-errors-link>
+              Errors
+            </a>
+            <a
+              class="text-[color:var(--accent-ink)] hover:underline"
+              href="./legal-notice.html"
+              data-legal-notice-link
+            >
+              Legal Notice
+            </a>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

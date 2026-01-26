@@ -33,7 +33,7 @@
     <header class="border-b border-[color:var(--border)] bg-[#0b0f14]">
       <div class="flex justify-center px-6">
         <div class="header-bar flex w-full max-w-6xl items-center justify-between gap-4 py-4">
-          <a class="logo-link" href="./index.html" aria-label="Gungnr documentation home" data-docs-home-link>
+          <a class="logo-link" href="./index.html" aria-label="Gungnr home" data-home-link>
             <span class="logo-mark">
               <svg viewBox="124 82 252 338" class="h-6 w-6" aria-hidden="true" focusable="false">
                 <path
@@ -70,7 +70,7 @@
             </span>
           </a>
           <div class="flex items-center gap-4">
-            <a class="btn-ghost" href="./index.html" data-docs-home-link>Back to Docs</a>
+            <a class="btn-ghost" href="./docs.html" data-docs-link>Back to Docs</a>
           </div>
         </div>
       </div>
@@ -209,9 +209,17 @@
               Hrafngud
             </a>
           </p>
-          <a class="text-[color:var(--accent-ink)] hover:underline" href="./index.html" data-docs-home-link>
-            Docs Home
-          </a>
+          <div class="flex items-center gap-6">
+            <a class="text-[color:var(--accent-ink)] hover:underline" href="./index.html" data-home-link>
+              Home
+            </a>
+            <a class="text-[color:var(--accent-ink)] hover:underline" href="./docs.html" data-docs-link>
+              Docs
+            </a>
+            <a class="text-[color:var(--accent-ink)] hover:underline" href="./errors.html" data-errors-link>
+              Errors
+            </a>
+          </div>
         </div>
       </div>
     </footer>

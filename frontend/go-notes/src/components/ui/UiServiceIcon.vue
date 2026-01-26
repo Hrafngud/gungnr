@@ -1,11 +1,24 @@
 <script setup lang="ts">
-defineProps<{
+import { computed } from 'vue'
+
+const props = defineProps<{
   type?: string
 }>()
+
+const isUrl = computed(() => props.type?.startsWith('http'))
 </script>
 
 <template>
+  <!-- Render SVG from URL -->
+  <img
+    v-if="isUrl"
+    :src="type"
+    alt="service icon"
+    class="h-5 w-5"
+  />
+  <!-- Fallback to inline SVG paths for named icon types -->
   <svg
+    v-else
     class="h-5 w-5 text-[color:var(--accent-ink)]"
     viewBox="0 0 24 24"
     fill="none"
