@@ -418,8 +418,13 @@ const submitQuick = async () => {
       containerPort: containerPort ?? undefined,
     })
     quickState.jobId = data.job.id
-    quickState.success = 'Service forward queued. Automation started.'
-    toastStore.success('Service forward queued.', 'Forward queued')
+    const hostPort = data.hostPort ?? port
+    const portNote =
+      hostPort === port
+        ? `on port ${hostPort}`
+        : `requested port ${port} was busy; using port ${hostPort}`
+    quickState.success = `Service forward queued ${portNote}. Automation started.`
+    toastStore.success(`Service forward queued ${portNote}.`, 'Forward queued')
     await refreshAll()
   } catch (err) {
     const message = apiErrorMessage(err)

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"go-notes/internal/errs"
 	"go-notes/internal/models"
 	"gorm.io/gorm"
 )
@@ -53,7 +52,7 @@ func (r *GormJobRepository) Get(ctx context.Context, id uint) (*models.Job, erro
 	var job models.Job
 	if err := r.db.WithContext(ctx).First(&job, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errs.Wrap(errs.CodeNotFound, "record not found", ErrNotFound)
+			return nil, ErrNotFound
 		}
 		return nil, err
 	}

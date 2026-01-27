@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"go-notes/internal/errs"
 	"go-notes/internal/models"
 	"gorm.io/gorm"
 )
@@ -34,7 +33,7 @@ func (r *GormProjectRepository) GetByName(ctx context.Context, name string) (*mo
 	err := r.db.WithContext(ctx).Where("name = ?", name).First(&project).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errs.Wrap(errs.CodeNotFound, "record not found", ErrNotFound)
+			return nil, ErrNotFound
 		}
 		return nil, err
 	}

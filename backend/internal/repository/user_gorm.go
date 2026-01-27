@@ -4,7 +4,6 @@ import (
 	"errors"
 	"time"
 
-	"go-notes/internal/errs"
 	"go-notes/internal/models"
 	"gorm.io/gorm"
 )
@@ -80,7 +79,7 @@ func (r *GormUserRepository) GetByGitHubID(githubID int64) (*models.User, error)
 	var user models.User
 	if err := r.db.Where("git_hub_id = ?", githubID).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errs.Wrap(errs.CodeNotFound, "record not found", ErrNotFound)
+			return nil, ErrNotFound
 		}
 		return nil, err
 	}
@@ -91,7 +90,7 @@ func (r *GormUserRepository) GetByID(id uint) (*models.User, error) {
 	var user models.User
 	if err := r.db.First(&user, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errs.Wrap(errs.CodeNotFound, "record not found", ErrNotFound)
+			return nil, ErrNotFound
 		}
 		return nil, err
 	}

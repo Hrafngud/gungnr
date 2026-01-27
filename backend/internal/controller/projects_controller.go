@@ -178,19 +178,20 @@ func (c *ProjectsController) QuickService(ctx *gin.Context) {
 		return
 	}
 
-	job, err := c.service.QuickService(ctx.Request.Context(), req)
+	job, hostPort, err := c.service.QuickService(ctx.Request.Context(), req)
 	if err != nil {
 		apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeProjectQuickFailed, err.Error())
 		return
 	}
 
 	c.logAudit(ctx, "project.quick_service", req.Subdomain, map[string]any{
-		"domain": req.Domain,
-		"port":   req.Port,
-		"jobId":  job.ID,
+		"domain":   req.Domain,
+		"port":     hostPort,
+		"jobId":    job.ID,
+		"portAuto": hostPort != req.Port,
 	})
 
-	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
+	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job), "hostPort": hostPort})
 }
 
 func (c *ProjectsController) logAudit(ctx *gin.Context, action, target string, metadata map[string]any) {

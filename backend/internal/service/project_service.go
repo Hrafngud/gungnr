@@ -175,18 +175,18 @@ func (s *ProjectService) ForwardLocal(ctx context.Context, req ForwardLocalReque
 	return s.jobs.Create(ctx, JobTypeForwardLocal, req)
 }
 
-func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceRequest) (*models.Job, error) {
+func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceRequest) (*models.Job, int, error) {
 	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
 	if err := ValidateSubdomain(req.Subdomain); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	domain, err := s.resolveDomain(ctx, req.Domain)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Domain = domain
 	if err := ValidatePort(req.Port); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Image = strings.TrimSpace(req.Image)
 	req.ContainerName = strings.TrimSpace(req.ContainerName)
@@ -197,14 +197,23 @@ func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceReque
 		req.ContainerPort = defaultQuickServiceContainerPort
 	}
 	if err := ValidatePort(req.ContainerPort); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if req.ContainerName != "" {
 		if err := validateContainerName(req.ContainerName); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	}
-	return s.jobs.Create(ctx, JobTypeQuickService, req)
+	chosenPort, err := ensureAvailableHostPort(ctx, req.Port)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Port = chosenPort
+	job, err := s.jobs.Create(ctx, JobTypeQuickService, req)
+	if err != nil {
+		return nil, 0, err
+	}
+	return job, chosenPort, nil
 }
 
 func (s *ProjectService) resolveDomain(ctx context.Context, requested string) (string, error) {

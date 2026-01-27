@@ -10,7 +10,6 @@ import (
 	"go-notes/internal/errs"
 	cf "go-notes/internal/integrations/cloudflare"
 	gh "go-notes/internal/integrations/github"
-	"go-notes/internal/repository"
 	"go-notes/internal/service"
 )
 
@@ -71,8 +70,6 @@ func mapKnown(err error) (errs.Code, string, bool) {
 	switch {
 	case errors.Is(err, auth.ErrInvalidSession), errors.Is(err, auth.ErrExpiredSession):
 		return errs.CodeAuthUnauthenticated, "unauthenticated", true
-	case errors.Is(err, repository.ErrNotFound):
-		return errs.CodeNotFound, "resource not found", true
 	case errors.Is(err, service.ErrUnauthorized):
 		return errs.CodeAuthForbidden, "user not allowed", true
 	case errors.Is(err, service.ErrAdminAuthDisabled):
