@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"go-notes/internal/config"
+	"go-notes/internal/errs"
 	"go-notes/internal/integrations/cloudflare"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
@@ -408,12 +409,12 @@ func (s *SettingsService) CloudflaredPreview(ctx context.Context) (CloudflaredPr
 	}
 	path := strings.TrimSpace(cfg.CloudflaredConfig)
 	if path == "" {
-		return CloudflaredPreview{}, fmt.Errorf("cloudflared config path is empty")
+		return CloudflaredPreview{}, errs.New(errs.CodeSettingsPreviewFailed, "cloudflared config path is empty")
 	}
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return CloudflaredPreview{}, fmt.Errorf("read cloudflared config: %w", err)
+		return CloudflaredPreview{}, errs.Wrap(errs.CodeSettingsPreviewFailed, "read cloudflared config failed", err)
 	}
 
 	return CloudflaredPreview{
@@ -543,7 +544,7 @@ func (s *SettingsService) ResolveDomainSelection(ctx context.Context, requested 
 		client := cloudflare.NewClient(cfg)
 		zones, err := client.ListZones(ctx)
 		if err != nil {
-			return DomainSelection{}, fmt.Errorf("list cloudflare zones: %w", err)
+			return DomainSelection{}, errs.Wrap(errs.CodeCloudflareZones, "list cloudflare zones failed", err)
 		}
 		for _, zone := range zones {
 			if normalizeDomain(zone.Name) == normalizedRequested {

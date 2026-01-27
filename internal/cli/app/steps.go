@@ -268,6 +268,19 @@ func runEnvSetup(ctx context.Context, state *State, ui UI) error {
 	}
 	state.DataPaths = dataPaths
 
+	ui.StepProgress("env_setup", "Wiring tunnel auto-start")
+	autoStart, err := cloudflared.SetupAutoStart(state.CloudflaredConfig, state.DataPaths.StateDir)
+	if err != nil {
+		return err
+	}
+	state.CloudflaredAutoStart = autoStart
+	if autoStart.CronInstalled {
+		ui.Info("Tunnel auto-start: " + autoStart.CronDetail)
+		ui.Info("Tunnel ensure script: " + autoStart.EnsureScript)
+	} else if strings.TrimSpace(autoStart.CronDetail) != "" {
+		ui.Warn("Tunnel auto-start: " + autoStart.CronDetail)
+	}
+
 	githubSecret, err := ui.Prompt(ctx, Prompt{
 		Label:    "GitHub OAuth Client Secret",
 		Secret:   true,

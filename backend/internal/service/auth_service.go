@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"go-notes/internal/config"
+	"go-notes/internal/errs"
 	ghintegration "go-notes/internal/integrations/github"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
@@ -51,7 +52,7 @@ func (s *AuthService) AuthenticateAdmin(ctx context.Context, login, password str
 	adminLogin := strings.TrimSpace(s.cfg.AdminLogin)
 	adminPassword := strings.TrimSpace(s.cfg.AdminPassword)
 	if adminLogin == "" || adminPassword == "" {
-		return nil, ErrAdminAuthDisabled
+		return nil, errs.Wrap(errs.CodeAuthTestTokenDisabled, "test token disabled", ErrAdminAuthDisabled)
 	}
 
 	inputLogin := strings.TrimSpace(login)
@@ -59,7 +60,7 @@ func (s *AuthService) AuthenticateAdmin(ctx context.Context, login, password str
 	loginMatch := subtle.ConstantTimeCompare([]byte(inputLogin), []byte(adminLogin)) == 1
 	passwordMatch := subtle.ConstantTimeCompare([]byte(inputPassword), []byte(adminPassword)) == 1
 	if !loginMatch || !passwordMatch {
-		return nil, ErrUnauthorized
+		return nil, errs.Wrap(errs.CodeAuthInvalidCredentials, "invalid credentials", ErrUnauthorized)
 	}
 
 	user, err := s.userRepo.UpsertFromGitHub(-1, adminLogin, "")
@@ -85,17 +86,17 @@ func (s *AuthService) Exchange(ctx context.Context, code, redirectURL string) (*
 	}
 
 	if ghUser == nil || ghUser.ID == nil || ghUser.Login == nil {
-		return nil, errors.New("github user payload incomplete")
+		return nil, errs.New(errs.CodeAuthLoginFailed, "github user payload incomplete")
 	}
 
 	if _, err := s.userRepo.GetByGitHubID(ghUser.GetID()); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return nil, ErrUnauthorized
+			return nil, errs.Wrap(errs.CodeAuthForbidden, "user not allowed", ErrUnauthorized)
 		}
 		return nil, fmt.Errorf("check allowlist: %w", err)
 	}
 	if ghUser.GetLogin() == "" {
-		return nil, ErrUnauthorized
+		return nil, errs.Wrap(errs.CodeAuthForbidden, "user not allowed", ErrUnauthorized)
 	}
 
 	user, err := s.userRepo.UpsertFromGitHub(ghUser.GetID(), ghUser.GetLogin(), ghUser.GetAvatarURL())

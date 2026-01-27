@@ -7,21 +7,22 @@ import (
 )
 
 type State struct {
-	Paths              filesystem.Paths
-	DataPaths          filesystem.DataPaths
-	GitHubClientID     string
-	GitHubClientSecret string
-	GitHubCallbackURL  string
-	GitHubUser         *github.User
-	Tunnel             *cloudflared.TunnelInfo
-	DNS                *cloudflareSetup
-	CloudflaredConfig  string
-	CloudflaredLogPath string
-	Env                BootstrapEnv
-	ComposeFile        string
-	ComposeLogPath     string
-	PanelHostname      string
-	PanelURL           string
+	Paths                filesystem.Paths
+	DataPaths            filesystem.DataPaths
+	GitHubClientID       string
+	GitHubClientSecret   string
+	GitHubCallbackURL    string
+	GitHubUser           *github.User
+	Tunnel               *cloudflared.TunnelInfo
+	DNS                  *cloudflareSetup
+	CloudflaredConfig    string
+	CloudflaredLogPath   string
+	CloudflaredAutoStart cloudflared.PersistenceResult
+	Env                  BootstrapEnv
+	ComposeFile          string
+	ComposeLogPath       string
+	PanelHostname        string
+	PanelURL             string
 }
 
 type cloudflareSetup struct {
@@ -34,29 +35,33 @@ type cloudflareSetup struct {
 }
 
 type Summary struct {
-	DataDir             string
-	TemplatesDir        string
-	StateDir            string
-	EnvPath             string
-	PanelURL            string
-	CloudflaredConfig   string
-	CloudflaredLog      string
-	ComposeLog          string
-	CloudflaredTunnel   string
-	CloudflaredTunnelID string
+	DataDir                 string
+	TemplatesDir            string
+	StateDir                string
+	EnvPath                 string
+	PanelURL                string
+	CloudflaredConfig       string
+	CloudflaredLog          string
+	ComposeLog              string
+	CloudflaredTunnel       string
+	CloudflaredTunnelID     string
+	CloudflaredEnsureScript string
+	CloudflaredCronDetail   string
 }
 
 func (s State) Summary() Summary {
 	return Summary{
-		DataDir:             s.DataPaths.Root,
-		TemplatesDir:        s.DataPaths.TemplatesDir,
-		StateDir:            s.DataPaths.StateDir,
-		EnvPath:             s.DataPaths.EnvPath,
-		PanelURL:            s.PanelURL,
-		CloudflaredConfig:   s.CloudflaredConfig,
-		CloudflaredLog:      s.CloudflaredLogPath,
-		ComposeLog:          s.ComposeLogPath,
-		CloudflaredTunnel:   s.Env.CloudflaredTunnel,
-		CloudflaredTunnelID: s.Env.CloudflareTunnelID,
+		DataDir:                 s.DataPaths.Root,
+		TemplatesDir:            s.DataPaths.TemplatesDir,
+		StateDir:                s.DataPaths.StateDir,
+		EnvPath:                 s.DataPaths.EnvPath,
+		PanelURL:                s.PanelURL,
+		CloudflaredConfig:       s.CloudflaredConfig,
+		CloudflaredLog:          s.CloudflaredLogPath,
+		ComposeLog:              s.ComposeLogPath,
+		CloudflaredTunnel:       s.Env.CloudflaredTunnel,
+		CloudflaredTunnelID:     s.Env.CloudflareTunnelID,
+		CloudflaredEnsureScript: s.CloudflaredAutoStart.EnsureScript,
+		CloudflaredCronDetail:   s.CloudflaredAutoStart.CronDetail,
 	}
 }

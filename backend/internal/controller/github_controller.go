@@ -5,6 +5,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"go-notes/internal/apierror"
+	"go-notes/internal/errs"
 	"go-notes/internal/service"
 )
 
@@ -22,13 +24,13 @@ func (c *GitHubController) Register(r gin.IRoutes) {
 
 func (c *GitHubController) Catalog(ctx *gin.Context) {
 	if c.service == nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "github service unavailable"})
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeGitHubUnavailable, "github service unavailable", nil)
 		return
 	}
 
 	catalog, err := c.service.Catalog(ctx.Request.Context())
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load github catalog"})
+		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeGitHubCatalog, "failed to load github catalog")
 		return
 	}
 

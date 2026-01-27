@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"go-notes/internal/config"
+	"go-notes/internal/errs"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
 )
@@ -46,5 +47,6 @@ func (s *RBACService) SeedSuperUser() error {
 		return fmt.Errorf("prune superusers: %w", err)
 	}
 
-	return fmt.Errorf("%w: limit=2 total=%d removed=%d", ErrSuperUserCapExceeded, len(superUsers), len(deleteIDs))
+	detail := fmt.Sprintf("superuser cap exceeded: limit=2 total=%d removed=%d", len(superUsers), len(deleteIDs))
+	return errs.Wrap(errs.CodeRBACSuperUserCap, detail, ErrSuperUserCapExceeded)
 }

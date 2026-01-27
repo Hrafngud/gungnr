@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"go-notes/internal/config"
+	"go-notes/internal/errs"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
 )
@@ -67,12 +68,12 @@ type QuickServiceRequest struct {
 
 func (s *ProjectService) ListLocal(ctx context.Context) ([]LocalProject, error) {
 	if strings.TrimSpace(s.cfg.TemplatesDir) == "" {
-		return nil, fmt.Errorf("TEMPLATES_DIR not configured")
+		return nil, errs.New(errs.CodeProjectLocalListFailed, "TEMPLATES_DIR not configured")
 	}
 
 	entries, err := os.ReadDir(s.cfg.TemplatesDir)
 	if err != nil {
-		return nil, fmt.Errorf("read templates dir: %w", err)
+		return nil, errs.Wrap(errs.CodeProjectLocalListFailed, "read templates dir failed", err)
 	}
 
 	var projects []LocalProject
@@ -230,17 +231,17 @@ func (s *ProjectService) resolveTemplateSelection(ctx context.Context, templateR
 	owner := strings.TrimSpace(s.cfg.GitHubTemplateOwner)
 	repo := strings.TrimSpace(s.cfg.GitHubTemplateRepo)
 	if owner == "" || repo == "" {
-		return "", fmt.Errorf("template source not configured")
+		return "", errs.New(errs.CodeProjectTemplateSource, "template source not configured")
 	}
 	if templateRef == "" {
 		return fmt.Sprintf("%s/%s", owner, repo), nil
 	}
 	selectedOwner, selectedRepo, err := parseTemplateRef(templateRef)
 	if err != nil {
-		return "", err
+		return "", errs.Wrap(errs.CodeProjectTemplateSource, "template reference is invalid", err)
 	}
 	if templateKey(selectedOwner, selectedRepo) != templateKey(owner, repo) {
-		return "", fmt.Errorf("template is not in allowlist")
+		return "", errs.New(errs.CodeProjectTemplateSource, "template is not in allowlist")
 	}
 	return fmt.Sprintf("%s/%s", owner, repo), nil
 }

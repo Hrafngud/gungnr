@@ -647,18 +647,20 @@ func (c *Client) ensureRemoteManaged(ctx context.Context, tunnelID string) error
 	if err != nil {
 		return err
 	}
-	if strings.EqualFold(info.ConfigSrc, "local") {
+
+	switch strings.ToLower(strings.TrimSpace(info.ConfigSrc)) {
+	case "cloudflare":
+		return nil
+	case "local":
 		return fmt.Errorf("tunnel %s is locally managed (config_src=%s, remote_config=%s); Cloudflare API updates require config_src=cloudflare: %w",
 			describeTunnelName(info, tunnelID), describeConfigSrc(info.ConfigSrc), describeRemoteConfig(info.RemoteConfig), ErrTunnelNotRemote)
-	}
-	if strings.EqualFold(info.ConfigSrc, "cloudflare") {
+	default:
+		if info.RemoteConfig != nil && !*info.RemoteConfig {
+			return fmt.Errorf("tunnel %s is locally managed (config_src=%s, remote_config=%s); Cloudflare API updates require config_src=cloudflare: %w",
+				describeTunnelName(info, tunnelID), describeConfigSrc(info.ConfigSrc), describeRemoteConfig(info.RemoteConfig), ErrTunnelNotRemote)
+		}
 		return nil
 	}
-	if info.RemoteConfig != nil && !*info.RemoteConfig {
-		return fmt.Errorf("tunnel %s is locally managed (config_src=%s, remote_config=%s); Cloudflare API updates require config_src=cloudflare: %w",
-			describeTunnelName(info, tunnelID), describeConfigSrc(info.ConfigSrc), describeRemoteConfig(info.RemoteConfig), ErrTunnelNotRemote)
-	}
-	return nil
 }
 
 func (c *Client) getTunnelInfo(ctx context.Context, tunnelID string) (tunnelInfo, error) {

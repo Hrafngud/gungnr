@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"go-notes/internal/errs"
 	"go-notes/internal/models"
 	"gorm.io/gorm"
 )
@@ -20,7 +21,7 @@ func (r *GormSettingsRepository) Get(ctx context.Context) (*models.Settings, err
 	var settings models.Settings
 	if err := r.db.WithContext(ctx).Order("id asc").First(&settings).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrNotFound
+			return nil, errs.Wrap(errs.CodeNotFound, "record not found", ErrNotFound)
 		}
 		return nil, err
 	}

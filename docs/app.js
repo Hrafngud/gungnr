@@ -171,14 +171,16 @@ if (docSearch && searchResults) {
       section.id;
     const group = section.dataset.docGroup || '';
     const tags = section.dataset.docTags || '';
+    const code = (section.dataset.docCode || '').trim();
+    const codeKey = code.toLowerCase();
     const groupLabel = group
       ? group.replace(/-/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase())
       : '';
     const label =
       groupLabel && groupLabel !== title ? `${groupLabel} / ${title}` : title;
-    const searchable = `${title} ${groupLabel} ${tags} ${section.textContent || ''}`.toLowerCase();
+    const searchable = `${code} ${title} ${groupLabel} ${tags} ${section.textContent || ''}`.toLowerCase();
 
-    return { id: section.id, title, group, groupLabel, label, searchable };
+    return { id: section.id, title, group, groupLabel, label, code, codeKey, searchable };
   });
 
   const renderResults = (query) => {
@@ -191,13 +193,19 @@ if (docSearch && searchResults) {
     }
 
     const matches = searchItems
-      .filter((item) => item.searchable.includes(trimmed))
-      .slice(0, 6);
+      .map((item) => ({ item, score: matchScore(item, trimmed) }))
+      .filter((entry) => entry.score < Number.POSITIVE_INFINITY)
+      .sort((a, b) => {
+        if (a.score !== b.score) return a.score - b.score;
+        return a.item.title.localeCompare(b.item.title);
+      })
+      .slice(0, 6)
+      .map((entry) => entry.item);
 
     if (matches.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'search-result-empty';
-      empty.textContent = 'No matches. Try "install" or "tunnel".';
+      empty.textContent = 'No matches. Try "AUTH-401" or "tunnel".';
       searchResults.appendChild(empty);
       searchResults.hidden = false;
       return;
@@ -212,10 +220,12 @@ if (docSearch && searchResults) {
       title.textContent = item.title;
 
       const meta = document.createElement('span');
-      meta.textContent =
-        item.groupLabel && item.groupLabel !== item.title
-          ? item.groupLabel
-          : 'Section';
+      const metaParts = [];
+      if (item.code) metaParts.push(item.code);
+      if (item.groupLabel && item.groupLabel !== item.title) {
+        metaParts.push(item.groupLabel);
+      }
+      meta.textContent = metaParts.length > 0 ? metaParts.join(' · ') : 'Section';
 
       link.appendChild(title);
       link.appendChild(meta);
@@ -264,4 +274,17 @@ if (docSearch && searchResults) {
       triggerSearchPulse();
     }
   });
+}
+
+function matchScore(item, query) {
+  if (!query) return Number.POSITIVE_INFINITY;
+
+  if (item.codeKey) {
+    if (item.codeKey === query) return 0;
+    if (item.codeKey.startsWith(query)) return 1;
+    if (item.codeKey.includes(query)) return 2;
+  }
+
+  if (item.searchable.includes(query)) return 10;
+  return Number.POSITIVE_INFINITY;
 }

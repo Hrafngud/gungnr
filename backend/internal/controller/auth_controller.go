@@ -13,7 +13,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"go-notes/internal/apierror"
 	"go-notes/internal/auth"
+	"go-notes/internal/errs"
 	"go-notes/internal/middleware"
 	"go-notes/internal/service"
 )
@@ -69,7 +71,7 @@ func (c *AuthController) Register(r *gin.Engine) {
 func (c *AuthController) Login(ctx *gin.Context) {
 	state, err := generateState()
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate state"})
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeAuthStateGenerate, "failed to generate state", nil)
 		return
 	}
 
@@ -82,13 +84,13 @@ func (c *AuthController) Callback(ctx *gin.Context) {
 	state := ctx.Query("state")
 	code := ctx.Query("code")
 	if state == "" || code == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "missing code or state"})
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeAuthCallbackMissing, "missing code or state", nil)
 		return
 	}
 
 	cookieState, err := ctx.Cookie(oauthStateCookie)
 	if err != nil || cookieState != state {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid oauth state"})
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeAuthStateInvalid, "invalid oauth state", nil)
 		return
 	}
 
@@ -97,19 +99,18 @@ func (c *AuthController) Callback(ctx *gin.Context) {
 	callbackURL := c.resolveCallbackURL(ctx)
 	user, err := c.service.Exchange(ctx, code, callbackURL)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrUnauthorized):
-			ctx.JSON(http.StatusForbidden, gin.H{"error": "user not allowed"})
-		default:
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "login failed"})
+		if errors.Is(err, service.ErrUnauthorized) {
+			apierror.RespondWithError(ctx, http.StatusForbidden, err, errs.CodeAuthForbidden, "user not allowed")
+			return
 		}
+		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeAuthLoginFailed, "login failed")
 		return
 	}
 
 	session := c.sessions.NewSession(user.ID, user.Login, user.AvatarURL, user.Role)
 	value, err := c.sessions.Encode(session)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeAuthSessionCreate, "failed to create session", nil)
 		return
 	}
 
@@ -126,7 +127,7 @@ func (c *AuthController) Callback(ctx *gin.Context) {
 func (c *AuthController) Me(ctx *gin.Context) {
 	session, err := c.readSession(ctx)
 	if err != nil {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		apierror.RespondWithError(ctx, http.StatusUnauthorized, err, errs.CodeAuthUnauthenticated, "unauthenticated")
 		return
 	}
 
@@ -153,7 +154,7 @@ func (c *AuthController) Logout(ctx *gin.Context) {
 func (c *AuthController) TestToken(ctx *gin.Context) {
 	var req testTokenRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeAuthTestTokenInvalid, "invalid payload", nil)
 		return
 	}
 
@@ -161,11 +162,11 @@ func (c *AuthController) TestToken(ctx *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrAdminAuthDisabled):
-			ctx.JSON(http.StatusNotFound, gin.H{"error": "test token disabled"})
+			apierror.RespondWithError(ctx, http.StatusNotFound, err, errs.CodeAuthTestTokenDisabled, "test token disabled")
 		case errors.Is(err, service.ErrUnauthorized):
-			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+			apierror.RespondWithError(ctx, http.StatusUnauthorized, err, errs.CodeAuthInvalidCredentials, "invalid credentials")
 		default:
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
+			apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeAuthLoginFailed, "failed to issue token")
 		}
 		return
 	}
@@ -173,7 +174,7 @@ func (c *AuthController) TestToken(ctx *gin.Context) {
 	session := c.sessions.NewSession(user.ID, user.Login, user.AvatarURL, user.Role)
 	value, err := c.sessions.Encode(session)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeAuthSessionCreate, "failed to create session", nil)
 		return
 	}
 

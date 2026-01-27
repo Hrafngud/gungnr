@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go-notes/internal/models"
+	"go-notes/internal/repository"
 	"log"
 	"sync"
 	"time"
-
-	"go-notes/internal/models"
-	"go-notes/internal/repository"
 )
 
 var ErrHandlerMissing = errors.New("job handler not registered")
@@ -47,7 +46,6 @@ func (r *Runner) Enqueue(_ context.Context, job models.Job) error {
 	if handler == nil {
 		return ErrHandlerMissing
 	}
-
 	go r.run(job, handler)
 	return nil
 }
@@ -81,7 +79,6 @@ func (r *Runner) run(job models.Job, handler Handler) {
 			log.Printf("job %d finish update failed: %v", job.ID, err)
 		}
 	}()
-
 	handlerErr = handler(ctx, job, logger)
 }
 

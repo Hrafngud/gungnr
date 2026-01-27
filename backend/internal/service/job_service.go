@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"go-notes/internal/errs"
 	"go-notes/internal/jobs"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
@@ -82,13 +83,13 @@ func (s *JobService) Stop(ctx context.Context, id uint, errMsg string) (*models.
 
 	switch job.Status {
 	case "completed", "failed":
-		return nil, ErrJobAlreadyFinished
+		return nil, errs.Wrap(errs.CodeJobAlreadyFinished, ErrJobAlreadyFinished.Error(), ErrJobAlreadyFinished)
 	case "running":
-		return nil, ErrJobRunning
+		return nil, errs.Wrap(errs.CodeJobRunning, ErrJobRunning.Error(), ErrJobRunning)
 	case "pending":
 		// ok
 	default:
-		return nil, ErrJobNotStoppable
+		return nil, errs.Wrap(errs.CodeJobNotStoppable, ErrJobNotStoppable.Error(), ErrJobNotStoppable)
 	}
 
 	message := strings.TrimSpace(errMsg)
@@ -119,13 +120,13 @@ func (s *JobService) Retry(ctx context.Context, id uint) (*models.Job, error) {
 	case "failed":
 		// ok
 	case "running":
-		return nil, ErrJobRunning
+		return nil, errs.Wrap(errs.CodeJobRunning, ErrJobRunning.Error(), ErrJobRunning)
 	case "completed":
-		return nil, ErrJobAlreadyFinished
+		return nil, errs.Wrap(errs.CodeJobAlreadyFinished, ErrJobAlreadyFinished.Error(), ErrJobAlreadyFinished)
 	case "pending":
-		return nil, ErrJobNotRetryable
+		return nil, errs.Wrap(errs.CodeJobNotRetryable, ErrJobNotRetryable.Error(), ErrJobNotRetryable)
 	default:
-		return nil, ErrJobNotRetryable
+		return nil, errs.Wrap(errs.CodeJobNotRetryable, ErrJobNotRetryable.Error(), ErrJobNotRetryable)
 	}
 
 	retry := models.Job{

@@ -9,6 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"go-notes/internal/apierror"
+	"go-notes/internal/errs"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
 	"go-notes/internal/service"
@@ -50,7 +52,7 @@ func (c *UsersController) RegisterAdmin(r gin.IRoutes) {
 func (c *UsersController) List(ctx *gin.Context) {
 	users, err := c.service.List(ctx.Request.Context())
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load users"})
+		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeUserListFailed, "failed to load users")
 		return
 	}
 
@@ -70,19 +72,19 @@ func (c *UsersController) List(ctx *gin.Context) {
 func (c *UsersController) UpdateRole(ctx *gin.Context) {
 	userID, err := parseUserID(ctx.Param("id"))
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeUserInvalidID, "invalid user id", nil)
 		return
 	}
 
 	var req updateUserRoleRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeUserInvalidPayload, "invalid payload", nil)
 		return
 	}
 
 	role := strings.ToLower(strings.TrimSpace(req.Role))
 	if role != models.RoleAdmin && role != models.RoleUser {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "role must be admin or user"})
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeUserInvalidRole, "role must be admin or user", nil)
 		return
 	}
 
@@ -90,11 +92,11 @@ func (c *UsersController) UpdateRole(ctx *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, repository.ErrNotFound):
-			ctx.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			apierror.RespondWithError(ctx, http.StatusNotFound, err, errs.CodeUserNotFound, "user not found")
 		case errors.Is(err, service.ErrLastSuperUser):
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "cannot demote last superuser"})
+			apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeUserLastSuperUser, "cannot demote last superuser")
 		default:
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update role"})
+			apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeUserUpdateFailed, "failed to update role")
 		}
 		return
 	}
@@ -110,13 +112,13 @@ func (c *UsersController) UpdateRole(ctx *gin.Context) {
 func (c *UsersController) Create(ctx *gin.Context) {
 	var req createUserRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeUserInvalidPayload, "invalid payload", nil)
 		return
 	}
 
 	login := strings.TrimSpace(req.Login)
 	if login == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "login is required"})
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeUserLoginRequired, "login is required", nil)
 		return
 	}
 
@@ -124,11 +126,11 @@ func (c *UsersController) Create(ctx *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrAllowlistLoginRequired):
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "login is required"})
+			apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeUserLoginRequired, "login is required")
 		case errors.Is(err, service.ErrAllowlistUserNotFound):
-			ctx.JSON(http.StatusNotFound, gin.H{"error": "github user not found"})
+			apierror.RespondWithError(ctx, http.StatusNotFound, err, errs.CodeUserGitHubNotFound, "github user not found")
 		default:
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add user"})
+			apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeUserCreateFailed, "failed to add user")
 		}
 		return
 	}
@@ -144,18 +146,18 @@ func (c *UsersController) Create(ctx *gin.Context) {
 func (c *UsersController) Delete(ctx *gin.Context) {
 	userID, err := parseUserID(ctx.Param("id"))
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeUserInvalidID, "invalid user id", nil)
 		return
 	}
 
 	if err := c.service.RemoveAllowlistUser(ctx.Request.Context(), userID); err != nil {
 		switch {
 		case errors.Is(err, repository.ErrNotFound):
-			ctx.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			apierror.RespondWithError(ctx, http.StatusNotFound, err, errs.CodeUserNotFound, "user not found")
 		case errors.Is(err, service.ErrCannotRemoveSuperUser):
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "cannot remove superuser"})
+			apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeUserRemoveSuperUser, "cannot remove superuser")
 		default:
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove user"})
+			apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeUserDeleteFailed, "failed to remove user")
 		}
 		return
 	}

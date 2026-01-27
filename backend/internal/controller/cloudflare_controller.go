@@ -5,6 +5,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"go-notes/internal/apierror"
+	"go-notes/internal/errs"
 	"go-notes/internal/service"
 )
 
@@ -23,12 +25,12 @@ func (c *CloudflareController) Register(r gin.IRoutes) {
 
 func (c *CloudflareController) Preflight(ctx *gin.Context) {
 	if c.service == nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "cloudflare service unavailable"})
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeCloudflareUnavailable, "cloudflare service unavailable", nil)
 		return
 	}
 	result, err := c.service.Preflight(ctx.Request.Context())
 	if err != nil {
-		ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		apierror.RespondWithError(ctx, http.StatusBadGateway, err, errs.CodeCloudflarePreflight, err.Error())
 		return
 	}
 	ctx.JSON(http.StatusOK, result)
@@ -41,12 +43,12 @@ type CloudflareZone struct {
 
 func (c *CloudflareController) Zones(ctx *gin.Context) {
 	if c.service == nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "cloudflare service unavailable"})
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeCloudflareUnavailable, "cloudflare service unavailable", nil)
 		return
 	}
 	zones, err := c.service.Zones(ctx.Request.Context())
 	if err != nil {
-		ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		apierror.RespondWithError(ctx, http.StatusBadGateway, err, errs.CodeCloudflareZones, err.Error())
 		return
 	}
 	response := make([]CloudflareZone, 0, len(zones))

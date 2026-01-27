@@ -434,6 +434,20 @@ pre {
   list-style: none;
 }
 
+.error-code {
+  display: inline-block;
+  margin-right: 0.6rem;
+  padding: 0.12rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  color: var(--accent-ink);
+  background: rgba(98, 167, 255, 0.08);
+}
+
 .details-card summary::-webkit-details-marker {
   display: none;
 }
