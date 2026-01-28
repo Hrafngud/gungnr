@@ -14,12 +14,12 @@ const isUrl = computed(() => props.type?.startsWith('http'))
     v-if="isUrl"
     :src="type"
     alt="service icon"
-    class="h-5 w-5"
+    class="w-32 h-fit"
   />
   <!-- Fallback to inline SVG paths for named icon types -->
   <svg
     v-else
-    class="h-5 w-5 text-[color:var(--accent-ink)]"
+    class="w-32 h-fit text-[color:var(--accent-ink)]"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
@@ -29,7 +29,7 @@ const isUrl = computed(() => props.type?.startsWith('http'))
     aria-hidden="true"
   >
     <!-- Custom -->
-    <path v-if="!type || type === 'custom'" d="M12 2v20m0-20a2 2 0 0 1 2 2m-2-2a2 2 0 0 0-2 2m0 0v16m0 0a2 2 0 0 0 2 2m-2-2a2 2 0 0 1-2-2m4 0a2 2 0 0 1-2 2m0 0H8m12-10H4" />
+    <path v-if="!type || type === 'code'" d="M12 2v20m0-20a2 2 0 0 1 2 2m-2-2a2 2 0 0 0-2 2m0 0v16m0 0a2 2 0 0 0 2 2m-2-2a2 2 0 0 1-2-2m4 0a2 2 0 0 1-2 2m0 0H8m12-10H4" />
     <!-- Draw -->
     <path v-else-if="type === 'draw'" d="M3 17v3a1 1 0 0 0 1 1h3m13-4v3a1 1 0 0 1-1 1h-3M3 7V4a1 1 0 0 1 1-1h3m13 4V4a1 1 0 0 0-1-1h-3m-4 15l-3-3m0 0l-3-3m3 3V9m0 0l-3 3m3-3l3 3" />
     <!-- AI -->
@@ -60,7 +60,7 @@ const isUrl = computed(() => props.type?.startsWith('http'))
     <!-- Admin -->
     <path v-else-if="type === 'admin'" d="M12 2L2 7v5c0 6.5 4.5 11 10 11s10-4.5 10-11V7l-10-5zm0 18c-4.41 0-8-3.14-8-7V8.31l8-4 8 4V13c0 3.86-3.59 7-8 7z" />
     <!-- Code -->
-    <path v-else-if="type === 'code'" d="M16 18l6-6-6-6M8 6l-6 6 6 6" />
+    <path v-else-if="type === 'custom'" d="M16 18l6-6-6-6M8 6l-6 6 6 6" />
     <!-- Git -->
     <template v-else-if="type === 'git'">
       <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
