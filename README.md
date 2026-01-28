@@ -58,6 +58,7 @@ Scripts created under `~/gungnr/state`:
 
 ## Documentation
 Live: https://docs.jdoss.pro
+
 Local source: `docs/index.html` (landing), `docs/docs.html` (docs), `docs/errors.html` (errors).
 (If you fork you can continue to document etc.)
 
@@ -90,7 +91,7 @@ Local source: `docs/index.html` (landing), `docs/docs.html` (docs), `docs/errors
 - **More one click deplyments**: Testing and validating more tools for quick deployment.
 
 
-##Test token auth (optional)
+## Test token auth (optional)
 
 Since only OAuth is supported, when you wish to hit the panel with curl, or give a token to an agent/test suite,
 you can leverage this endpoint for grabbing a token, this is optional and requires setting up the variables in .env:
@@ -103,17 +104,6 @@ curl -sS http://localhost/test-token \
 ```
 Use the returned token as `Authorization: Bearer <token>` for `/api/v1/*` routes.
 
-
-## Release compose (GHCR images)
-Use `docker-compose.release.yml` to run GHCR images instead of local builds.
-
-Default image tag is `latest` (set by `GUNGNR_VERSION`). Pin a specific release
-by exporting `GUNGNR_VERSION=vX.Y.Z` or editing the compose file directly.
-
-Example:
-```bash
-GUNGNR_VERSION=v1.2.3 docker compose -f docker-compose.release.yml up -d
-```
 
 ## Workflows
 - Create from template: choose a name and subdomain; Gungnr creates the repo
