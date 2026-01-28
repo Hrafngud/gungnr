@@ -137,7 +137,7 @@ Local source: `docs/index.html` (landing), `docs/docs.html` (docs), `docs/errors
 - **Console and Filesystem**: Adding console and filesystem views. 
 - **TUI installer persistence**: Persisting the installation state for a while even when user shutdown the TUI.
 - **Advanced Docker deployment**: For a broad compatibility with images that require custom setup before startup.
-- **More one click deplyments**: Testing and validating more tools for quick deployment.
+- **More one click deployments**: Testing and validating more tools for quick deployment.
 
 
 ## Test token auth (optional)
