@@ -248,7 +248,8 @@ detect_release_repo() {
     fi
   fi
 
-  GUNGNR_CLI_REPO=""
+  GUNGNR_CLI_REPO="hrafngud/gungnr"
+  log "Using default release repo ${GUNGNR_CLI_REPO} (set GUNGNR_CLI_REPO to override)."
 }
 
 download_cli() {

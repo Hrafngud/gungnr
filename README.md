@@ -154,6 +154,17 @@ Use the returned token as `Authorization: Bearer <token>` for `/api/v1/*` routes
 - `make down`
 - `make down-v`
 
+## Release compose (GHCR images)
+Use `docker-compose.release.yml` to run GHCR images instead of local builds.
+
+Default image tag is `latest` (set by `GUNGNR_VERSION`). Pin a specific release
+by exporting `GUNGNR_VERSION=vX.Y.Z` or editing the compose file directly.
+
+Example:
+```bash
+GUNGNR_VERSION=v1.2.3 docker compose -f docker-compose.release.yml up -d
+```
+
 ## Workflows
 - Create from template: choose a name and subdomain; Gungnr creates the repo
   and deploys it.
