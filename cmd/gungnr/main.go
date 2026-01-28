@@ -26,6 +26,8 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "version", "--version", "-v":
+		printVersion()
 	case "bootstrap":
 		runBootstrap(os.Args[2:])
 	case "restart":
@@ -43,10 +45,21 @@ func main() {
 
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
+	fmt.Fprintln(os.Stderr, "  gungnr version")
 	fmt.Fprintln(os.Stderr, "  gungnr bootstrap [--plain]")
 	fmt.Fprintln(os.Stderr, "  gungnr restart")
 	fmt.Fprintln(os.Stderr, "  gungnr tunnel run")
 	fmt.Fprintln(os.Stderr, "  gungnr uninstall [--yes]")
+}
+
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
+func printVersion() {
+	fmt.Fprintf(os.Stdout, "gungnr %s (commit %s, built %s)\n", version, commit, date)
 }
 
 func runBootstrap(args []string) {
