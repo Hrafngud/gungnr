@@ -1,6 +1,10 @@
 package service
 
-import "strings"
+import (
+	"strings"
+
+	"go-notes/internal/errs"
+)
 
 func normalizeDomain(input string) string {
 	return strings.ToLower(strings.TrimSpace(input))
@@ -44,15 +48,9 @@ func selectDomain(requested, base string, additional []string) (string, error) {
 }
 
 func errBaseDomainUnset() error {
-	return errorString("base domain is not configured")
+	return errs.New(errs.CodeDomainMissing, "base domain is not configured")
 }
 
 func errDomainNotConfigured(domain string) error {
-	return errorString("domain is not configured: " + domain)
-}
-
-type errorString string
-
-func (e errorString) Error() string {
-	return string(e)
+	return errs.New(errs.CodeDomainNotConfigured, "domain is not configured: "+domain)
 }

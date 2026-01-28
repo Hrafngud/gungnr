@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 
+	"go-notes/internal/errs"
 	"go-notes/internal/jobs"
 )
 
@@ -185,7 +186,7 @@ var containerNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 
 func validateContainerName(name string) error {
 	if !containerNamePattern.MatchString(name) {
-		return fmt.Errorf("container name %q is invalid; use letters, numbers, '.', '_' or '-'", name)
+		return errs.New(errs.CodeContainerName, fmt.Sprintf("container name %q is invalid; use letters, numbers, '.', '_' or '-'", name))
 	}
 	return nil
 }

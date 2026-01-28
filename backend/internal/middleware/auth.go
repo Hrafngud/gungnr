@@ -6,7 +6,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"go-notes/internal/apierror"
 	"go-notes/internal/auth"
+	"go-notes/internal/errs"
 	"go-notes/internal/models"
 )
 
@@ -22,11 +24,10 @@ func AuthRequired(sessions *auth.Manager) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		session, err := ReadSession(ctx, sessions)
 		if err != nil {
-			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+			apierror.Respond(ctx, http.StatusUnauthorized, errs.CodeAuthUnauthenticated, "unauthenticated", nil)
 			ctx.Abort()
 			return
 		}
-
 		ctx.Set(sessionContextKey, session)
 		ctx.Next()
 	}
@@ -91,13 +92,13 @@ func requireRole(sessions *auth.Manager, requiredRole string) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		session, err := ReadSession(ctx, sessions)
 		if err != nil {
-			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+			apierror.Respond(ctx, http.StatusUnauthorized, errs.CodeAuthUnauthenticated, "unauthenticated", nil)
 			ctx.Abort()
 			return
 		}
 
 		if !roleAllowed(session.Role, requiredRole) {
-			ctx.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			apierror.Respond(ctx, http.StatusForbidden, errs.CodeAuthForbidden, "forbidden", nil)
 			ctx.Abort()
 			return
 		}

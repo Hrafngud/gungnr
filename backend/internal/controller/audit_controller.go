@@ -7,6 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"go-notes/internal/apierror"
+	"go-notes/internal/errs"
 	"go-notes/internal/service"
 )
 
@@ -36,7 +38,7 @@ func (c *AuditController) List(ctx *gin.Context) {
 	limit := parseAuditLimit(ctx.Query("limit"))
 	logs, err := c.service.List(ctx.Request.Context(), limit)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load audit logs"})
+		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeAuditListFailed, "failed to load audit logs")
 		return
 	}
 

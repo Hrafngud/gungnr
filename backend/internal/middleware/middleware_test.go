@@ -11,7 +11,6 @@ import (
 
 func TestCORSMiddlewareAllowsConfiguredOrigin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
 	r := gin.New()
 	r.Use(CORSMiddleware([]string{"http://localhost:4173"}))
 	r.GET("/ping", func(c *gin.Context) {
@@ -30,7 +29,6 @@ func TestCORSMiddlewareAllowsConfiguredOrigin(t *testing.T) {
 
 func TestCORSMiddlewareAllowsWildcard(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
 	r := gin.New()
 	r.Use(CORSMiddleware([]string{"*"}))
 	r.Any("/ping", func(c *gin.Context) {

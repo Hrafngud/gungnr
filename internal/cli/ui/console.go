@@ -124,6 +124,12 @@ func (c *ConsoleUI) FinalSummary(summary app.Summary) {
 	fmt.Fprintf(c.out, "- Panel hostname: %s\n", summary.PanelURL)
 	fmt.Fprintf(c.out, "- Cloudflared config: %s\n", summary.CloudflaredConfig)
 	fmt.Fprintf(c.out, "- Cloudflared log: %s\n", summary.CloudflaredLog)
+	if strings.TrimSpace(summary.CloudflaredCronDetail) != "" {
+		fmt.Fprintf(c.out, "- Tunnel auto-start: %s\n", summary.CloudflaredCronDetail)
+	}
+	if strings.TrimSpace(summary.CloudflaredEnsureScript) != "" {
+		fmt.Fprintf(c.out, "- Tunnel ensure script: %s\n", summary.CloudflaredEnsureScript)
+	}
 	fmt.Fprintf(c.out, "- Docker build log: %s\n", summary.ComposeLog)
 	fmt.Fprintf(c.out, "- Cloudflare tunnel: %s (%s)\n", summary.CloudflaredTunnel, summary.CloudflaredTunnelID)
 }

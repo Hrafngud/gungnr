@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"go-notes/internal/errs"
 	ghintegration "go-notes/internal/integrations/github"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
@@ -43,7 +44,7 @@ func (s *UserService) UpdateRole(ctx context.Context, userID uint, role string) 
 			return nil, fmt.Errorf("count superusers: %w", err)
 		}
 		if superUsers <= 1 {
-			return nil, ErrLastSuperUser
+			return nil, errs.Wrap(errs.CodeUserLastSuperUser, ErrLastSuperUser.Error(), ErrLastSuperUser)
 		}
 	}
 
@@ -59,14 +60,14 @@ func (s *UserService) AddAllowlistUser(ctx context.Context, login string) (*mode
 	trimmed := strings.TrimSpace(login)
 	trimmed = strings.TrimPrefix(trimmed, "@")
 	if trimmed == "" {
-		return nil, ErrAllowlistLoginRequired
+		return nil, errs.Wrap(errs.CodeUserLoginRequired, ErrAllowlistLoginRequired.Error(), ErrAllowlistLoginRequired)
 	}
 
 	client := github.NewClient(nil)
 	ghUser, _, err := client.Users.Get(ctx, trimmed)
 	if err != nil {
 		if isGitHubNotFound(err) {
-			return nil, ErrAllowlistUserNotFound
+			return nil, errs.Wrap(errs.CodeUserGitHubNotFound, ErrAllowlistUserNotFound.Error(), ErrAllowlistUserNotFound)
 		}
 		detail := ghintegration.FormatError(err)
 		if detail == "" {
@@ -75,7 +76,7 @@ func (s *UserService) AddAllowlistUser(ctx context.Context, login string) (*mode
 		return nil, fmt.Errorf("fetch github user: %w; %s", err, detail)
 	}
 	if ghUser == nil || ghUser.ID == nil || ghUser.Login == nil {
-		return nil, errors.New("github user payload incomplete")
+		return nil, errs.New(errs.CodeUserCreateFailed, "github user payload incomplete")
 	}
 
 	user, err := s.userRepo.CreateAllowlistUser(ghUser.GetID(), ghUser.GetLogin(), ghUser.GetAvatarURL())
@@ -92,7 +93,7 @@ func (s *UserService) RemoveAllowlistUser(ctx context.Context, userID uint) erro
 		return err
 	}
 	if user.Role == models.RoleSuperUser {
-		return ErrCannotRemoveSuperUser
+		return errs.Wrap(errs.CodeUserRemoveSuperUser, ErrCannotRemoveSuperUser.Error(), ErrCannotRemoveSuperUser)
 	}
 
 	if err := s.userRepo.DeleteByIDs([]uint{userID}); err != nil {

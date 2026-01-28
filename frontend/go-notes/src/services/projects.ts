@@ -24,5 +24,5 @@ export const projectsApi = {
     image?: string
     containerPort?: number
   }) =>
-    api.post<{ job: Job }>('/api/v1/projects/quick', payload),
+    api.post<{ job: Job; hostPort: number }>('/api/v1/projects/quick', payload),
 }

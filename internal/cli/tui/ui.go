@@ -359,6 +359,12 @@ func (m *model) appendSummary(summary app.Summary) {
 	m.appendLog("- Panel hostname: " + summary.PanelURL)
 	m.appendLog("- Cloudflared config: " + summary.CloudflaredConfig)
 	m.appendLog("- Cloudflared log: " + summary.CloudflaredLog)
+	if strings.TrimSpace(summary.CloudflaredCronDetail) != "" {
+		m.appendLog("- Tunnel auto-start: " + summary.CloudflaredCronDetail)
+	}
+	if strings.TrimSpace(summary.CloudflaredEnsureScript) != "" {
+		m.appendLog("- Tunnel ensure script: " + summary.CloudflaredEnsureScript)
+	}
 	m.appendLog("- Docker build log: " + summary.ComposeLog)
 	m.appendLog("- Cloudflare tunnel: " + summary.CloudflaredTunnel + " (" + summary.CloudflaredTunnelID + ")")
 }

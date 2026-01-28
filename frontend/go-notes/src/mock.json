@@ -286,6 +286,7 @@
     }
   },
   "POST /api/v1/projects/quick": {
+    "hostPort": 80,
     "job": {
       "id": 5,
       "type": "quick",

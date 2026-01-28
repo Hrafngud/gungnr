@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"go-notes/internal/config"
+	"go-notes/internal/errs"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
 )
@@ -67,12 +68,12 @@ type QuickServiceRequest struct {
 
 func (s *ProjectService) ListLocal(ctx context.Context) ([]LocalProject, error) {
 	if strings.TrimSpace(s.cfg.TemplatesDir) == "" {
-		return nil, fmt.Errorf("TEMPLATES_DIR not configured")
+		return nil, errs.New(errs.CodeProjectLocalListFailed, "TEMPLATES_DIR not configured")
 	}
 
 	entries, err := os.ReadDir(s.cfg.TemplatesDir)
 	if err != nil {
-		return nil, fmt.Errorf("read templates dir: %w", err)
+		return nil, errs.Wrap(errs.CodeProjectLocalListFailed, "read templates dir failed", err)
 	}
 
 	var projects []LocalProject
@@ -174,18 +175,18 @@ func (s *ProjectService) ForwardLocal(ctx context.Context, req ForwardLocalReque
 	return s.jobs.Create(ctx, JobTypeForwardLocal, req)
 }
 
-func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceRequest) (*models.Job, error) {
+func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceRequest) (*models.Job, int, error) {
 	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
 	if err := ValidateSubdomain(req.Subdomain); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	domain, err := s.resolveDomain(ctx, req.Domain)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Domain = domain
 	if err := ValidatePort(req.Port); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Image = strings.TrimSpace(req.Image)
 	req.ContainerName = strings.TrimSpace(req.ContainerName)
@@ -196,14 +197,23 @@ func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceReque
 		req.ContainerPort = defaultQuickServiceContainerPort
 	}
 	if err := ValidatePort(req.ContainerPort); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if req.ContainerName != "" {
 		if err := validateContainerName(req.ContainerName); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	}
-	return s.jobs.Create(ctx, JobTypeQuickService, req)
+	chosenPort, err := ensureAvailableHostPort(ctx, req.Port)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Port = chosenPort
+	job, err := s.jobs.Create(ctx, JobTypeQuickService, req)
+	if err != nil {
+		return nil, 0, err
+	}
+	return job, chosenPort, nil
 }
 
 func (s *ProjectService) resolveDomain(ctx context.Context, requested string) (string, error) {
@@ -230,17 +240,17 @@ func (s *ProjectService) resolveTemplateSelection(ctx context.Context, templateR
 	owner := strings.TrimSpace(s.cfg.GitHubTemplateOwner)
 	repo := strings.TrimSpace(s.cfg.GitHubTemplateRepo)
 	if owner == "" || repo == "" {
-		return "", fmt.Errorf("template source not configured")
+		return "", errs.New(errs.CodeProjectTemplateSource, "template source not configured")
 	}
 	if templateRef == "" {
 		return fmt.Sprintf("%s/%s", owner, repo), nil
 	}
 	selectedOwner, selectedRepo, err := parseTemplateRef(templateRef)
 	if err != nil {
-		return "", err
+		return "", errs.Wrap(errs.CodeProjectTemplateSource, "template reference is invalid", err)
 	}
 	if templateKey(selectedOwner, selectedRepo) != templateKey(owner, repo) {
-		return "", fmt.Errorf("template is not in allowlist")
+		return "", errs.New(errs.CodeProjectTemplateSource, "template is not in allowlist")
 	}
 	return fmt.Sprintf("%s/%s", owner, repo), nil
 }

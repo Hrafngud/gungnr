@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth'
 import NavIcon from '@/components/NavIcon.vue'
 import UiPageOverlay from '@/components/ui/UiPageOverlay.vue'
 import { usePageLoadingStore } from '@/stores/pageLoading'
+import HostStatusHeader from '@/components/home/HostStatusHeader.vue'
 
 type NavItem = {
   label: string
@@ -70,13 +71,21 @@ const auth = useAuthStore()
 const pageLoading = usePageLoadingStore()
 const SIDEBAR_KEY = 'gungnr.sidebar'
 const sidebarMode = ref<'expanded' | 'collapsed'>('expanded')
+const avatarAnimationClass = ref<string>('')
 
 const isSidebarCollapsed = computed(() => sidebarMode.value === 'collapsed')
 const showOverlay = computed(() => !auth.initialized || pageLoading.loading)
 const navItems = computed(() => baseNavItems)
 
 const toggleCollapse = () => {
-  sidebarMode.value = isSidebarCollapsed.value ? 'expanded' : 'collapsed'
+  const isCollapsing = !isSidebarCollapsed.value
+  avatarAnimationClass.value = isCollapsing ? 'avatar-collapsing' : 'avatar-expanding'
+  setTimeout(() => {
+    sidebarMode.value = isSidebarCollapsed.value ? 'expanded' : 'collapsed'
+    setTimeout(() => {
+      avatarAnimationClass.value = ''
+    }, 400)
+  }, 50)
 }
 
 const handleLogout = async () => {
@@ -112,25 +121,25 @@ const isActive = (to: string) => {
   <div class="min-h-screen text-[color:var(--text)]">
     <div class="flex">
       <aside
-        class="sidebar-nav sticky top-0 hidden h-screen flex-col gap-6 border-r border-[color:var(--border)] bg-[color:var(--surface)] py-8 lg:flex"
+        class="sidebar-nav sticky top-0 hidden h-screen flex-col gap-6 border-r border-[color:var(--border)] bg-[color:var(--surface)] py-8 lg:flex transition-all duration-300 ease-out will-change-all"
         :class="[
           isSidebarCollapsed ? 'w-20 px-3' : 'w-72 px-6',
         ]"
       >
         <div
-          class="space-y-3 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-2)] p-4 text-xs text-[color:var(--muted)]"
-          :class="isSidebarCollapsed ? 'p-3' : 'p-4'"
+          class="github-badge-container flex flex-col items-center justify-center rounded-[25px] p-2 border border-[color:var(--border)] bg-[color:var(--surface-2)] text-xs text-[color:var(--muted)]"
+          :class="[
+            isSidebarCollapsed ? 'p-0 h-9 w-9 mx-auto  collapsed' : 'text-center',
+          ]"
         >
-          <p v-if="!isSidebarCollapsed" class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-            GitHub
-          </p>
-          <div v-if="auth.user" class="flex items-center gap-3">
+          <div v-if="auth.user" class="flex flex-col items-center">
             <img
               :src="auth.user.avatarUrl"
               :alt="auth.user.login"
-              class="h-9 w-9 rounded-xl object-cover"
+              class="w-8 h-fit rounded-full object-cover"
+              :class="avatarAnimationClass"
             />
-            <div v-if="!isSidebarCollapsed">
+            <div v-if="!isSidebarCollapsed" class="transition-opacity duration-300 ease-out text-center">
               <p class="text-sm font-semibold text-[color:var(--text)]">
                 @{{ auth.user.login }}
               </p>
@@ -139,7 +148,7 @@ const isActive = (to: string) => {
               </p>
             </div>
           </div>
-          <p v-else-if="!isSidebarCollapsed" class="text-[color:var(--muted-2)]">
+          <p v-else-if="!isSidebarCollapsed" class="text-[color:var(--muted-2)] text-center">
             Sign in to connect GitHub.
           </p>
         </div>
@@ -149,7 +158,7 @@ const isActive = (to: string) => {
             v-for="item in navItems"
             :key="item.to"
             :to="item.to"
-            class="group flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-semibold transition"
+            class="group flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-semibold transition-all duration-300 ease-out"
             :title="isSidebarCollapsed ? item.label : undefined"
             :class="[
               isActive(item.to)
@@ -189,18 +198,17 @@ const isActive = (to: string) => {
 
       <div class="min-h-screen flex-1">
 
-        <header class="sticky top-0 z-20 border-b border-[color:var(--border)] bg-[color:var(--bg-soft)] px-4 py-4">
+        <header class="sticky top-0 z-20 border-b border-[color:var(--border)] bg-gradient-to-br from-zinc-600/30 to-zinc-900 px-4 py-4">
           <div class="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-4">
-            <div class="min-w-0">
+            <div class="flex flex-row justify-between gap-8 items-center">
+              <div class="w-4 h-fit flex items-center">
+                <img src="/logo.svg" alt="Gungnr logo">
+              </div>
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                 {{ pageTitle }}
               </p>
-              <h1 class="text-lg font-semibold text-[color:var(--text)]">
-                Gungnr
-              </h1>
             </div>
             <div class="flex flex-wrap items-center gap-3">
-              <span class="badge status-neutral">Host ready</span>
               <button
                 v-if="auth.user"
                 type="button"
@@ -224,6 +232,7 @@ const isActive = (to: string) => {
               </RouterLink>
             </div>
           </div>
+          <HostStatusHeader />
 
           <nav class="mx-auto mt-4 flex w-full max-w-7xl gap-2 overflow-x-auto pb-2 lg:hidden">
             <RouterLink
@@ -250,3 +259,49 @@ const isActive = (to: string) => {
     <UiPageOverlay :show="showOverlay" :message="pageLoading.message" />
   </div>
 </template>
+
+<style scoped>
+  @keyframes avatarCollapse {
+    0% {
+      transform: scale(1) rotate(0deg);
+      filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.1));
+    }
+    50% {
+      transform: scale(1.05) rotate(-2deg);
+    }
+    100% {
+      transform: scale(1) rotate(0deg);
+      filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.15));
+    }
+  }
+
+  @keyframes avatarExpand {
+    0% {
+      transform: scale(1) rotate(0deg);
+      filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.15));
+    }
+    50% {
+      transform: scale(1.05) rotate(2deg);
+    }
+    100% {
+      transform: scale(1) rotate(0deg);
+      filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.1));
+    }
+  }
+
+  .avatar-collapsing {
+    animation: avatarCollapse 400ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  }
+
+  .avatar-expanding {
+    animation: avatarExpand 400ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  }
+
+  .github-badge-container {
+    transition: all 350ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  .github-badge-container.collapsed {
+    background: linear-gradient(135deg, var(--surface-2), var(--surface));
+  }
+</style>

@@ -1,10 +1,10 @@
 package clistrings
 
 const (
-	GitHubOAuthAppURL  = "https://github.com/settings/developers"
+	GitHubOAuthAppURL   = "https://github.com/settings/developers"
 	GitHubDeviceFlowDoc = "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app"
-	CloudflareTokenURL = "https://dash.cloudflare.com/profile/api-tokens"
-	CloudflareTokenDoc = "https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/deployment-guides/terraform/#3-create-a-cloudflare-api-token"
+	CloudflareTokenURL  = "https://dash.cloudflare.com/profile/api-tokens"
+	CloudflareTokenDoc  = "https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/deployment-guides/terraform/#3-create-a-cloudflare-api-token"
 )
 
 func GitHubDeviceFlowHelp() []string {
@@ -24,5 +24,5 @@ func CloudflareTokenHelp() []string {
 }
 
 func CloudflaredPersistenceNote() string {
-	return "Note: cloudflared runs as the current user; persistence and auto-restart are out of scope."
+	return "Note: cloudflared runs as the current user; bootstrap wires a crontab watchdog to keep it running after reboot."
 }

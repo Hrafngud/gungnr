@@ -253,7 +253,17 @@ const scrollToBottom = async () => {
   logViewport.value.scrollTop = logViewport.value.scrollHeight
 }
 
-watch([selectedContainer, followLive, showTimestamps], () => {
+watch(selectedContainer, () => {
+  if (!hasSelection.value) return
+  clearLogs()
+  if (streamState.value === 'paused') {
+    closeStream()
+    return
+  }
+  startStream()
+})
+
+watch([followLive, showTimestamps], () => {
   if (streamState.value === 'paused') return
   if (hasSelection.value) {
     startStream()
@@ -404,13 +414,9 @@ onBeforeUnmount(() => {
                 <p class="text-sm font-semibold text-[color:var(--text)]">
                   {{ container.name }}
                 </p>
-                <UiBadge tone="neutral">{{ container.status }}</UiBadge>
               </div>
               <p class="text-xs text-[color:var(--muted)]">
                 {{ container.image }}
-              </p>
-              <p class="text-xs text-[color:var(--muted-2)]">
-                {{ container.ports || 'No published ports' }}
               </p>
             </div>
           </div>
@@ -441,12 +447,9 @@ onBeforeUnmount(() => {
             <p class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
               Runtime
             </p>
-            <p class=" text-[color:var(--muted-2)]">{{ selectedInfo?.status }}</p>
-                        </div>
+            <p class="w-full text-[color:var(--muted-2)]">{{ selectedInfo?.status }}</p>
+            </div>
 
-            <p class="text-xs text-[color:var(--text)]">
-              ({{ selectedInfo?.runningFor || 'Unknown' }})
-            </p>
           </div>
           <div>
             <p class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Ports</p>

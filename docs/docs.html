@@ -674,6 +674,37 @@
                 </div>
               </div>
             </div>
+
+            <div
+              id="install-watchdog"
+              class="mt-6 card p-6"
+              data-doc-section
+              data-doc-title="Tunnel auto-start watchdog"
+              data-doc-group="installation"
+              data-doc-tags="cloudflared cron watchdog"
+            >
+              <h3 class="text-xl font-semibold">Tunnel auto-start watchdog</h3>
+              <p class="mt-2 text-sm text-[color:var(--muted)]">
+                Bootstrap installs a lightweight cron watchdog so the tunnel restarts on reboot and is checked
+                every 5 minutes. The scripts live under <code>~/gungnr/state</code>.
+              </p>
+              <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                <li><code>~/gungnr/state/cloudflared-run.sh</code> (starts the tunnel with the generated config)</li>
+                <li><code>~/gungnr/state/cloudflared-ensure.sh</code> (verifies the process and relaunches if needed)</li>
+              </ul>
+              <div class="mt-4 code-block" id="cmd-watchdog-run">
+                <button class="copy-button" data-copy-target="#cmd-watchdog-run code">Copy</button>
+                <pre class="m-0 text-sm"><code>~/gungnr/state/cloudflared-ensure.sh</code></pre>
+              </div>
+              <div class="mt-4 code-block" id="cmd-watchdog-view">
+                <button class="copy-button" data-copy-target="#cmd-watchdog-view code">Copy</button>
+                <pre class="m-0 text-sm"><code>crontab -l | rg 'gungnr-cloudflared'</code></pre>
+              </div>
+              <div class="mt-4 code-block" id="cmd-watchdog-remove">
+                <button class="copy-button" data-copy-target="#cmd-watchdog-remove code">Copy</button>
+                <pre class="m-0 text-sm"><code>crontab -l | rg -v 'gungnr-cloudflared' | crontab -</code></pre>
+              </div>
+            </div>
           </section>
 
           <section

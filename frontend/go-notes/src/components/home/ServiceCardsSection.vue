@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
@@ -34,7 +33,7 @@ const searchQuery = ref('')
 const customServiceCard: ServiceCard = {
   id: 'custom',
   name: 'Custom service',
-  description: 'Forward any local port through the host tunnel.',
+  description: 'Deploy a custom docker service.',
   repoLabel: 'cloudflare/cloudflared',
   repoUrl: 'https://github.com/cloudflare/cloudflared',
   kind: 'custom',
@@ -104,31 +103,26 @@ const serviceCards = computed<ServiceCard[]>(() => {
       </svg>
     </div>
     <div class="overflow-y-auto" style="max-height: 368px">
-      <div class="grid gap-4 sm:grid-cols-2">
+      <div class="grid grid-cols-4 gap-4">
         <UiPanel
           v-for="card in serviceCards"
           :key="card.id"
           :variant="selectedCardId === card.id ? 'raise' : 'soft'"
-          class="flex h-full flex-col gap-4 p-4 text-left transition"
+          class="flex h-full flex-row items-center gap-4 p-4 text-left transition"
           :class="selectedCardId === card.id ? 'border-[color:var(--accent)]' : ''"
         >
+          <div class="flex w-2/6 h-fit items-center justify-center rounded bg-transparent">
+                <UiServiceIcon :type="card.icon" />
+          </div>
+          <div class="flex flex-col gap-4 w-4/6">
           <div class="flex items-start justify-between gap-3">
             <div class="flex items-start gap-3">
-              <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded bg-[color:var(--bg-soft)]">
-                <UiServiceIcon :type="card.icon" />
-              </div>
               <div>
-                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                  Service
-                </p>
                 <h4 class="mt-1 text-base font-semibold text-[color:var(--text)]">
                   {{ card.name }}
                 </h4>
               </div>
             </div>
-            <UiBadge :tone="selectedCardId === card.id ? 'ok' : 'neutral'">
-              {{ selectedCardId === card.id ? 'Selected' : card.kind === 'custom' ? 'Custom' : 'Preset' }}
-            </UiBadge>
           </div>
           <p class="text-xs text-[color:var(--muted)]">
             {{ card.description }}
@@ -137,7 +131,7 @@ const serviceCards = computed<ServiceCard[]>(() => {
             <span v-if="card.subdomain">subdomain: {{ card.subdomain }}</span>
             <span v-if="card.port">port: {{ card.port }}</span>
           </div>
-          <div class="flex items-center gap-2 text-xs text-[color:var(--muted)]">
+          <div v-if="card.kind !== 'custom'" class="flex items-center gap-2 text-xs text-[color:var(--muted)]">
             <svg
               class="h-3.5 w-3.5 text-[color:var(--muted-2)]"
               viewBox="0 0 24 24"
@@ -168,6 +162,7 @@ const serviceCards = computed<ServiceCard[]>(() => {
           >
             {{ selectedCardId === card.id ? 'Hide form' : 'Select service' }}
           </UiButton>
+          </div>
         </UiPanel>
       </div>
       <p

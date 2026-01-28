@@ -2,12 +2,26 @@ import axios from 'axios'
 import mockData from '@/mock.json'
 
 export class ApiError extends Error {
+  code?: string
+  docsUrl?: string
   fields?: Record<string, string>
+  details?: unknown
 
-  constructor(message: string, fields?: Record<string, string>) {
+  constructor(
+    message: string,
+    options?: {
+      code?: string
+      docsUrl?: string
+      fields?: Record<string, string>
+      details?: unknown
+    },
+  ) {
     super(message)
     this.name = 'ApiError'
-    this.fields = fields
+    this.code = options?.code
+    this.docsUrl = options?.docsUrl
+    this.fields = options?.fields
+    this.details = options?.details
   }
 }
 
@@ -169,15 +183,28 @@ export function parseApiError(error: unknown): ApiError {
   if (axios.isAxiosError(error)) {
     const data =
       typeof error.response?.data === 'object' && error.response?.data !== null
-        ? (error.response?.data as {
-            error?: string
-            message?: string
-            fields?: Record<string, string>
-          })
+        ? (error.response?.data as Record<string, unknown>)
         : {}
 
-    const message = data.error || data.message || error.message || 'Unexpected error'
-    return new ApiError(message, data.fields)
+    const nested =
+      typeof data.error === 'object' && data.error !== null
+        ? (data.error as Record<string, unknown>)
+        : {}
+
+    const payload: Record<string, unknown> = { ...data, ...nested }
+
+    const code = stringOrUndefined(payload.code)
+    const docsUrl = stringOrUndefined(payload.docsUrl)
+    const fields = recordOrUndefined(payload.fields)
+    const details = payload.details
+
+    const message =
+      stringOrUndefined(payload.message) ||
+      (typeof data.error === 'string' ? data.error : undefined) ||
+      error.message ||
+      'Unexpected error'
+
+    return new ApiError(message, { code, docsUrl, fields, details })
   }
 
   if (error instanceof Error) {
@@ -188,7 +215,34 @@ export function parseApiError(error: unknown): ApiError {
 }
 
 export function apiErrorMessage(error: unknown): string {
-  return parseApiError(error).message
+  const parsed = parseApiError(error)
+  if (parsed.code) {
+    return `[${parsed.code}] ${parsed.message}`
+  }
+  return parsed.message
+}
+
+export function apiErrorCode(error: unknown): string | undefined {
+  return parseApiError(error).code
+}
+
+export function apiErrorDocsUrl(error: unknown): string | undefined {
+  return parseApiError(error).docsUrl
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed ? trimmed : undefined
+}
+
+function recordOrUndefined(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const entries = Object.entries(value as Record<string, unknown>).filter(
+    ([, v]) => typeof v === 'string',
+  )
+  if (entries.length === 0) return undefined
+  return Object.fromEntries(entries) as Record<string, string>
 }
 
 export function getApiBaseUrl(): string {

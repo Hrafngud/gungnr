@@ -45,6 +45,29 @@ as a user-managed process. Manual tunnel setup is no longer required for a
 standard install.
 Persistence and auto-restart are out of scope for now.
 
+### Tunnel auto-start watchdog
+Bootstrap installs a lightweight cron watchdog so `cloudflared` restarts after
+reboot and is re-checked every 5 minutes.
+
+Scripts created under `~/gungnr/state`:
+- `~/gungnr/state/cloudflared-run.sh` (starts the tunnel using the generated config)
+- `~/gungnr/state/cloudflared-ensure.sh` (checks the process and relaunches if needed)
+
+Run the ensure script manually:
+```bash
+~/gungnr/state/cloudflared-ensure.sh
+```
+
+View the managed crontab entries:
+```bash
+crontab -l | rg 'gungnr-cloudflared'
+```
+
+Remove only the watchdog entries (leaves other cron jobs intact):
+```bash
+crontab -l | rg -v 'gungnr-cloudflared' | crontab -
+```
+
 ## Gungnr setup
 1) Run `./install.sh` to install the CLI and prerequisites.
 2) Run `gungnr bootstrap` and follow the prompts to configure the machine.

@@ -5,7 +5,6 @@ import UiButton from '@/components/ui/UiButton.vue'
 import UiFieldGuidance from '@/components/ui/UiFieldGuidance.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import NavIcon from '@/components/NavIcon.vue'
-import HostStatusPanel from '@/components/home/HostStatusPanel.vue'
 import TemplateCardsSection from '@/components/home/TemplateCardsSection.vue'
 import ServiceCardsSection from '@/components/home/ServiceCardsSection.vue'
 import QuickDeployTemplateForm from '@/components/home/QuickDeployTemplateForm.vue'
@@ -17,16 +16,13 @@ import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toasts'
 import { usePageLoadingStore } from '@/stores/pageLoading'
 import { projectsApi } from '@/services/projects'
-import { healthApi } from '@/services/health'
 import { settingsApi } from '@/services/settings'
 import { githubApi } from '@/services/github'
 import { cloudflareApi } from '@/services/cloudflare'
 import { apiErrorMessage } from '@/services/api'
-import { isPendingJob } from '@/utils/jobStatus'
-import type { DockerHealth, TunnelHealth } from '@/types/health'
-import type { Settings } from '@/types/settings'
 import type { GitHubCatalog } from '@/types/github'
 import type { CloudflareZone } from '@/types/cloudflare'
+import type { Settings } from '@/types/settings'
 import { useFieldGuidance } from '@/composables/useFieldGuidance'
 
 type QueueState = {
@@ -58,12 +54,7 @@ const toastStore = useToastStore()
 const fieldGuidance = useFieldGuidance()
 const pageLoading = usePageLoadingStore()
 
-const machineName = ref('')
-const dockerHealth = ref<DockerHealth | null>(null)
-const tunnelHealth = ref<TunnelHealth | null>(null)
 const settings = ref<Settings | null>(null)
-const hostLoading = ref(false)
-const settingsError = ref<string | null>(null)
 const catalog = ref<GitHubCatalog | null>(null)
 const catalogError = ref<string | null>(null)
 const zones = ref<CloudflareZone[]>([])
@@ -119,34 +110,6 @@ const selectedServiceCard = ref<string | null>(null)
 
 const isAuthenticated = computed(() => Boolean(auth.user))
 
-const jobCounts = computed(() => {
-  const counts = {
-    pending: 0,
-    running: 0,
-    completed: 0,
-    failed: 0,
-  }
-  jobsStore.jobs.forEach((job) => {
-    if (isPendingJob(job.status)) counts.pending += 1
-    else if (job.status === 'running') counts.running += 1
-    else if (job.status === 'completed') counts.completed += 1
-    else if (job.status === 'failed') counts.failed += 1
-  })
-  return counts
-})
-
-const lastJob = computed(() => jobsStore.jobs[0] ?? null)
-
-const lastProject = computed(() => {
-  if (projectsStore.projects.length === 0) return null
-  const sorted = [...projectsStore.projects].sort((a, b) => {
-    const aTime = new Date(a.updatedAt || a.createdAt).getTime()
-    const bTime = new Date(b.updatedAt || b.createdAt).getTime()
-    return bTime - aTime
-  })
-  return sorted[0] ?? null
-})
-
 const templateOptions = computed(() => {
   const templates = catalog.value?.templates?.filter(
     (template) => template.owner && template.repo,
@@ -193,6 +156,15 @@ const domainOptions = computed(() => {
   return options
 })
 
+const loadSettings = async () => {
+  try {
+    const { data } = await settingsApi.get()
+    settings.value = data.settings
+  } catch (err) {
+    settings.value = null
+  }
+}
+
 const templateRepoLabel = computed(() => {
   if (catalogError.value) return 'Template source unavailable'
   if (templateOptions.value.length === 0) {
@@ -238,32 +210,6 @@ const parsePort = (value: string, required: boolean) => {
   return parsed
 }
 
-const loadHostStatus = async () => {
-  hostLoading.value = true
-  settingsError.value = null
-  const [dockerResult, tunnelResult, settingsResult] = await Promise.allSettled([
-    healthApi.docker(),
-    healthApi.tunnel(),
-    settingsApi.get(),
-  ])
-  if (dockerResult.status === 'fulfilled') {
-    dockerHealth.value = dockerResult.value.data
-  } else {
-    dockerHealth.value = { status: 'error', detail: apiErrorMessage(dockerResult.reason) }
-  }
-  if (tunnelResult.status === 'fulfilled') {
-    tunnelHealth.value = tunnelResult.value.data
-  } else {
-    tunnelHealth.value = { status: 'error', detail: apiErrorMessage(tunnelResult.reason) }
-  }
-  if (settingsResult.status === 'fulfilled') {
-    settings.value = settingsResult.value.data.settings
-  } else {
-    settingsError.value = apiErrorMessage(settingsResult.reason)
-  }
-  hostLoading.value = false
-}
-
 const loadCatalog = async () => {
   if (!isAuthenticated.value) {
     catalog.value = null
@@ -295,7 +241,7 @@ const loadZones = async () => {
 
 const refreshAll = async () => {
   await Promise.allSettled([
-    loadHostStatus(),
+    loadSettings(),
     loadZones(),
     loadCatalog(),
     jobsStore.fetchJobs(),
@@ -418,8 +364,13 @@ const submitQuick = async () => {
       containerPort: containerPort ?? undefined,
     })
     quickState.jobId = data.job.id
-    quickState.success = 'Service forward queued. Automation started.'
-    toastStore.success('Service forward queued.', 'Forward queued')
+    const hostPort = data.hostPort ?? port
+    const portNote =
+      hostPort === port
+        ? `on port ${hostPort}`
+        : `requested port ${port} was busy; using port ${hostPort}`
+    quickState.success = `Service forward queued ${portNote}. Automation started.`
+    toastStore.success(`Service forward queued ${portNote}.`, 'Forward queued')
     await refreshAll()
   } catch (err) {
     const message = apiErrorMessage(err)
@@ -481,13 +432,10 @@ onMounted(async () => {
   await Promise.allSettled([
     !projectsStore.initialized ? projectsStore.fetchProjects() : Promise.resolve(),
     !jobsStore.initialized ? jobsStore.fetchJobs() : Promise.resolve(),
-    loadHostStatus(),
+    loadSettings(),
     loadZones(),
   ])
   pageLoading.stop()
-  if (typeof window !== 'undefined') {
-    machineName.value = window.location.hostname || 'localhost'
-  }
 })
 
 watch(
@@ -528,9 +476,11 @@ watch(
   () => auth.user,
   (value) => {
     if (value) {
+      loadSettings()
       loadCatalog()
       loadZones()
     } else {
+      loadSettings()
       catalog.value = null
       catalogError.value = null
       zones.value = []
@@ -541,21 +491,6 @@ watch(
 </script>
 
 <template>
-  <HostStatusPanel
-    :machine-name="machineName"
-    :docker-health="dockerHealth"
-    :tunnel-health="tunnelHealth"
-    :settings="settings"
-    :host-loading="hostLoading"
-    :settings-error="settingsError"
-    :jobs-error="jobsStore.error"
-    :projects-error="projectsStore.error"
-    :job-counts="jobCounts"
-    :last-job="lastJob"
-    :last-project="lastProject"
-    @refresh="refreshAll"
-  />
-  <hr />
   <section class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <div>
@@ -586,7 +521,7 @@ watch(
           </span>
         </UiButton>
       </UiPanel>
-      <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div class="grid gap-6">
         <TemplateCardsSection
           :catalog="catalog"
           :catalog-error="catalogError"

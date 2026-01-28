@@ -352,8 +352,6 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 			return err
 		}
 	}
-	logger.Logf("using host port %d for quick service", req.Port)
-
 	runtimeCfg, err := w.settings.ResolveConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
@@ -362,6 +360,7 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 	if err != nil {
 		return err
 	}
+	logger.Logf("using host port %d for quick service", req.Port)
 
 	if err := w.runContainer(ctx, logger, req); err != nil {
 		return err
@@ -517,6 +516,103 @@ func addDockerReservedPorts(ctx context.Context, reserved map[int]bool) {
 	for _, port := range ports {
 		reserved[port] = true
 	}
+}
+
+func ensureAvailableHostPort(ctx context.Context, requested int) (int, error) {
+	if err := ValidatePort(requested); err != nil {
+		return 0, err
+	}
+
+	reserved := map[int]bool{}
+	addDockerReservedPorts(ctx, reserved)
+	addHostReservedPorts(ctx, reserved)
+
+	if !reserved[requested] {
+		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", requested))
+		if err == nil {
+			_ = ln.Close()
+			return requested, nil
+		}
+		if isPermissionError(err) {
+			return requested, nil
+		}
+		reserved[requested] = true
+	}
+
+	port, err := findFreePortNearby(requested+1, reserved)
+	if err != nil {
+		return 0, err
+	}
+	return port, nil
+}
+
+func addHostReservedPorts(ctx context.Context, reserved map[int]bool) {
+	ports, err := listHostListeningPorts(ctx)
+	if err != nil {
+		return
+	}
+	for _, port := range ports {
+		reserved[port] = true
+	}
+}
+
+func findFreePortNearby(start int, reserved map[int]bool) (int, error) {
+	for port := start; port <= 65535; port++ {
+		if reserved[port] {
+			continue
+		}
+		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err == nil {
+			_ = ln.Close()
+			return port, nil
+		}
+		if isPermissionError(err) {
+			// For privileged ports we cannot bind as a non-root user, so rely on the
+			// reserved set populated from host listeners and Docker published ports.
+			return port, nil
+		}
+	}
+	return 0, fmt.Errorf("no free port available from %d", start)
+}
+
+func listHostListeningPorts(ctx context.Context) ([]int, error) {
+	cmd := exec.CommandContext(ctx, "ss", "-ltnH")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, err
+	}
+	return parseHostListeningPorts(string(output)), nil
+}
+
+var hostPortSuffixPattern = regexp.MustCompile(`(?:\]|:)(\d+)$`)
+
+func parseHostListeningPorts(raw string) []int {
+	seen := map[int]bool{}
+	lines := strings.Split(raw, "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		localAddr := strings.TrimSpace(fields[3])
+		if localAddr == "" || strings.HasSuffix(localAddr, ":*") {
+			continue
+		}
+		matches := hostPortSuffixPattern.FindStringSubmatch(localAddr)
+		if matches == nil {
+			continue
+		}
+		port, err := strconv.Atoi(matches[1])
+		if err != nil || port < 1 || port > 65535 {
+			continue
+		}
+		seen[port] = true
+	}
+	ports := make([]int, 0, len(seen))
+	for port := range seen {
+		ports = append(ports, port)
+	}
+	return ports
 }
 
 func listDockerPublishedPorts(ctx context.Context) ([]int, error) {

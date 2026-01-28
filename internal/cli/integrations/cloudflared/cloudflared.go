@@ -92,6 +92,9 @@ func WriteConfig(cloudflaredDir string, tunnel *TunnelInfo, hostname string) (st
 
 func StartTunnel(configPath string) (string, error) {
 	logPath := filepath.Join(filepath.Dir(configPath), "cloudflared.log")
+	if err := stopTunnelProcesses(configPath); err != nil {
+		return "", err
+	}
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return "", fmt.Errorf("open cloudflared log file: %w", err)
@@ -106,6 +109,74 @@ func StartTunnel(configPath string) (string, error) {
 	}
 	_ = logFile.Close()
 	return logPath, nil
+}
+
+func stopTunnelProcesses(configPath string) error {
+	pids, err := findTunnelPIDs(configPath)
+	if err != nil {
+		return err
+	}
+	if len(pids) == 0 {
+		return nil
+	}
+
+	for _, pid := range pids {
+		if killErr := exec.Command("kill", "-TERM", strconv.Itoa(pid)).Run(); killErr != nil {
+			return fmt.Errorf("stop existing cloudflared process %d: %w", pid, killErr)
+		}
+	}
+
+	time.Sleep(2 * time.Second)
+
+	remaining, err := findTunnelPIDs(configPath)
+	if err != nil {
+		return err
+	}
+	if len(remaining) == 0 {
+		return nil
+	}
+
+	for _, pid := range remaining {
+		_ = exec.Command("kill", "-KILL", strconv.Itoa(pid)).Run()
+	}
+
+	finalCheck, err := findTunnelPIDs(configPath)
+	if err != nil {
+		return err
+	}
+	if len(finalCheck) > 0 {
+		return fmt.Errorf("cloudflared still running for config %s (pids: %v)", configPath, finalCheck)
+	}
+	return nil
+}
+
+func findTunnelPIDs(configPath string) ([]int, error) {
+	escapedConfig := regexp.QuoteMeta(configPath)
+	pattern := fmt.Sprintf("cloudflared.*--config[[:space:]]+%s.*tunnel run", escapedConfig)
+	cmd := exec.Command("pgrep", "-f", pattern)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		trimmed := strings.TrimSpace(string(output))
+		if trimmed == "" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("pgrep cloudflared: %s", trimmed)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	pids := make([]int, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		pid, convErr := strconv.Atoi(line)
+		if convErr != nil {
+			return nil, fmt.Errorf("parse cloudflared pid %q: %w", line, convErr)
+		}
+		pids = append(pids, pid)
+	}
+	return pids, nil
 }
 
 func WaitForRunning(tunnelID string, timeout time.Duration) error {

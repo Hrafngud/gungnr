@@ -681,6 +681,9 @@ h3 {
   align-items: center;
   justify-content: center;
   animation: hero-float 6s ease-in-out infinite;
+  border: none;
+  border-radius: 50%;
+  overflow: hidden;
 }
 
 .page-overlay .hero-logo-mark {
@@ -690,8 +693,7 @@ h3 {
 .hero-logo-svg {
   width: 70%;
   height: auto;
-  filter: drop-shadow(0 12px 24px rgba(7, 16, 24, 0.45))
-    drop-shadow(0 0 18px rgba(137, 194, 217, 0.35));
+  filter: drop-shadow(0 4px 12px rgba(7, 16, 24, 0.35));
 }
 
 .hero-path {

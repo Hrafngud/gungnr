@@ -87,7 +87,7 @@
                 <input
                   id="doc-search"
                   type="search"
-                  placeholder="Search errors: docker, tunnel, dns"
+                  placeholder="Search errors: AUTH-401, docker, tunnel"
                   autocomplete="off"
                 />
               </div>
@@ -171,6 +171,9 @@
               </div>
               <div class="sidebar-section" data-doc-group="panel-auth" data-doc-title="Panel & Auth">
                 <a class="sidebar-link" data-nav-link href="#errors-panel">Panel &amp; auth</a>
+              </div>
+              <div class="sidebar-section" data-doc-group="api-codes" data-doc-title="API Error Codes">
+                <a class="sidebar-link" data-nav-link href="#errors-api-codes">API error codes</a>
               </div>
             </aside>
 
@@ -447,6 +450,411 @@ sudo cat "$(docker inspect -f '{{.LogPath}}' &lt;container-id&gt;)"</code></pre>
                       additional users must be added in the panel.
                     </p>
                   </details>
+                </div>
+              </section>
+
+              <section
+                id="errors-api-codes"
+                class="scroll-mt-24"
+                data-doc-section
+                data-doc-group="api-codes"
+                data-doc-title="API error codes"
+                data-doc-tags="api error codes auth validation jobs host settings cloudflare github users projects audit"
+                data-doc-code="API-CODES"
+              >
+                <p class="section-label">API error codes</p>
+                <h2 class="mt-2 text-3xl font-semibold">Standardized API errors</h2>
+                <p class="mt-3 text-[color:var(--muted)]">
+                  Every API error now includes a stable <strong>code</strong>. Search by code (for example
+                  <code>AUTH-401</code>) to jump directly to the recovery steps.
+                </p>
+                <div class="callout mt-4">
+                  Error response shape: <code>{ code, message, error, docsUrl }</code>. The UI surfaces the code in
+                  toast messages as <code>[CODE]</code> prefixes.
+                </div>
+
+                <div class="mt-8 flex flex-col gap-6">
+                  <div>
+                    <h3 class="text-lg font-semibold">Core &amp; validation</h3>
+                    <div class="mt-3 grid gap-4">
+                      <details class="details-card" id="CORE-400" data-doc-section data-doc-group="api-codes" data-doc-title="CORE-400 bad request" data-doc-tags="core bad request" data-doc-code="CORE-400">
+                        <summary><span class="error-code">CORE-400</span>Bad request</summary>
+                        <p>The request payload or query parameters are invalid. Re-check the request shape and field names.</p>
+                      </details>
+                      <details class="details-card" id="CORE-404" data-doc-section data-doc-group="api-codes" data-doc-title="CORE-404 resource not found" data-doc-tags="core not found" data-doc-code="CORE-404">
+                        <summary><span class="error-code">CORE-404</span>Resource not found</summary>
+                        <p>The referenced resource does not exist. Verify IDs, names, and that the resource still exists.</p>
+                      </details>
+                      <details class="details-card" id="CORE-500" data-doc-section data-doc-group="api-codes" data-doc-title="CORE-500 internal error" data-doc-tags="core internal" data-doc-code="CORE-500">
+                        <summary><span class="error-code">CORE-500</span>Internal server error</summary>
+                        <p>An unexpected server error occurred. Check <code>make logs</code> and the API container logs for details.</p>
+                      </details>
+                      <details class="details-card" id="VAL-400-FIELDS" data-doc-section data-doc-group="api-codes" data-doc-title="VAL-400-FIELDS validation fields" data-doc-tags="validation fields" data-doc-code="VAL-400-FIELDS">
+                        <summary><span class="error-code">VAL-400-FIELDS</span>Field validation failed</summary>
+                        <p>One or more fields failed validation. Inspect any <code>fields</code> map returned by the API for specifics.</p>
+                      </details>
+                      <details class="details-card" id="VAL-400-NAME" data-doc-section data-doc-group="api-codes" data-doc-title="VAL-400-NAME invalid name" data-doc-tags="validation name" data-doc-code="VAL-400-NAME">
+                        <summary><span class="error-code">VAL-400-NAME</span>Invalid project or service name</summary>
+                        <p>Names must be lowercase and use letters, numbers, or dashes. Trim spaces and avoid uppercase characters.</p>
+                      </details>
+                      <details class="details-card" id="VAL-400-SUBDOMAIN" data-doc-section data-doc-group="api-codes" data-doc-title="VAL-400-SUBDOMAIN invalid subdomain" data-doc-tags="validation subdomain" data-doc-code="VAL-400-SUBDOMAIN">
+                        <summary><span class="error-code">VAL-400-SUBDOMAIN</span>Invalid subdomain</summary>
+                        <p>Subdomains must be lowercase and use letters, numbers, or dashes. Avoid dots and underscores.</p>
+                      </details>
+                      <details class="details-card" id="VAL-400-PORT" data-doc-section data-doc-group="api-codes" data-doc-title="VAL-400-PORT invalid port" data-doc-tags="validation port" data-doc-code="VAL-400-PORT">
+                        <summary><span class="error-code">VAL-400-PORT</span>Invalid port</summary>
+                        <p>Ports must be between 1 and 65535. Use a different port if the requested one is reserved or unavailable.</p>
+                      </details>
+                      <details class="details-card" id="VAL-400-DOMAIN" data-doc-section data-doc-group="api-codes" data-doc-title="VAL-400-DOMAIN invalid domain" data-doc-tags="validation domain" data-doc-code="VAL-400-DOMAIN">
+                        <summary><span class="error-code">VAL-400-DOMAIN</span>Invalid domain</summary>
+                        <p>The provided domain is not a valid hostname. Use a full domain like <code>example.com</code>.</p>
+                      </details>
+                      <details class="details-card" id="VAL-400-DOMAIN-MISSING" data-doc-section data-doc-group="api-codes" data-doc-title="VAL-400-DOMAIN-MISSING base domain missing" data-doc-tags="validation domain missing" data-doc-code="VAL-400-DOMAIN-MISSING">
+                        <summary><span class="error-code">VAL-400-DOMAIN-MISSING</span>Base domain is not configured</summary>
+                        <p>Bootstrap should set the base domain. Verify your bootstrap-generated <code>.env</code> and the Host Settings domain value.</p>
+                      </details>
+                      <details class="details-card" id="VAL-400-DOMAIN-NOT-CONFIGURED" data-doc-section data-doc-group="api-codes" data-doc-title="VAL-400-DOMAIN-NOT-CONFIGURED domain not configured" data-doc-tags="validation domain not configured" data-doc-code="VAL-400-DOMAIN-NOT-CONFIGURED">
+                        <summary><span class="error-code">VAL-400-DOMAIN-NOT-CONFIGURED</span>Domain is not configured</summary>
+                        <p>The requested domain is not available to the panel. Choose the base domain or a Cloudflare zone visible to your token.</p>
+                      </details>
+                      <details class="details-card" id="VAL-400-CONTAINER-NAME" data-doc-section data-doc-group="api-codes" data-doc-title="VAL-400-CONTAINER-NAME invalid container name" data-doc-tags="validation container" data-doc-code="VAL-400-CONTAINER-NAME">
+                        <summary><span class="error-code">VAL-400-CONTAINER-NAME</span>Invalid container name</summary>
+                        <p>Container names must start with a letter or number and may include <code>.</code>, <code>_</code>, or <code>-</code>.</p>
+                      </details>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 class="text-lg font-semibold">Authentication</h3>
+                    <div class="mt-3 grid gap-4">
+                      <details class="details-card" id="AUTH-401" data-doc-section data-doc-group="api-codes" data-doc-title="AUTH-401 unauthenticated" data-doc-tags="auth unauthenticated" data-doc-code="AUTH-401">
+                        <summary><span class="error-code">AUTH-401</span>Unauthenticated</summary>
+                        <p>Your session is missing or expired. Log in again via GitHub and retry the action.</p>
+                      </details>
+                      <details class="details-card" id="AUTH-401-CREDENTIALS" data-doc-section data-doc-group="api-codes" data-doc-title="AUTH-401-CREDENTIALS invalid credentials" data-doc-tags="auth credentials test token" data-doc-code="AUTH-401-CREDENTIALS">
+                        <summary><span class="error-code">AUTH-401-CREDENTIALS</span>Invalid credentials</summary>
+                        <p>The admin test token credentials are incorrect. Verify <code>ADMIN_LOGIN</code> and <code>ADMIN_PASSWORD</code> in the environment.</p>
+                      </details>
+                      <details class="details-card" id="AUTH-403" data-doc-section data-doc-group="api-codes" data-doc-title="AUTH-403 forbidden" data-doc-tags="auth forbidden allowlist" data-doc-code="AUTH-403">
+                        <summary><span class="error-code">AUTH-403</span>Forbidden</summary>
+                        <p>The user is not allowed to access the resource. Confirm the user is on the allowlist with the correct role.</p>
+                      </details>
+                      <details class="details-card" id="AUTH-403-ADMIN" data-doc-section data-doc-group="api-codes" data-doc-title="AUTH-403-ADMIN admin required" data-doc-tags="auth admin role" data-doc-code="AUTH-403-ADMIN">
+                        <summary><span class="error-code">AUTH-403-ADMIN</span>Admin role required</summary>
+                        <p>This action is restricted to Admin or SuperUser roles. Use an admin account or update the user role in Users.</p>
+                      </details>
+                      <details class="details-card" id="AUTH-400-CALLBACK" data-doc-section data-doc-group="api-codes" data-doc-title="AUTH-400-CALLBACK missing oauth callback fields" data-doc-tags="auth oauth callback" data-doc-code="AUTH-400-CALLBACK">
+                        <summary><span class="error-code">AUTH-400-CALLBACK</span>Missing OAuth callback data</summary>
+                        <p>The OAuth callback is missing <code>code</code> or <code>state</code>. Restart the login flow and avoid opening stale callback URLs.</p>
+                      </details>
+                      <details class="details-card" id="AUTH-400-STATE" data-doc-section data-doc-group="api-codes" data-doc-title="AUTH-400-STATE invalid oauth state" data-doc-tags="auth oauth state" data-doc-code="AUTH-400-STATE">
+                        <summary><span class="error-code">AUTH-400-STATE</span>Invalid OAuth state</summary>
+                        <p>The OAuth state cookie does not match the callback. Clear cookies for the panel domain and retry login.</p>
+                      </details>
+                      <details class="details-card" id="AUTH-404-TEST-TOKEN" data-doc-section data-doc-group="api-codes" data-doc-title="AUTH-404-TEST-TOKEN test token disabled" data-doc-tags="auth test token" data-doc-code="AUTH-404-TEST-TOKEN">
+                        <summary><span class="error-code">AUTH-404-TEST-TOKEN</span>Test token endpoint disabled</summary>
+                        <p>The admin test-token endpoint is disabled unless <code>ADMIN_LOGIN</code> and <code>ADMIN_PASSWORD</code> are set.</p>
+                      </details>
+                      <details class="details-card" id="AUTH-400-TEST-TOKEN" data-doc-section data-doc-group="api-codes" data-doc-title="AUTH-400-TEST-TOKEN invalid test token payload" data-doc-tags="auth test token payload" data-doc-code="AUTH-400-TEST-TOKEN">
+                        <summary><span class="error-code">AUTH-400-TEST-TOKEN</span>Invalid test token payload</summary>
+                        <p>The request body for <code>/test-token</code> is invalid. Send JSON with <code>login</code> and <code>password</code> fields.</p>
+                      </details>
+                      <details class="details-card" id="AUTH-500-STATE" data-doc-section data-doc-group="api-codes" data-doc-title="AUTH-500-STATE failed to generate oauth state" data-doc-tags="auth state" data-doc-code="AUTH-500-STATE">
+                        <summary><span class="error-code">AUTH-500-STATE</span>Failed to generate OAuth state</summary>
+                        <p>The server could not generate a secure OAuth state. Check container entropy sources and restart the API.</p>
+                      </details>
+                      <details class="details-card" id="AUTH-500-LOGIN" data-doc-section data-doc-group="api-codes" data-doc-title="AUTH-500-LOGIN login failed" data-doc-tags="auth login" data-doc-code="AUTH-500-LOGIN">
+                        <summary><span class="error-code">AUTH-500-LOGIN</span>Login failed</summary>
+                        <p>The OAuth exchange or GitHub lookup failed. Confirm GitHub OAuth credentials and callback URL are correct.</p>
+                      </details>
+                      <details class="details-card" id="AUTH-500-SESSION" data-doc-section data-doc-group="api-codes" data-doc-title="AUTH-500-SESSION failed to create session" data-doc-tags="auth session" data-doc-code="AUTH-500-SESSION">
+                        <summary><span class="error-code">AUTH-500-SESSION</span>Failed to create session</summary>
+                        <p>The server could not encode the session. Verify <code>SESSION_SECRET</code> is set and stable across restarts.</p>
+                      </details>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 class="text-lg font-semibold">Jobs</h3>
+                    <div class="mt-3 grid gap-4">
+                      <details class="details-card" id="JOB-400-ID" data-doc-section data-doc-group="api-codes" data-doc-title="JOB-400-ID invalid job id" data-doc-tags="jobs id" data-doc-code="JOB-400-ID">
+                        <summary><span class="error-code">JOB-400-ID</span>Invalid job id</summary>
+                        <p>The job id is not a valid positive number. Use the numeric job id from the Jobs view.</p>
+                      </details>
+                      <details class="details-card" id="JOB-400-BODY" data-doc-section data-doc-group="api-codes" data-doc-title="JOB-400-BODY invalid job request body" data-doc-tags="jobs body" data-doc-code="JOB-400-BODY">
+                        <summary><span class="error-code">JOB-400-BODY</span>Invalid job request body</summary>
+                        <p>The request body is malformed. Ensure JSON is valid and matches the endpoint schema.</p>
+                      </details>
+                      <details class="details-card" id="JOB-404" data-doc-section data-doc-group="api-codes" data-doc-title="JOB-404 job not found" data-doc-tags="jobs not found" data-doc-code="JOB-404">
+                        <summary><span class="error-code">JOB-404</span>Job not found</summary>
+                        <p>The job no longer exists. Refresh the Jobs list and retry using an existing job id.</p>
+                      </details>
+                      <details class="details-card" id="JOB-409-FINISHED" data-doc-section data-doc-group="api-codes" data-doc-title="JOB-409-FINISHED job already finished" data-doc-tags="jobs conflict finished" data-doc-code="JOB-409-FINISHED">
+                        <summary><span class="error-code">JOB-409-FINISHED</span>Job already finished</summary>
+                        <p>The job has already completed or failed. Use retry instead of stop, or create a new job.</p>
+                      </details>
+                      <details class="details-card" id="JOB-409-RUNNING" data-doc-section data-doc-group="api-codes" data-doc-title="JOB-409-RUNNING job already running" data-doc-tags="jobs conflict running" data-doc-code="JOB-409-RUNNING">
+                        <summary><span class="error-code">JOB-409-RUNNING</span>Job already running</summary>
+                        <p>The job is currently running. Wait for it to finish or cancel it if the action supports stopping.</p>
+                      </details>
+                      <details class="details-card" id="JOB-409-NOT-STOPPABLE" data-doc-section data-doc-group="api-codes" data-doc-title="JOB-409-NOT-STOPPABLE job not stoppable" data-doc-tags="jobs conflict stoppable" data-doc-code="JOB-409-NOT-STOPPABLE">
+                        <summary><span class="error-code">JOB-409-NOT-STOPPABLE</span>Job is not stoppable</summary>
+                        <p>This job status cannot be stopped. Inspect the job status and logs to understand the current lifecycle stage.</p>
+                      </details>
+                      <details class="details-card" id="JOB-409-NOT-RETRYABLE" data-doc-section data-doc-group="api-codes" data-doc-title="JOB-409-NOT-RETRYABLE job not retryable" data-doc-tags="jobs conflict retryable" data-doc-code="JOB-409-NOT-RETRYABLE">
+                        <summary><span class="error-code">JOB-409-NOT-RETRYABLE</span>Job is not retryable</summary>
+                        <p>Only failed jobs can be retried. Wait for the job to fail, or rerun the action manually.</p>
+                      </details>
+                      <details class="details-card" id="JOB-500-LIST" data-doc-section data-doc-group="api-codes" data-doc-title="JOB-500-LIST failed to list jobs" data-doc-tags="jobs list" data-doc-code="JOB-500-LIST">
+                        <summary><span class="error-code">JOB-500-LIST</span>Failed to load jobs</summary>
+                        <p>The server could not load jobs from the database. Check Postgres health and API logs.</p>
+                      </details>
+                      <details class="details-card" id="JOB-500-STOP" data-doc-section data-doc-group="api-codes" data-doc-title="JOB-500-STOP failed to stop job" data-doc-tags="jobs stop" data-doc-code="JOB-500-STOP">
+                        <summary><span class="error-code">JOB-500-STOP</span>Failed to stop job</summary>
+                        <p>The API could not update the job state. Check database connectivity and retry.</p>
+                      </details>
+                      <details class="details-card" id="JOB-500-RETRY" data-doc-section data-doc-group="api-codes" data-doc-title="JOB-500-RETRY failed to retry job" data-doc-tags="jobs retry" data-doc-code="JOB-500-RETRY">
+                        <summary><span class="error-code">JOB-500-RETRY</span>Failed to retry job</summary>
+                        <p>The retry job could not be queued. Check the runner status and the API logs.</p>
+                      </details>
+                      <details class="details-card" id="JOB-500-STREAM" data-doc-section data-doc-group="api-codes" data-doc-title="JOB-500-STREAM job stream unsupported" data-doc-tags="jobs stream" data-doc-code="JOB-500-STREAM">
+                        <summary><span class="error-code">JOB-500-STREAM</span>Job streaming unsupported</summary>
+                        <p>The current server or proxy does not support streaming. Use the Jobs detail view and refresh periodically.</p>
+                      </details>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 class="text-lg font-semibold">Host &amp; Docker</h3>
+                    <div class="mt-3 grid gap-4">
+                      <details class="details-card" id="HOST-400-PROJECT" data-doc-section data-doc-group="api-codes" data-doc-title="HOST-400-PROJECT invalid project name" data-doc-tags="host docker project" data-doc-code="HOST-400-PROJECT">
+                        <summary><span class="error-code">HOST-400-PROJECT</span>Invalid project name</summary>
+                        <p>The project filter contains unsafe characters. Use only letters, numbers, dots, underscores, or dashes.</p>
+                      </details>
+                      <details class="details-card" id="HOST-400-CONTAINER" data-doc-section data-doc-group="api-codes" data-doc-title="HOST-400-CONTAINER invalid container input" data-doc-tags="host docker container" data-doc-code="HOST-400-CONTAINER">
+                        <summary><span class="error-code">HOST-400-CONTAINER</span>Invalid container input</summary>
+                        <p>The container name is missing or invalid. Choose a container from the list instead of typing a custom name.</p>
+                      </details>
+                      <details class="details-card" id="HOST-400-BODY" data-doc-section data-doc-group="api-codes" data-doc-title="HOST-400-BODY invalid host request body" data-doc-tags="host docker body" data-doc-code="HOST-400-BODY">
+                        <summary><span class="error-code">HOST-400-BODY</span>Invalid request body</summary>
+                        <p>The request body is malformed. Ensure the action payload is valid JSON.</p>
+                      </details>
+                      <details class="details-card" id="HOST-403-ADMIN" data-doc-section data-doc-group="api-codes" data-doc-title="HOST-403-ADMIN admin required" data-doc-tags="host docker admin" data-doc-code="HOST-403-ADMIN">
+                        <summary><span class="error-code">HOST-403-ADMIN</span>Admin role required</summary>
+                        <p>Docker mutations (stop, restart, remove) require Admin or SuperUser access.</p>
+                      </details>
+                      <details class="details-card" id="HOST-500-DOCKER" data-doc-section data-doc-group="api-codes" data-doc-title="HOST-500-DOCKER docker command failed" data-doc-tags="host docker" data-doc-code="HOST-500-DOCKER">
+                        <summary><span class="error-code">HOST-500-DOCKER</span>Docker command failed</summary>
+                        <p>The Docker command failed on the host. Check that Docker is running and that the API has socket access.</p>
+                      </details>
+                      <details class="details-card" id="HOST-500-USAGE" data-doc-section data-doc-group="api-codes" data-doc-title="HOST-500-USAGE docker usage failed" data-doc-tags="host docker usage" data-doc-code="HOST-500-USAGE">
+                        <summary><span class="error-code">HOST-500-USAGE</span>Failed to load Docker usage</summary>
+                        <p>Docker usage inspection failed. Run <code>docker system df</code> on the host to verify Docker health.</p>
+                      </details>
+                      <details class="details-card" id="HOST-500-LOGS" data-doc-section data-doc-group="api-codes" data-doc-title="HOST-500-LOGS docker logs failed" data-doc-tags="host docker logs" data-doc-code="HOST-500-LOGS">
+                        <summary><span class="error-code">HOST-500-LOGS</span>Failed to stream Docker logs</summary>
+                        <p>Log streaming failed. Confirm the container exists and that Docker logs are accessible on the host.</p>
+                      </details>
+                      <details class="details-card" id="HOST-500-STREAM" data-doc-section data-doc-group="api-codes" data-doc-title="HOST-500-STREAM streaming unsupported" data-doc-tags="host docker stream" data-doc-code="HOST-500-STREAM">
+                        <summary><span class="error-code">HOST-500-STREAM</span>Streaming unsupported</summary>
+                        <p>The server or proxy does not support streaming responses. Try refreshing the view or check logs directly.</p>
+                      </details>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 class="text-lg font-semibold">Settings</h3>
+                    <div class="mt-3 grid gap-4">
+                      <details class="details-card" id="SETTINGS-500-LOAD" data-doc-section data-doc-group="api-codes" data-doc-title="SETTINGS-500-LOAD failed to load settings" data-doc-tags="settings load" data-doc-code="SETTINGS-500-LOAD">
+                        <summary><span class="error-code">SETTINGS-500-LOAD</span>Failed to load settings</summary>
+                        <p>The API could not load settings from storage. Check database connectivity and API logs.</p>
+                      </details>
+                      <details class="details-card" id="SETTINGS-500-SOURCES" data-doc-section data-doc-group="api-codes" data-doc-title="SETTINGS-500-SOURCES failed to resolve sources" data-doc-tags="settings sources" data-doc-code="SETTINGS-500-SOURCES">
+                        <summary><span class="error-code">SETTINGS-500-SOURCES</span>Failed to resolve settings sources</summary>
+                        <p>The API could not resolve config sources. Verify the environment and database are consistent.</p>
+                      </details>
+                      <details class="details-card" id="SETTINGS-403-ADMIN" data-doc-section data-doc-group="api-codes" data-doc-title="SETTINGS-403-ADMIN admin required" data-doc-tags="settings admin" data-doc-code="SETTINGS-403-ADMIN">
+                        <summary><span class="error-code">SETTINGS-403-ADMIN</span>Admin role required</summary>
+                        <p>Updating settings requires Admin or SuperUser access.</p>
+                      </details>
+                      <details class="details-card" id="SETTINGS-400-BODY" data-doc-section data-doc-group="api-codes" data-doc-title="SETTINGS-400-BODY invalid settings payload" data-doc-tags="settings payload" data-doc-code="SETTINGS-400-BODY">
+                        <summary><span class="error-code">SETTINGS-400-BODY</span>Invalid settings payload</summary>
+                        <p>The settings request body is invalid. Confirm it matches the settings schema and uses correct field names.</p>
+                      </details>
+                      <details class="details-card" id="SETTINGS-500-UPDATE" data-doc-section data-doc-group="api-codes" data-doc-title="SETTINGS-500-UPDATE failed to update settings" data-doc-tags="settings update" data-doc-code="SETTINGS-500-UPDATE">
+                        <summary><span class="error-code">SETTINGS-500-UPDATE</span>Failed to update settings</summary>
+                        <p>The API could not persist settings. Check database health and retry the update.</p>
+                      </details>
+                      <details class="details-card" id="SETTINGS-400-PREVIEW" data-doc-section data-doc-group="api-codes" data-doc-title="SETTINGS-400-PREVIEW cloudflared preview failed" data-doc-tags="settings preview cloudflared" data-doc-code="SETTINGS-400-PREVIEW">
+                        <summary><span class="error-code">SETTINGS-400-PREVIEW</span>Cloudflared preview failed</summary>
+                        <p>The configured cloudflared config path could not be read. Verify the path exists and is readable by the API container.</p>
+                      </details>
+                      <details class="details-card" id="SETTINGS-500-SYNC" data-doc-section data-doc-group="api-codes" data-doc-title="SETTINGS-500-SYNC failed to sync settings" data-doc-tags="settings sync cloudflare" data-doc-code="SETTINGS-500-SYNC">
+                        <summary><span class="error-code">SETTINGS-500-SYNC</span>Failed to sync settings</summary>
+                        <p>Syncing settings from the environment failed. Check the Cloudflare-related environment variables and retry.</p>
+                      </details>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 class="text-lg font-semibold">Cloudflare &amp; GitHub</h3>
+                    <div class="mt-3 grid gap-4">
+                      <details class="details-card" id="CF-500-SERVICE" data-doc-section data-doc-group="api-codes" data-doc-title="CF-500-SERVICE cloudflare service unavailable" data-doc-tags="cloudflare service" data-doc-code="CF-500-SERVICE">
+                        <summary><span class="error-code">CF-500-SERVICE</span>Cloudflare service unavailable</summary>
+                        <p>The Cloudflare integration is not initialized. Restart the API and confirm Cloudflare settings are present.</p>
+                      </details>
+                      <details class="details-card" id="CF-502-PREFLIGHT" data-doc-section data-doc-group="api-codes" data-doc-title="CF-502-PREFLIGHT cloudflare preflight failed" data-doc-tags="cloudflare preflight" data-doc-code="CF-502-PREFLIGHT">
+                        <summary><span class="error-code">CF-502-PREFLIGHT</span>Cloudflare preflight failed</summary>
+                        <p>The Cloudflare preflight check failed. Confirm the token, zone, and tunnel settings are correct.</p>
+                      </details>
+                      <details class="details-card" id="CF-502-ZONES" data-doc-section data-doc-group="api-codes" data-doc-title="CF-502-ZONES cloudflare zones failed" data-doc-tags="cloudflare zones" data-doc-code="CF-502-ZONES">
+                        <summary><span class="error-code">CF-502-ZONES</span>Cloudflare zone lookup failed</summary>
+                        <p>Fetching zones from Cloudflare failed. Check the API token scopes and account visibility.</p>
+                      </details>
+                      <details class="details-card" id="CF-400-TOKEN" data-doc-section data-doc-group="api-codes" data-doc-title="CF-400-TOKEN cloudflare token missing" data-doc-tags="cloudflare token" data-doc-code="CF-400-TOKEN">
+                        <summary><span class="error-code">CF-400-TOKEN</span>Cloudflare token missing</summary>
+                        <p>The Cloudflare API token is required. Set it during bootstrap or update it in Host Settings.</p>
+                      </details>
+                      <details class="details-card" id="CF-400-ACCOUNT" data-doc-section data-doc-group="api-codes" data-doc-title="CF-400-ACCOUNT cloudflare account missing" data-doc-tags="cloudflare account" data-doc-code="CF-400-ACCOUNT">
+                        <summary><span class="error-code">CF-400-ACCOUNT</span>Cloudflare account ID missing</summary>
+                        <p>The Cloudflare account ID is required for certain API calls. Confirm it is present in the environment or settings.</p>
+                      </details>
+                      <details class="details-card" id="CF-400-ZONE" data-doc-section data-doc-group="api-codes" data-doc-title="CF-400-ZONE cloudflare zone missing" data-doc-tags="cloudflare zone" data-doc-code="CF-400-ZONE">
+                        <summary><span class="error-code">CF-400-ZONE</span>Cloudflare zone ID missing</summary>
+                        <p>The Cloudflare zone ID is missing. Ensure the selected domain is backed by a visible Cloudflare zone.</p>
+                      </details>
+                      <details class="details-card" id="CF-400-TUNNEL" data-doc-section data-doc-group="api-codes" data-doc-title="CF-400-TUNNEL cloudflare tunnel missing" data-doc-tags="cloudflare tunnel" data-doc-code="CF-400-TUNNEL">
+                        <summary><span class="error-code">CF-400-TUNNEL</span>Cloudflared tunnel reference missing</summary>
+                        <p>The tunnel name or ID is required. Re-run bootstrap tunnel setup or verify the tunnel reference in settings.</p>
+                      </details>
+                      <details class="details-card" id="CF-409-TUNNEL-LOCAL" data-doc-section data-doc-group="api-codes" data-doc-title="CF-409-TUNNEL-LOCAL tunnel is locally managed" data-doc-tags="cloudflare tunnel local" data-doc-code="CF-409-TUNNEL-LOCAL">
+                        <summary><span class="error-code">CF-409-TUNNEL-LOCAL</span>Tunnel is locally managed</summary>
+                        <p>The tunnel is configured locally and cannot be updated via the Cloudflare API. Use local config updates instead.</p>
+                      </details>
+                      <details class="details-card" id="GH-500-SERVICE" data-doc-section data-doc-group="api-codes" data-doc-title="GH-500-SERVICE github service unavailable" data-doc-tags="github service" data-doc-code="GH-500-SERVICE">
+                        <summary><span class="error-code">GH-500-SERVICE</span>GitHub service unavailable</summary>
+                        <p>The GitHub integration is not initialized. Restart the API and confirm GitHub settings are configured.</p>
+                      </details>
+                      <details class="details-card" id="GH-500-CATALOG" data-doc-section data-doc-group="api-codes" data-doc-title="GH-500-CATALOG github catalog failed" data-doc-tags="github catalog" data-doc-code="GH-500-CATALOG">
+                        <summary><span class="error-code">GH-500-CATALOG</span>GitHub catalog failed</summary>
+                        <p>The template catalog could not be loaded. Confirm GitHub App settings are correct and the installation has access.</p>
+                      </details>
+                      <details class="details-card" id="GH-400-TOKEN" data-doc-section data-doc-group="api-codes" data-doc-title="GH-400-TOKEN github token missing" data-doc-tags="github token" data-doc-code="GH-400-TOKEN">
+                        <summary><span class="error-code">GH-400-TOKEN</span>GitHub token missing</summary>
+                        <p>A GitHub installation token is required for this action. Configure the GitHub App and installation in Host Settings.</p>
+                      </details>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 class="text-lg font-semibold">Users &amp; roles</h3>
+                    <div class="mt-3 grid gap-4">
+                      <details class="details-card" id="USER-400-ID" data-doc-section data-doc-group="api-codes" data-doc-title="USER-400-ID invalid user id" data-doc-tags="users id" data-doc-code="USER-400-ID">
+                        <summary><span class="error-code">USER-400-ID</span>Invalid user id</summary>
+                        <p>The user id must be a positive integer. Use the user id returned by the API or shown in the Users view.</p>
+                      </details>
+                      <details class="details-card" id="USER-400-PAYLOAD" data-doc-section data-doc-group="api-codes" data-doc-title="USER-400-PAYLOAD invalid user payload" data-doc-tags="users payload" data-doc-code="USER-400-PAYLOAD">
+                        <summary><span class="error-code">USER-400-PAYLOAD</span>Invalid user payload</summary>
+                        <p>The user request body is invalid. Ensure the payload is valid JSON with the expected fields.</p>
+                      </details>
+                      <details class="details-card" id="USER-400-ROLE" data-doc-section data-doc-group="api-codes" data-doc-title="USER-400-ROLE invalid role" data-doc-tags="users role" data-doc-code="USER-400-ROLE">
+                        <summary><span class="error-code">USER-400-ROLE</span>Invalid role</summary>
+                        <p>Roles must be <code>admin</code> or <code>user</code> when updating roles through the API.</p>
+                      </details>
+                      <details class="details-card" id="USER-400-LOGIN" data-doc-section data-doc-group="api-codes" data-doc-title="USER-400-LOGIN login required" data-doc-tags="users login" data-doc-code="USER-400-LOGIN">
+                        <summary><span class="error-code">USER-400-LOGIN</span>Login is required</summary>
+                        <p>A GitHub login is required when adding a user to the allowlist.</p>
+                      </details>
+                      <details class="details-card" id="USER-404" data-doc-section data-doc-group="api-codes" data-doc-title="USER-404 user not found" data-doc-tags="users not found" data-doc-code="USER-404">
+                        <summary><span class="error-code">USER-404</span>User not found</summary>
+                        <p>The user does not exist. Refresh the Users list and retry with a valid user id.</p>
+                      </details>
+                      <details class="details-card" id="USER-404-GITHUB" data-doc-section data-doc-group="api-codes" data-doc-title="USER-404-GITHUB github user not found" data-doc-tags="users github" data-doc-code="USER-404-GITHUB">
+                        <summary><span class="error-code">USER-404-GITHUB</span>GitHub user not found</summary>
+                        <p>The provided GitHub username could not be resolved. Check spelling and that the user exists publicly.</p>
+                      </details>
+                      <details class="details-card" id="USER-400-LAST-SUPERUSER" data-doc-section data-doc-group="api-codes" data-doc-title="USER-400-LAST-SUPERUSER cannot demote last superuser" data-doc-tags="users superuser" data-doc-code="USER-400-LAST-SUPERUSER">
+                        <summary><span class="error-code">USER-400-LAST-SUPERUSER</span>Cannot demote last superuser</summary>
+                        <p>At least one SuperUser must exist. Promote another user before demoting the current SuperUser.</p>
+                      </details>
+                      <details class="details-card" id="USER-400-SUPERUSER" data-doc-section data-doc-group="api-codes" data-doc-title="USER-400-SUPERUSER cannot remove superuser" data-doc-tags="users superuser remove" data-doc-code="USER-400-SUPERUSER">
+                        <summary><span class="error-code">USER-400-SUPERUSER</span>Cannot remove superuser</summary>
+                        <p>SuperUsers cannot be removed through the allowlist delete action.</p>
+                      </details>
+                      <details class="details-card" id="USER-500-LIST" data-doc-section data-doc-group="api-codes" data-doc-title="USER-500-LIST failed to list users" data-doc-tags="users list" data-doc-code="USER-500-LIST">
+                        <summary><span class="error-code">USER-500-LIST</span>Failed to load users</summary>
+                        <p>The API could not load users from storage. Check database health and API logs.</p>
+                      </details>
+                      <details class="details-card" id="USER-500-UPDATE" data-doc-section data-doc-group="api-codes" data-doc-title="USER-500-UPDATE failed to update user" data-doc-tags="users update" data-doc-code="USER-500-UPDATE">
+                        <summary><span class="error-code">USER-500-UPDATE</span>Failed to update user</summary>
+                        <p>The user update failed to persist. Check database connectivity and retry the update.</p>
+                      </details>
+                      <details class="details-card" id="USER-500-CREATE" data-doc-section data-doc-group="api-codes" data-doc-title="USER-500-CREATE failed to create user" data-doc-tags="users create" data-doc-code="USER-500-CREATE">
+                        <summary><span class="error-code">USER-500-CREATE</span>Failed to create user</summary>
+                        <p>The user could not be created. Check GitHub lookup success and database health.</p>
+                      </details>
+                      <details class="details-card" id="USER-500-DELETE" data-doc-section data-doc-group="api-codes" data-doc-title="USER-500-DELETE failed to delete user" data-doc-tags="users delete" data-doc-code="USER-500-DELETE">
+                        <summary><span class="error-code">USER-500-DELETE</span>Failed to delete user</summary>
+                        <p>The user could not be deleted. Check database health and retry.</p>
+                      </details>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 class="text-lg font-semibold">Projects</h3>
+                    <div class="mt-3 grid gap-4">
+                      <details class="details-card" id="PROJECT-500-LIST" data-doc-section data-doc-group="api-codes" data-doc-title="PROJECT-500-LIST failed to list projects" data-doc-tags="projects list" data-doc-code="PROJECT-500-LIST">
+                        <summary><span class="error-code">PROJECT-500-LIST</span>Failed to load projects</summary>
+                        <p>The API could not load projects. Check database connectivity and API logs.</p>
+                      </details>
+                      <details class="details-card" id="PROJECT-500-LOCAL" data-doc-section data-doc-group="api-codes" data-doc-title="PROJECT-500-LOCAL failed to list local projects" data-doc-tags="projects local" data-doc-code="PROJECT-500-LOCAL">
+                        <summary><span class="error-code">PROJECT-500-LOCAL</span>Failed to load local projects</summary>
+                        <p>Local template discovery failed. Verify <code>TEMPLATES_DIR</code> is set and readable by the API container.</p>
+                      </details>
+                      <details class="details-card" id="PROJECT-400-BODY" data-doc-section data-doc-group="api-codes" data-doc-title="PROJECT-400-BODY invalid project request body" data-doc-tags="projects body" data-doc-code="PROJECT-400-BODY">
+                        <summary><span class="error-code">PROJECT-400-BODY</span>Invalid project request body</summary>
+                        <p>The project request body is invalid. Confirm field names and types match the API schema.</p>
+                      </details>
+                      <details class="details-card" id="PROJECT-403-ADMIN" data-doc-section data-doc-group="api-codes" data-doc-title="PROJECT-403-ADMIN admin required" data-doc-tags="projects admin" data-doc-code="PROJECT-403-ADMIN">
+                        <summary><span class="error-code">PROJECT-403-ADMIN</span>Admin role required</summary>
+                        <p>Project mutations require Admin or SuperUser access.</p>
+                      </details>
+                      <details class="details-card" id="PROJECT-400-CREATE" data-doc-section data-doc-group="api-codes" data-doc-title="PROJECT-400-CREATE create from template failed" data-doc-tags="projects create template" data-doc-code="PROJECT-400-CREATE">
+                        <summary><span class="error-code">PROJECT-400-CREATE</span>Create-from-template validation failed</summary>
+                        <p>The create-from-template request failed validation. Check name, subdomain, domain, and port inputs.</p>
+                      </details>
+                      <details class="details-card" id="PROJECT-400-DEPLOY" data-doc-section data-doc-group="api-codes" data-doc-title="PROJECT-400-DEPLOY deploy existing failed" data-doc-tags="projects deploy existing" data-doc-code="PROJECT-400-DEPLOY">
+                        <summary><span class="error-code">PROJECT-400-DEPLOY</span>Deploy-existing validation failed</summary>
+                        <p>The deploy-existing request failed validation. Confirm the service exists and the port/domain inputs are correct.</p>
+                      </details>
+                      <details class="details-card" id="PROJECT-400-FORWARD" data-doc-section data-doc-group="api-codes" data-doc-title="PROJECT-400-FORWARD forward failed" data-doc-tags="projects forward" data-doc-code="PROJECT-400-FORWARD">
+                        <summary><span class="error-code">PROJECT-400-FORWARD</span>Forward-local validation failed</summary>
+                        <p>The forward-local request failed validation. Re-check the service name, subdomain, domain, and port.</p>
+                      </details>
+                      <details class="details-card" id="PROJECT-400-QUICK" data-doc-section data-doc-group="api-codes" data-doc-title="PROJECT-400-QUICK quick service failed" data-doc-tags="projects quick service" data-doc-code="PROJECT-400-QUICK">
+                        <summary><span class="error-code">PROJECT-400-QUICK</span>Quick service validation failed</summary>
+                        <p>The quick service request failed validation. Confirm subdomain, domain, and port values are valid.</p>
+                      </details>
+                      <details class="details-card" id="PROJECT-400-TEMPLATE" data-doc-section data-doc-group="api-codes" data-doc-title="PROJECT-400-TEMPLATE template selection invalid" data-doc-tags="projects template allowlist" data-doc-code="PROJECT-400-TEMPLATE">
+                        <summary><span class="error-code">PROJECT-400-TEMPLATE</span>Template selection invalid</summary>
+                        <p>The template reference is invalid or not in the allowlist. Select a template from the catalog instead of typing one.</p>
+                      </details>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 class="text-lg font-semibold">Audit &amp; RBAC</h3>
+                    <div class="mt-3 grid gap-4">
+                      <details class="details-card" id="AUDIT-500-LIST" data-doc-section data-doc-group="api-codes" data-doc-title="AUDIT-500-LIST failed to list audit logs" data-doc-tags="audit logs" data-doc-code="AUDIT-500-LIST">
+                        <summary><span class="error-code">AUDIT-500-LIST</span>Failed to load audit logs</summary>
+                        <p>The audit log query failed. Check database health and API logs.</p>
+                      </details>
+                      <details class="details-card" id="RBAC-409-SUPERUSER-CAP" data-doc-section data-doc-group="api-codes" data-doc-title="RBAC-409-SUPERUSER-CAP superuser cap exceeded" data-doc-tags="rbac superuser" data-doc-code="RBAC-409-SUPERUSER-CAP">
+                        <summary><span class="error-code">RBAC-409-SUPERUSER-CAP</span>SuperUser cap exceeded</summary>
+                        <p>More than two SuperUsers were detected and pruned during seeding. Review the Users list to confirm the final state.</p>
+                      </details>
+                    </div>
+                  </div>
                 </div>
               </section>
             </div>
