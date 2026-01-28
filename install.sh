@@ -5,6 +5,10 @@ log() {
   printf '%s\n' "$*"
 }
 
+log_stderr() {
+  printf '%s\n' "$*" >&2
+}
+
 warn() {
   printf 'Warning: %s\n' "$*" >&2
 }
@@ -249,7 +253,7 @@ detect_release_repo() {
   fi
 
   GUNGNR_CLI_REPO="hrafngud/gungnr"
-  log "Using default release repo ${GUNGNR_CLI_REPO} (set GUNGNR_CLI_REPO to override)."
+  log_stderr "Using default release repo ${GUNGNR_CLI_REPO} (set GUNGNR_CLI_REPO to override)."
 }
 
 download_cli() {
@@ -275,7 +279,7 @@ download_cli() {
     url="${release_base}/${asset_name}"
   fi
 
-  log "Downloading Gungnr CLI from ${url}"
+  log_stderr "Downloading Gungnr CLI from ${url}"
   if require_command curl; then
     curl -fsSL "$url" -o "${tmp_dir}/gungnr"
   elif require_command wget; then
