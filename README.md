@@ -1,5 +1,6 @@
 <div align="center">
 
+![Gungnr Logo](frontend/go-notes/public/logo.svg)
 
 # Gungnr
 
@@ -51,16 +52,63 @@ Scripts created under `~/gungnr/state`:
 
 
 ## Installation
-1) Run `./install.sh` to install the CLI and prerequisites.
-2) Run `gungnr bootstrap` and follow the prompts to configure the machine.
-3) Open the printed panel URL and login via GitHub.
-4) Configure GitHub App settings in the UI if you want to enable template creation.
+
+### Method 1 - Install Script (Recommended)
+
+**0)** Do all Cloudflare and Github prerequisite config [as instructed on docs](https://docs.jdoss.pro/docs.html#install-steps)!!
+
+**1)** Run:
+  ```
+   wget -qO /tmp/gungnr-install.sh https://raw.githubusercontent.com/Hrafngud/gungnr/main/install.sh && chmd +x /tmp/gungnr-install.sh && /tmp/gungnr-install.sh
+  ```
+   to install the CLI and prerequisites.
+
+**2)** Run `gungnr bootstrap` and follow the prompts to configure the application.
+
+**3)** Open the printed panel URL and login via GitHub.
+
+**4)** Configure GitHub App settings in the UI if you want to enable template creation (optional).
+
+
+---
+
+### Method 2 - Build From Source (For Development)
+
+**0)** Do all Cloudflare and Github prerequisite config [as instructed on docs](https://docs.jdoss.pro/docs.html#install-steps)!!
+
+**1)** Create a directory:
+  ```
+  mkdir gungnr-dev
+  cd gungnr-dev
+  ```
+  then clone Gungnr:
+
+  ```
+  git clone https://github.com/Hrafngud/gungnr.git
+  ```
+
+  <em>OBS: If you clone it at `~/` , it will conflict with gungnr default config directory, do it into a separate directory.</em>
+  
+**2)** Build:
+  ```
+  go build -o ./gungnr ./cmd/gungnr
+
+  ```
+  
+**3)** Run bootstrap:
+
+  ```
+  ./gungnr bootstrap
+  ```
+**4)** Open the printed panel URL and login via GitHub.
+
+**5)** Configure GitHub App settings in the UI if you want to enable template creation (optional).
 
 ## Documentation
 Live: https://docs.jdoss.pro
 
 Local source: `docs/index.html` (landing), `docs/docs.html` (docs), `docs/errors.html` (errors).
-(If you fork you can continue to document etc.)
+(If you forked the repo, you can continue to document new features there.)
 
 ## Roadmap
 
@@ -77,11 +125,12 @@ Local source: `docs/index.html` (landing), `docs/docs.html` (docs), `docs/errors
 - **CLI operations**: `gungnr restart`, `gungnr tunnel run`, and `gungnr uninstall` commands for panel and tunnel control.
 
 ### Planned Features
-- **Expanded RBAC**: More granular permissions and role customization.
+- **Expanded RBAC**: Define clearer RBAC rules and presets for different case scenarios.
 - **Additional templates**: Support for different fullstack stacks beyond the current Vue + Go + PostgreSQL.
 - **Enhanced bootstrap**: Idempotent re-runs and safe upgrade paths.
 - **Daemon management**: Optional auto-restart for cloudflared with systemd integration.
 - **Additional CLI commands**: More panel and tunnel control operations.
+- **Interoperability**: Modern support for integration with external tools (API's, MCP's etc.).
 - **macOS support**: Compatibility layer for macOS (amd64/arm64) via native installer.
 - **Windows support**: PowerShell-based installation and management flows.
 - **Feedback and support official channels**: Currently, if you have an problem you can open an issue directly.
@@ -106,13 +155,10 @@ Use the returned token as `Authorization: Bearer <token>` for `/api/v1/*` routes
 
 
 ## Workflows
-- Create from template: choose a name and subdomain; Gungnr creates the repo
-  and deploys it.
-- Deploy existing: select a local template project, set a subdomain, and start
-  compose.
-- Quick local service: provide a subdomain and host port (defaults to running an
-  Excalidraw container on port 80).
-- Activity: review the audit timeline of user actions in the Activity view.
+- Deploy existing: If you already serving something on localhost, use cloudflare to foward it to the web instantly.
+- Quick local service: Pick a well known service available in public Docker registry, and experience a instant deployment with custom subdomain.
+- Templates: Start a fresh repo/project from a opinated template,in your host machine, right to the web. All repos live in `gungnr/templates`. 
+
 
 ## Local development (optional)
 - Backend: `cd backend && go run ./cmd/server`
