@@ -166,7 +166,7 @@ ensure_docker_compose() {
       fi
       ;;
     linux:apt)
-      install_packages docker-compose-plugin
+      install_packages docker-compose
       ;;
     linux:dnf)
       install_packages docker-compose-plugin
