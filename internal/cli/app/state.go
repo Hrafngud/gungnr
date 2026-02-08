@@ -9,6 +9,8 @@ import (
 type State struct {
 	Paths                filesystem.Paths
 	DataPaths            filesystem.DataPaths
+	KeepaliveEnabled     bool
+	KeepaliveStatus      string
 	GitHubClientID       string
 	GitHubClientSecret   string
 	GitHubCallbackURL    string
@@ -40,6 +42,7 @@ type Summary struct {
 	StateDir                string
 	EnvPath                 string
 	PanelURL                string
+	KeepaliveStatus         string
 	CloudflaredConfig       string
 	CloudflaredLog          string
 	ComposeLog              string
@@ -50,12 +53,22 @@ type Summary struct {
 }
 
 func (s State) Summary() Summary {
+	keepaliveStatus := s.KeepaliveStatus
+	if keepaliveStatus == "" {
+		if s.KeepaliveEnabled {
+			keepaliveStatus = "enabled"
+		} else {
+			keepaliveStatus = "skipped"
+		}
+	}
+
 	return Summary{
 		DataDir:                 s.DataPaths.Root,
 		TemplatesDir:            s.DataPaths.TemplatesDir,
 		StateDir:                s.DataPaths.StateDir,
 		EnvPath:                 s.DataPaths.EnvPath,
 		PanelURL:                s.PanelURL,
+		KeepaliveStatus:         keepaliveStatus,
 		CloudflaredConfig:       s.CloudflaredConfig,
 		CloudflaredLog:          s.CloudflaredLogPath,
 		ComposeLog:              s.ComposeLogPath,
