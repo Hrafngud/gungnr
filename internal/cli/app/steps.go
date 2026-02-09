@@ -383,23 +383,40 @@ func runKeepaliveSetup(ctx context.Context, state *State, ui UI) error {
 	}
 
 	ui.StepProgress("keepalive_setup", "Installing reboot fallback scripts and watchdog")
-	autoStart, err := cloudflared.SetupAutoStart(state.CloudflaredConfig, state.DataPaths.StateDir)
+	keepaliveCtx, err := resolveKeepaliveContext(true)
 	if err != nil {
 		return err
 	}
-	state.CloudflaredAutoStart = autoStart
-
-	if autoStart.CronInstalled {
-		state.KeepaliveStatus = "enabled (" + autoStart.CronDetail + ")"
-		ui.Info("Reboot fallback: " + autoStart.CronDetail)
-		ui.Info("Tunnel ensure script: " + autoStart.EnsureScript)
-		return nil
+	setupResult, err := configureKeepalive(keepaliveCtx, keepaliveModeCore)
+	if err != nil {
+		return err
+	}
+	state.CloudflaredAutoStart = cloudflared.PersistenceResult{
+		RunScript:    setupResult.Supervisor.RunScript,
+		EnsureScript: setupResult.Supervisor.EnsureScript,
+		Supervisor:   string(setupResult.Supervisor.Supervisor),
+		Installed:    setupResult.Supervisor.Installed,
+		Detail:       setupResult.Supervisor.Detail,
 	}
 
-	detail := strings.TrimSpace(autoStart.CronDetail)
+	detail := strings.TrimSpace(setupResult.Supervisor.Detail)
 	if detail == "" {
 		detail = "enabled (watchdog details unavailable)"
 	}
+
+	if strings.TrimSpace(string(setupResult.Supervisor.Supervisor)) != "" {
+		detail = detail + " via " + string(setupResult.Supervisor.Supervisor)
+	}
+
+	if setupResult.Supervisor.Installed {
+		state.KeepaliveStatus = "enabled (" + detail + ")"
+		ui.Info("Reboot fallback: " + detail)
+		ui.Info("Recovery run script: " + setupResult.Supervisor.RunScript)
+		ui.Info("Tunnel ensure script: " + setupResult.Supervisor.EnsureScript)
+		ui.Info("Compose recovery path: " + setupResult.ComposeFile)
+		return nil
+	}
+
 	state.KeepaliveStatus = "enabled with warning (" + detail + ")"
 	ui.Warn("Reboot fallback: " + detail)
 	return nil

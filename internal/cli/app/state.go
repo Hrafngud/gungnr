@@ -75,6 +75,6 @@ func (s State) Summary() Summary {
 		CloudflaredTunnel:       s.Env.CloudflaredTunnel,
 		CloudflaredTunnelID:     s.Env.CloudflareTunnelID,
 		CloudflaredEnsureScript: s.CloudflaredAutoStart.EnsureScript,
-		CloudflaredCronDetail:   s.CloudflaredAutoStart.CronDetail,
+		CloudflaredCronDetail:   s.CloudflaredAutoStart.Detail,
 	}
 }

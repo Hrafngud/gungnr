@@ -24,7 +24,7 @@ func CloudflareTokenHelp() []string {
 }
 
 func CloudflaredPersistenceNote() string {
-	return "Note: cloudflared runs as the current user; bootstrap wires a crontab watchdog to keep it running after reboot."
+	return "Note: keepalive runs as the current user; bootstrap prefers a user systemd timer and falls back to a crontab watchdog for core recovery after reboot."
 }
 
 func KeepaliveBootstrapHelp() []string {
