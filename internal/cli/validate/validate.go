@@ -50,3 +50,28 @@ func NormalizeCloudflareToken(token string) string {
 	}
 	return value
 }
+
+func NormalizeYesNo(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "y", "yes", "true", "1":
+		return "yes"
+	case "n", "no", "false", "0":
+		return "no"
+	default:
+		return normalized
+	}
+}
+
+func YesNo(value string) error {
+	switch NormalizeYesNo(value) {
+	case "yes", "no":
+		return nil
+	default:
+		return errors.New("enter yes or no")
+	}
+}
+
+func IsYes(value string) bool {
+	return NormalizeYesNo(value) == "yes"
+}

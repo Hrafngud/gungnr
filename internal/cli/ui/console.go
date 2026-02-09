@@ -122,6 +122,7 @@ func (c *ConsoleUI) FinalSummary(summary app.Summary) {
 	fmt.Fprintf(c.out, "- State directory: %s\n", summary.StateDir)
 	fmt.Fprintf(c.out, "- .env path: %s\n", summary.EnvPath)
 	fmt.Fprintf(c.out, "- Panel hostname: %s\n", summary.PanelURL)
+	fmt.Fprintf(c.out, "- Reboot fallback: %s\n", summary.KeepaliveStatus)
 	fmt.Fprintf(c.out, "- Cloudflared config: %s\n", summary.CloudflaredConfig)
 	fmt.Fprintf(c.out, "- Cloudflared log: %s\n", summary.CloudflaredLog)
 	if strings.TrimSpace(summary.CloudflaredCronDetail) != "" {

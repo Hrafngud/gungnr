@@ -1,6 +1,0 @@
-./audit_gorm.go
-./job_gorm.go
-./project_gorm.go
-./repository.go
-./settings_gorm.go
-./user_gorm.go

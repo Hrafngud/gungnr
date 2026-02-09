@@ -111,6 +111,23 @@ func StartTunnel(configPath string) (string, error) {
 	return logPath, nil
 }
 
+func EnsureTunnelRunning(configPath string) (started bool, logPath string, err error) {
+	logPath = filepath.Join(filepath.Dir(configPath), "cloudflared.log")
+	pids, err := findTunnelPIDs(configPath)
+	if err != nil {
+		return false, "", err
+	}
+	if len(pids) > 0 {
+		return false, logPath, nil
+	}
+
+	startedLogPath, err := StartTunnel(configPath)
+	if err != nil {
+		return false, "", err
+	}
+	return true, startedLogPath, nil
+}
+
 func stopTunnelProcesses(configPath string) error {
 	pids, err := findTunnelPIDs(configPath)
 	if err != nil {

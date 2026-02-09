@@ -34,6 +34,8 @@ func main() {
 		runRestart(os.Args[2:])
 	case "tunnel":
 		runTunnel(os.Args[2:])
+	case "keepalive":
+		runKeepalive(os.Args[2:])
 	case "uninstall":
 		runUninstall(os.Args[2:])
 	default:
@@ -49,6 +51,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  gungnr bootstrap [--plain]")
 	fmt.Fprintln(os.Stderr, "  gungnr restart")
 	fmt.Fprintln(os.Stderr, "  gungnr tunnel run")
+	fmt.Fprintln(os.Stderr, "  gungnr keepalive <enable|disable|status|all|recover>")
 	fmt.Fprintln(os.Stderr, "  gungnr uninstall [--yes]")
 }
 
@@ -123,6 +126,52 @@ func runTunnel(args []string) {
 		fmt.Fprintln(os.Stderr, "  gungnr tunnel run")
 		os.Exit(2)
 	}
+}
+
+func runKeepalive(args []string) {
+	if len(args) != 1 {
+		printKeepaliveUsage()
+		os.Exit(2)
+	}
+
+	var (
+		output string
+		err    error
+	)
+
+	switch args[0] {
+	case "enable":
+		output, err = app.KeepaliveEnable()
+	case "disable":
+		output, err = app.KeepaliveDisable()
+	case "status":
+		output, err = app.KeepaliveStatus()
+	case "all":
+		output, err = app.KeepaliveAll()
+	case "recover":
+		output, err = app.KeepaliveRecover()
+	default:
+		printKeepaliveUsage()
+		os.Exit(2)
+	}
+
+	if strings.TrimSpace(output) != "" {
+		fmt.Fprintln(os.Stdout, output)
+	}
+
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func printKeepaliveUsage() {
+	fmt.Fprintln(os.Stderr, "Usage:")
+	fmt.Fprintln(os.Stderr, "  gungnr keepalive enable")
+	fmt.Fprintln(os.Stderr, "  gungnr keepalive disable")
+	fmt.Fprintln(os.Stderr, "  gungnr keepalive status")
+	fmt.Fprintln(os.Stderr, "  gungnr keepalive all")
+	fmt.Fprintln(os.Stderr, "  gungnr keepalive recover")
 }
 
 func runUninstall(args []string) {

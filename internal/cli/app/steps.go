@@ -34,11 +34,13 @@ func (s stepFunc) Run(ctx context.Context, state *State, ui UI) error {
 func BootstrapSteps() []Step {
 	return []Step{
 		stepFunc{id: "preflight", title: "Preflight checks", run: runPreflight},
+		stepFunc{id: "keepalive_option", title: "Reboot fallback option", run: runKeepaliveOption},
 		stepFunc{id: "github_identity", title: "GitHub identity", run: runGitHubIdentity},
 		stepFunc{id: "cloudflared_tunnel", title: "Cloudflared tunnel", run: runCloudflaredTunnel},
 		stepFunc{id: "cloudflare_dns", title: "Cloudflare DNS", run: runCloudflareDNS},
 		stepFunc{id: "cloudflared_run", title: "Cloudflared config + run", run: runCloudflaredRun},
 		stepFunc{id: "env_setup", title: "Data + env setup", run: runEnvSetup},
+		stepFunc{id: "keepalive_setup", title: "Reboot fallback setup", run: runKeepaliveSetup},
 		stepFunc{id: "compose_start", title: "Start services", run: runComposeStart},
 	}
 }
@@ -82,6 +84,28 @@ func runPreflight(ctx context.Context, state *State, ui UI) error {
 	}
 
 	state.Paths = paths
+	return nil
+}
+
+func runKeepaliveOption(ctx context.Context, state *State, ui UI) error {
+	value, err := ui.Prompt(ctx, Prompt{
+		Label:     "Enable reboot fallback? (yes/no)",
+		Default:   "yes",
+		Help:      clistrings.KeepaliveBootstrapHelp(),
+		Validate:  validate.YesNo,
+		Normalize: validate.NormalizeYesNo,
+	})
+	if err != nil {
+		return err
+	}
+
+	state.KeepaliveEnabled = validate.IsYes(value)
+	if state.KeepaliveEnabled {
+		ui.Info("Reboot fallback: enabled for this bootstrap run.")
+	} else {
+		ui.Info("Reboot fallback: skipped for this bootstrap run.")
+	}
+
 	return nil
 }
 
@@ -247,7 +271,11 @@ func runCloudflaredRun(ctx context.Context, state *State, ui UI) error {
 	}
 
 	ui.Info("Cloudflared tunnel is running.")
-	ui.Info(clistrings.CloudflaredPersistenceNote())
+	if state.KeepaliveEnabled {
+		ui.Info(clistrings.CloudflaredPersistenceNote())
+	} else {
+		ui.Info("Note: cloudflared runs as the current user; reboot fallback is disabled for this bootstrap run.")
+	}
 	return nil
 }
 
@@ -267,19 +295,6 @@ func runEnvSetup(ctx context.Context, state *State, ui UI) error {
 		return err
 	}
 	state.DataPaths = dataPaths
-
-	ui.StepProgress("env_setup", "Wiring tunnel auto-start")
-	autoStart, err := cloudflared.SetupAutoStart(state.CloudflaredConfig, state.DataPaths.StateDir)
-	if err != nil {
-		return err
-	}
-	state.CloudflaredAutoStart = autoStart
-	if autoStart.CronInstalled {
-		ui.Info("Tunnel auto-start: " + autoStart.CronDetail)
-		ui.Info("Tunnel ensure script: " + autoStart.EnsureScript)
-	} else if strings.TrimSpace(autoStart.CronDetail) != "" {
-		ui.Warn("Tunnel auto-start: " + autoStart.CronDetail)
-	}
 
 	githubSecret, err := ui.Prompt(ctx, Prompt{
 		Label:    "GitHub OAuth Client Secret",
@@ -349,6 +364,61 @@ func runEnvSetup(ctx context.Context, state *State, ui UI) error {
 	if err := filesystem.WriteEnvFile(dataPaths.EnvPath, state.Env.Entries()); err != nil {
 		return err
 	}
+	return nil
+}
+
+func runKeepaliveSetup(ctx context.Context, state *State, ui UI) error {
+	_ = ctx
+	if !state.KeepaliveEnabled {
+		state.KeepaliveStatus = "skipped (disabled during bootstrap)"
+		ui.StepProgress("keepalive_setup", "Skipping reboot fallback setup")
+		ui.Info("Reboot fallback skipped.")
+		return nil
+	}
+	if strings.TrimSpace(state.CloudflaredConfig) == "" {
+		return errors.New("cloudflared config missing before reboot fallback setup")
+	}
+	if strings.TrimSpace(state.DataPaths.StateDir) == "" {
+		return errors.New("state directory missing before reboot fallback setup")
+	}
+
+	ui.StepProgress("keepalive_setup", "Installing reboot fallback scripts and watchdog")
+	keepaliveCtx, err := resolveKeepaliveContext(true)
+	if err != nil {
+		return err
+	}
+	setupResult, err := configureKeepalive(keepaliveCtx, keepaliveModeCore)
+	if err != nil {
+		return err
+	}
+	state.CloudflaredAutoStart = cloudflared.PersistenceResult{
+		RunScript:    setupResult.Supervisor.RunScript,
+		EnsureScript: setupResult.Supervisor.EnsureScript,
+		Supervisor:   string(setupResult.Supervisor.Supervisor),
+		Installed:    setupResult.Supervisor.Installed,
+		Detail:       setupResult.Supervisor.Detail,
+	}
+
+	detail := strings.TrimSpace(setupResult.Supervisor.Detail)
+	if detail == "" {
+		detail = "enabled (watchdog details unavailable)"
+	}
+
+	if strings.TrimSpace(string(setupResult.Supervisor.Supervisor)) != "" {
+		detail = detail + " via " + string(setupResult.Supervisor.Supervisor)
+	}
+
+	if setupResult.Supervisor.Installed {
+		state.KeepaliveStatus = "enabled (" + detail + ")"
+		ui.Info("Reboot fallback: " + detail)
+		ui.Info("Recovery run script: " + setupResult.Supervisor.RunScript)
+		ui.Info("Tunnel ensure script: " + setupResult.Supervisor.EnsureScript)
+		ui.Info("Compose recovery path: " + setupResult.ComposeFile)
+		return nil
+	}
+
+	state.KeepaliveStatus = "enabled with warning (" + detail + ")"
+	ui.Warn("Reboot fallback: " + detail)
 	return nil
 }
 

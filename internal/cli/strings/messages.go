@@ -24,5 +24,12 @@ func CloudflareTokenHelp() []string {
 }
 
 func CloudflaredPersistenceNote() string {
-	return "Note: cloudflared runs as the current user; bootstrap wires a crontab watchdog to keep it running after reboot."
+	return "Note: keepalive runs as the current user; bootstrap prefers a user systemd timer and falls back to a crontab watchdog for core recovery after reboot."
+}
+
+func KeepaliveBootstrapHelp() []string {
+	return []string{
+		"Reboot fallback keeps the tunnel running after reboots and checks it every 5 minutes.",
+		"Answer yes to install the watchdog during bootstrap, or no to skip it.",
+	}
 }

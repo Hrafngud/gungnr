@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"gungnr-cli/internal/cli/integrations/command"
 )
@@ -55,8 +56,19 @@ func FindComposeFile() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("unable to resolve working directory: %w", err)
 	}
+	return FindComposeFileFromDir(startDir)
+}
 
+func FindComposeFileFromDir(startDir string) (string, error) {
 	dir := startDir
+	if strings.TrimSpace(dir) == "" {
+		return "", errors.New("compose search directory is empty")
+	}
+	absDir, err := filepath.Abs(dir)
+	if err == nil {
+		dir = absDir
+	}
+
 	for {
 		composePath := filepath.Join(dir, "docker-compose.yml")
 		if info, err := os.Stat(composePath); err == nil && !info.IsDir() {
@@ -82,6 +94,18 @@ func StartCompose(composeFile, envFile, logPath string) error {
 	composeDir := filepath.Dir(composeFile)
 	args := append([]string{}, baseArgs...)
 	args = append(args, "--env-file", envFile, "-f", composeFile, "up", "-d", "--build")
+	return command.RunLoggedInDir(composeDir, commandName, logPath, args...)
+}
+
+func EnsureComposeRunning(composeFile, envFile, logPath string) error {
+	commandName, baseArgs, err := ResolveComposeCommand()
+	if err != nil {
+		return err
+	}
+
+	composeDir := filepath.Dir(composeFile)
+	args := append([]string{}, baseArgs...)
+	args = append(args, "--env-file", envFile, "-f", composeFile, "up", "-d")
 	return command.RunLoggedInDir(composeDir, commandName, logPath, args...)
 }
 
