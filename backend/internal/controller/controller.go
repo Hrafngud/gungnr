@@ -17,12 +17,8 @@ func NewHealthController(service *service.HealthService) *HealthController {
 	return &HealthController{service: service}
 }
 
-func (h *HealthController) Register(r *gin.Engine) {
-	r.GET("/healthz", func(ctx *gin.Context) {
-		ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
-	r.GET("/health/docker", h.Docker)
-	r.GET("/health/tunnel", h.Tunnel)
+func (h *HealthController) Healthz(ctx *gin.Context) {
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 func (h *HealthController) Docker(ctx *gin.Context) {

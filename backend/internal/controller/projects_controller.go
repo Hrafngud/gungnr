@@ -33,15 +33,6 @@ func NewProjectsController(service *service.ProjectService, audit *service.Audit
 	return &ProjectsController{service: service, audit: audit}
 }
 
-func (c *ProjectsController) Register(r gin.IRoutes) {
-	r.GET("/projects", c.List)
-	r.GET("/projects/local", c.ListLocal)
-	r.POST("/projects/template", c.CreateFromTemplate)
-	r.POST("/projects/existing", c.DeployExisting)
-	r.POST("/projects/forward", c.ForwardLocal)
-	r.POST("/projects/quick", c.QuickService)
-}
-
 func (c *ProjectsController) List(ctx *gin.Context) {
 	projects, err := c.service.List(ctx.Request.Context())
 	if err != nil {

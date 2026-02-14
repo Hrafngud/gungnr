@@ -19,6 +19,7 @@ var ErrLastSuperUser = errors.New("cannot demote last superuser")
 var ErrAllowlistUserNotFound = errors.New("github user not found")
 var ErrAllowlistLoginRequired = errors.New("github login required")
 var ErrCannotRemoveSuperUser = errors.New("cannot remove superuser")
+var ErrUserNotFound = errors.New("user not found")
 
 type UserService struct {
 	userRepo repository.UserRepository
@@ -35,6 +36,9 @@ func (s *UserService) List(ctx context.Context) ([]models.User, error) {
 func (s *UserService) UpdateRole(ctx context.Context, userID uint, role string) (*models.User, error) {
 	user, err := s.userRepo.GetByID(userID)
 	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, errs.Wrap(errs.CodeUserNotFound, ErrUserNotFound.Error(), ErrUserNotFound)
+		}
 		return nil, err
 	}
 
@@ -90,6 +94,9 @@ func (s *UserService) AddAllowlistUser(ctx context.Context, login string) (*mode
 func (s *UserService) RemoveAllowlistUser(ctx context.Context, userID uint) error {
 	user, err := s.userRepo.GetByID(userID)
 	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return errs.Wrap(errs.CodeUserNotFound, ErrUserNotFound.Error(), ErrUserNotFound)
+		}
 		return err
 	}
 	if user.Role == models.RoleSuperUser {

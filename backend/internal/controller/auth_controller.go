@@ -60,14 +60,6 @@ func NewAuthController(service *service.AuthService, audit *service.AuditService
 	}
 }
 
-func (c *AuthController) Register(r *gin.Engine) {
-	r.GET("/auth/login", c.Login)
-	r.GET("/auth/callback", c.Callback)
-	r.GET("/auth/me", c.Me)
-	r.POST("/auth/logout", c.Logout)
-	r.POST("/test-token", c.TestToken)
-}
-
 func (c *AuthController) Login(ctx *gin.Context) {
 	state, err := generateState()
 	if err != nil {

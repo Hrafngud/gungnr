@@ -2,7 +2,6 @@ package controller
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -10,6 +9,7 @@ import (
 	"go-notes/internal/apierror"
 	"go-notes/internal/errs"
 	"go-notes/internal/service"
+	"go-notes/internal/utils/httpx"
 )
 
 type AuditController struct {
@@ -30,12 +30,14 @@ func NewAuditController(service *service.AuditService) *AuditController {
 	return &AuditController{service: service}
 }
 
-func (c *AuditController) Register(r gin.IRoutes) {
-	r.GET("/audit-logs", c.List)
-}
-
 func (c *AuditController) List(ctx *gin.Context) {
-	limit := parseAuditLimit(ctx.Query("limit"))
+	limit := httpx.ParseIntQuery(ctx, "limit", 0)
+	if limit <= 0 {
+		limit = 0
+	}
+	if limit > 500 {
+		limit = 500
+	}
 	logs, err := c.service.List(ctx.Request.Context(), limit)
 	if err != nil {
 		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeAuditListFailed, "failed to load audit logs")
@@ -56,18 +58,4 @@ func (c *AuditController) List(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"logs": response})
-}
-
-func parseAuditLimit(raw string) int {
-	if raw == "" {
-		return 0
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil || value <= 0 {
-		return 0
-	}
-	if value > 500 {
-		return 500
-	}
-	return value
 }

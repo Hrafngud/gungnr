@@ -29,13 +29,6 @@ func NewSettingsController(service *service.SettingsService, audit *service.Audi
 	return &SettingsController{service: service, audit: audit}
 }
 
-func (c *SettingsController) Register(r gin.IRoutes) {
-	r.GET("/settings", c.Get)
-	r.PUT("/settings", c.Update)
-	r.GET("/settings/cloudflared/preview", c.CloudflaredPreview)
-	r.POST("/settings/cloudflare/sync", c.SyncCloudflareFromEnv)
-}
-
 func (c *SettingsController) Get(ctx *gin.Context) {
 	settings, err := c.service.Get(ctx.Request.Context())
 	if err != nil {

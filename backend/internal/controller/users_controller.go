@@ -3,7 +3,6 @@ package controller
 import (
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -12,8 +11,8 @@ import (
 	"go-notes/internal/apierror"
 	"go-notes/internal/errs"
 	"go-notes/internal/models"
-	"go-notes/internal/repository"
 	"go-notes/internal/service"
+	"go-notes/internal/utils/httpx"
 )
 
 type UsersController struct {
@@ -39,16 +38,6 @@ func NewUsersController(service *service.UserService) *UsersController {
 	return &UsersController{service: service}
 }
 
-func (c *UsersController) Register(r gin.IRoutes) {
-	r.GET("/users", c.List)
-}
-
-func (c *UsersController) RegisterAdmin(r gin.IRoutes) {
-	r.POST("/users", c.Create)
-	r.PATCH("/users/:id/role", c.UpdateRole)
-	r.DELETE("/users/:id", c.Delete)
-}
-
 func (c *UsersController) List(ctx *gin.Context) {
 	users, err := c.service.List(ctx.Request.Context())
 	if err != nil {
@@ -70,8 +59,8 @@ func (c *UsersController) List(ctx *gin.Context) {
 }
 
 func (c *UsersController) UpdateRole(ctx *gin.Context) {
-	userID, err := parseUserID(ctx.Param("id"))
-	if err != nil {
+	userID, err := httpx.ParseUintParam(ctx.Param("id"))
+	if err != nil || userID == 0 {
 		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeUserInvalidID, "invalid user id", nil)
 		return
 	}
@@ -91,7 +80,7 @@ func (c *UsersController) UpdateRole(ctx *gin.Context) {
 	user, err := c.service.UpdateRole(ctx.Request.Context(), userID, role)
 	if err != nil {
 		switch {
-		case errors.Is(err, repository.ErrNotFound):
+		case errors.Is(err, service.ErrUserNotFound):
 			apierror.RespondWithError(ctx, http.StatusNotFound, err, errs.CodeUserNotFound, "user not found")
 		case errors.Is(err, service.ErrLastSuperUser):
 			apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeUserLastSuperUser, "cannot demote last superuser")
@@ -144,15 +133,15 @@ func (c *UsersController) Create(ctx *gin.Context) {
 }
 
 func (c *UsersController) Delete(ctx *gin.Context) {
-	userID, err := parseUserID(ctx.Param("id"))
-	if err != nil {
+	userID, err := httpx.ParseUintParam(ctx.Param("id"))
+	if err != nil || userID == 0 {
 		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeUserInvalidID, "invalid user id", nil)
 		return
 	}
 
 	if err := c.service.RemoveAllowlistUser(ctx.Request.Context(), userID); err != nil {
 		switch {
-		case errors.Is(err, repository.ErrNotFound):
+		case errors.Is(err, service.ErrUserNotFound):
 			apierror.RespondWithError(ctx, http.StatusNotFound, err, errs.CodeUserNotFound, "user not found")
 		case errors.Is(err, service.ErrCannotRemoveSuperUser):
 			apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeUserRemoveSuperUser, "cannot remove superuser")
@@ -163,15 +152,4 @@ func (c *UsersController) Delete(ctx *gin.Context) {
 	}
 
 	ctx.Status(http.StatusNoContent)
-}
-
-func parseUserID(raw string) (uint, error) {
-	value, err := strconv.ParseUint(raw, 10, 32)
-	if err != nil || value == 0 {
-		if err == nil {
-			return 0, errors.New("invalid id")
-		}
-		return 0, err
-	}
-	return uint(value), nil
 }

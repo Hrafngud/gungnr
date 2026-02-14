@@ -18,10 +18,6 @@ func NewGitHubController(service *service.GitHubService) *GitHubController {
 	return &GitHubController{service: service}
 }
 
-func (c *GitHubController) Register(r gin.IRoutes) {
-	r.GET("/github/catalog", c.Catalog)
-}
-
 func (c *GitHubController) Catalog(ctx *gin.Context) {
 	if c.service == nil {
 		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeGitHubUnavailable, "github service unavailable", nil)

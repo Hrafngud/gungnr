@@ -3,8 +3,6 @@ package controller
 import (
 	"bufio"
 	"net/http"
-	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +11,7 @@ import (
 	"go-notes/internal/errs"
 	"go-notes/internal/middleware"
 	"go-notes/internal/service"
+	"go-notes/internal/utils/httpx"
 )
 
 type HostController struct {
@@ -22,15 +21,6 @@ type HostController struct {
 
 func NewHostController(service *service.HostService, audit *service.AuditService) *HostController {
 	return &HostController{service: service, audit: audit}
-}
-
-func (c *HostController) Register(r gin.IRoutes) {
-	r.GET("/host/docker", c.ListDocker)
-	r.GET("/host/docker/usage", c.DockerUsage)
-	r.GET("/host/docker/logs", c.StreamDockerLogs)
-	r.POST("/host/docker/stop", c.StopDocker)
-	r.POST("/host/docker/restart", c.RestartDocker)
-	r.POST("/host/docker/remove", c.RemoveDocker)
 }
 
 func (c *HostController) ListDocker(ctx *gin.Context) {
@@ -44,7 +34,7 @@ func (c *HostController) ListDocker(ctx *gin.Context) {
 
 func (c *HostController) DockerUsage(ctx *gin.Context) {
 	project := strings.TrimSpace(ctx.Query("project"))
-	if project != "" && !isSafeContainerRef(project) {
+	if project != "" && !httpx.IsSafeRef(project) {
 		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidProject, "invalid project name", nil)
 		return
 	}
@@ -62,23 +52,20 @@ func (c *HostController) StreamDockerLogs(ctx *gin.Context) {
 		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidContainer, "container is required", nil)
 		return
 	}
-	if !isSafeContainerRef(container) {
+	if !httpx.IsSafeRef(container) {
 		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidContainer, "invalid container name", nil)
 		return
 	}
 
 	opts := service.ContainerLogsOptions{
-		Tail:       clampInt(parseIntQuery(ctx, "tail", 200), 1, 5000),
-		Follow:     parseBoolQuery(ctx, "follow", true),
-		Timestamps: parseBoolQuery(ctx, "timestamps", true),
+		Tail:       httpx.ClampInt(httpx.ParseIntQuery(ctx, "tail", 200), 1, 5000),
+		Follow:     httpx.ParseBoolQuery(ctx, "follow", true),
+		Timestamps: httpx.ParseBoolQuery(ctx, "timestamps", true),
 	}
 
-	ctx.Writer.Header().Set("Content-Type", "text/event-stream")
-	ctx.Writer.Header().Set("Cache-Control", "no-cache")
-	ctx.Writer.Header().Set("Connection", "keep-alive")
-	ctx.Writer.Header().Set("X-Accel-Buffering", "no")
+	httpx.SetSSEHeaders(ctx)
 
-	flusher, ok := ctx.Writer.(http.Flusher)
+	flusher, ok := httpx.SSEFlusher(ctx)
 	if !ok {
 		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeHostStreamUnsupported, "streaming unsupported", nil)
 		return
@@ -100,18 +87,18 @@ func (c *HostController) StreamDockerLogs(ctx *gin.Context) {
 		if line == "" {
 			continue
 		}
-		sendEvent(ctx, flusher, "log", gin.H{"line": line})
+		httpx.SendSSEEvent(ctx, flusher, "log", gin.H{"line": line})
 	}
 
 	if err := scanner.Err(); err != nil {
-		sendEvent(ctx, flusher, "error", gin.H{"code": errs.CodeHostLogsFailed, "message": err.Error()})
+		httpx.SendSSEEvent(ctx, flusher, "error", gin.H{"code": errs.CodeHostLogsFailed, "message": err.Error()})
 		return
 	}
 	if err := cmd.Wait(); err != nil {
-		sendEvent(ctx, flusher, "error", gin.H{"code": errs.CodeHostLogsFailed, "message": err.Error()})
+		httpx.SendSSEEvent(ctx, flusher, "error", gin.H{"code": errs.CodeHostLogsFailed, "message": err.Error()})
 		return
 	}
-	sendEvent(ctx, flusher, "done", gin.H{"status": "closed"})
+	httpx.SendSSEEvent(ctx, flusher, "done", gin.H{"status": "closed"})
 }
 
 type containerActionRequest struct {
@@ -179,46 +166,6 @@ func (c *HostController) RemoveDocker(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"status": "removed"})
 }
 
-func parseBoolQuery(ctx *gin.Context, key string, fallback bool) bool {
-	raw := strings.TrimSpace(ctx.Query(key))
-	if raw == "" {
-		return fallback
-	}
-	value, err := strconv.ParseBool(raw)
-	if err != nil {
-		return fallback
-	}
-	return value
-}
-
-func parseIntQuery(ctx *gin.Context, key string, fallback int) int {
-	raw := strings.TrimSpace(ctx.Query(key))
-	if raw == "" {
-		return fallback
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil {
-		return fallback
-	}
-	return value
-}
-
-func clampInt(value, min, max int) int {
-	if value < min {
-		return min
-	}
-	if value > max {
-		return max
-	}
-	return value
-}
-
-var dockerRefPattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
-
-func isSafeContainerRef(value string) bool {
-	return dockerRefPattern.MatchString(value)
-}
-
 func (c *HostController) parseContainerAction(ctx *gin.Context) (string, bool) {
 	var req containerActionRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -230,7 +177,7 @@ func (c *HostController) parseContainerAction(ctx *gin.Context) (string, bool) {
 		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidContainer, "container is required", nil)
 		return "", false
 	}
-	if !isSafeContainerRef(container) {
+	if !httpx.IsSafeRef(container) {
 		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidContainer, "invalid container name", nil)
 		return "", false
 	}
@@ -248,7 +195,7 @@ func (c *HostController) parseRemoveContainerAction(ctx *gin.Context) (removeCon
 		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidContainer, "container is required", nil)
 		return removeContainerRequest{}, false
 	}
-	if !isSafeContainerRef(container) {
+	if !httpx.IsSafeRef(container) {
 		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidContainer, "invalid container name", nil)
 		return removeContainerRequest{}, false
 	}

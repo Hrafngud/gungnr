@@ -24,6 +24,7 @@ var (
 	ErrJobRunning         = errors.New("job already running")
 	ErrJobNotStoppable    = errors.New("job is not stoppable")
 	ErrJobNotRetryable    = errors.New("job is not retryable")
+	ErrJobNotFound        = errors.New("job not found")
 )
 
 func NewJobService(repo repository.JobRepository, runner *jobs.Runner) *JobService {
@@ -46,7 +47,14 @@ func (s *JobService) ListPage(ctx context.Context, page int, pageSize int) ([]mo
 }
 
 func (s *JobService) Get(ctx context.Context, id uint) (*models.Job, error) {
-	return s.repo.Get(ctx, id)
+	job, err := s.repo.Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, errs.Wrap(errs.CodeJobNotFound, ErrJobNotFound.Error(), ErrJobNotFound)
+		}
+		return nil, err
+	}
+	return job, nil
 }
 
 func (s *JobService) Create(ctx context.Context, jobType string, payload any) (*models.Job, error) {
@@ -78,6 +86,9 @@ func (s *JobService) Create(ctx context.Context, jobType string, payload any) (*
 func (s *JobService) Stop(ctx context.Context, id uint, errMsg string) (*models.Job, error) {
 	job, err := s.repo.Get(ctx, id)
 	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, errs.Wrap(errs.CodeJobNotFound, ErrJobNotFound.Error(), ErrJobNotFound)
+		}
 		return nil, err
 	}
 
@@ -113,6 +124,9 @@ func (s *JobService) Stop(ctx context.Context, id uint, errMsg string) (*models.
 func (s *JobService) Retry(ctx context.Context, id uint) (*models.Job, error) {
 	job, err := s.repo.Get(ctx, id)
 	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, errs.Wrap(errs.CodeJobNotFound, ErrJobNotFound.Error(), ErrJobNotFound)
+		}
 		return nil, err
 	}
 

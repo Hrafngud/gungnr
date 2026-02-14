@@ -18,11 +18,6 @@ func NewCloudflareController(service *service.CloudflareService) *CloudflareCont
 	return &CloudflareController{service: service}
 }
 
-func (c *CloudflareController) Register(r gin.IRoutes) {
-	r.GET("/cloudflare/preflight", c.Preflight)
-	r.GET("/cloudflare/zones", c.Zones)
-}
-
 func (c *CloudflareController) Preflight(ctx *gin.Context) {
 	if c.service == nil {
 		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeCloudflareUnavailable, "cloudflare service unavailable", nil)
