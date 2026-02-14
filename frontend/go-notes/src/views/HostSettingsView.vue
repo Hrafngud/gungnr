@@ -126,9 +126,12 @@ watch(removeVolumes, (enabled) => {
 })
 
 const hasPreview = computed(() => Boolean(preview.value?.contents))
-const localProjectNames = computed(
-  () => new Set(localProjects.value.map((project) => project.name.toLowerCase())),
-)
+const localProjectNames = computed(() => {
+  const names = localProjects.value
+    .map((project) => (typeof project?.name === 'string' ? project.name.trim().toLowerCase() : ''))
+    .filter((name) => name.length > 0)
+  return new Set(names)
+})
 
 const isRunningStatus = (status: string) => {
   const normalized = status.toLowerCase()
@@ -216,7 +219,8 @@ const ownershipLabel = (container: DockerContainer) => {
   if (localProjectsLoading.value) return 'Checking'
   if (localProjectsError.value) return 'Unknown'
   const project = container.project?.toLowerCase()
-  if (project && localProjectNames.value.has(project)) {
+  const localNames = localProjectNames.value
+  if (project && localNames.has(project)) {
     return 'Local template'
   }
   return 'External'
@@ -307,9 +311,10 @@ const loadContainers = async () => {
   containersError.value = null
   try {
     const { data } = await hostApi.listDocker()
-    containers.value = data.containers
+    containers.value = Array.isArray(data.containers) ? data.containers : []
   } catch (err) {
     containersError.value = apiErrorMessage(err)
+    containers.value = []
   } finally {
     containersLoading.value = false
   }
@@ -335,7 +340,7 @@ const loadLocalProjects = async () => {
   localProjectsError.value = null
   try {
     const { data } = await projectsApi.listLocal()
-    localProjects.value = data.projects
+    localProjects.value = Array.isArray(data.projects) ? data.projects : []
   } catch (err) {
     localProjectsError.value = apiErrorMessage(err)
     localProjects.value = []

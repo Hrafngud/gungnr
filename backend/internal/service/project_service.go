@@ -76,7 +76,7 @@ func (s *ProjectService) ListLocal(ctx context.Context) ([]LocalProject, error) 
 		return nil, errs.Wrap(errs.CodeProjectLocalListFailed, "read templates dir failed", err)
 	}
 
-	var projects []LocalProject
+	projects := make([]LocalProject, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
