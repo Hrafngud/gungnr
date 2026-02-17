@@ -7,9 +7,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+
+	"go-notes/internal/errs"
+	"go-notes/internal/jobs"
+	"go-notes/internal/repository"
 )
 
 type DockerPortBinding struct {
@@ -33,10 +39,16 @@ type DockerContainer struct {
 	PortBindings []DockerPortBinding `json:"portBindings"`
 }
 
-type HostService struct{}
+type HostService struct {
+	templatesDir string
+	projects     repository.ProjectRepository
+}
 
-func NewHostService() *HostService {
-	return &HostService{}
+func NewHostService(templatesDir string, projects repository.ProjectRepository) *HostService {
+	return &HostService{
+		templatesDir: strings.TrimSpace(templatesDir),
+		projects:     projects,
+	}
 }
 
 type ContainerLogsOptions struct {
@@ -219,6 +231,416 @@ func (s *HostService) RemoveContainer(ctx context.Context, container string, rem
 	}
 	args = append(args, container)
 	return s.runDockerCommand(ctx, args...)
+}
+
+func (s *HostService) RestartProjectStack(ctx context.Context, project string) error {
+	return s.restartProjectStack(ctx, project, nil)
+}
+
+func (s *HostService) RestartProjectStackWithLogger(ctx context.Context, project string, logger jobs.Logger) error {
+	return s.restartProjectStack(ctx, project, logger)
+}
+
+func (s *HostService) restartProjectStack(ctx context.Context, project string, logger jobs.Logger) error {
+	baseDir := strings.TrimSpace(s.templatesDir)
+	project = strings.TrimSpace(project)
+	if project == "" || project == "." || project == ".." {
+		return fmt.Errorf("invalid project name")
+	}
+
+	attempts := make([]string, 0, 4)
+
+	if repoDir, err := s.resolveProjectDirFromRepository(ctx, baseDir, project); err == nil {
+		hostLogf(logger, "restart attempt: repository path %s", repoDir)
+		if err := s.composeUp(ctx, repoDir, nil, logger); err == nil {
+			return nil
+		} else {
+			attempts = append(attempts, fmt.Sprintf("repository path (%s): %v", repoDir, err))
+			hostLogf(logger, "restart attempt failed: repository path %s: %v", repoDir, err)
+		}
+	} else {
+		attempts = append(attempts, fmt.Sprintf("repository path resolve: %v", err))
+		hostLogf(logger, "restart attempt resolve failed: repository path: %v", err)
+	}
+
+	if baseDir != "" {
+		if exactDir, err := resolveProjectDirExact(baseDir, project); err == nil {
+			hostLogf(logger, "restart attempt: templates exact path %s", exactDir)
+			if err := s.composeUp(ctx, exactDir, nil, logger); err == nil {
+				return nil
+			} else {
+				attempts = append(attempts, fmt.Sprintf("templates exact (%s): %v", exactDir, err))
+				hostLogf(logger, "restart attempt failed: templates exact path %s: %v", exactDir, err)
+			}
+		} else {
+			attempts = append(attempts, fmt.Sprintf("templates exact resolve: %v", err))
+			hostLogf(logger, "restart attempt resolve failed: templates exact: %v", err)
+		}
+
+		if fallbackDir, err := resolveProjectDir(baseDir, project); err == nil {
+			hostLogf(logger, "restart attempt: templates fallback path %s", fallbackDir)
+			if err := s.composeUp(ctx, fallbackDir, nil, logger); err == nil {
+				return nil
+			} else {
+				attempts = append(attempts, fmt.Sprintf("templates fallback (%s): %v", fallbackDir, err))
+				hostLogf(logger, "restart attempt failed: templates fallback path %s: %v", fallbackDir, err)
+			}
+		} else {
+			attempts = append(attempts, fmt.Sprintf("templates fallback resolve: %v", err))
+			hostLogf(logger, "restart attempt resolve failed: templates fallback: %v", err)
+		}
+	}
+
+	meta, err := s.readComposeProjectMeta(ctx, project)
+	if err != nil {
+		attempts = append(attempts, fmt.Sprintf("compose metadata read: %v", err))
+		hostLogf(logger, "restart attempt failed: compose metadata read: %v", err)
+		return buildRestartProjectError(attempts)
+	}
+
+	projectDir, err := resolveComposeProjectDir(baseDir, project, meta.WorkingDir, meta.ConfigFiles)
+	if err != nil {
+		attempts = append(attempts, fmt.Sprintf("compose metadata resolve: %v", err))
+		hostLogf(logger, "restart attempt failed: compose metadata resolve: %v", err)
+		return buildRestartProjectError(attempts)
+	}
+	configFiles := resolveComposeConfigFiles(projectDir, meta.ConfigFiles)
+	hostLogf(logger, "restart attempt: compose metadata path %s", projectDir)
+	if err := s.composeUp(ctx, projectDir, configFiles, logger); err != nil {
+		attempts = append(attempts, fmt.Sprintf("compose metadata (%s): %v", projectDir, err))
+		hostLogf(logger, "restart attempt failed: compose metadata path %s: %v", projectDir, err)
+		return buildRestartProjectError(attempts)
+	}
+	return nil
+}
+
+func (s *HostService) resolveProjectDirFromRepository(ctx context.Context, baseDir, project string) (string, error) {
+	if s.projects == nil {
+		return "", fmt.Errorf("project repository unavailable")
+	}
+
+	pathFromRecord := func(name string) (string, error) {
+		record, err := s.projects.GetByName(ctx, name)
+		if err != nil {
+			return "", err
+		}
+		return normalizeProjectPath(baseDir, record.Path)
+	}
+
+	if dir, err := pathFromRecord(project); err == nil {
+		return dir, nil
+	} else if err != repository.ErrNotFound {
+		return "", fmt.Errorf("load project record: %w", err)
+	}
+
+	lower := strings.ToLower(project)
+	if lower != project {
+		if dir, err := pathFromRecord(lower); err == nil {
+			return dir, nil
+		} else if err != repository.ErrNotFound {
+			return "", fmt.Errorf("load project record: %w", err)
+		}
+	}
+
+	projects, err := s.projects.List(ctx)
+	if err != nil {
+		return "", fmt.Errorf("list projects: %w", err)
+	}
+	for _, item := range projects {
+		if strings.EqualFold(strings.TrimSpace(item.Name), project) {
+			return normalizeProjectPath(baseDir, item.Path)
+		}
+	}
+
+	return "", fmt.Errorf("project record missing: %q", project)
+}
+
+func normalizeProjectPath(baseDir, rawPath string) (string, error) {
+	projectPath := strings.TrimSpace(rawPath)
+	if projectPath == "" {
+		return "", fmt.Errorf("project path is empty")
+	}
+
+	candidates := make([]string, 0, 3)
+	if filepath.IsAbs(projectPath) {
+		candidates = append(candidates, projectPath)
+		if baseDir != "" {
+			candidates = append(candidates, filepath.Join(baseDir, filepath.Base(projectPath)))
+		}
+	} else {
+		candidates = append(candidates, projectPath)
+		if baseDir != "" {
+			candidates = append(candidates, filepath.Join(baseDir, projectPath))
+		}
+	}
+
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err != nil {
+			continue
+		}
+		if !info.IsDir() {
+			continue
+		}
+		return candidate, nil
+	}
+
+	return "", fmt.Errorf("project directory not accessible from path %q", projectPath)
+}
+
+func buildRestartProjectError(attempts []string) error {
+	if len(attempts) == 0 {
+		return errs.New(errs.CodeHostDockerFailed, "restart compose stack failed")
+	}
+	message := "restart compose stack failed: " + attempts[len(attempts)-1]
+	return errs.WithDetails(
+		errs.New(errs.CodeHostDockerFailed, message),
+		map[string]any{"attempts": attempts},
+	)
+}
+
+func resolveProjectDirExact(baseDir, project string) (string, error) {
+	if strings.TrimSpace(baseDir) == "" {
+		return "", fmt.Errorf("templates directory not configured")
+	}
+	projectDir := filepath.Join(baseDir, project)
+	info, err := os.Stat(projectDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("project directory missing: %q", project)
+		}
+		return "", fmt.Errorf("check project directory: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("project path is not a directory: %q", project)
+	}
+	return projectDir, nil
+}
+
+func resolveProjectDir(baseDir, project string) (string, error) {
+	if strings.TrimSpace(baseDir) == "" {
+		return "", fmt.Errorf("templates directory not configured")
+	}
+	projectDir := filepath.Join(baseDir, project)
+	if info, err := os.Stat(projectDir); err == nil {
+		if info.IsDir() {
+			return projectDir, nil
+		}
+		return "", fmt.Errorf("project path is not a directory: %q", project)
+	}
+
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("read templates directory: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if strings.EqualFold(entry.Name(), project) {
+			return filepath.Join(baseDir, entry.Name()), nil
+		}
+	}
+
+	return "", fmt.Errorf("project directory missing: %q", project)
+}
+
+type composeProjectMeta struct {
+	WorkingDir  string
+	ConfigFiles []string
+}
+
+func (s *HostService) readComposeProjectMeta(ctx context.Context, project string) (composeProjectMeta, error) {
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "-q", "--filter", "label=com.docker.compose.project="+project)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return composeProjectMeta{}, fmt.Errorf("docker ps compose metadata failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	containerIDs := parseLines(output)
+	if len(containerIDs) == 0 {
+		return composeProjectMeta{}, fmt.Errorf("compose project not found: %q", project)
+	}
+
+	var lastErr error
+	for _, containerID := range containerIDs {
+		labels, err := inspectContainerLabels(ctx, containerID)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		workingDir := strings.TrimSpace(labels["com.docker.compose.project.working_dir"])
+		configFilesRaw := strings.TrimSpace(labels["com.docker.compose.project.config_files"])
+		if workingDir == "" && configFilesRaw == "" {
+			continue
+		}
+		return composeProjectMeta{
+			WorkingDir:  workingDir,
+			ConfigFiles: splitComposeConfigFiles(configFilesRaw),
+		}, nil
+	}
+	if lastErr != nil {
+		return composeProjectMeta{}, fmt.Errorf("inspect compose metadata failed: %w", lastErr)
+	}
+	return composeProjectMeta{}, fmt.Errorf("compose metadata labels unavailable for project %q", project)
+}
+
+func inspectContainerLabels(ctx context.Context, containerID string) (map[string]string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{json .Config.Labels}}", containerID)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker inspect labels failed for %s: %w: %s", containerID, err, strings.TrimSpace(string(output)))
+	}
+	trimmed := strings.TrimSpace(string(output))
+	if trimmed == "" || trimmed == "null" {
+		return map[string]string{}, nil
+	}
+	labels := map[string]string{}
+	if err := json.Unmarshal([]byte(trimmed), &labels); err != nil {
+		return nil, fmt.Errorf("parse docker inspect labels for %s: %w", containerID, err)
+	}
+	return labels, nil
+}
+
+func resolveComposeProjectDir(baseDir, project, workingDir string, configFiles []string) (string, error) {
+	workingDir = strings.TrimSpace(workingDir)
+	if workingDir != "" {
+		if info, err := os.Stat(workingDir); err == nil && info.IsDir() {
+			return workingDir, nil
+		}
+	}
+	if baseDir == "" {
+		if workingDir != "" {
+			return "", fmt.Errorf("compose working directory is not accessible: %q", workingDir)
+		}
+		return "", fmt.Errorf("templates directory not configured")
+	}
+
+	if workingDir != "" {
+		baseName := filepath.Base(workingDir)
+		if baseName != "." && baseName != "/" {
+			mapped := filepath.Join(baseDir, baseName)
+			if info, err := os.Stat(mapped); err == nil && info.IsDir() {
+				return mapped, nil
+			}
+		}
+	}
+
+	for _, configFile := range configFiles {
+		dir := filepath.Dir(strings.TrimSpace(configFile))
+		if dir == "" || dir == "." || dir == "/" {
+			continue
+		}
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return dir, nil
+		}
+		if baseDir != "" {
+			mapped := filepath.Join(baseDir, filepath.Base(dir))
+			if info, err := os.Stat(mapped); err == nil && info.IsDir() {
+				return mapped, nil
+			}
+		}
+	}
+
+	return resolveProjectDir(baseDir, project)
+}
+
+func resolveComposeConfigFiles(projectDir string, configFiles []string) []string {
+	if len(configFiles) == 0 {
+		return nil
+	}
+	resolved := make([]string, 0, len(configFiles))
+	seen := make(map[string]struct{})
+	for _, raw := range configFiles {
+		filePath := strings.TrimSpace(raw)
+		if filePath == "" {
+			continue
+		}
+		candidates := []string{filePath}
+		if projectDir != "" {
+			if filepath.IsAbs(filePath) {
+				candidates = append(candidates, filepath.Join(projectDir, filepath.Base(filePath)))
+			} else {
+				candidates = append(candidates, filepath.Join(projectDir, filePath))
+			}
+		}
+		for _, candidate := range candidates {
+			if candidate == "" {
+				continue
+			}
+			if _, err := os.Stat(candidate); err != nil {
+				continue
+			}
+			if _, exists := seen[candidate]; exists {
+				break
+			}
+			seen[candidate] = struct{}{}
+			resolved = append(resolved, candidate)
+			break
+		}
+	}
+	if len(resolved) == 0 {
+		return nil
+	}
+	return resolved
+}
+
+func splitComposeConfigFiles(raw string) []string {
+	parts := strings.Split(raw, ",")
+	files := make([]string, 0, len(parts))
+	for _, part := range parts {
+		file := strings.TrimSpace(part)
+		if file != "" {
+			files = append(files, file)
+		}
+	}
+	return files
+}
+
+func parseLines(raw []byte) []string {
+	lines := strings.Split(string(raw), "\n")
+	items := make([]string, 0, len(lines))
+	for _, line := range lines {
+		item := strings.TrimSpace(line)
+		if item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func (s *HostService) composeUp(ctx context.Context, projectDir string, configFiles []string, logger jobs.Logger) error {
+	args := []string{"compose"}
+	for _, configFile := range configFiles {
+		args = append(args, "-f", configFile)
+	}
+	args = append(args, "up", "--build", "-d")
+
+	hostLogf(logger, "running command in %s: docker %s", projectDir, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Dir = projectDir
+	output, err := cmd.CombinedOutput()
+	logCommandOutput(logger, output)
+	if err != nil {
+		return fmt.Errorf("docker %s failed: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func hostLogf(logger jobs.Logger, format string, args ...any) {
+	if logger == nil {
+		return
+	}
+	logger.Logf(format, args...)
+}
+
+func logCommandOutput(logger jobs.Logger, output []byte) {
+	if logger == nil {
+		return
+	}
+	for _, line := range parseLines(output) {
+		logger.Log(line)
+	}
 }
 
 type dockerPSLine struct {

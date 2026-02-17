@@ -111,6 +111,8 @@ const canConfirmRemove = computed(() => {
   return true
 })
 const isAdmin = computed(() => authStore.isAdmin)
+const selectedProjectRestarting = ref(false)
+const selectedProjectRestartError = ref<string | null>(null)
 
 watch(removeModalOpen, (open) => {
   if (!open) {
@@ -213,7 +215,6 @@ const actionStateFor = (container: DockerContainer): ContainerActionState => {
   }
   return actionStates[container.id] as ContainerActionState
 }
-
 
 const ownershipLabel = (container: DockerContainer) => {
   if (localProjectsLoading.value) return 'Checking'
@@ -389,6 +390,33 @@ const restartContainer = async (container: DockerContainer) => {
   }
 }
 
+const restartSelectedProjectStack = async () => {
+  if (!isAdmin.value) {
+    toastStore.error('Admin access required.', 'Restart blocked')
+    return
+  }
+  if (projectFilter.value === 'all') {
+    toastStore.error('Select a project first.', 'Restart blocked')
+    return
+  }
+  if (selectedProjectRestarting.value) return
+  selectedProjectRestartError.value = null
+  selectedProjectRestarting.value = true
+  try {
+    const { data } = await hostApi.restartProject(projectFilter.value)
+    toastStore.success(
+      `Project "${projectFilter.value}" restart queued (job #${data.job.id}).`,
+      'Docker compose',
+    )
+  } catch (err) {
+    const message = apiErrorMessage(err)
+    selectedProjectRestartError.value = message
+    toastStore.error(message, 'Queue failed')
+  } finally {
+    selectedProjectRestarting.value = false
+  }
+}
+
 const openRemoveModal = (container: DockerContainer) => {
   removeTarget.value = container
   removeVolumes.value = false
@@ -438,6 +466,7 @@ watch(projectOptions, (options) => {
 })
 
 watch(projectFilter, () => {
+  selectedProjectRestartError.value = null
   loadDockerUsage()
 })
 </script>
@@ -613,14 +642,32 @@ watch(projectFilter, () => {
               Stopped ({{ stoppedCount }})
             </UiButton>
           </div>
-          <div class="min-w-[200px]">
-            <UiSelect v-model="projectFilter" :options="projectOptions" />
+          <div class="flex items-center gap-2">
+            <div class="min-w-[200px]">
+              <UiSelect v-model="projectFilter" :options="projectOptions" />
+            </div>
+            <UiButton
+              v-if="projectFilter !== 'all'"
+              variant="ghost"
+              size="sm"
+              :disabled="selectedProjectRestarting || !isAdmin"
+              @click="restartSelectedProjectStack"
+            >
+              <span class="flex items-center gap-2">
+                <NavIcon name="restart" class="h-3.5 w-3.5" />
+                <UiInlineSpinner v-if="selectedProjectRestarting" />
+                {{ selectedProjectRestarting ? 'Restarting stack...' : 'Restart stack' }}
+              </span>
+            </UiButton>
           </div>
         </div>
 
         <p v-if="projectFilter !== 'all'" class="text-xs text-[color:var(--muted)]">
           Showing resources for project "{{ projectFilter }}". Disk usage remains global.
         </p>
+        <UiInlineFeedback v-if="selectedProjectRestartError" tone="error">
+          {{ selectedProjectRestartError }}
+        </UiInlineFeedback>
 
         <UiState v-if="containersError" tone="error">
           {{ containersError }}
@@ -743,60 +790,6 @@ watch(projectFilter, () => {
                 {{ actionStateFor(container).error }}
               </UiInlineFeedback>
             </UiPanel>
-          </UiListRow>
-        </div>
-      </UiPanel>
-
-      <UiPanel variant="soft" class="space-y-4 p-4">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-              Local templates
-            </p>
-            <h3 class="mt-2 text-base font-semibold text-[color:var(--text)]">
-              Local project folders
-            </h3>
-            <p class="mt-2 text-xs text-[color:var(--muted)]">
-              These folders live in the templates directory. Lifecycle actions are safest for
-              containers whose compose project matches one of these names.
-            </p> 
-          </div>
-          <UiButton
-            variant="ghost"
-            size="xs"
-            :disabled="localProjectsLoading"
-            @click="loadLocalProjects"
-          >
-            <span class="flex items-center gap-2">
-              <NavIcon name="refresh" class="h-3 w-3" />
-              <UiInlineSpinner v-if="localProjectsLoading" />
-              Refresh folders
-            </span>
-          </UiButton>
-        </div>
-
-        <UiState v-if="localProjectsError" tone="error">
-          {{ localProjectsError }}
-        </UiState>
-
-        <UiState v-else-if="localProjectsLoading" loading>
-          Loading local folders...
-        </UiState>
-
-        <UiState v-else-if="localProjects.length === 0">
-          No local template folders detected.
-        </UiState>
-
-        <div v-else class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          <UiListRow
-            v-for="project in localProjects"
-            :key="project.path"
-            class="flex flex-wrap items-center justify-between gap-2 break-words text-xs"
-          >
-            <span class="text-[color:var(--text)]">{{ project.name }}</span>
-            <span class="truncate text-[color:var(--muted)]" :title="project.path">
-              {{ project.path }}
-            </span>
           </UiListRow>
         </div>
       </UiPanel>

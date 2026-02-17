@@ -7,4 +7,5 @@ const (
 	JobTypeForwardLocal   = "forward_local"
 	JobTypeDockerRun      = "docker_run"
 	JobTypeDockerCompose  = "docker_compose_up"
+	JobTypeHostRestart    = "host_restart_project_stack"
 )

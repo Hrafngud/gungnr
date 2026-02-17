@@ -16,11 +16,12 @@ import (
 
 type HostController struct {
 	service *service.HostService
+	jobs    *service.JobService
 	audit   *service.AuditService
 }
 
-func NewHostController(service *service.HostService, audit *service.AuditService) *HostController {
-	return &HostController{service: service, audit: audit}
+func NewHostController(service *service.HostService, jobs *service.JobService, audit *service.AuditService) *HostController {
+	return &HostController{service: service, jobs: jobs, audit: audit}
 }
 
 func (c *HostController) ListDocker(ctx *gin.Context) {
@@ -110,6 +111,10 @@ type removeContainerRequest struct {
 	RemoveVolumes bool   `json:"removeVolumes"`
 }
 
+type projectActionRequest struct {
+	Project string `json:"project"`
+}
+
 func (c *HostController) StopDocker(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
@@ -166,6 +171,35 @@ func (c *HostController) RemoveDocker(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"status": "removed"})
 }
 
+func (c *HostController) RestartDockerProject(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeHostAdminRequired, "admin role required", nil)
+		return
+	}
+	project, ok := c.parseProjectAction(ctx)
+	if !ok {
+		return
+	}
+	if c.jobs == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeHostDockerFailed, "job service unavailable", nil)
+		return
+	}
+	job, err := c.jobs.Create(ctx.Request.Context(), service.JobTypeHostRestart, service.RestartProjectStackRequest{
+		Project: project,
+	})
+	if err != nil {
+		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeHostDockerFailed, "failed to queue project restart")
+		return
+	}
+	c.logAudit(ctx, "host.project.restart", project, map[string]any{
+		"project":   project,
+		"operation": "docker_compose_up_build_async",
+		"jobId":     job.ID,
+	})
+	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
+}
+
 func (c *HostController) parseContainerAction(ctx *gin.Context) (string, bool) {
 	var req containerActionRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -203,6 +237,24 @@ func (c *HostController) parseRemoveContainerAction(ctx *gin.Context) (removeCon
 	return req, true
 }
 
+func (c *HostController) parseProjectAction(ctx *gin.Context) (string, bool) {
+	var req projectActionRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidBody, "invalid request body", nil)
+		return "", false
+	}
+	project := strings.TrimSpace(req.Project)
+	if project == "" {
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidProject, "project is required", nil)
+		return "", false
+	}
+	if project == "." || project == ".." || !httpx.IsSafeRef(project) {
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidProject, "invalid project name", nil)
+		return "", false
+	}
+	return project, true
+}
+
 func (c *HostController) logAudit(ctx *gin.Context, action, target string, metadata map[string]any) {
 	if c.audit == nil {
 		return
@@ -211,7 +263,9 @@ func (c *HostController) logAudit(ctx *gin.Context, action, target string, metad
 		metadata = map[string]any{}
 	}
 	if _, ok := metadata["container"]; !ok {
-		metadata["container"] = target
+		if _, hasProject := metadata["project"]; !hasProject {
+			metadata["container"] = target
+		}
 	}
 	session, _ := middleware.SessionFromContext(ctx)
 	_ = c.audit.Log(ctx.Request.Context(), service.AuditEntry{

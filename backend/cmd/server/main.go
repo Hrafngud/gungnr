@@ -52,14 +52,16 @@ func main() {
 	githubService := service.NewGitHubService(cfg, settingsService)
 	cloudflareService := service.NewCloudflareService(settingsService)
 	auditService := service.NewAuditService(auditRepo)
-	hostService := service.NewHostService()
-	healthService := service.NewHealthService(hostService, settingsService)
 	dockerRunner := service.NewDockerRunner()
+	hostService := service.NewHostService(cfg.TemplatesDir, projectRepo)
+	healthService := service.NewHealthService(hostService, settingsService)
 
 	workflows := service.NewProjectWorkflows(cfg, projectRepo, settingsService, dockerRunner)
 	workflows.Register(jobRunner)
 	dockerWorkflows := service.NewDockerWorkflows(dockerRunner)
 	dockerWorkflows.Register(jobRunner)
+	hostWorkflows := service.NewHostWorkflows(hostService)
+	hostWorkflows.Register(jobRunner)
 
 	sessionManager := auth.NewManager(cfg.SessionSecret, cfg.SessionTTL)
 	secureCookie := cfg.AppEnv == "prod"
@@ -71,7 +73,7 @@ func main() {
 		Projects:        controller.NewProjectsController(projectService, auditService),
 		Jobs:            controller.NewJobsController(jobService),
 		Settings:        controller.NewSettingsController(settingsService, auditService),
-		Host:            controller.NewHostController(hostService, auditService),
+		Host:            controller.NewHostController(hostService, jobService, auditService),
 		Audit:           controller.NewAuditController(auditService),
 		Users:           controller.NewUsersController(userService),
 		GitHub:          controller.NewGitHubController(githubService),

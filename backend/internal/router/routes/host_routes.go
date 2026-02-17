@@ -15,5 +15,6 @@ func RegisterHost(r gin.IRoutes, c *controller.HostController) {
 	r.GET("/host/docker/logs", c.StreamDockerLogs)
 	r.POST("/host/docker/stop", c.StopDocker)
 	r.POST("/host/docker/restart", c.RestartDocker)
+	r.POST("/host/docker/project/restart", c.RestartDockerProject)
 	r.POST("/host/docker/remove", c.RemoveDocker)
 }
