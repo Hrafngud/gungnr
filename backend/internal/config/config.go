@@ -40,6 +40,12 @@ type Config struct {
 	CloudflareTunnelID  string
 	CloudflaredConfig   string
 	CloudflaredTunnel   string
+	InfraQueueRoot      string
+	InfraPollInterval   time.Duration
+	InfraResultTimeout  time.Duration
+	InfraIntentMaxAge   time.Duration
+	InfraResultMaxAge   time.Duration
+	InfraClaimMaxAge    time.Duration
 }
 
 func Load() (Config, error) {
@@ -73,6 +79,12 @@ func Load() (Config, error) {
 	v.SetDefault("CLOUDFLARE_TUNNEL_ID", "")
 	v.SetDefault("CLOUDFLARED_CONFIG", "~/.cloudflared/config.yml")
 	v.SetDefault("CLOUDFLARED_TUNNEL_NAME", "")
+	v.SetDefault("INFRA_QUEUE_ROOT", "/templates/.infra")
+	v.SetDefault("INFRA_POLL_INTERVAL_MS", 500)
+	v.SetDefault("INFRA_RESULT_TIMEOUT_SEC", 120)
+	v.SetDefault("INFRA_RETENTION_INTENT_HOURS", 168)
+	v.SetDefault("INFRA_RETENTION_RESULT_HOURS", 168)
+	v.SetDefault("INFRA_RETENTION_CLAIM_MINUTES", 60)
 
 	v.AutomaticEnv()
 
@@ -113,7 +125,23 @@ func Load() (Config, error) {
 		CloudflareTunnelID:  v.GetString("CLOUDFLARE_TUNNEL_ID"),
 		CloudflaredConfig:   v.GetString("CLOUDFLARED_CONFIG"),
 		CloudflaredTunnel:   v.GetString("CLOUDFLARED_TUNNEL_NAME"),
+		InfraQueueRoot:      v.GetString("INFRA_QUEUE_ROOT"),
+		InfraPollInterval:   time.Duration(v.GetInt("INFRA_POLL_INTERVAL_MS")) * time.Millisecond,
+		InfraResultTimeout:  time.Duration(v.GetInt("INFRA_RESULT_TIMEOUT_SEC")) * time.Second,
+		InfraIntentMaxAge:   time.Duration(v.GetInt("INFRA_RETENTION_INTENT_HOURS")) * time.Hour,
+		InfraResultMaxAge:   time.Duration(v.GetInt("INFRA_RETENTION_RESULT_HOURS")) * time.Hour,
+		InfraClaimMaxAge:    time.Duration(v.GetInt("INFRA_RETENTION_CLAIM_MINUTES")) * time.Minute,
 	}
+
+	if cfg.InfraPollInterval <= 0 {
+		cfg.InfraPollInterval = 500 * time.Millisecond
+	}
+	if cfg.InfraResultTimeout <= 0 {
+		cfg.InfraResultTimeout = 120 * time.Second
+	}
+	cfg.InfraIntentMaxAge = clampDuration(cfg.InfraIntentMaxAge, 24*time.Hour, 30*24*time.Hour, 7*24*time.Hour)
+	cfg.InfraResultMaxAge = clampDuration(cfg.InfraResultMaxAge, 24*time.Hour, 30*24*time.Hour, 7*24*time.Hour)
+	cfg.InfraClaimMaxAge = clampDuration(cfg.InfraClaimMaxAge, 5*time.Minute, 24*time.Hour, 60*time.Minute)
 
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL is required")
@@ -156,6 +184,19 @@ func parseInt64(input string) int64 {
 	value, err := strconv.ParseInt(trimmed, 10, 64)
 	if err != nil {
 		return 0
+	}
+	return value
+}
+
+func clampDuration(value, min, max, fallback time.Duration) time.Duration {
+	if value <= 0 {
+		value = fallback
+	}
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
 	}
 	return value
 }

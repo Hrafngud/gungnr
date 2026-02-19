@@ -47,7 +47,7 @@ func (w *HostWorkflows) handleRestartProjectStack(ctx context.Context, job model
 	}
 
 	logger.Logf("restarting compose stack for project %q", req.Project)
-	if err := w.host.RestartProjectStackWithLogger(ctx, req.Project, logger); err != nil {
+	if err := w.host.RestartProjectStackWithLogger(ctx, fmt.Sprintf("job-%d", job.ID), req.Project, logger); err != nil {
 		return err
 	}
 	logger.Logf("compose restart completed for project %q", req.Project)

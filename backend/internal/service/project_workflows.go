@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/url"
 	"os"
@@ -15,9 +16,11 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"go-notes/internal/config"
+	"go-notes/internal/infra/contract"
 	"go-notes/internal/integrations/cloudflare"
 	gh "go-notes/internal/integrations/github"
 	"go-notes/internal/jobs"
@@ -30,14 +33,25 @@ type ProjectWorkflows struct {
 	projects     repository.ProjectRepository
 	settings     *SettingsService
 	dockerRunner *DockerRunner
+	infraClient  infraBridgeClient
 }
 
-func NewProjectWorkflows(cfg config.Config, projects repository.ProjectRepository, settings *SettingsService, dockerRunner *DockerRunner) *ProjectWorkflows {
+type cloudflareWorkflowClient interface {
+	EnsureDNSForZone(ctx context.Context, hostname string, zoneID string) error
+	UpdateIngress(ctx context.Context, hostname string, port int) error
+}
+
+type infraBridgeClient interface {
+	RestartTunnel(ctx context.Context, requestID, configPath string) (contract.Result, error)
+}
+
+func NewProjectWorkflows(cfg config.Config, projects repository.ProjectRepository, settings *SettingsService, dockerRunner *DockerRunner, infraClient infraBridgeClient) *ProjectWorkflows {
 	return &ProjectWorkflows{
 		cfg:          cfg,
 		projects:     projects,
 		settings:     settings,
 		dockerRunner: dockerRunner,
+		infraClient:  infraClient,
 	}
 }
 
@@ -152,7 +166,14 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	}
 
 	logger.Log("cloning repository into templates directory")
-	if err := cloneTemplateRepo(ctx, logger, authURL, projectDir); err != nil {
+	composePath, err := cloneTemplateRepo(ctx, logger, authURL, projectDir)
+	if err != nil {
+		return err
+	}
+	if err := normalizeGitOrigin(ctx, logger, projectDir, cloneURL); err != nil {
+		return err
+	}
+	if err := repairProjectOwnership(logger, runtimeCfg.TemplatesDir, runtimeCfg.CloudflaredConfig, projectDir); err != nil {
 		return err
 	}
 
@@ -175,7 +196,6 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	}
 	logger.Logf("using proxy port %d and db port %d", proxyPort, dbPort)
 
-	composePath := filepath.Join(projectDir, "docker-compose.yml")
 	patchSummary, err := patchComposePorts(composePath, proxyPort, dbPort)
 	if err == nil || patchSummary.Proxy.Matched || patchSummary.DB.Matched || patchSummary.Proxy.Reason != "" || patchSummary.DB.Reason != "" {
 		logComposePatchSummary(logger, proxyPort, dbPort, patchSummary)
@@ -205,7 +225,8 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	hostname := fmt.Sprintf("%s.%s", req.Subdomain, selection.Domain)
 	logger.Logf("configuring tunnel ingress for %s", hostname)
 	cloudflareClient := cloudflare.NewClient(runtimeCfg)
-	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, hostname, selection.Domain, selection.ZoneID, proxyPort); err != nil {
+	requestID := fmt.Sprintf("job-%d", job.ID)
+	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, requestID, hostname, selection.Domain, selection.ZoneID, proxyPort); err != nil {
 		return err
 	}
 
@@ -254,9 +275,8 @@ func (w *ProjectWorkflows) handleDeployExisting(ctx context.Context, job models.
 	if _, err := os.Stat(projectDir); err != nil {
 		return fmt.Errorf("project directory missing: %w", err)
 	}
-	composePath := filepath.Join(projectDir, "docker-compose.yml")
-	if _, err := os.Stat(composePath); err != nil {
-		return fmt.Errorf("docker-compose.yml missing: %w", err)
+	if _, err := resolveComposeFile(projectDir); err != nil {
+		return fmt.Errorf("compose file missing: %w", err)
 	}
 
 	logger.Log("starting docker compose stack")
@@ -267,7 +287,8 @@ func (w *ProjectWorkflows) handleDeployExisting(ctx context.Context, job models.
 	hostname := fmt.Sprintf("%s.%s", req.Subdomain, selection.Domain)
 	logger.Logf("configuring tunnel ingress for %s", hostname)
 	cloudflareClient := cloudflare.NewClient(runtimeCfg)
-	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, hostname, selection.Domain, selection.ZoneID, req.Port); err != nil {
+	requestID := fmt.Sprintf("job-%d", job.ID)
+	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, requestID, hostname, selection.Domain, selection.ZoneID, req.Port); err != nil {
 		return err
 	}
 
@@ -317,7 +338,8 @@ func (w *ProjectWorkflows) handleForwardLocal(ctx context.Context, job models.Jo
 	hostname := fmt.Sprintf("%s.%s", req.Subdomain, selection.Domain)
 	logger.Logf("configuring tunnel ingress for %s", hostname)
 	cloudflareClient := cloudflare.NewClient(runtimeCfg)
-	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, hostname, selection.Domain, selection.ZoneID, req.Port); err != nil {
+	requestID := fmt.Sprintf("job-%d", job.ID)
+	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, requestID, hostname, selection.Domain, selection.ZoneID, req.Port); err != nil {
 		return err
 	}
 
@@ -369,7 +391,8 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 	hostname := fmt.Sprintf("%s.%s", req.Subdomain, selection.Domain)
 	logger.Logf("configuring tunnel ingress for %s", hostname)
 	cloudflareClient := cloudflare.NewClient(runtimeCfg)
-	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, hostname, selection.Domain, selection.ZoneID, req.Port); err != nil {
+	requestID := fmt.Sprintf("job-%d", job.ID)
+	if err := w.cloudflareSetup(ctx, logger, runtimeCfg, cloudflareClient, requestID, hostname, selection.Domain, selection.ZoneID, req.Port); err != nil {
 		return err
 	}
 
@@ -396,7 +419,7 @@ func (w *ProjectWorkflows) runContainer(ctx context.Context, logger jobs.Logger,
 	return w.dockerRunner.RunContainer(ctx, logger, dockerReq)
 }
 
-func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, logger jobs.Logger, cfg config.Config, cloudfl *cloudflare.Client, hostname, domain, zoneID string, port int) error {
+func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, logger jobs.Logger, cfg config.Config, cloudfl cloudflareWorkflowClient, requestID, hostname, domain, zoneID string, port int) error {
 	if strings.TrimSpace(domain) == "" {
 		return fmt.Errorf("domain not configured")
 	}
@@ -423,7 +446,38 @@ func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, logger jobs.Logg
 				logger.Logf("cloudflared config update error: %v", updateErr)
 				return fmt.Errorf("cloudflared ingress: %w", updateErr)
 			}
-			logger.Log("restart the local tunnel to apply ingress updates: gungnr tunnel run")
+			if w.infraClient == nil {
+				logger.Log("infra bridge client unavailable; continuing after local ingress update")
+				return nil
+			}
+			logger.Logf("submitting restart_tunnel intent via infra bridge (request_id=%s)", strings.TrimSpace(requestID))
+			result, restartErr := w.infraClient.RestartTunnel(ctx, requestID, cfg.CloudflaredConfig)
+			if restartErr != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				if strings.TrimSpace(result.IntentID) != "" {
+					logger.Logf("infra bridge restart_tunnel intent error: intent_id=%s", result.IntentID)
+				}
+				if strings.TrimSpace(result.LogPath) != "" {
+					logger.Logf("infra bridge restart_tunnel log path: %s", result.LogPath)
+				}
+				if restartTunnelLikelyIPv6LoopbackIssue(restartErr, result) {
+					logger.Log("cloudflared restart diagnostics: origin may be unreachable on IPv6 loopback (::1) while ingress uses localhost")
+				}
+				logger.Logf("infra bridge restart_tunnel error: %v", restartErr)
+				return fmt.Errorf("cloudflared restart: %w", restartErr)
+			}
+			logger.Logf("infra bridge restart_tunnel intent completed: intent_id=%s status=%s", result.IntentID, result.Status)
+			if strings.TrimSpace(result.LogPath) != "" {
+				logger.Logf("infra bridge restart_tunnel log path: %s", result.LogPath)
+			}
+			if result.Error != nil {
+				return fmt.Errorf("cloudflared restart failed (%s): %s", strings.TrimSpace(result.Error.Code), strings.TrimSpace(result.Error.Message))
+			}
+			if result.Status != contract.StatusSucceeded {
+				return fmt.Errorf("cloudflared restart reported non-success status %q", result.Status)
+			}
 			return nil
 		}
 		logger.Logf("cloudflare ingress error: %v", err)
@@ -432,7 +486,7 @@ func (w *ProjectWorkflows) cloudflareSetup(ctx context.Context, logger jobs.Logg
 	if updateErr := cloudflare.UpdateLocalIngress(cfg.CloudflaredConfig, hostname, port); updateErr != nil {
 		logger.Logf("cloudflared config update skipped: %v", updateErr)
 	}
-	logger.Log("restart the local tunnel to apply ingress updates: gungnr tunnel run")
+	logger.Log("tunnel ingress updated via Cloudflare API")
 	return nil
 }
 
@@ -816,9 +870,8 @@ func buildAuthenticatedCloneURL(rawURL, token string) (string, error) {
 	return parsed.String(), nil
 }
 
-func cloneTemplateRepo(ctx context.Context, logger jobs.Logger, authURL, projectDir string) error {
-	const maxAttempts = 3
-	composePath := filepath.Join(projectDir, "docker-compose.yml")
+func cloneTemplateRepo(ctx context.Context, logger jobs.Logger, authURL, projectDir string) (string, error) {
+	const maxAttempts = 10
 
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -828,26 +881,279 @@ func cloneTemplateRepo(ctx context.Context, logger jobs.Logger, authURL, project
 
 		if err := runQuietCommand(ctx, logger, "", []string{"GIT_TERMINAL_PROMPT=0"}, "git", "clone", authURL, projectDir); err != nil {
 			lastErr = err
-		} else if _, err := os.Stat(composePath); err == nil {
-			return nil
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("check compose file: %w", err)
 		} else {
-			lastErr = fmt.Errorf("docker-compose.yml missing after clone")
+			composePath, resolveErr := resolveComposeFile(projectDir)
+			if resolveErr == nil {
+				return composePath, nil
+			}
+			if !errors.Is(resolveErr, os.ErrNotExist) {
+				return "", resolveErr
+			}
+			logger.Logf(
+				"clone attempt %d/%d completed but compose file is not present yet (entries: %s)",
+				attempt,
+				maxAttempts,
+				summarizeTopLevelEntries(projectDir, 8),
+			)
+			lastErr = fmt.Errorf("compose file missing after clone: %w", resolveErr)
+		}
+
+		if attempt >= maxAttempts {
+			break
 		}
 
 		if err := os.RemoveAll(projectDir); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("cleanup failed clone: %w", err)
+			return "", fmt.Errorf("cleanup failed clone: %w", err)
 		}
 
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(time.Duration(attempt) * time.Second):
+			return "", ctx.Err()
+		case <-time.After(time.Duration(attempt*2) * time.Second):
 		}
 	}
 
-	return lastErr
+	if lastErr != nil {
+		return "", fmt.Errorf("%w (final entries: %s)", lastErr, summarizeTopLevelEntries(projectDir, 12))
+	}
+	return "", fmt.Errorf("repository clone failed without a terminal error")
+}
+
+var composeFileCandidates = []string{
+	"compose.yaml",
+	"compose.yml",
+	"docker-compose.yml",
+	"docker-compose.yaml",
+}
+
+func resolveComposeFile(projectDir string) (string, error) {
+	for _, name := range composeFileCandidates {
+		path := filepath.Join(projectDir, name)
+		info, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return "", fmt.Errorf("check compose file %s: %w", path, err)
+		}
+		if info.IsDir() {
+			continue
+		}
+		return path, nil
+	}
+	return "", fmt.Errorf(
+		"expected one of %s in %s: %w",
+		strings.Join(composeFileCandidates, ", "),
+		projectDir,
+		os.ErrNotExist,
+	)
+}
+
+func summarizeTopLevelEntries(projectDir string, max int) string {
+	if max <= 0 {
+		max = 5
+	}
+	entries, err := os.ReadDir(projectDir)
+	if err != nil {
+		return fmt.Sprintf("unreadable (%v)", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := strings.TrimSpace(entry.Name())
+		if name == "" || name == ".git" {
+			continue
+		}
+		names = append(names, name)
+		if len(names) >= max {
+			break
+		}
+	}
+	if len(names) == 0 {
+		return "<none>"
+	}
+	if len(entries)-1 > len(names) {
+		return fmt.Sprintf("%s (+more)", strings.Join(names, ", "))
+	}
+	return strings.Join(names, ", ")
+}
+
+func normalizeGitOrigin(ctx context.Context, logger jobs.Logger, projectDir, cloneURL string) error {
+	cloneURL = strings.TrimSpace(cloneURL)
+	if cloneURL == "" {
+		return fmt.Errorf("repository clone URL is empty")
+	}
+	logger.Log("setting git origin to canonical repository URL")
+	if err := runQuietCommand(ctx, logger, projectDir, nil, "git", "remote", "set-url", "origin", cloneURL); err != nil {
+		return fmt.Errorf("set git remote origin: %w", err)
+	}
+	return nil
+}
+
+func repairProjectOwnership(logger jobs.Logger, templatesDir, cloudflaredConfig, projectDir string) error {
+	if os.Geteuid() != 0 {
+		return nil
+	}
+
+	uid, gid, err := detectPreferredOwnership(templatesDir, cloudflaredConfig)
+	if err != nil {
+		return err
+	}
+	if uid == 0 && gid == 0 {
+		return nil
+	}
+
+	logger.Logf("applying ownership %d:%d to %s", uid, gid, projectDir)
+	if err := chownRecursive(projectDir, uid, gid); err != nil {
+		return err
+	}
+	return nil
+}
+
+func detectPreferredOwnership(templatesDir, cloudflaredConfig string) (int, int, error) {
+	candidates := ownershipCandidates(templatesDir, cloudflaredConfig)
+	if len(candidates) == 0 {
+		return 0, 0, fmt.Errorf("templates directory not configured")
+	}
+
+	for _, candidate := range candidates {
+		uid, gid, found, err := detectOwnershipFromDirectoryEntries(candidate)
+		if err != nil {
+			return 0, 0, err
+		}
+		if found {
+			return uid, gid, nil
+		}
+	}
+
+	for _, candidate := range candidates {
+		uid, gid, found, err := detectOwnershipFromPathParents(candidate)
+		if err != nil {
+			return 0, 0, err
+		}
+		if found {
+			return uid, gid, nil
+		}
+	}
+
+	return 0, 0, nil
+}
+
+func ownershipCandidates(templatesDir, cloudflaredConfig string) []string {
+	seen := make(map[string]struct{})
+	candidates := make([]string, 0, 2)
+	add := func(path string) {
+		trimmed := strings.TrimSpace(path)
+		if trimmed == "" {
+			return
+		}
+		clean := filepath.Clean(trimmed)
+		if _, ok := seen[clean]; ok {
+			return
+		}
+		seen[clean] = struct{}{}
+		candidates = append(candidates, clean)
+	}
+
+	add(templatesDir)
+	if cfgPath := strings.TrimSpace(expandUserPath(cloudflaredConfig)); cfgPath != "" {
+		add(filepath.Dir(filepath.Clean(cfgPath)))
+	}
+
+	return candidates
+}
+
+func restartTunnelLikelyIPv6LoopbackIssue(err error, result contract.Result) bool {
+	if strings.Contains(strings.ToLower(err.Error()), "[::1]") {
+		return true
+	}
+	if result.Error != nil && strings.Contains(strings.ToLower(strings.TrimSpace(result.Error.Message)), "[::1]") {
+		return true
+	}
+	for _, line := range result.LogTail {
+		normalized := strings.ToLower(strings.TrimSpace(line))
+		if strings.Contains(normalized, "[::1]") && strings.Contains(normalized, "connect: connection refused") {
+			return true
+		}
+	}
+	return false
+}
+
+func detectOwnershipFromDirectoryEntries(path string) (int, int, bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, 0, false, nil
+		}
+		return 0, 0, false, fmt.Errorf("stat ownership anchor %s: %w", path, err)
+	}
+	if !info.IsDir() {
+		return 0, 0, false, nil
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("read ownership entries for %s: %w", path, err)
+	}
+	for _, entry := range entries {
+		entryInfo, infoErr := entry.Info()
+		if infoErr != nil {
+			if os.IsNotExist(infoErr) {
+				continue
+			}
+			return 0, 0, false, fmt.Errorf("read ownership entry %s: %w", filepath.Join(path, entry.Name()), infoErr)
+		}
+		stat, ok := entryInfo.Sys().(*syscall.Stat_t)
+		if !ok {
+			continue
+		}
+		uid := int(stat.Uid)
+		gid := int(stat.Gid)
+		if uid != 0 || gid != 0 {
+			return uid, gid, true, nil
+		}
+	}
+
+	return 0, 0, false, nil
+}
+
+func detectOwnershipFromPathParents(path string) (int, int, bool, error) {
+	anchor := filepath.Clean(path)
+	for {
+		info, err := os.Stat(anchor)
+		if err == nil {
+			stat, ok := info.Sys().(*syscall.Stat_t)
+			if !ok {
+				return 0, 0, false, fmt.Errorf("read ownership for %s", anchor)
+			}
+			uid := int(stat.Uid)
+			gid := int(stat.Gid)
+			if uid != 0 || gid != 0 {
+				return uid, gid, true, nil
+			}
+		} else if !os.IsNotExist(err) {
+			return 0, 0, false, fmt.Errorf("stat ownership anchor %s: %w", anchor, err)
+		}
+
+		parent := filepath.Dir(anchor)
+		if parent == anchor {
+			break
+		}
+		anchor = parent
+	}
+
+	return 0, 0, false, nil
+}
+
+func chownRecursive(path string, uid, gid int) error {
+	return filepath.WalkDir(path, func(current string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := os.Lchown(current, uid, gid); err != nil {
+			return fmt.Errorf("chown %s: %w", current, err)
+		}
+		return nil
+	})
 }
 
 func runLoggedCommand(ctx context.Context, logger jobs.Logger, dir string, env []string, name string, args ...string) error {

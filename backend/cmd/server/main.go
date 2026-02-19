@@ -1,12 +1,18 @@
 package main
 
 import (
+	"context"
 	"log"
+	"time"
 
 	"go-notes/internal/auth"
 	"go-notes/internal/config"
 	"go-notes/internal/controller"
 	"go-notes/internal/db"
+	infraclient "go-notes/internal/infra/client"
+	"go-notes/internal/infra/contract"
+	infraqueue "go-notes/internal/infra/queue"
+	infraworker "go-notes/internal/infra/worker"
 	"go-notes/internal/jobs"
 	"go-notes/internal/middleware"
 	"go-notes/internal/repository"
@@ -53,10 +59,44 @@ func main() {
 	cloudflareService := service.NewCloudflareService(settingsService)
 	auditService := service.NewAuditService(auditRepo)
 	dockerRunner := service.NewDockerRunner()
-	hostService := service.NewHostService(cfg.TemplatesDir, projectRepo)
+
+	bridgeQueue, err := infraqueue.NewFilesystem(cfg.InfraQueueRoot)
+	if err != nil {
+		log.Fatalf("failed to initialize infra queue: %v", err)
+	}
+	cleanupReport, cleanupErr := bridgeQueue.CleanupStale(context.Background(), time.Now().UTC(), infraqueue.RetentionPolicy{
+		IntentMaxAge: cfg.InfraIntentMaxAge,
+		ResultMaxAge: cfg.InfraResultMaxAge,
+		ClaimMaxAge:  cfg.InfraClaimMaxAge,
+	})
+	if cleanupErr != nil {
+		log.Printf("warn: infra queue cleanup failed: %v", cleanupErr)
+	} else if cleanupReport.TotalRemoved() > 0 {
+		log.Printf(
+			"infra queue cleanup removed intents=%d results=%d claims=%d protected=%d",
+			cleanupReport.RemovedIntents,
+			cleanupReport.RemovedResults,
+			cleanupReport.RemovedClaims,
+			cleanupReport.ProtectedTasks,
+		)
+	}
+	bridgeClient := infraclient.New(bridgeQueue, cfg.InfraPollInterval, cfg.InfraResultTimeout)
+	bridgeWorker := infraworker.New(bridgeQueue, cfg.InfraPollInterval, cfg.TemplatesDir, log.Default())
+	if err := bridgeWorker.ValidateTaskCoverage([]contract.TaskType{
+		contract.TaskTypeRestartTunnel,
+		contract.TaskTypeDockerStopContainer,
+		contract.TaskTypeDockerRestartContainer,
+		contract.TaskTypeDockerRemoveContainer,
+		contract.TaskTypeComposeUpStack,
+	}); err != nil {
+		log.Fatalf("infra worker readiness check failed: %v", err)
+	}
+	go bridgeWorker.Run(context.Background())
+
+	hostService := service.NewHostService(cfg.TemplatesDir, projectRepo, bridgeClient)
 	healthService := service.NewHealthService(hostService, settingsService)
 
-	workflows := service.NewProjectWorkflows(cfg, projectRepo, settingsService, dockerRunner)
+	workflows := service.NewProjectWorkflows(cfg, projectRepo, settingsService, dockerRunner, bridgeClient)
 	workflows.Register(jobRunner)
 	dockerWorkflows := service.NewDockerWorkflows(dockerRunner)
 	dockerWorkflows.Register(jobRunner)

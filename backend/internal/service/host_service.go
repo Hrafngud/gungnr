@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,8 @@ import (
 	"strings"
 
 	"go-notes/internal/errs"
+	infraclient "go-notes/internal/infra/client"
+	"go-notes/internal/infra/contract"
 	"go-notes/internal/jobs"
 	"go-notes/internal/repository"
 )
@@ -42,12 +45,21 @@ type DockerContainer struct {
 type HostService struct {
 	templatesDir string
 	projects     repository.ProjectRepository
+	infraClient  hostInfraBridgeClient
 }
 
-func NewHostService(templatesDir string, projects repository.ProjectRepository) *HostService {
+type hostInfraBridgeClient interface {
+	StopContainer(ctx context.Context, requestID, container string) (contract.Result, error)
+	RestartContainer(ctx context.Context, requestID, container string) (contract.Result, error)
+	RemoveContainer(ctx context.Context, requestID, container string, removeVolumes bool) (contract.Result, error)
+	ComposeUpStack(ctx context.Context, requestID string, payload contract.ComposeUpStackPayload) (contract.Result, error)
+}
+
+func NewHostService(templatesDir string, projects repository.ProjectRepository, infraClient hostInfraBridgeClient) *HostService {
 	return &HostService{
 		templatesDir: strings.TrimSpace(templatesDir),
 		projects:     projects,
+		infraClient:  infraClient,
 	}
 }
 
@@ -217,99 +229,87 @@ func (s *HostService) StartContainerLogs(ctx context.Context, container string, 
 }
 
 func (s *HostService) StopContainer(ctx context.Context, container string) error {
-	return s.runDockerCommand(ctx, "stop", container)
+	container = strings.TrimSpace(container)
+	if container == "" {
+		return fmt.Errorf("container is required")
+	}
+	if s.infraClient == nil {
+		return fmt.Errorf("infra bridge client unavailable")
+	}
+
+	result, err := s.infraClient.StopContainer(ctx, "", container)
+	if err != nil {
+		return bridgeTaskError("failed to stop container", contract.TaskTypeDockerStopContainer, container, err)
+	}
+	return bridgeResultError("failed to stop container", contract.TaskTypeDockerStopContainer, container, result)
 }
 
 func (s *HostService) RestartContainer(ctx context.Context, container string) error {
-	return s.runDockerCommand(ctx, "restart", container)
+	container = strings.TrimSpace(container)
+	if container == "" {
+		return fmt.Errorf("container is required")
+	}
+	if s.infraClient == nil {
+		return fmt.Errorf("infra bridge client unavailable")
+	}
+
+	result, err := s.infraClient.RestartContainer(ctx, "", container)
+	if err != nil {
+		return bridgeTaskError("failed to restart container", contract.TaskTypeDockerRestartContainer, container, err)
+	}
+	return bridgeResultError("failed to restart container", contract.TaskTypeDockerRestartContainer, container, result)
 }
 
 func (s *HostService) RemoveContainer(ctx context.Context, container string, removeVolumes bool) error {
-	args := []string{"rm", "-f"}
-	if removeVolumes {
-		args = append(args, "-v")
+	container = strings.TrimSpace(container)
+	if container == "" {
+		return fmt.Errorf("container is required")
 	}
-	args = append(args, container)
-	return s.runDockerCommand(ctx, args...)
+	if s.infraClient == nil {
+		return fmt.Errorf("infra bridge client unavailable")
+	}
+
+	result, err := s.infraClient.RemoveContainer(ctx, "", container, removeVolumes)
+	if err != nil {
+		return bridgeTaskError("failed to remove container", contract.TaskTypeDockerRemoveContainer, container, err)
+	}
+	return bridgeResultError("failed to remove container", contract.TaskTypeDockerRemoveContainer, container, result)
 }
 
 func (s *HostService) RestartProjectStack(ctx context.Context, project string) error {
-	return s.restartProjectStack(ctx, project, nil)
+	return s.restartProjectStack(ctx, "", project, nil)
 }
 
-func (s *HostService) RestartProjectStackWithLogger(ctx context.Context, project string, logger jobs.Logger) error {
-	return s.restartProjectStack(ctx, project, logger)
+func (s *HostService) RestartProjectStackWithLogger(ctx context.Context, requestID, project string, logger jobs.Logger) error {
+	return s.restartProjectStack(ctx, requestID, project, logger)
 }
 
-func (s *HostService) restartProjectStack(ctx context.Context, project string, logger jobs.Logger) error {
-	baseDir := strings.TrimSpace(s.templatesDir)
+func (s *HostService) restartProjectStack(ctx context.Context, requestID, project string, logger jobs.Logger) error {
 	project = strings.TrimSpace(project)
 	if project == "" || project == "." || project == ".." {
 		return fmt.Errorf("invalid project name")
 	}
-
-	attempts := make([]string, 0, 4)
-
-	if repoDir, err := s.resolveProjectDirFromRepository(ctx, baseDir, project); err == nil {
-		hostLogf(logger, "restart attempt: repository path %s", repoDir)
-		if err := s.composeUp(ctx, repoDir, nil, logger); err == nil {
-			return nil
-		} else {
-			attempts = append(attempts, fmt.Sprintf("repository path (%s): %v", repoDir, err))
-			hostLogf(logger, "restart attempt failed: repository path %s: %v", repoDir, err)
-		}
-	} else {
-		attempts = append(attempts, fmt.Sprintf("repository path resolve: %v", err))
-		hostLogf(logger, "restart attempt resolve failed: repository path: %v", err)
+	if s.infraClient == nil {
+		return fmt.Errorf("infra bridge client unavailable")
 	}
 
-	if baseDir != "" {
-		if exactDir, err := resolveProjectDirExact(baseDir, project); err == nil {
-			hostLogf(logger, "restart attempt: templates exact path %s", exactDir)
-			if err := s.composeUp(ctx, exactDir, nil, logger); err == nil {
-				return nil
-			} else {
-				attempts = append(attempts, fmt.Sprintf("templates exact (%s): %v", exactDir, err))
-				hostLogf(logger, "restart attempt failed: templates exact path %s: %v", exactDir, err)
-			}
-		} else {
-			attempts = append(attempts, fmt.Sprintf("templates exact resolve: %v", err))
-			hostLogf(logger, "restart attempt resolve failed: templates exact: %v", err)
-		}
-
-		if fallbackDir, err := resolveProjectDir(baseDir, project); err == nil {
-			hostLogf(logger, "restart attempt: templates fallback path %s", fallbackDir)
-			if err := s.composeUp(ctx, fallbackDir, nil, logger); err == nil {
-				return nil
-			} else {
-				attempts = append(attempts, fmt.Sprintf("templates fallback (%s): %v", fallbackDir, err))
-				hostLogf(logger, "restart attempt failed: templates fallback path %s: %v", fallbackDir, err)
-			}
-		} else {
-			attempts = append(attempts, fmt.Sprintf("templates fallback resolve: %v", err))
-			hostLogf(logger, "restart attempt resolve failed: templates fallback: %v", err)
-		}
-	}
-
-	meta, err := s.readComposeProjectMeta(ctx, project)
+	hostLogf(logger, "submitting compose_up_stack intent via infra bridge for project %q", project)
+	result, err := s.infraClient.ComposeUpStack(ctx, requestID, contract.ComposeUpStackPayload{
+		Project: project,
+		Build:   true,
+	})
 	if err != nil {
-		attempts = append(attempts, fmt.Sprintf("compose metadata read: %v", err))
-		hostLogf(logger, "restart attempt failed: compose metadata read: %v", err)
-		return buildRestartProjectError(attempts)
+		hostLogf(logger, "infra bridge compose_up_stack error: %v", err)
+		return bridgeTaskError("restart compose stack failed", contract.TaskTypeComposeUpStack, project, err)
+	}
+	if err := bridgeResultError("restart compose stack failed", contract.TaskTypeComposeUpStack, project, result); err != nil {
+		hostLogf(logger, "infra bridge compose_up_stack failed result: %v", err)
+		return err
 	}
 
-	projectDir, err := resolveComposeProjectDir(baseDir, project, meta.WorkingDir, meta.ConfigFiles)
-	if err != nil {
-		attempts = append(attempts, fmt.Sprintf("compose metadata resolve: %v", err))
-		hostLogf(logger, "restart attempt failed: compose metadata resolve: %v", err)
-		return buildRestartProjectError(attempts)
-	}
-	configFiles := resolveComposeConfigFiles(projectDir, meta.ConfigFiles)
-	hostLogf(logger, "restart attempt: compose metadata path %s", projectDir)
-	if err := s.composeUp(ctx, projectDir, configFiles, logger); err != nil {
-		attempts = append(attempts, fmt.Sprintf("compose metadata (%s): %v", projectDir, err))
-		hostLogf(logger, "restart attempt failed: compose metadata path %s: %v", projectDir, err)
-		return buildRestartProjectError(attempts)
+	hostLogf(logger, "infra bridge compose_up_stack intent completed: intent_id=%s status=%s", result.IntentID, result.Status)
+	if strings.TrimSpace(result.LogPath) != "" {
+		hostLogf(logger, "infra bridge compose_up_stack log path: %s", result.LogPath)
 	}
 	return nil
 }
@@ -783,13 +783,46 @@ func parseDockerPorts(raw string) []DockerPortBinding {
 	return bindings
 }
 
-func (s *HostService) runDockerCommand(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("docker %s failed: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+func bridgeResultError(message string, taskType contract.TaskType, target string, result contract.Result) error {
+	if result.Status != contract.StatusFailed {
+		return nil
 	}
-	return nil
+	failed := &infraclient.TaskFailedError{
+		IntentID: result.IntentID,
+		LogPath:  result.LogPath,
+	}
+	if result.Error != nil {
+		failed.Code = result.Error.Code
+		failed.Message = result.Error.Message
+	}
+	if strings.TrimSpace(failed.Message) == "" {
+		failed.Message = "host worker reported failure"
+	}
+	return bridgeTaskError(message, taskType, target, failed)
+}
+
+func bridgeTaskError(message string, taskType contract.TaskType, target string, err error) error {
+	details := map[string]any{
+		"task_type": taskType,
+	}
+	if strings.TrimSpace(target) != "" {
+		details["target"] = target
+	}
+
+	var taskFailed *infraclient.TaskFailedError
+	if errors.As(err, &taskFailed) {
+		if strings.TrimSpace(taskFailed.IntentID) != "" {
+			details["intent_id"] = taskFailed.IntentID
+		}
+		if strings.TrimSpace(taskFailed.Code) != "" {
+			details["worker_error_code"] = taskFailed.Code
+		}
+		if strings.TrimSpace(taskFailed.LogPath) != "" {
+			details["log_path"] = taskFailed.LogPath
+		}
+	}
+
+	return errs.WithDetails(errs.Wrap(errs.CodeHostDockerFailed, message, err), details)
 }
 
 func parseHostPort(raw string) (string, int) {

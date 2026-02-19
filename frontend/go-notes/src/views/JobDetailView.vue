@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
@@ -19,8 +19,35 @@ const streaming = ref(false)
 const connected = ref(false)
 const pageLoading = usePageLoadingStore()
 let source: EventSource | null = null
+const ingressPrefix = 'configuring tunnel ingress for '
+const restartIntentLine = 'submitting restart_tunnel intent via infra bridge'
 
 const jobId = Number(route.params.id)
+
+const deploymentHostname = computed(() => {
+  for (let idx = logLines.value.length - 1; idx >= 0; idx -= 1) {
+    const line = logLines.value[idx]?.trim() ?? ''
+    if (!line.startsWith(ingressPrefix)) continue
+    const hostname = line.slice(ingressPrefix.length).trim().toLowerCase()
+    if (!hostname) return null
+    if (!/^[a-z0-9.-]+$/.test(hostname)) return null
+    return hostname
+  }
+  return null
+})
+
+const deploymentUrl = computed(() =>
+  deploymentHostname.value ? `https://${deploymentHostname.value}` : null,
+)
+
+const showDeploymentLink = computed(
+  () => job.value?.status === 'completed' && deploymentUrl.value !== null,
+)
+
+const showTunnelRestartWarning = computed(() => {
+  if (job.value?.status === 'failed') return false
+  return logLines.value.some((line) => line.includes(restartIntentLine))
+})
 
 const fetchJob = async () => {
   if (!Number.isFinite(jobId)) {
@@ -159,6 +186,23 @@ onBeforeUnmount(() => {
 
         <UiState v-if="job.error" tone="error">
           {{ job.error }}
+        </UiState>
+
+        <UiState v-if="showTunnelRestartWarning" tone="warn">
+          The panel may go offline for a few minutes while the tunnel restarts. This is
+          expected, so do not panic.
+        </UiState>
+
+        <UiState v-if="showDeploymentLink && deploymentUrl" tone="ok">
+          Deployment is live at
+          <a
+            class="font-semibold underline"
+            :href="deploymentUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {{ deploymentUrl }}
+          </a>
         </UiState>
       </UiPanel>
 

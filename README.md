@@ -26,8 +26,15 @@ Setup is now driven by a one-time terminal bootstrap (`install.sh` + `gungnr boo
 - Vue 3 UI served by nginx.
 - Single nginx proxy on port 80 routes /, /api, and /auth.
 - `cloudflared` runs on the host as a user-managed CLI process (primary path).
-- Deploy actions run inside the API container via the Docker socket (no host-worker flow).
+- API is the orchestration/control plane: it submits bridge intents and maps worker results to jobs/logs.
+- Host lifecycle execution is handled by the host worker through the filesystem bridge queue.
 - `deploy.sh` is reference-only; do not modify it. The UI must reproduce its CLI behavior before any advanced automation.
+
+## Host lifecycle bridge (current state)
+- Bridge cutover is complete: host lifecycle endpoints and async project restart run through bridge intents/results.
+- API responsibilities: validate request + RBAC, submit task intents, wait/load results, map outcomes to API/job logs.
+- Worker responsibilities: execute host lifecycle actions (`restart_tunnel`, container lifecycle, compose restart, host probes) and write structured task results.
+- Queue storage defaults to `INFRA_QUEUE_ROOT=/templates/.infra` with `intents/`, `claims/`, `results/`, and `logs/` subdirectories.
 
 ## Requirements
 - Sudo access to install dependencies.
@@ -45,7 +52,7 @@ Currently, Gungnr is **only supported on Linux**. We are looking forward to intr
 The bootstrap CLI configures and runs a locally managed tunnel with `cloudflared`
 as a user-managed process. Manual tunnel setup is no longer required for a
 standard install.
-Persistence and auto-restart are out of scope for now.
+Reboot fallback is available via keepalive tooling and bootstrap-installed watchdog scripts.
 
 ### Tunnel auto-start watchdog
 Bootstrap installs a lightweight cron watchdog so `cloudflared` restarts after
@@ -126,6 +133,17 @@ Host integration defaults:
 - `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID` (required for API-managed tunnels)
 - `VITE_API_BASE_URL=/` when building the web container so the UI uses same-origin HTTPS.
 
+Infra bridge runtime defaults:
+- `INFRA_QUEUE_ROOT` (host-visible queue root; default `/templates/.infra`)
+- `INFRA_POLL_INTERVAL_MS` (API-side bridge poll interval)
+- `INFRA_RESULT_TIMEOUT_SEC` (API wait timeout for terminal worker result)
+
+Infra retention controls:
+- `INFRA_RETENTION_INTENT_HOURS` (max age for stale intent files)
+- `INFRA_RETENTION_RESULT_HOURS` (max age for stale terminal result files)
+- `INFRA_RETENTION_CLAIM_MINUTES` (max age for stale claim locks)
+- Startup cleanup protects active bridge work and only prunes stale terminal/orphaned artifacts.
+
 Note: Host Settings are for inspection and minor adjustments only. Settings in
 the UI (domain, GitHub token, Cloudflare token, cloudflared tunnel ref,
 cloudflared config path) override env defaults.
@@ -168,8 +186,8 @@ GUNGNR_VERSION=v1.2.3 docker compose -f docker-compose.release.yml up -d
 ## Workflows
 - Create from template: choose a name and subdomain; Gungnr creates the repo
   and deploys it.
-- Deploy existing: select a local template project, set a subdomain, and start
-  compose.
+- Forward localhost service: provide a service name, subdomain, and local host
+  port to expose an existing app through the tunnel.
 - Quick local service: provide a subdomain and host port (defaults to running an
   Excalidraw container on port 80).
 - Activity: review the audit timeline of user actions in the Activity view.
