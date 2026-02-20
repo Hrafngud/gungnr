@@ -10,7 +10,7 @@ import HostStatusHeader from '@/components/home/HostStatusHeader.vue'
 type NavItem = {
   label: string
   to: string
-  icon: 'home' | 'overview' | 'activity' | 'logs' | 'host' | 'network' | 'github' | 'users'
+  icon: 'home' | 'overview' | 'activity' | 'projects' | 'logs' | 'host' | 'network' | 'github' | 'users'
   helper: string
 }
 
@@ -26,6 +26,12 @@ const baseNavItems: NavItem[] = [
     to: '/overview',
     icon: 'overview',
     helper: 'Jobs and activity',
+  },
+  {
+    label: 'Projects',
+    to: '/projects',
+    icon: 'projects',
+    helper: 'Workspace',
   },
   {
     label: 'Jobs',

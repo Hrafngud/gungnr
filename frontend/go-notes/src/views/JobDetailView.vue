@@ -21,6 +21,8 @@ const pageLoading = usePageLoadingStore()
 let source: EventSource | null = null
 const ingressPrefix = 'configuring tunnel ingress for '
 const restartIntentLine = 'submitting restart_tunnel intent via infra bridge'
+const logFontSizes = [11, 12, 13, 14] as const
+const logFontSize = ref<number>(12)
 
 const jobId = Number(route.params.id)
 
@@ -48,6 +50,12 @@ const showTunnelRestartWarning = computed(() => {
   if (job.value?.status === 'failed') return false
   return logLines.value.some((line) => line.includes(restartIntentLine))
 })
+
+const cycleLogFontSize = () => {
+  const currentIndex = logFontSizes.findIndex((size) => size === logFontSize.value)
+  const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % logFontSizes.length
+  logFontSize.value = logFontSizes[nextIndex] ?? logFontSizes[0]
+}
 
 const fetchJob = async () => {
   if (!Number.isFinite(jobId)) {
@@ -209,10 +217,16 @@ onBeforeUnmount(() => {
       <UiPanel class="p-5">
         <div class="flex items-center justify-between">
           <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Logs</p>
-          <span class="text-xs text-[color:var(--muted-2)]">{{ logLines.length }} lines</span>
+          <div class="flex items-center gap-2">
+            <UiButton variant="ghost" size="sm" @click="cycleLogFontSize">
+              Log size: {{ logFontSize }}px
+            </UiButton>
+            <span class="text-xs text-[color:var(--muted-2)]">{{ logLines.length }} lines</span>
+          </div>
         </div>
         <pre
-          class="mt-4 max-h-[420px] overflow-auto rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)] p-4 text-xs text-[color:var(--text)]"
+          class="mt-4 max-h-[420px] overflow-auto rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-inset)] p-4 text-[color:var(--text)]"
+          :style="{ fontSize: `${logFontSize}px`, lineHeight: '1.45' }"
         ><code>{{ logLines.join('\n') || 'Waiting for log output...' }}</code></pre>
       </UiPanel>
     </div>

@@ -82,6 +82,7 @@ func (s *HostService) ListContainers(ctx context.Context, includeAll bool) ([]Do
 	}
 
 	scanner := bufio.NewScanner(bytes.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	var containers []DockerContainer
 
 	for scanner.Scan() {
@@ -113,6 +114,22 @@ func (s *HostService) ListContainers(ctx context.Context, includeAll bool) ([]Do
 	}
 
 	return containers, nil
+}
+
+func (s *HostService) CountRunningContainers(ctx context.Context) (int, error) {
+	cmd := exec.CommandContext(ctx, "docker", "ps", "--format", "{{.ID}}")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("docker ps failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	count := 0
+	for _, line := range strings.Split(string(output), "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count, nil
 }
 
 type DockerUsageEntry struct {

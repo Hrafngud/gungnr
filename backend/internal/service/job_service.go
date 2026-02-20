@@ -46,6 +46,44 @@ func (s *JobService) ListPage(ctx context.Context, page int, pageSize int) ([]mo
 	return s.repo.ListPage(ctx, offset, pageSize)
 }
 
+func (s *JobService) ListByProjectPage(ctx context.Context, project string, page int, pageSize int) ([]models.Job, int64, error) {
+	project = strings.ToLower(strings.TrimSpace(project))
+	if project == "" {
+		return nil, 0, errs.New(errs.CodeProjectInvalidName, "project name is required")
+	}
+
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 1
+	}
+
+	jobs, err := s.repo.List(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	filtered := make([]models.Job, 0, len(jobs))
+	for _, job := range jobs {
+		if jobMatchesProject(job, project) {
+			filtered = append(filtered, job)
+		}
+	}
+
+	total := int64(len(filtered))
+	offset := (page - 1) * pageSize
+	if offset >= len(filtered) {
+		return []models.Job{}, total, nil
+	}
+
+	end := offset + pageSize
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	return filtered[offset:end], total, nil
+}
+
 func (s *JobService) Get(ctx context.Context, id uint) (*models.Job, error) {
 	job, err := s.repo.Get(ctx, id)
 	if err != nil {
@@ -172,4 +210,52 @@ func (s *JobService) LogLines(job *models.Job) []string {
 		return nil
 	}
 	return strings.Split(raw, "\n")
+}
+
+func jobMatchesProject(job models.Job, project string) bool {
+	if project == "" {
+		return false
+	}
+	if !jobTypeSupportsProjectFilter(job.Type) {
+		return false
+	}
+	return projectNameFromJobInput(job.Input) == project
+}
+
+func jobTypeSupportsProjectFilter(jobType string) bool {
+	switch jobType {
+	case JobTypeCreateTemplate, JobTypeDeployExisting, JobTypeHostRestart:
+		return true
+	default:
+		return false
+	}
+}
+
+func projectNameFromJobInput(input string) string {
+	if strings.TrimSpace(input) == "" {
+		return ""
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(input), &payload); err != nil {
+		return ""
+	}
+
+	// Current project-related workflows identify the target with either "project" or "name".
+	for _, key := range []string{"project", "name"} {
+		raw, ok := payload[key]
+		if !ok {
+			continue
+		}
+		value, ok := raw.(string)
+		if !ok {
+			continue
+		}
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		if normalized != "" {
+			return normalized
+		}
+	}
+
+	return ""
 }

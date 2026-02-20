@@ -56,19 +56,19 @@ func (s *HealthService) Docker(ctx context.Context) DockerHealth {
 		return DockerHealth{Status: "error", Detail: "host service unavailable"}
 	}
 
-	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	checkCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 
-	containers, err := s.host.ListContainers(checkCtx, false)
+	count, err := s.host.CountRunningContainers(checkCtx)
 	if err != nil {
 		return DockerHealth{Status: "error", Detail: err.Error()}
 	}
 
-	detail := fmt.Sprintf("%d containers running", len(containers))
+	detail := fmt.Sprintf("%d containers running", count)
 	return DockerHealth{
 		Status:     "ok",
 		Detail:     detail,
-		Containers: len(containers),
+		Containers: count,
 	}
 }
 

@@ -9,6 +9,8 @@ import GitHubView from '@/views/GitHubView.vue'
 import UsersView from '@/views/UsersView.vue'
 import JobsView from '@/views/JobsView.vue'
 import JobDetailView from '@/views/JobDetailView.vue'
+import ProjectsListView from '@/views/ProjectsListView.vue'
+import ProjectDetailView from '@/views/ProjectDetailView.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const router = createRouter({
@@ -77,7 +79,15 @@ const router = createRouter({
     },
     {
       path: '/projects',
-      redirect: '/',
+      name: 'projects',
+      component: ProjectsListView,
+      meta: { title: 'Projects' },
+    },
+    {
+      path: '/projects/:name',
+      name: 'project-detail',
+      component: ProjectDetailView,
+      meta: { title: 'Project' },
     },
     {
       path: '/activity',

@@ -94,6 +94,8 @@ func main() {
 	go bridgeWorker.Run(context.Background())
 
 	hostService := service.NewHostService(cfg.TemplatesDir, projectRepo, bridgeClient)
+	projectRuntimeService := service.NewProjectRuntimeService(cfg.TemplatesDir, projectRepo, hostService)
+	projectEnvService := service.NewProjectEnvService(cfg.TemplatesDir, projectRepo)
 	healthService := service.NewHealthService(hostService, settingsService)
 
 	workflows := service.NewProjectWorkflows(cfg, projectRepo, settingsService, dockerRunner, bridgeClient)
@@ -110,7 +112,7 @@ func main() {
 	r := router.NewRouter(router.Dependencies{
 		Health:          controller.NewHealthController(healthService),
 		Auth:            controller.NewAuthController(authService, auditService, sessionManager, secureCookie, cookieDomain),
-		Projects:        controller.NewProjectsController(projectService, auditService),
+		Projects:        controller.NewProjectsController(projectService, projectRuntimeService, projectEnvService, hostService, jobService, auditService),
 		Jobs:            controller.NewJobsController(jobService),
 		Settings:        controller.NewSettingsController(settingsService, auditService),
 		Host:            controller.NewHostController(hostService, jobService, auditService),
