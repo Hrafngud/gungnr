@@ -53,7 +53,6 @@ func main() {
 	jobRunner := jobs.NewRunner(jobRepo)
 	jobService := service.NewJobService(jobRepo, jobRunner)
 	settingsService := service.NewSettingsService(cfg, settingsRepo)
-	projectService := service.NewProjectService(cfg, projectRepo, jobService, settingsService)
 	userService := service.NewUserService(userRepo)
 	githubService := service.NewGitHubService(cfg, settingsService)
 	cloudflareService := service.NewCloudflareService(settingsService)
@@ -94,11 +93,13 @@ func main() {
 	go bridgeWorker.Run(context.Background())
 
 	hostService := service.NewHostService(cfg.TemplatesDir, projectRepo, bridgeClient)
+	projectService := service.NewProjectService(cfg, projectRepo, jobService, settingsService)
+	projectArchiveService := service.NewProjectArchiveService(cfg, projectRepo, settingsService, jobService, hostService)
 	projectRuntimeService := service.NewProjectRuntimeService(cfg.TemplatesDir, projectRepo, hostService)
 	projectEnvService := service.NewProjectEnvService(cfg.TemplatesDir, projectRepo)
 	healthService := service.NewHealthService(hostService, settingsService)
 
-	workflows := service.NewProjectWorkflows(cfg, projectRepo, settingsService, dockerRunner, bridgeClient)
+	workflows := service.NewProjectWorkflows(cfg, projectRepo, settingsService, hostService, auditService, dockerRunner, bridgeClient)
 	workflows.Register(jobRunner)
 	dockerWorkflows := service.NewDockerWorkflows(dockerRunner)
 	dockerWorkflows.Register(jobRunner)
@@ -112,7 +113,7 @@ func main() {
 	r := router.NewRouter(router.Dependencies{
 		Health:          controller.NewHealthController(healthService),
 		Auth:            controller.NewAuthController(authService, auditService, sessionManager, secureCookie, cookieDomain),
-		Projects:        controller.NewProjectsController(projectService, projectRuntimeService, projectEnvService, hostService, jobService, auditService),
+		Projects:        controller.NewProjectsController(projectService, projectArchiveService, projectRuntimeService, projectEnvService, hostService, jobService, auditService),
 		Jobs:            controller.NewJobsController(jobService),
 		Settings:        controller.NewSettingsController(settingsService, auditService),
 		Host:            controller.NewHostController(hostService, jobService, auditService),

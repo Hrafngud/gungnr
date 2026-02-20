@@ -59,16 +59,9 @@ func (s *JobService) ListByProjectPage(ctx context.Context, project string, page
 		pageSize = 1
 	}
 
-	jobs, err := s.repo.List(ctx)
+	filtered, err := s.ListByProject(ctx, project)
 	if err != nil {
 		return nil, 0, err
-	}
-
-	filtered := make([]models.Job, 0, len(jobs))
-	for _, job := range jobs {
-		if jobMatchesProject(job, project) {
-			filtered = append(filtered, job)
-		}
 	}
 
 	total := int64(len(filtered))
@@ -82,6 +75,26 @@ func (s *JobService) ListByProjectPage(ctx context.Context, project string, page
 		end = len(filtered)
 	}
 	return filtered[offset:end], total, nil
+}
+
+func (s *JobService) ListByProject(ctx context.Context, project string) ([]models.Job, error) {
+	project = strings.ToLower(strings.TrimSpace(project))
+	if project == "" {
+		return nil, errs.New(errs.CodeProjectInvalidName, "project name is required")
+	}
+
+	jobs, err := s.repo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make([]models.Job, 0, len(jobs))
+	for _, job := range jobs {
+		if jobMatchesProject(job, project) {
+			filtered = append(filtered, job)
+		}
+	}
+	return filtered, nil
 }
 
 func (s *JobService) Get(ctx context.Context, id uint) (*models.Job, error) {
@@ -224,7 +237,7 @@ func jobMatchesProject(job models.Job, project string) bool {
 
 func jobTypeSupportsProjectFilter(jobType string) bool {
 	switch jobType {
-	case JobTypeCreateTemplate, JobTypeDeployExisting, JobTypeHostRestart:
+	case JobTypeCreateTemplate, JobTypeDeployExisting, JobTypeHostRestart, JobTypeProjectArchive:
 		return true
 	default:
 		return false

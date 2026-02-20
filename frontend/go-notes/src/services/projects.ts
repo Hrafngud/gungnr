@@ -2,6 +2,8 @@ import { api, getApiBaseUrl } from '@/services/api'
 import type {
   LocalProject,
   Project,
+  ProjectArchiveOptions,
+  ProjectArchivePlan,
   ProjectDetail,
   ProjectEnvRead,
   ProjectEnvWrite,
@@ -15,6 +17,10 @@ export const projectsApi = {
   getDetail: (name: string) => api.get<ProjectDetail>(`/api/v1/projects/${encodeURIComponent(name)}`),
   listJobs: (name: string, params?: { page?: number; limit?: number }) =>
     api.get<JobListResponse>(`/api/v1/projects/${encodeURIComponent(name)}/jobs`, { params }),
+  getArchivePlan: (name: string) =>
+    api.get<{ plan: ProjectArchivePlan }>(`/api/v1/projects/${encodeURIComponent(name)}/archive/plan`),
+  archiveProject: (name: string, payload: Partial<ProjectArchiveOptions>) =>
+    api.post<{ job: Job; plan: ProjectArchivePlan }>(`/api/v1/projects/${encodeURIComponent(name)}/archive`, payload),
   listLocal: () => api.get<{ projects: LocalProject[] }>('/api/v1/projects/local'),
   restartStack: (name: string) =>
     api.post<{ job: Job }>(

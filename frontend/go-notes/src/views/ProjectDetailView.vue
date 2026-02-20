@@ -6,9 +6,11 @@ import UiButton from '@/components/ui/UiButton.vue'
 import UiFormSidePanel from '@/components/ui/UiFormSidePanel.vue'
 import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
+import UiInput from '@/components/ui/UiInput.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
+import UiToggle from '@/components/ui/UiToggle.vue'
 import NavIcon from '@/components/NavIcon.vue'
 import { jobsApi } from '@/services/jobs'
 import { projectsApi } from '@/services/projects'
@@ -18,7 +20,12 @@ import { usePageLoadingStore } from '@/stores/pageLoading'
 import { useToastStore } from '@/stores/toasts'
 import { jobStatusLabel, jobStatusTone } from '@/utils/jobStatus'
 import type { Job, JobDetail, JobListResponse } from '@/types/jobs'
-import type { ProjectContainer, ProjectDetail } from '@/types/projects'
+import type {
+  ProjectArchiveOptions,
+  ProjectArchivePlan,
+  ProjectContainer,
+  ProjectDetail,
+} from '@/types/projects'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
@@ -31,6 +38,19 @@ const error = ref<string | null>(null)
 const detail = ref<ProjectDetail | null>(null)
 const stackRestarting = ref(false)
 const stackRestartError = ref<string | null>(null)
+const archivePlan = ref<ProjectArchivePlan | null>(null)
+const archivePlanLoading = ref(false)
+const archivePlanError = ref<string | null>(null)
+const archiveExecuting = ref(false)
+const archiveExecuteError = ref<string | null>(null)
+const archiveExecutedWithWarnings = ref(false)
+const archiveOptions = ref<ProjectArchiveOptions>({
+  removeContainers: true,
+  removeVolumes: false,
+  removeIngress: true,
+  removeDns: true,
+})
+const archiveConfirmInput = ref('')
 const isAdmin = computed(() => authStore.isAdmin)
 
 const projectJobs = ref<Job[]>([])
@@ -58,6 +78,16 @@ const projectName = computed(() => {
 const canGoJobsBack = computed(() => jobsPage.value > 1)
 const canGoJobsForward = computed(() => jobsTotalPages.value > 0 && jobsPage.value < jobsTotalPages.value)
 const selectedJobLogOutput = computed(() => selectedJob.value?.logLines?.join('\n') ?? '')
+const archiveConfirmationPhrase = computed(() => {
+  const normalized = (detail.value?.project.normalizedName || projectName.value || '').toLowerCase().trim()
+  if (!normalized) return 'ARCHIVE PROJECT'
+  return `ARCHIVE ${normalized}`
+})
+const canSubmitArchive = computed(() => {
+  if (!isAdmin.value || archiveExecuting.value) return false
+  if (archiveOptions.value.removeVolumes && !archiveOptions.value.removeContainers) return false
+  return archiveConfirmInput.value.trim() === archiveConfirmationPhrase.value
+})
 
 const statusTone = (status: string): BadgeTone => {
   const normalized = status.trim().toLowerCase()
@@ -117,6 +147,42 @@ const loadProjectJobs = async (page = 1) => {
   }
 }
 
+const applyArchiveDefaults = (plan: ProjectArchivePlan) => {
+  archiveOptions.value = {
+    removeContainers: plan.defaults.removeContainers,
+    removeVolumes: plan.defaults.removeVolumes,
+    removeIngress: plan.defaults.removeIngress,
+    removeDns: plan.defaults.removeDns,
+  }
+}
+
+const loadArchivePlan = async () => {
+  const name = projectName.value
+  if (!name) {
+    archivePlan.value = null
+    archivePlanError.value = 'Invalid project name.'
+    return
+  }
+  if (!isAdmin.value) {
+    archivePlan.value = null
+    archivePlanError.value = null
+    return
+  }
+
+  archivePlanLoading.value = true
+  archivePlanError.value = null
+  try {
+    const { data } = await projectsApi.getArchivePlan(name)
+    archivePlan.value = data.plan
+    applyArchiveDefaults(data.plan)
+  } catch (err) {
+    archivePlan.value = null
+    archivePlanError.value = apiErrorMessage(err)
+  } finally {
+    archivePlanLoading.value = false
+  }
+}
+
 const load = async () => {
   const name = projectName.value
   if (!name) {
@@ -132,6 +198,7 @@ const load = async () => {
     const { data } = await projectsApi.getDetail(name)
     detail.value = data
     await loadProjectJobs(1)
+    await loadArchivePlan()
   } catch (err) {
     detail.value = null
     error.value = apiErrorMessage(err)
@@ -139,6 +206,8 @@ const load = async () => {
     jobsTotal.value = 0
     jobsTotalPages.value = 0
     jobsPage.value = 1
+    archivePlan.value = null
+    archivePlanError.value = null
   } finally {
     loading.value = false
     pageLoading.stop()
@@ -166,6 +235,47 @@ const restartStack = async () => {
     toastStore.error(message, 'Queue failed')
   } finally {
     stackRestarting.value = false
+  }
+}
+
+const queueArchive = async () => {
+  const name = projectName.value
+  if (!name) return
+  if (!isAdmin.value) {
+    toastStore.error('Admin access required.', 'Archive blocked')
+    return
+  }
+  if (!canSubmitArchive.value) return
+
+  archiveExecuteError.value = null
+  archiveExecuting.value = true
+  try {
+    const payload = {
+      removeContainers: archiveOptions.value.removeContainers,
+      removeVolumes: archiveOptions.value.removeVolumes,
+      removeIngress: archiveOptions.value.removeIngress,
+      removeDns: archiveOptions.value.removeDns,
+    }
+    const { data } = await projectsApi.archiveProject(name, payload)
+    archivePlan.value = data.plan
+    archiveExecutedWithWarnings.value = (data.plan.warnings?.length ?? 0) > 0
+    archiveConfirmInput.value = ''
+
+    if (archiveExecutedWithWarnings.value) {
+      toastStore.warn(
+        `Archive queued (job #${data.job.id}) with ${data.plan.warnings.length} warning(s) in plan preview.`,
+        'Archive queued',
+      )
+    } else {
+      toastStore.success(`Archive queued (job #${data.job.id}).`, 'Project cleanup')
+    }
+    await load()
+  } catch (err) {
+    const message = apiErrorMessage(err)
+    archiveExecuteError.value = message
+    toastStore.error(message, 'Archive queue failed')
+  } finally {
+    archiveExecuting.value = false
   }
 }
 
@@ -236,6 +346,12 @@ const goToJobsPage = async (nextPage: number) => {
 onMounted(load)
 watch(projectName, () => {
   stackRestartError.value = null
+  archivePlan.value = null
+  archivePlanError.value = null
+  archiveExecuteError.value = null
+  archiveExecuting.value = false
+  archiveExecutedWithWarnings.value = false
+  archiveConfirmInput.value = ''
   jobLogsPanelOpen.value = false
   void load()
 })
@@ -247,6 +363,14 @@ watch(jobLogsPanelOpen, (open) => {
   selectedJobError.value = null
   selectedJobLoading.value = false
 })
+
+watch(
+  () => archiveOptions.value.removeContainers,
+  (enabled) => {
+    if (enabled) return
+    archiveOptions.value.removeVolumes = false
+  },
+)
 </script>
 
 <template>
@@ -464,6 +588,194 @@ watch(jobLogsPanelOpen, (open) => {
             </div>
           </UiListRow>
         </div>
+      </UiPanel>
+
+      <UiPanel class="space-y-5 p-6">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Archive cleanup</p>
+            <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Plan and execute</h2>
+            <p class="mt-2 text-sm text-[color:var(--muted)]">
+              Cleanup is asynchronous and always queued as a project job.
+            </p>
+          </div>
+          <UiButton variant="ghost" size="sm" :disabled="archivePlanLoading" @click="loadArchivePlan">
+            <span class="inline-flex items-center gap-2">
+              <NavIcon name="refresh" class="h-3.5 w-3.5" />
+              <UiInlineSpinner v-if="archivePlanLoading" />
+              Refresh plan
+            </span>
+          </UiButton>
+        </div>
+
+        <UiState v-if="!isAdmin">
+          Read-only access: admin permissions are required to preview and execute archive cleanup.
+        </UiState>
+        <UiState v-else-if="archivePlanLoading" loading>Building archive cleanup plan...</UiState>
+        <UiState v-else-if="archivePlanError" tone="error">{{ archivePlanError }}</UiState>
+
+        <template v-else-if="archivePlan">
+          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Containers</p>
+              <p class="text-lg font-semibold text-[color:var(--text)]">{{ archivePlan.containers.length }}</p>
+            </UiPanel>
+            <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Hostnames</p>
+              <p class="text-lg font-semibold text-[color:var(--text)]">{{ archivePlan.hostnames.length }}</p>
+            </UiPanel>
+            <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Ingress rules</p>
+              <p class="text-lg font-semibold text-[color:var(--text)]">{{ archivePlan.ingressRules.length }}</p>
+            </UiPanel>
+            <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">DNS records</p>
+              <p class="text-lg font-semibold text-[color:var(--text)]">
+                {{ archivePlan.dnsRecords.filter((record) => record.deleteEligible).length }}/{{ archivePlan.dnsRecords.length }}
+              </p>
+            </UiPanel>
+          </div>
+
+          <UiInlineFeedback v-if="archivePlan.warnings.length > 0" tone="warn">
+            {{ archivePlan.warnings.length }} warning(s): {{ archivePlan.warnings.join(' | ') }}
+          </UiInlineFeedback>
+          <UiInlineFeedback v-if="archiveExecutedWithWarnings" tone="warn">
+            Last archive request was queued with warnings in the plan preview. Review job logs after completion.
+          </UiInlineFeedback>
+          <UiInlineFeedback v-if="archiveExecuteError" tone="error">
+            {{ archiveExecuteError }}
+          </UiInlineFeedback>
+
+          <div class="grid gap-4 xl:grid-cols-2">
+            <UiPanel variant="soft" class="space-y-3 p-4">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Hostnames</p>
+              <UiState v-if="archivePlan.hostnames.length === 0">No hostnames discovered.</UiState>
+              <ul v-else class="space-y-1 text-xs text-[color:var(--muted)]">
+                <li
+                  v-for="hostname in archivePlan.hostnames"
+                  :key="hostname"
+                  class="font-mono text-[color:var(--text)] break-all"
+                >
+                  {{ hostname }}
+                </li>
+              </ul>
+            </UiPanel>
+
+            <UiPanel variant="soft" class="space-y-3 p-4">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Container targets</p>
+              <UiState v-if="archivePlan.containers.length === 0">No project containers found.</UiState>
+              <ul v-else class="space-y-1 text-xs text-[color:var(--muted)]">
+                <li
+                  v-for="container in archivePlan.containers"
+                  :key="container.id || container.name"
+                  class="flex flex-wrap items-center justify-between gap-2"
+                >
+                  <span class="font-mono text-[color:var(--text)]">{{ container.name }}</span>
+                  <UiBadge :tone="statusTone(container.status)">
+                    {{ container.status || 'unknown' }}
+                  </UiBadge>
+                </li>
+              </ul>
+            </UiPanel>
+
+            <UiPanel variant="soft" class="space-y-3 p-4">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Ingress targets</p>
+              <UiState v-if="archivePlan.ingressRules.length === 0">No ingress rules matched.</UiState>
+              <ul v-else class="space-y-1 text-xs text-[color:var(--muted)]">
+                <li
+                  v-for="rule in archivePlan.ingressRules"
+                  :key="`${rule.source}-${rule.hostname}-${rule.service}`"
+                  class="space-y-1"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <span class="font-mono text-[color:var(--text)] break-all">{{ rule.hostname }}</span>
+                    <UiBadge :tone="rule.source === 'remote' ? 'ok' : 'neutral'">
+                      {{ rule.source }}
+                    </UiBadge>
+                  </div>
+                  <p class="font-mono text-[11px] text-[color:var(--muted-2)] break-all">{{ rule.service || 'service not set' }}</p>
+                </li>
+              </ul>
+            </UiPanel>
+
+            <UiPanel variant="soft" class="space-y-3 p-4">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">DNS targets</p>
+              <UiState v-if="archivePlan.dnsRecords.length === 0">No DNS records matched.</UiState>
+              <ul v-else class="space-y-2 text-xs text-[color:var(--muted)]">
+                <li
+                  v-for="record in archivePlan.dnsRecords"
+                  :key="`${record.zoneId}-${record.id}-${record.name}`"
+                  class="space-y-1"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <span class="font-mono text-[color:var(--text)] break-all">{{ record.name }}</span>
+                    <UiBadge :tone="record.deleteEligible ? 'ok' : 'warn'">
+                      {{ record.deleteEligible ? 'deletable' : 'skip' }}
+                    </UiBadge>
+                  </div>
+                  <p class="font-mono text-[11px] text-[color:var(--muted-2)] break-all">
+                    {{ record.type }} → {{ record.content }}
+                  </p>
+                  <p v-if="record.skipReason" class="text-[11px] text-[color:var(--muted)]">
+                    {{ record.skipReason }}
+                  </p>
+                </li>
+              </ul>
+            </UiPanel>
+          </div>
+
+          <UiPanel variant="raise" class="space-y-4 p-5">
+            <div>
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Execution</p>
+              <p class="mt-2 text-sm text-[color:var(--muted)]">
+                Confirmation phrase: <span class="font-mono text-[color:var(--text)]">{{ archiveConfirmationPhrase }}</span>
+              </p>
+            </div>
+
+            <div class="grid gap-3 sm:grid-cols-2">
+              <UiToggle v-model="archiveOptions.removeContainers" :disabled="!isAdmin">
+                Remove project containers
+              </UiToggle>
+              <UiToggle v-model="archiveOptions.removeVolumes" :disabled="!isAdmin || !archiveOptions.removeContainers">
+                Remove container volumes
+              </UiToggle>
+              <UiToggle v-model="archiveOptions.removeIngress" :disabled="!isAdmin">
+                Remove ingress rules
+              </UiToggle>
+              <UiToggle v-model="archiveOptions.removeDns" :disabled="!isAdmin">
+                Remove DNS records
+              </UiToggle>
+            </div>
+
+            <label class="block text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+              Confirmation phrase
+            </label>
+            <UiInput
+              v-model="archiveConfirmInput"
+              :disabled="!isAdmin || archiveExecuting"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Type the phrase exactly"
+            />
+
+            <div class="flex flex-wrap items-center gap-3">
+              <UiButton
+                variant="danger"
+                size="sm"
+                :disabled="!canSubmitArchive"
+                @click="queueArchive"
+              >
+                <span class="inline-flex items-center gap-2">
+                  <UiInlineSpinner v-if="archiveExecuting" />
+                  {{ archiveExecuting ? 'Queueing archive...' : 'Queue archive job' }}
+                </span>
+              </UiButton>
+              <p v-if="!isAdmin" class="text-xs text-[color:var(--muted)]">
+                Read-only access: admin permissions are required to queue archive cleanup.
+              </p>
+            </div>
+          </UiPanel>
+        </template>
       </UiPanel>
 
       <UiPanel class="space-y-5 p-6">

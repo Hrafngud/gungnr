@@ -39,8 +39,12 @@ export const jobActionLabel = (action?: string): string => {
       return 'Create template'
     case 'deploy_existing':
       return 'Deploy existing'
+    case 'forward_local':
+      return 'Forward local'
     case 'quick_service':
       return 'Quick service'
+    case 'project_archive':
+      return 'Project archive'
     default:
       return action ? action.replace(/_/g, ' ') : 'Deploy'
   }

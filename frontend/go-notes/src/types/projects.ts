@@ -84,3 +84,52 @@ export interface ProjectEnvWrite {
   updatedAt: string
   backupPath?: string
 }
+
+export interface ProjectArchiveOptions {
+  removeContainers: boolean
+  removeVolumes: boolean
+  removeIngress: boolean
+  removeDns: boolean
+}
+
+export interface ProjectArchivePlanProject {
+  name: string
+  normalizedName: string
+  path: string
+  status: string
+}
+
+export interface ProjectArchivePlanContainer {
+  id: string
+  name: string
+  image: string
+  status: string
+  service: string
+}
+
+export interface ProjectArchivePlanIngressRule {
+  hostname: string
+  service: string
+  source: 'local' | 'remote' | string
+}
+
+export interface ProjectArchivePlanDNSRecord {
+  id: string
+  zoneId: string
+  name: string
+  type: string
+  content: string
+  proxied: boolean
+  deleteEligible: boolean
+  skipReason?: string
+}
+
+export interface ProjectArchivePlan {
+  project: ProjectArchivePlanProject
+  defaults: ProjectArchiveOptions
+  hostnames: string[]
+  containers: ProjectArchivePlanContainer[]
+  ingressRules: ProjectArchivePlanIngressRule[]
+  dnsRecords: ProjectArchivePlanDNSRecord[]
+  warnings: string[]
+}

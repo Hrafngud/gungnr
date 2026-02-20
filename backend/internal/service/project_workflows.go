@@ -32,6 +32,8 @@ type ProjectWorkflows struct {
 	cfg          config.Config
 	projects     repository.ProjectRepository
 	settings     *SettingsService
+	host         *HostService
+	audit        *AuditService
 	dockerRunner *DockerRunner
 	infraClient  infraBridgeClient
 }
@@ -45,11 +47,21 @@ type infraBridgeClient interface {
 	RestartTunnel(ctx context.Context, requestID, configPath string) (contract.Result, error)
 }
 
-func NewProjectWorkflows(cfg config.Config, projects repository.ProjectRepository, settings *SettingsService, dockerRunner *DockerRunner, infraClient infraBridgeClient) *ProjectWorkflows {
+func NewProjectWorkflows(
+	cfg config.Config,
+	projects repository.ProjectRepository,
+	settings *SettingsService,
+	host *HostService,
+	audit *AuditService,
+	dockerRunner *DockerRunner,
+	infraClient infraBridgeClient,
+) *ProjectWorkflows {
 	return &ProjectWorkflows{
 		cfg:          cfg,
 		projects:     projects,
 		settings:     settings,
+		host:         host,
+		audit:        audit,
 		dockerRunner: dockerRunner,
 		infraClient:  infraClient,
 	}
@@ -60,6 +72,7 @@ func (w *ProjectWorkflows) Register(runner *jobs.Runner) {
 	runner.Register(JobTypeDeployExisting, w.handleDeployExisting)
 	runner.Register(JobTypeForwardLocal, w.handleForwardLocal)
 	runner.Register(JobTypeQuickService, w.handleQuickService)
+	runner.Register(JobTypeProjectArchive, w.handleProjectArchive)
 }
 
 func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.Job, logger jobs.Logger) error {

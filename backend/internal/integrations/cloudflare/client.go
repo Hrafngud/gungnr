@@ -57,6 +57,19 @@ type ZoneAccount struct {
 	Name string `json:"name"`
 }
 
+type DNSRecord struct {
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Name    string `json:"name"`
+	Content string `json:"content"`
+	Proxied bool   `json:"proxied"`
+}
+
+type IngressRule struct {
+	Hostname string `json:"hostname"`
+	Service  string `json:"service"`
+}
+
 func NewClient(cfg config.Config) *Client {
 	return &Client{
 		cfg: cfg,
@@ -112,6 +125,66 @@ func (c *Client) EnsureDNSForZone(ctx context.Context, hostname, zoneID string) 
 	})
 }
 
+func (c *Client) TunnelID(ctx context.Context) (string, error) {
+	if err := c.ensureAuth(); err != nil {
+		return "", err
+	}
+	return c.resolveTunnelID(ctx)
+}
+
+func (c *Client) ExpectedTunnelCNAME(ctx context.Context) (string, error) {
+	tunnelID, err := c.TunnelID(ctx)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s.cfargotunnel.com", tunnelID), nil
+}
+
+func (c *Client) ListDNSRecordsByName(ctx context.Context, hostname, zoneID string) ([]DNSRecord, error) {
+	if strings.TrimSpace(hostname) == "" {
+		return nil, ErrMissingHostname
+	}
+	if err := c.ensureToken(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(zoneID) == "" {
+		return nil, ErrMissingZoneID
+	}
+
+	records, err := c.listDNSRecordsByName(ctx, strings.TrimSpace(hostname), strings.TrimSpace(zoneID))
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]DNSRecord, 0, len(records))
+	for _, record := range records {
+		result = append(result, DNSRecord{
+			ID:      record.ID,
+			Type:    record.Type,
+			Name:    record.Name,
+			Content: record.Content,
+			Proxied: record.Proxied,
+		})
+	}
+	return result, nil
+}
+
+func (c *Client) DeleteDNSRecord(ctx context.Context, zoneID, recordID string) error {
+	if err := c.ensureToken(); err != nil {
+		return err
+	}
+	zoneID = strings.TrimSpace(zoneID)
+	if zoneID == "" {
+		return ErrMissingZoneID
+	}
+	recordID = strings.TrimSpace(recordID)
+	if recordID == "" {
+		return fmt.Errorf("dns record id is required")
+	}
+	path := fmt.Sprintf("/zones/%s/dns_records/%s", zoneID, recordID)
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
+}
+
 func (c *Client) UpdateIngress(ctx context.Context, hostname string, port int) error {
 	if strings.TrimSpace(hostname) == "" {
 		return ErrMissingHostname
@@ -141,6 +214,62 @@ func (c *Client) UpdateIngress(ctx context.Context, hostname string, port int) e
 	config.Ingress = ensureIngressRule(config.Ingress, hostname, service)
 
 	return c.updateTunnelConfig(ctx, tunnelID, config)
+}
+
+func (c *Client) ListIngressRules(ctx context.Context) ([]IngressRule, error) {
+	if err := c.ensureAuth(); err != nil {
+		return nil, err
+	}
+
+	tunnelID, err := c.resolveTunnelID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.ensureRemoteManaged(ctx, tunnelID); err != nil {
+		return nil, err
+	}
+
+	config, err := c.getTunnelConfig(ctx, tunnelID)
+	if err != nil {
+		return nil, err
+	}
+
+	return ingressRulesFromConfig(config.Ingress), nil
+}
+
+func (c *Client) RemoveIngressHostnames(ctx context.Context, hostnames []string) ([]IngressRule, error) {
+	if err := c.ensureAuth(); err != nil {
+		return nil, err
+	}
+
+	targets := normalizeHostnameSet(hostnames)
+	if len(targets) == 0 {
+		return []IngressRule{}, nil
+	}
+
+	tunnelID, err := c.resolveTunnelID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.ensureRemoteManaged(ctx, tunnelID); err != nil {
+		return nil, err
+	}
+
+	config, err := c.getTunnelConfig(ctx, tunnelID)
+	if err != nil {
+		return nil, err
+	}
+
+	removed, nextIngress := removeIngressRules(config.Ingress, targets)
+	if len(removed) == 0 {
+		return []IngressRule{}, nil
+	}
+
+	config.Ingress = nextIngress
+	if err := c.updateTunnelConfig(ctx, tunnelID, config); err != nil {
+		return nil, err
+	}
+	return removed, nil
 }
 
 func (c *Client) TunnelStatus(ctx context.Context) (TunnelStatus, error) {
@@ -571,6 +700,87 @@ func coerceIngress(value any) []map[string]any {
 		}
 	}
 	return result
+}
+
+func ingressRulesFromConfig(ingress []map[string]any) []IngressRule {
+	rules := make([]IngressRule, 0, len(ingress))
+	for _, rule := range ingress {
+		hostname, _ := rule["hostname"].(string)
+		service, _ := rule["service"].(string)
+		hostname = strings.TrimSpace(hostname)
+		if hostname == "" {
+			continue
+		}
+		rules = append(rules, IngressRule{
+			Hostname: strings.ToLower(hostname),
+			Service:  strings.TrimSpace(service),
+		})
+	}
+	return rules
+}
+
+func normalizeHostnameSet(hostnames []string) map[string]struct{} {
+	result := make(map[string]struct{})
+	for _, hostname := range hostnames {
+		normalized := strings.ToLower(strings.TrimSpace(hostname))
+		if normalized == "" {
+			continue
+		}
+		result[normalized] = struct{}{}
+	}
+	return result
+}
+
+func removeIngressRules(existing []map[string]any, targets map[string]struct{}) ([]IngressRule, []map[string]any) {
+	if len(targets) == 0 {
+		return []IngressRule{}, ensureCatchAllRule(existing)
+	}
+
+	removed := make([]IngressRule, 0)
+	next := make([]map[string]any, 0, len(existing))
+	for _, rule := range existing {
+		hostname, _ := rule["hostname"].(string)
+		normalizedHostname := strings.ToLower(strings.TrimSpace(hostname))
+		if normalizedHostname == "" {
+			if !isCatchAll(rule) {
+				next = append(next, rule)
+			}
+			continue
+		}
+
+		if _, ok := targets[normalizedHostname]; ok {
+			service, _ := rule["service"].(string)
+			removed = append(removed, IngressRule{
+				Hostname: normalizedHostname,
+				Service:  strings.TrimSpace(service),
+			})
+			continue
+		}
+		next = append(next, rule)
+	}
+
+	return removed, ensureCatchAllRule(next)
+}
+
+func ensureCatchAllRule(existing []map[string]any) []map[string]any {
+	var rules []map[string]any
+	var catchAll map[string]any
+
+	for _, rule := range existing {
+		if isCatchAll(rule) {
+			if catchAll == nil {
+				catchAll = rule
+			}
+			continue
+		}
+		rules = append(rules, rule)
+	}
+
+	if catchAll == nil {
+		catchAll = map[string]any{"service": "http_status:404"}
+	}
+	rules = append(rules, catchAll)
+	return rules
 }
 
 func ensureIngressRule(existing []map[string]any, hostname, service string) []map[string]any {

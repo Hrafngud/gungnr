@@ -14,6 +14,8 @@ func RegisterProjects(r gin.IRoutes, c *controller.ProjectsController) {
 	r.GET("/projects/local", c.ListLocal)
 	r.GET("/projects/:name", c.Detail)
 	r.GET("/projects/:name/jobs", c.ListJobs)
+	r.GET("/projects/:name/archive/plan", c.ArchivePlan)
+	r.POST("/projects/:name/archive", c.Archive)
 	r.POST("/projects/:name/stack/restart", c.RestartStack)
 	r.POST("/projects/:name/containers/stop", c.StopContainer)
 	r.POST("/projects/:name/containers/restart", c.RestartContainer)

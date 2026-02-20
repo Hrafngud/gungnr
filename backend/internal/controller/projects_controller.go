@@ -3,6 +3,7 @@ package controller
 import (
 	"bufio"
 	"errors"
+	"io"
 	"math"
 	"net/http"
 	"strings"
@@ -19,6 +20,7 @@ import (
 
 type ProjectsController struct {
 	service *service.ProjectService
+	archive *service.ProjectArchiveService
 	runtime *service.ProjectRuntimeService
 	env     *service.ProjectEnvService
 	host    *service.HostService
@@ -52,8 +54,16 @@ type projectEnvWriteRequest struct {
 	CreateBackup *bool  `json:"createBackup,omitempty"`
 }
 
+type projectArchiveRequest struct {
+	RemoveContainers *bool `json:"removeContainers,omitempty"`
+	RemoveVolumes    *bool `json:"removeVolumes,omitempty"`
+	RemoveIngress    *bool `json:"removeIngress,omitempty"`
+	RemoveDNS        *bool `json:"removeDns,omitempty"`
+}
+
 func NewProjectsController(
 	service *service.ProjectService,
+	archive *service.ProjectArchiveService,
 	runtime *service.ProjectRuntimeService,
 	env *service.ProjectEnvService,
 	host *service.HostService,
@@ -62,6 +72,7 @@ func NewProjectsController(
 ) *ProjectsController {
 	return &ProjectsController{
 		service: service,
+		archive: archive,
 		runtime: runtime,
 		env:     env,
 		host:    host,
@@ -189,6 +200,95 @@ func (c *ProjectsController) ListJobs(ctx *gin.Context) {
 		"pageSize":   limit,
 		"total":      total,
 		"totalPages": totalPages,
+	})
+}
+
+func (c *ProjectsController) ArchivePlan(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		return
+	}
+
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.archive == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeProjectArchivePlanFailed, "project archive service unavailable", nil)
+		return
+	}
+
+	plan, err := c.archive.Plan(ctx.Request.Context(), project)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectArchivePlanFailed, "failed to build project archive plan")
+		return
+	}
+
+	c.logAudit(ctx, "project.archive.plan", plan.Project.NormalizedName, map[string]any{
+		"project":        plan.Project.NormalizedName,
+		"containers":     len(plan.Containers),
+		"hostnames":      len(plan.Hostnames),
+		"ingressRules":   len(plan.Ingress),
+		"dnsRecords":     len(plan.DNSRecords),
+		"warningCount":   len(plan.Warnings),
+		"defaultOptions": plan.Defaults,
+	})
+
+	ctx.JSON(http.StatusOK, gin.H{"plan": plan})
+}
+
+func (c *ProjectsController) Archive(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		return
+	}
+
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.archive == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeProjectArchiveFailed, "project archive service unavailable", nil)
+		return
+	}
+
+	options, ok := c.parseProjectArchiveRequest(ctx)
+	if !ok {
+		return
+	}
+
+	job, plan, err := c.archive.Queue(ctx.Request.Context(), project, options, service.ProjectArchiveActor{
+		UserID: session.UserID,
+		Login:  session.Login,
+	})
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectArchiveFailed, "failed to queue project archive")
+		return
+	}
+
+	targets := jobTargetsFromPlan(plan, options)
+	c.logAudit(ctx, "project.archive.execute", plan.Project.NormalizedName, map[string]any{
+		"project":          plan.Project.NormalizedName,
+		"jobId":            job.ID,
+		"removeContainers": options.RemoveContainers,
+		"removeVolumes":    options.RemoveVolumes,
+		"removeIngress":    options.RemoveIngress,
+		"removeDns":        options.RemoveDNS,
+		"targets": map[string]any{
+			"containers": len(targets.Containers),
+			"hostnames":  len(targets.Hostnames),
+			"dnsRecords": len(targets.DNSRecords),
+		},
+		"warningCount": len(plan.Warnings),
+	})
+
+	ctx.JSON(http.StatusAccepted, gin.H{
+		"job":  newJobResponse(*job),
+		"plan": plan,
 	})
 }
 
@@ -692,4 +792,71 @@ func (c *ProjectsController) logAudit(ctx *gin.Context, action, target string, m
 		Target:    target,
 		Metadata:  metadata,
 	})
+}
+
+func (c *ProjectsController) parseProjectArchiveRequest(ctx *gin.Context) (service.ProjectArchiveOptions, bool) {
+	options := service.DefaultProjectArchiveOptions()
+	if ctx.Request.ContentLength == 0 {
+		return options, true
+	}
+
+	var req projectArchiveRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		if errors.Is(err, io.EOF) {
+			return options, true
+		}
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "invalid request body", nil)
+		return service.ProjectArchiveOptions{}, false
+	}
+
+	if req.RemoveContainers != nil {
+		options.RemoveContainers = *req.RemoveContainers
+	}
+	if req.RemoveVolumes != nil {
+		options.RemoveVolumes = *req.RemoveVolumes
+	}
+	if req.RemoveIngress != nil {
+		options.RemoveIngress = *req.RemoveIngress
+	}
+	if req.RemoveDNS != nil {
+		options.RemoveDNS = *req.RemoveDNS
+	}
+	if !options.RemoveContainers && options.RemoveVolumes {
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "removeVolumes requires removeContainers=true", nil)
+		return service.ProjectArchiveOptions{}, false
+	}
+	return options, true
+}
+
+func jobTargetsFromPlan(plan service.ProjectArchivePlan, options service.ProjectArchiveOptions) service.ProjectArchiveTargets {
+	targets := service.ProjectArchiveTargets{
+		Containers: []string{},
+		Hostnames:  []string{},
+		DNSRecords: []service.ProjectArchiveDNSDeleteTarget{},
+	}
+	if options.RemoveContainers {
+		for _, container := range plan.Containers {
+			if strings.TrimSpace(container.Name) == "" {
+				continue
+			}
+			targets.Containers = append(targets.Containers, container.Name)
+		}
+	}
+	if options.RemoveIngress {
+		targets.Hostnames = append(targets.Hostnames, plan.Hostnames...)
+	}
+	if options.RemoveDNS {
+		for _, record := range plan.DNSRecords {
+			if !record.DeleteEligible {
+				continue
+			}
+			targets.DNSRecords = append(targets.DNSRecords, service.ProjectArchiveDNSDeleteTarget{
+				ZoneID:   record.ZoneID,
+				RecordID: record.ID,
+				Hostname: record.Name,
+				Content:  record.Content,
+			})
+		}
+	}
+	return targets
 }

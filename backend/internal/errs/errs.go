@@ -172,6 +172,8 @@ const (
 	CodeProjectContainerNotFound Code = "PROJECT-404-CONTAINER"
 	CodeProjectDetailFailed      Code = "PROJECT-500-DETAIL"
 	CodeProjectJobsFailed        Code = "PROJECT-500-JOBS"
+	CodeProjectArchivePlanFailed Code = "PROJECT-500-ARCHIVE-PLAN"
+	CodeProjectArchiveFailed     Code = "PROJECT-500-ARCHIVE"
 	CodeProjectStackFailed       Code = "PROJECT-500-STACK"
 	CodeProjectContainerFailed   Code = "PROJECT-500-CONTAINER"
 	CodeProjectLogsFailed        Code = "PROJECT-500-LOGS"
