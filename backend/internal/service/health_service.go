@@ -56,7 +56,10 @@ func (s *HealthService) Docker(ctx context.Context) DockerHealth {
 		return DockerHealth{Status: "error", Detail: "host service unavailable"}
 	}
 
-	checkCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	// Keep host probe execution independent from request-context cancellation.
+	// Some callers/proxies can apply short request deadlines that would
+	// otherwise kill the docker command before it returns.
+	checkCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 
 	count, err := s.host.CountRunningContainers(checkCtx)

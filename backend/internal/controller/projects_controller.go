@@ -71,6 +71,32 @@ func NewProjectsController(
 }
 
 func (c *ProjectsController) List(ctx *gin.Context) {
+	if c.runtime != nil {
+		summaries, err := c.runtime.ListSummaries(ctx.Request.Context())
+		if err != nil {
+			apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeProjectListFailed, "failed to load projects")
+			return
+		}
+
+		response := make([]projectResponse, 0, len(summaries))
+		for _, project := range summaries {
+			response = append(response, projectResponse{
+				ID:        project.ID,
+				Name:      project.Name,
+				RepoURL:   project.RepoURL,
+				Path:      project.Path,
+				ProxyPort: project.ProxyPort,
+				DBPort:    project.DBPort,
+				Status:    project.Status,
+				CreatedAt: project.CreatedAt,
+				UpdatedAt: project.UpdatedAt,
+			})
+		}
+
+		ctx.JSON(http.StatusOK, gin.H{"projects": response})
+		return
+	}
+
 	projects, err := c.service.List(ctx.Request.Context())
 	if err != nil {
 		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeProjectListFailed, "failed to load projects")

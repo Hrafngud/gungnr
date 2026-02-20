@@ -19,16 +19,50 @@ const searchQuery = ref('')
 const currentPage = ref(1)
 const pageSize = 9
 
-const isRunningStatus = (status: string) => {
-  const normalized = status.trim().toLowerCase()
-  return normalized === 'running' || normalized === 'up' || normalized.includes('running')
+const normalizeStatus = (status: string) => status.trim().toLowerCase()
+
+const isHealthyStatus = (status: string) => {
+  const normalized = normalizeStatus(status)
+  if (!normalized) return false
+  if (normalized.includes('unhealthy')) return false
+  return (
+    normalized === 'running' ||
+    normalized === 'up' ||
+    normalized === 'healthy' ||
+    normalized.includes('running') ||
+    normalized.includes('healthy')
+  )
+}
+
+const isDownStatus = (status: string) => {
+  const normalized = normalizeStatus(status)
+  if (!normalized) return false
+  return (
+    normalized === 'down' ||
+    normalized.includes('stopped') ||
+    normalized.includes('exited') ||
+    normalized.includes('failed') ||
+    normalized.includes('error')
+  )
+}
+
+const isDegradedStatus = (status: string) => {
+  const normalized = normalizeStatus(status)
+  if (!normalized || isHealthyStatus(normalized) || isDownStatus(normalized)) return false
+  return (
+    normalized.includes('degraded') ||
+    normalized.includes('partial') ||
+    normalized.includes('starting') ||
+    normalized.includes('unhealthy')
+  )
 }
 
 const projectTone = (project: Project): BadgeTone => {
-  const normalized = project.status.trim().toLowerCase()
+  const normalized = normalizeStatus(project.status)
   if (!normalized) return 'neutral'
-  if (isRunningStatus(project.status)) return 'ok'
-  if (normalized.includes('failed') || normalized.includes('error')) return 'error'
+  if (isDownStatus(normalized)) return 'error'
+  if (isDegradedStatus(normalized)) return 'warn'
+  if (isHealthyStatus(normalized)) return 'ok'
   if (normalized.includes('building') || normalized.includes('pending')) return 'warn'
   return 'neutral'
 }
@@ -91,8 +125,8 @@ const pageSummary = computed(() => {
   return `${start}-${end} of ${filteredProjects.value.length} projects`
 })
 
-const runningCount = computed(() =>
-  projectsStore.projects.filter((project) => isRunningStatus(project.status)).length,
+const healthyCount = computed(() =>
+  projectsStore.projects.filter((project) => projectTone(project) === 'ok').length,
 )
 
 const goToPage = (nextPage: number) => {
@@ -143,8 +177,8 @@ onMounted(load)
         <p class="text-lg font-semibold">{{ projectsStore.projects.length }}</p>
       </UiPanel>
       <UiPanel variant="soft" class="space-y-2 p-4">
-        <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Running</p>
-        <p class="text-lg font-semibold text-[color:var(--success)]">{{ runningCount }}</p>
+        <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Healthy</p>
+        <p class="text-lg font-semibold text-[color:var(--success)]">{{ healthyCount }}</p>
       </UiPanel>
       <UiPanel variant="soft" class="space-y-2 p-4">
         <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Filtered</p>

@@ -82,6 +82,38 @@ func (s *ProjectRuntimeService) Resolve(ctx context.Context, projectName string)
 	return resolveProjectPath(ctx, s.projects, s.templatesDir, projectName)
 }
 
+func (s *ProjectRuntimeService) ListSummaries(ctx context.Context) ([]ProjectSummary, error) {
+	projects, err := s.projects.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	projectContainers, runtimeAvailable := s.groupProjectContainers(ctx)
+
+	summaries := make([]ProjectSummary, 0, len(projects))
+	for _, project := range projects {
+		status := strings.TrimSpace(project.Status)
+		if runtimeAvailable {
+			key := strings.ToLower(strings.TrimSpace(project.Name))
+			status = deriveProjectRuntimeStatus(projectContainers[key])
+		}
+
+		summaries = append(summaries, ProjectSummary{
+			ID:        project.ID,
+			Name:      project.Name,
+			RepoURL:   project.RepoURL,
+			Path:      project.Path,
+			ProxyPort: project.ProxyPort,
+			DBPort:    project.DBPort,
+			Status:    status,
+			CreatedAt: project.CreatedAt,
+			UpdatedAt: project.UpdatedAt,
+		})
+	}
+
+	return summaries, nil
+}
+
 func (s *ProjectRuntimeService) Detail(ctx context.Context, projectName string) (ProjectDetail, error) {
 	resolved, err := s.Resolve(ctx, projectName)
 	if err != nil {
@@ -217,6 +249,78 @@ func (s *ProjectRuntimeService) projectContainers(ctx context.Context, normalize
 	})
 
 	return filtered, nil
+}
+
+func (s *ProjectRuntimeService) groupProjectContainers(ctx context.Context) (map[string][]DockerContainer, bool) {
+	grouped := make(map[string][]DockerContainer)
+	if s.host == nil {
+		return grouped, false
+	}
+
+	containers, err := s.host.ListContainers(ctx, true)
+	if err != nil {
+		return grouped, false
+	}
+
+	for _, container := range containers {
+		project := strings.ToLower(strings.TrimSpace(container.Project))
+		if project == "" {
+			continue
+		}
+		grouped[project] = append(grouped[project], container)
+	}
+
+	return grouped, true
+}
+
+func deriveProjectRuntimeStatus(containers []DockerContainer) string {
+	if len(containers) == 0 {
+		return "down"
+	}
+
+	running := 0
+	healthy := 0
+	for _, container := range containers {
+		if !isRunningContainerStatus(container.Status) {
+			continue
+		}
+		running++
+		if isHealthyContainerStatus(container.Status) {
+			healthy++
+		}
+	}
+
+	if running == 0 {
+		return "down"
+	}
+	if running == len(containers) && healthy == len(containers) {
+		return "running"
+	}
+	return "degraded"
+}
+
+func isRunningContainerStatus(status string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	return normalized == "running" || strings.HasPrefix(normalized, "up") || strings.Contains(normalized, " running")
+}
+
+func isHealthyContainerStatus(status string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	if !isRunningContainerStatus(normalized) {
+		return false
+	}
+
+	if strings.Contains(normalized, "unhealthy") {
+		return false
+	}
+	if strings.Contains(normalized, "health: starting") || strings.Contains(normalized, "(starting)") {
+		return false
+	}
+	if strings.Contains(normalized, "restarting") || strings.Contains(normalized, "paused") {
+		return false
+	}
+
+	return true
 }
 
 func envFileInfo(path string) (exists bool, sizeBytes int64, updatedAt *time.Time) {

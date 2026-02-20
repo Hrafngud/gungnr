@@ -120,7 +120,8 @@ const dotClass = (status?: string) => {
 const dockerSummary = computed(() => {
   const status = statusLabel(dockerHealth.value?.status)
   const count = dockerHealth.value?.containers
-  if (typeof count === 'number') {
+  const rawStatus = dockerHealth.value?.status
+  if (typeof count === 'number' && (rawStatus === 'ok' || rawStatus === 'warning')) {
     return `${status} · ${count} containers`
   }
   return status
