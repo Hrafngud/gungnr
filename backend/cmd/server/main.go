@@ -106,7 +106,7 @@ func main() {
 	dockerWorkflows.Register(jobRunner)
 	hostWorkflows := service.NewHostWorkflows(hostService)
 	hostWorkflows.Register(jobRunner)
-	netBirdWorkflows := service.NewNetBirdWorkflows(netBirdService, auditService)
+	netBirdWorkflows := service.NewNetBirdWorkflows(netBirdService, hostService, auditService)
 	netBirdWorkflows.Register(jobRunner)
 
 	sessionManager := auth.NewManager(cfg.SessionSecret, cfg.SessionTTL)

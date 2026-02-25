@@ -44,19 +44,70 @@ type NetBirdOperationCounts struct {
 	Unchanged int `json:"unchanged"`
 }
 
+type NetBirdExecutionCounts struct {
+	Succeeded int `json:"succeeded"`
+	Failed    int `json:"failed"`
+	Skipped   int `json:"skipped"`
+}
+
+type NetBirdExecutionDiagnostics struct {
+	IntentID        string `json:"intentId,omitempty"`
+	WorkerErrorCode string `json:"workerErrorCode,omitempty"`
+	LogPath         string `json:"logPath,omitempty"`
+}
+
+type NetBirdRebindingExecutionOperation struct {
+	Service       string                       `json:"service"`
+	ProjectID     uint                         `json:"projectId,omitempty"`
+	ProjectName   string                       `json:"projectName,omitempty"`
+	Port          int                          `json:"port"`
+	FromListeners []string                     `json:"fromListeners"`
+	ToListeners   []string                     `json:"toListeners"`
+	Reason        string                       `json:"reason,omitempty"`
+	Result        string                       `json:"result"`
+	Message       string                       `json:"message,omitempty"`
+	RequestID     string                       `json:"requestId,omitempty"`
+	Diagnostics   *NetBirdExecutionDiagnostics `json:"diagnostics,omitempty"`
+}
+
+type NetBirdRebindingExecutionSummary struct {
+	Counts     NetBirdExecutionCounts               `json:"counts"`
+	Operations []NetBirdRebindingExecutionOperation `json:"operations"`
+}
+
+type NetBirdRedeployExecutionTarget struct {
+	Service     string                       `json:"service"`
+	ProjectID   uint                         `json:"projectId,omitempty"`
+	ProjectName string                       `json:"projectName,omitempty"`
+	Port        int                          `json:"port,omitempty"`
+	Reason      string                       `json:"reason,omitempty"`
+	Result      string                       `json:"result"`
+	Message     string                       `json:"message,omitempty"`
+	RequestID   string                       `json:"requestId,omitempty"`
+	Diagnostics *NetBirdExecutionDiagnostics `json:"diagnostics,omitempty"`
+}
+
+type NetBirdRedeployExecutionSummary struct {
+	Counts   NetBirdExecutionCounts           `json:"counts"`
+	Panel    *NetBirdRedeployExecutionTarget  `json:"panel,omitempty"`
+	Projects []NetBirdRedeployExecutionTarget `json:"projects"`
+}
+
 type NetBirdModeApplySummary struct {
-	CurrentMode         NetBirdMode            `json:"currentMode"`
-	TargetMode          NetBirdMode            `json:"targetMode"`
-	AllowLocalhost      bool                   `json:"allowLocalhost"`
-	DefaultPolicyAction string                 `json:"defaultPolicyAction"`
-	Plan                NetBirdModePlan        `json:"plan"`
-	Reconcile           NetBirdReconcileResult `json:"reconcile"`
-	GroupResultCounts   NetBirdOperationCounts `json:"groupResultCounts"`
-	PolicyResultCounts  NetBirdOperationCounts `json:"policyResultCounts"`
-	Warnings            []string               `json:"warnings"`
-	RequestedBy         NetBirdModeApplyActor  `json:"requestedBy"`
-	RequestedAt         time.Time              `json:"requestedAt"`
-	CompletedAt         time.Time              `json:"completedAt"`
+	CurrentMode         NetBirdMode                      `json:"currentMode"`
+	TargetMode          NetBirdMode                      `json:"targetMode"`
+	AllowLocalhost      bool                             `json:"allowLocalhost"`
+	DefaultPolicyAction string                           `json:"defaultPolicyAction"`
+	Plan                NetBirdModePlan                  `json:"plan"`
+	Reconcile           NetBirdReconcileResult           `json:"reconcile"`
+	RebindingExecution  NetBirdRebindingExecutionSummary `json:"rebindingExecution"`
+	RedeployExecution   NetBirdRedeployExecutionSummary  `json:"redeployExecution"`
+	GroupResultCounts   NetBirdOperationCounts           `json:"groupResultCounts"`
+	PolicyResultCounts  NetBirdOperationCounts           `json:"policyResultCounts"`
+	Warnings            []string                         `json:"warnings"`
+	RequestedBy         NetBirdModeApplyActor            `json:"requestedBy"`
+	RequestedAt         time.Time                        `json:"requestedAt"`
+	CompletedAt         time.Time                        `json:"completedAt"`
 }
 
 type NetBirdDefaultPolicySummary struct {
