@@ -22,6 +22,7 @@ const (
 type NetBirdService struct {
 	cfg      config.Config
 	projects repository.ProjectRepository
+	jobs     repository.JobRepository
 }
 
 type NetBirdModePlan struct {
@@ -74,10 +75,11 @@ type NetBirdRedeployProjectTarget struct {
 	Reason      string `json:"reason"`
 }
 
-func NewNetBirdService(cfg config.Config, projects repository.ProjectRepository) *NetBirdService {
+func NewNetBirdService(cfg config.Config, projects repository.ProjectRepository, jobs repository.JobRepository) *NetBirdService {
 	return &NetBirdService{
 		cfg:      cfg,
 		projects: projects,
+		jobs:     jobs,
 	}
 }
 

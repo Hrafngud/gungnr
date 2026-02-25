@@ -141,6 +141,8 @@ const (
 	CodeCloudflareTunnelLocal    Code = "CF-409-TUNNEL-LOCAL"
 
 	CodeNetBirdUnavailable     Code = "NETBIRD-500-SERVICE"
+	CodeNetBirdStatusFailed    Code = "NETBIRD-500-STATUS"
+	CodeNetBirdACLGraphFailed  Code = "NETBIRD-500-ACL-GRAPH"
 	CodeNetBirdPlanFailed      Code = "NETBIRD-500-PLAN"
 	CodeNetBirdApplyFailed     Code = "NETBIRD-500-APPLY"
 	CodeNetBirdReconcileFailed Code = "NETBIRD-500-RECONCILE"

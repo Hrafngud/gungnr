@@ -56,7 +56,7 @@ func main() {
 	userService := service.NewUserService(userRepo)
 	githubService := service.NewGitHubService(cfg, settingsService)
 	cloudflareService := service.NewCloudflareService(settingsService)
-	netBirdService := service.NewNetBirdService(cfg, projectRepo)
+	netBirdService := service.NewNetBirdService(cfg, projectRepo, jobRepo)
 	auditService := service.NewAuditService(auditRepo)
 	dockerRunner := service.NewDockerRunner()
 

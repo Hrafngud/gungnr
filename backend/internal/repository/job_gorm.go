@@ -44,6 +44,21 @@ func (r *GormJobRepository) ListPage(ctx context.Context, offset int, limit int)
 	return jobs, total, nil
 }
 
+func (r *GormJobRepository) GetLatestByType(ctx context.Context, jobType string) (*models.Job, error) {
+	var job models.Job
+	if err := r.db.WithContext(ctx).
+		Where("type = ?", jobType).
+		Order("created_at desc, id desc").
+		Limit(1).
+		First(&job).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &job, nil
+}
+
 func (r *GormJobRepository) Create(ctx context.Context, job *models.Job) error {
 	return r.db.WithContext(ctx).Create(job).Error
 }

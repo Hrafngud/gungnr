@@ -31,6 +31,38 @@ func NewNetBirdController(service *service.NetBirdService, jobs *service.JobServ
 	}
 }
 
+func (c *NetBirdController) Status(ctx *gin.Context) {
+	if c.service == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeNetBirdUnavailable, "netbird service unavailable", nil)
+		return
+	}
+
+	status, err := c.service.Status(ctx.Request.Context())
+	if err != nil {
+		httpStatus := netBirdHTTPStatus(err, http.StatusInternalServerError)
+		apierror.RespondWithError(ctx, httpStatus, err, errs.CodeNetBirdStatusFailed, "failed to load netbird status")
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": status})
+}
+
+func (c *NetBirdController) ACLGraph(ctx *gin.Context) {
+	if c.service == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeNetBirdUnavailable, "netbird service unavailable", nil)
+		return
+	}
+
+	graph, err := c.service.ACLGraph(ctx.Request.Context())
+	if err != nil {
+		httpStatus := netBirdHTTPStatus(err, http.StatusInternalServerError)
+		apierror.RespondWithError(ctx, httpStatus, err, errs.CodeNetBirdACLGraphFailed, "failed to load netbird acl graph")
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"graph": graph})
+}
+
 func (c *NetBirdController) PlanMode(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
@@ -162,7 +194,7 @@ func netBirdHTTPStatus(err error, fallback int) int {
 		return http.StatusBadRequest
 	case errs.CodeNetBirdUnavailable:
 		return http.StatusInternalServerError
-	case errs.CodeNetBirdPlanFailed:
+	case errs.CodeNetBirdStatusFailed, errs.CodeNetBirdACLGraphFailed, errs.CodeNetBirdPlanFailed:
 		return http.StatusBadGateway
 	case errs.CodeNetBirdApplyFailed:
 		return http.StatusInternalServerError
