@@ -56,6 +56,7 @@ func main() {
 	userService := service.NewUserService(userRepo)
 	githubService := service.NewGitHubService(cfg, settingsService)
 	cloudflareService := service.NewCloudflareService(settingsService)
+	netBirdService := service.NewNetBirdService(cfg, projectRepo)
 	auditService := service.NewAuditService(auditRepo)
 	dockerRunner := service.NewDockerRunner()
 
@@ -105,6 +106,8 @@ func main() {
 	dockerWorkflows.Register(jobRunner)
 	hostWorkflows := service.NewHostWorkflows(hostService)
 	hostWorkflows.Register(jobRunner)
+	netBirdWorkflows := service.NewNetBirdWorkflows(netBirdService, auditService)
+	netBirdWorkflows.Register(jobRunner)
 
 	sessionManager := auth.NewManager(cfg.SessionSecret, cfg.SessionTTL)
 	secureCookie := cfg.AppEnv == "prod"
@@ -117,6 +120,7 @@ func main() {
 		Jobs:            controller.NewJobsController(jobService),
 		Settings:        controller.NewSettingsController(settingsService, auditService),
 		Host:            controller.NewHostController(hostService, jobService, auditService),
+		NetBird:         controller.NewNetBirdController(netBirdService, jobService, auditService),
 		Audit:           controller.NewAuditController(auditService),
 		Users:           controller.NewUsersController(userService),
 		GitHub:          controller.NewGitHubController(githubService),

@@ -14,6 +14,7 @@ type Dependencies struct {
 	Jobs       *controller.JobsController
 	Settings   *controller.SettingsController
 	Host       *controller.HostController
+	NetBird    *controller.NetBirdController
 	Audit      *controller.AuditController
 	Users      *controller.UsersController
 	GitHub     *controller.GitHubController
@@ -29,6 +30,7 @@ func Register(root gin.IRoutes, authed gin.IRoutes, admin gin.IRoutes, deps Depe
 	RegisterJobs(authed, deps.Jobs)
 	RegisterSettings(authed, deps.Settings)
 	RegisterHost(authed, deps.Host)
+	RegisterNetBird(authed, deps.NetBird)
 	RegisterAudit(authed, deps.Audit)
 	RegisterUsers(authed, deps.Users)
 	RegisterUsersAdmin(admin, deps.Users)

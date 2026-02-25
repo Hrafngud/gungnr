@@ -11,41 +11,43 @@ import (
 )
 
 type Config struct {
-	AppEnv              string
-	Port                string
-	DatabaseURL         string
-	DBMaxOpenConns      int
-	DBMaxIdleConns      int
-	DBConnMaxLifetime   time.Duration
-	AllowedOrigins      []string
-	SessionSecret       string
-	SessionTTL          time.Duration
-	CookieDomain        string
-	AdminLogin          string
-	AdminPassword       string
-	GitHubClientID      string
-	GitHubClientSecret  string
-	GitHubCallbackURL   string
-	GitHubTemplateOwner string
-	GitHubTemplateRepo  string
-	GitHubRepoOwner     string
-	GitHubRepoPrivate   bool
-	SuperUserGitHubName string
-	SuperUserGitHubID   int64
-	TemplatesDir        string
-	Domain              string
-	CloudflareAPIToken  string
-	CloudflareAccountID string
-	CloudflareZoneID    string
-	CloudflareTunnelID  string
-	CloudflaredConfig   string
-	CloudflaredTunnel   string
-	InfraQueueRoot      string
-	InfraPollInterval   time.Duration
-	InfraResultTimeout  time.Duration
-	InfraIntentMaxAge   time.Duration
-	InfraResultMaxAge   time.Duration
-	InfraClaimMaxAge    time.Duration
+	AppEnv                string
+	Port                  string
+	DatabaseURL           string
+	DBMaxOpenConns        int
+	DBMaxIdleConns        int
+	DBConnMaxLifetime     time.Duration
+	AllowedOrigins        []string
+	SessionSecret         string
+	SessionTTL            time.Duration
+	CookieDomain          string
+	AdminLogin            string
+	AdminPassword         string
+	GitHubClientID        string
+	GitHubClientSecret    string
+	GitHubCallbackURL     string
+	GitHubTemplateOwner   string
+	GitHubTemplateRepo    string
+	GitHubRepoOwner       string
+	GitHubRepoPrivate     bool
+	SuperUserGitHubName   string
+	SuperUserGitHubID     int64
+	TemplatesDir          string
+	Domain                string
+	CloudflareAPIToken    string
+	CloudflareAccountID   string
+	CloudflareZoneID      string
+	CloudflareTunnelID    string
+	CloudflaredConfig     string
+	CloudflaredTunnel     string
+	NetBirdMode           string
+	NetBirdAllowLocalhost bool
+	InfraQueueRoot        string
+	InfraPollInterval     time.Duration
+	InfraResultTimeout    time.Duration
+	InfraIntentMaxAge     time.Duration
+	InfraResultMaxAge     time.Duration
+	InfraClaimMaxAge      time.Duration
 }
 
 func Load() (Config, error) {
@@ -79,6 +81,8 @@ func Load() (Config, error) {
 	v.SetDefault("CLOUDFLARE_TUNNEL_ID", "")
 	v.SetDefault("CLOUDFLARED_CONFIG", "~/.cloudflared/config.yml")
 	v.SetDefault("CLOUDFLARED_TUNNEL_NAME", "")
+	v.SetDefault("NETBIRD_MODE", "legacy")
+	v.SetDefault("NETBIRD_ALLOW_LOCALHOST", false)
 	v.SetDefault("INFRA_QUEUE_ROOT", "/templates/.infra")
 	v.SetDefault("INFRA_POLL_INTERVAL_MS", 500)
 	v.SetDefault("INFRA_RESULT_TIMEOUT_SEC", 120)
@@ -96,41 +100,43 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		AppEnv:              v.GetString("APP_ENV"),
-		Port:                v.GetString("PORT"),
-		DatabaseURL:         v.GetString("DATABASE_URL"),
-		DBMaxOpenConns:      v.GetInt("DB_MAX_OPEN_CONNS"),
-		DBMaxIdleConns:      v.GetInt("DB_MAX_IDLE_CONNS"),
-		DBConnMaxLifetime:   time.Duration(v.GetInt("DB_CONN_MAX_LIFETIME_MIN")) * time.Minute,
-		AllowedOrigins:      parseCSV(v.GetString("CORS_ALLOWED_ORIGINS")),
-		SessionSecret:       v.GetString("SESSION_SECRET"),
-		SessionTTL:          time.Duration(v.GetInt("SESSION_TTL_HOURS")) * time.Hour,
-		CookieDomain:        strings.TrimSpace(v.GetString("COOKIE_DOMAIN")),
-		AdminLogin:          v.GetString("ADMIN_LOGIN"),
-		AdminPassword:       v.GetString("ADMIN_PASSWORD"),
-		GitHubClientID:      v.GetString("GITHUB_CLIENT_ID"),
-		GitHubClientSecret:  v.GetString("GITHUB_CLIENT_SECRET"),
-		GitHubCallbackURL:   v.GetString("GITHUB_CALLBACK_URL"),
-		GitHubTemplateOwner: v.GetString("GITHUB_TEMPLATE_OWNER"),
-		GitHubTemplateRepo:  v.GetString("GITHUB_TEMPLATE_REPO"),
-		GitHubRepoOwner:     v.GetString("GITHUB_REPO_OWNER"),
-		GitHubRepoPrivate:   v.GetBool("GITHUB_REPO_PRIVATE"),
-		SuperUserGitHubName: strings.TrimSpace(v.GetString("SUPERUSER_GH_NAME")),
-		SuperUserGitHubID:   parseInt64(v.GetString("SUPER_GH_ID")),
-		TemplatesDir:        v.GetString("TEMPLATES_DIR"),
-		Domain:              v.GetString("DOMAIN"),
-		CloudflareAPIToken:  v.GetString("CLOUDFLARE_API_TOKEN"),
-		CloudflareAccountID: v.GetString("CLOUDFLARE_ACCOUNT_ID"),
-		CloudflareZoneID:    v.GetString("CLOUDFLARE_ZONE_ID"),
-		CloudflareTunnelID:  v.GetString("CLOUDFLARE_TUNNEL_ID"),
-		CloudflaredConfig:   v.GetString("CLOUDFLARED_CONFIG"),
-		CloudflaredTunnel:   v.GetString("CLOUDFLARED_TUNNEL_NAME"),
-		InfraQueueRoot:      v.GetString("INFRA_QUEUE_ROOT"),
-		InfraPollInterval:   time.Duration(v.GetInt("INFRA_POLL_INTERVAL_MS")) * time.Millisecond,
-		InfraResultTimeout:  time.Duration(v.GetInt("INFRA_RESULT_TIMEOUT_SEC")) * time.Second,
-		InfraIntentMaxAge:   time.Duration(v.GetInt("INFRA_RETENTION_INTENT_HOURS")) * time.Hour,
-		InfraResultMaxAge:   time.Duration(v.GetInt("INFRA_RETENTION_RESULT_HOURS")) * time.Hour,
-		InfraClaimMaxAge:    time.Duration(v.GetInt("INFRA_RETENTION_CLAIM_MINUTES")) * time.Minute,
+		AppEnv:                v.GetString("APP_ENV"),
+		Port:                  v.GetString("PORT"),
+		DatabaseURL:           v.GetString("DATABASE_URL"),
+		DBMaxOpenConns:        v.GetInt("DB_MAX_OPEN_CONNS"),
+		DBMaxIdleConns:        v.GetInt("DB_MAX_IDLE_CONNS"),
+		DBConnMaxLifetime:     time.Duration(v.GetInt("DB_CONN_MAX_LIFETIME_MIN")) * time.Minute,
+		AllowedOrigins:        parseCSV(v.GetString("CORS_ALLOWED_ORIGINS")),
+		SessionSecret:         v.GetString("SESSION_SECRET"),
+		SessionTTL:            time.Duration(v.GetInt("SESSION_TTL_HOURS")) * time.Hour,
+		CookieDomain:          strings.TrimSpace(v.GetString("COOKIE_DOMAIN")),
+		AdminLogin:            v.GetString("ADMIN_LOGIN"),
+		AdminPassword:         v.GetString("ADMIN_PASSWORD"),
+		GitHubClientID:        v.GetString("GITHUB_CLIENT_ID"),
+		GitHubClientSecret:    v.GetString("GITHUB_CLIENT_SECRET"),
+		GitHubCallbackURL:     v.GetString("GITHUB_CALLBACK_URL"),
+		GitHubTemplateOwner:   v.GetString("GITHUB_TEMPLATE_OWNER"),
+		GitHubTemplateRepo:    v.GetString("GITHUB_TEMPLATE_REPO"),
+		GitHubRepoOwner:       v.GetString("GITHUB_REPO_OWNER"),
+		GitHubRepoPrivate:     v.GetBool("GITHUB_REPO_PRIVATE"),
+		SuperUserGitHubName:   strings.TrimSpace(v.GetString("SUPERUSER_GH_NAME")),
+		SuperUserGitHubID:     parseInt64(v.GetString("SUPER_GH_ID")),
+		TemplatesDir:          v.GetString("TEMPLATES_DIR"),
+		Domain:                v.GetString("DOMAIN"),
+		CloudflareAPIToken:    v.GetString("CLOUDFLARE_API_TOKEN"),
+		CloudflareAccountID:   v.GetString("CLOUDFLARE_ACCOUNT_ID"),
+		CloudflareZoneID:      v.GetString("CLOUDFLARE_ZONE_ID"),
+		CloudflareTunnelID:    v.GetString("CLOUDFLARE_TUNNEL_ID"),
+		CloudflaredConfig:     v.GetString("CLOUDFLARED_CONFIG"),
+		CloudflaredTunnel:     v.GetString("CLOUDFLARED_TUNNEL_NAME"),
+		NetBirdMode:           v.GetString("NETBIRD_MODE"),
+		NetBirdAllowLocalhost: v.GetBool("NETBIRD_ALLOW_LOCALHOST"),
+		InfraQueueRoot:        v.GetString("INFRA_QUEUE_ROOT"),
+		InfraPollInterval:     time.Duration(v.GetInt("INFRA_POLL_INTERVAL_MS")) * time.Millisecond,
+		InfraResultTimeout:    time.Duration(v.GetInt("INFRA_RESULT_TIMEOUT_SEC")) * time.Second,
+		InfraIntentMaxAge:     time.Duration(v.GetInt("INFRA_RETENTION_INTENT_HOURS")) * time.Hour,
+		InfraResultMaxAge:     time.Duration(v.GetInt("INFRA_RETENTION_RESULT_HOURS")) * time.Hour,
+		InfraClaimMaxAge:      time.Duration(v.GetInt("INFRA_RETENTION_CLAIM_MINUTES")) * time.Minute,
 	}
 
 	if cfg.InfraPollInterval <= 0 {

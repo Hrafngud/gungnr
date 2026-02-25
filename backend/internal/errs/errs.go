@@ -140,6 +140,14 @@ const (
 	CodeCloudflareMissingTunnel  Code = "CF-400-TUNNEL"
 	CodeCloudflareTunnelLocal    Code = "CF-409-TUNNEL-LOCAL"
 
+	CodeNetBirdUnavailable     Code = "NETBIRD-500-SERVICE"
+	CodeNetBirdPlanFailed      Code = "NETBIRD-500-PLAN"
+	CodeNetBirdApplyFailed     Code = "NETBIRD-500-APPLY"
+	CodeNetBirdReconcileFailed Code = "NETBIRD-500-RECONCILE"
+	CodeNetBirdInvalidBody     Code = "NETBIRD-400-BODY"
+	CodeNetBirdInvalidMode     Code = "NETBIRD-400-MODE"
+	CodeNetBirdAdminRequired   Code = "NETBIRD-403-ADMIN"
+
 	CodeGitHubUnavailable  Code = "GH-500-SERVICE"
 	CodeGitHubCatalog      Code = "GH-500-CATALOG"
 	CodeGitHubMissingToken Code = "GH-400-TOKEN"

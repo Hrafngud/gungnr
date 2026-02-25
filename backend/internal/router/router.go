@@ -15,6 +15,7 @@ type Dependencies struct {
 	Jobs            *controller.JobsController
 	Settings        *controller.SettingsController
 	Host            *controller.HostController
+	NetBird         *controller.NetBirdController
 	Audit           *controller.AuditController
 	Users           *controller.UsersController
 	GitHub          *controller.GitHubController
@@ -50,6 +51,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 		Jobs:       deps.Jobs,
 		Settings:   deps.Settings,
 		Host:       deps.Host,
+		NetBird:    deps.NetBird,
 		Audit:      deps.Audit,
 		Users:      deps.Users,
 		GitHub:     deps.GitHub,
