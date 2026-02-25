@@ -19,6 +19,13 @@ type NetBirdModeApplyActor struct {
 	Login  string `json:"login"`
 }
 
+type NetBirdPolicyReapplyRequest struct {
+	APIBaseURL   string   `json:"apiBaseUrl,omitempty"`
+	APIToken     string   `json:"apiToken,omitempty"`
+	HostPeerID   string   `json:"hostPeerId,omitempty"`
+	AdminPeerIDs []string `json:"adminPeerIds,omitempty"`
+}
+
 type NetBirdModeApplyJobRequest struct {
 	TargetMode     string                `json:"targetMode"`
 	AllowLocalhost bool                  `json:"allowLocalhost"`
@@ -52,6 +59,21 @@ type NetBirdModeApplySummary struct {
 	CompletedAt         time.Time              `json:"completedAt"`
 }
 
+type NetBirdDefaultPolicySummary struct {
+	Action string                    `json:"action"`
+	Result NetBirdReconcileOperation `json:"result"`
+}
+
+type NetBirdPolicyReapplySummary struct {
+	CurrentMode        NetBirdMode                 `json:"currentMode"`
+	DefaultPolicy      NetBirdDefaultPolicySummary `json:"defaultPolicy"`
+	GroupResultCounts  NetBirdOperationCounts      `json:"groupResultCounts"`
+	PolicyResultCounts NetBirdOperationCounts      `json:"policyResultCounts"`
+	GroupOperations    []NetBirdReconcileOperation `json:"groupOperations"`
+	PolicyOperations   []NetBirdReconcileOperation `json:"policyOperations"`
+	Warnings           []string                    `json:"warnings"`
+}
+
 func NormalizeNetBirdModeApplyRequest(input NetBirdModeApplyRequest) NetBirdModeApplyRequest {
 	return NetBirdModeApplyRequest{
 		TargetMode:     strings.ToLower(strings.TrimSpace(input.TargetMode)),
@@ -60,6 +82,15 @@ func NormalizeNetBirdModeApplyRequest(input NetBirdModeApplyRequest) NetBirdMode
 		APIToken:       strings.TrimSpace(input.APIToken),
 		HostPeerID:     strings.TrimSpace(input.HostPeerID),
 		AdminPeerIDs:   normalizeStringList(input.AdminPeerIDs),
+	}
+}
+
+func NormalizeNetBirdPolicyReapplyRequest(input NetBirdPolicyReapplyRequest) NetBirdPolicyReapplyRequest {
+	return NetBirdPolicyReapplyRequest{
+		APIBaseURL:   strings.TrimSpace(input.APIBaseURL),
+		APIToken:     strings.TrimSpace(input.APIToken),
+		HostPeerID:   strings.TrimSpace(input.HostPeerID),
+		AdminPeerIDs: normalizeStringList(input.AdminPeerIDs),
 	}
 }
 

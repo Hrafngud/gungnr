@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -163,6 +165,54 @@ func (c *NetBirdController) ApplyMode(ctx *gin.Context) {
 	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
 }
 
+func (c *NetBirdController) ReapplyPolicies(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeNetBirdAdminRequired, "admin role required", nil)
+		return
+	}
+	if c.service == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeNetBirdUnavailable, "netbird service unavailable", nil)
+		return
+	}
+
+	var req service.NetBirdPolicyReapplyRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeNetBirdInvalidBody, "invalid request body", nil)
+		return
+	}
+	req = service.NormalizeNetBirdPolicyReapplyRequest(req)
+
+	summary, err := c.service.ReapplyPolicies(ctx.Request.Context(), req)
+	if err != nil {
+		status := netBirdHTTPStatus(err, http.StatusInternalServerError)
+		apierror.RespondWithError(ctx, status, err, errs.CodeNetBirdReapplyFailed, "failed to reapply netbird policies")
+		return
+	}
+
+	if c.audit != nil {
+		_ = c.audit.Log(ctx.Request.Context(), service.AuditEntry{
+			UserID:    session.UserID,
+			UserLogin: session.Login,
+			Action:    "netbird.policy.reapply",
+			Target:    string(summary.CurrentMode),
+			Metadata: map[string]any{
+				"currentMode":             summary.CurrentMode,
+				"defaultPolicyAction":     summary.DefaultPolicy.Action,
+				"defaultPolicyResult":     summary.DefaultPolicy.Result.Result,
+				"groupResultCounts":       summary.GroupResultCounts,
+				"policyResultCounts":      summary.PolicyResultCounts,
+				"warningCount":            len(summary.Warnings),
+				"requestApiBaseUrlSet":    req.APIBaseURL != "",
+				"requestHostPeerIdSet":    req.HostPeerID != "",
+				"requestAdminPeerIdCount": len(req.AdminPeerIDs),
+			},
+		})
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"summary": summary})
+}
+
 func (c *NetBirdController) logAudit(ctx *gin.Context, userID uint, userLogin string, plan service.NetBirdModePlan) {
 	if c.audit == nil {
 		return
@@ -197,6 +247,8 @@ func netBirdHTTPStatus(err error, fallback int) int {
 	case errs.CodeNetBirdStatusFailed, errs.CodeNetBirdACLGraphFailed, errs.CodeNetBirdPlanFailed:
 		return http.StatusBadGateway
 	case errs.CodeNetBirdApplyFailed:
+		return http.StatusInternalServerError
+	case errs.CodeNetBirdReapplyFailed:
 		return http.StatusInternalServerError
 	default:
 		if strings.HasPrefix(string(typed.Code), "NETBIRD-400") {

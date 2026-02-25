@@ -145,6 +145,7 @@ const (
 	CodeNetBirdACLGraphFailed  Code = "NETBIRD-500-ACL-GRAPH"
 	CodeNetBirdPlanFailed      Code = "NETBIRD-500-PLAN"
 	CodeNetBirdApplyFailed     Code = "NETBIRD-500-APPLY"
+	CodeNetBirdReapplyFailed   Code = "NETBIRD-500-REAPPLY"
 	CodeNetBirdReconcileFailed Code = "NETBIRD-500-RECONCILE"
 	CodeNetBirdInvalidBody     Code = "NETBIRD-400-BODY"
 	CodeNetBirdInvalidMode     Code = "NETBIRD-400-MODE"
