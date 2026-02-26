@@ -364,6 +364,10 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 	if err := json.Unmarshal([]byte(job.Input), &req); err != nil {
 		return fmt.Errorf("parse quick service request: %w", err)
 	}
+	requestedPort := req.RequestedPort
+	if requestedPort == 0 {
+		requestedPort = req.Port
+	}
 	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
 	if err := ValidateSubdomain(req.Subdomain); err != nil {
 		return err
@@ -395,7 +399,11 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 	if err != nil {
 		return err
 	}
-	logger.Logf("using host port %d for quick service", req.Port)
+	if requestedPort != req.Port {
+		logger.Logf("requested host port %d was unavailable at queue time; using host port %d for quick service", requestedPort, req.Port)
+	} else {
+		logger.Logf("using host port %d for quick service", req.Port)
+	}
 
 	if err := w.runContainer(ctx, logger, req); err != nil {
 		return err

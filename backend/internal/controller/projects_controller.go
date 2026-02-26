@@ -661,10 +661,11 @@ func (c *ProjectsController) QuickService(ctx *gin.Context) {
 	}
 
 	c.logAudit(ctx, "project.quick_service", req.Subdomain, map[string]any{
-		"domain":   req.Domain,
-		"port":     hostPort,
-		"jobId":    job.ID,
-		"portAuto": hostPort != req.Port,
+		"domain":        req.Domain,
+		"requestedPort": req.Port,
+		"port":          hostPort,
+		"jobId":         job.ID,
+		"portAuto":      hostPort != req.Port,
 	})
 
 	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job), "hostPort": hostPort})

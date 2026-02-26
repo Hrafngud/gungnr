@@ -60,6 +60,7 @@ type ForwardLocalRequest struct {
 type QuickServiceRequest struct {
 	Subdomain     string `json:"subdomain"`
 	Domain        string `json:"domain,omitempty"`
+	RequestedPort int    `json:"requestedPort,omitempty"`
 	Port          int    `json:"port"`
 	Image         string `json:"image,omitempty"`
 	ContainerPort int    `json:"containerPort,omitempty"`
@@ -204,10 +205,12 @@ func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceReque
 			return nil, 0, err
 		}
 	}
-	chosenPort, err := ensureAvailableHostPort(ctx, req.Port)
+	requestedPort := req.Port
+	chosenPort, err := ensureAvailableHostPort(ctx, requestedPort)
 	if err != nil {
 		return nil, 0, err
 	}
+	req.RequestedPort = requestedPort
 	req.Port = chosenPort
 	job, err := s.jobs.Create(ctx, JobTypeQuickService, req)
 	if err != nil {
