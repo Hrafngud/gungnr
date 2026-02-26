@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"gungnr-cli/internal/cli/app"
 	"gungnr-cli/internal/cli/tui"
@@ -36,6 +37,8 @@ func main() {
 		runTunnel(os.Args[2:])
 	case "keepalive":
 		runKeepalive(os.Args[2:])
+	case "netbird":
+		runNetBird(os.Args[2:])
 	case "uninstall":
 		runUninstall(os.Args[2:])
 	default:
@@ -52,6 +55,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  gungnr restart")
 	fmt.Fprintln(os.Stderr, "  gungnr tunnel run")
 	fmt.Fprintln(os.Stderr, "  gungnr keepalive <enable|disable|status|all|recover>")
+	fmt.Fprintln(os.Stderr, "  gungnr netbird mode --set <legacy|mode_a|mode_b> [--allow-localhost]")
 	fmt.Fprintln(os.Stderr, "  gungnr uninstall [--yes]")
 }
 
@@ -172,6 +176,91 @@ func printKeepaliveUsage() {
 	fmt.Fprintln(os.Stderr, "  gungnr keepalive status")
 	fmt.Fprintln(os.Stderr, "  gungnr keepalive all")
 	fmt.Fprintln(os.Stderr, "  gungnr keepalive recover")
+}
+
+func runNetBird(args []string) {
+	if len(args) == 0 {
+		printNetBirdUsage()
+		os.Exit(2)
+	}
+
+	switch args[0] {
+	case "mode":
+		runNetBirdMode(args[1:])
+	default:
+		printNetBirdUsage()
+		os.Exit(2)
+	}
+}
+
+func runNetBirdMode(args []string) {
+	flags := flag.NewFlagSet("netbird mode", flag.ExitOnError)
+	targetMode := flags.String("set", "", "Target mode: legacy|mode_a|mode_b")
+	allowLocalhost := flags.Bool("allow-localhost", false, "Allow localhost listener in NetBird mode")
+	panelAPIURL := flags.String("api-url", "", "Panel API base URL (default: http://localhost)")
+	panelAuthToken := flags.String("auth-token", "", "Panel bearer auth token")
+	netbirdAPIBaseURL := flags.String("netbird-api-base-url", "", "NetBird API base URL override passed to backend apply")
+	netbirdAPIToken := flags.String("netbird-api-token", "", "NetBird API token used for backend apply")
+	hostPeerID := flags.String("host-peer-id", "", "NetBird host peer ID (required for mode_a/mode_b)")
+	adminPeerIDs := flags.String("admin-peer-ids", "", "Comma-separated NetBird admin peer IDs (required for mode_a/mode_b)")
+	autoApprove := flags.Bool("yes", false, "Skip interactive apply confirmation prompt")
+	pollInterval := flags.Duration("poll-interval", 2*time.Second, "Job polling interval")
+	pollTimeout := flags.Duration("poll-timeout", 30*time.Minute, "Max wait time for mode apply job completion")
+	_ = flags.Parse(args)
+
+	if strings.TrimSpace(*targetMode) == "" {
+		printNetBirdModeUsage()
+		os.Exit(2)
+	}
+	if flags.NArg() > 0 {
+		printNetBirdModeUsage()
+		os.Exit(2)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := app.NetBirdModeSwitch(ctx, app.NetBirdModeSwitchOptions{
+		TargetMode:        *targetMode,
+		AllowLocalhost:    *allowLocalhost,
+		PanelAPIBaseURL:   *panelAPIURL,
+		PanelAuthToken:    *panelAuthToken,
+		NetBirdAPIBaseURL: *netbirdAPIBaseURL,
+		NetBirdAPIToken:   *netbirdAPIToken,
+		HostPeerID:        *hostPeerID,
+		AdminPeerIDs:      parseCSVArg(*adminPeerIDs),
+		AutoApprove:       *autoApprove,
+		PollInterval:      *pollInterval,
+		PollTimeout:       *pollTimeout,
+		Stdin:             os.Stdin,
+		Stdout:            os.Stdout,
+	}); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func printNetBirdUsage() {
+	fmt.Fprintln(os.Stderr, "Usage:")
+	fmt.Fprintln(os.Stderr, "  gungnr netbird mode --set <legacy|mode_a|mode_b> [--allow-localhost]")
+}
+
+func printNetBirdModeUsage() {
+	fmt.Fprintln(os.Stderr, "Usage:")
+	fmt.Fprintln(os.Stderr, "  gungnr netbird mode --set <legacy|mode_a|mode_b> [--allow-localhost] [--api-url URL] [--auth-token TOKEN] [--netbird-api-base-url URL] [--netbird-api-token TOKEN] [--host-peer-id ID] [--admin-peer-ids id1,id2] [--yes] [--poll-interval 2s] [--poll-timeout 30m]")
+}
+
+func parseCSVArg(raw string) []string {
+	parts := strings.Split(raw, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value == "" {
+			continue
+		}
+		result = append(result, value)
+	}
+	return result
 }
 
 func runUninstall(args []string) {
