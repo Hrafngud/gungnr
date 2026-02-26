@@ -15,6 +15,24 @@ import (
 	"go-notes/internal/models"
 )
 
+type projectArchiveServiceExposureSummary struct {
+	TargetContainers  int
+	RemovedContainers int
+	SkippedContainers int
+	FailedContainers  int
+
+	TargetHostnames      int
+	RemovedIngressRemote int
+	RemovedIngressLocal  int
+	SkippedIngress       int
+	FailedIngress        int
+
+	TargetDNS  int
+	RemovedDNS int
+	SkippedDNS int
+	FailedDNS  int
+}
+
 func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.Job, logger jobs.Logger) error {
 	var req ProjectArchiveJobRequest
 	if err := json.Unmarshal([]byte(job.Input), &req); err != nil {
@@ -33,22 +51,54 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 	options := normalizeArchiveOptions(req.Options)
 	warnings := make(map[string]struct{})
 
+	exposureContainers := dedupeStrings(req.Targets.ExposureContainers)
+	exposureHostnames := dedupeHostnames(req.Targets.ExposureHostnames)
+	exposureContainerSet := stringSliceSet(exposureContainers)
+	exposureHostnameSet := stringSliceSet(exposureHostnames)
+	exposureSummary := projectArchiveServiceExposureSummary{
+		TargetContainers: len(exposureContainers),
+		TargetHostnames:  len(exposureHostnames),
+	}
+
 	removedContainers := 0
 	if options.RemoveContainers {
 		if w.host == nil {
 			addArchiveWarning(warnings, "host service unavailable while removing project containers")
+			exposureSummary.FailedContainers += exposureSummary.TargetContainers
 		} else {
 			targetContainers := dedupeStrings(req.Targets.Containers)
+			targetContainerSet := stringSliceSet(targetContainers)
+			for container := range exposureContainerSet {
+				if _, ok := targetContainerSet[container]; ok {
+					continue
+				}
+				exposureSummary.SkippedContainers++
+			}
+
 			for _, container := range targetContainers {
-				logger.Logf("removing project container %s (remove_volumes=%t)", container, options.RemoveVolumes)
+				_, isExposureContainer := exposureContainerSet[container]
+				if isExposureContainer {
+					logger.Logf("removing service-exposure container %s (remove_volumes=%t)", container, options.RemoveVolumes)
+				} else {
+					logger.Logf("removing project container %s (remove_volumes=%t)", container, options.RemoveVolumes)
+				}
 				if err := w.host.RemoveContainer(ctx, container, options.RemoveVolumes); err != nil {
 					addArchiveWarning(warnings, fmt.Sprintf("remove container %s failed: %v", container, err))
 					logger.Logf("container removal warning: %v", err)
+					if isExposureContainer {
+						exposureSummary.FailedContainers++
+					}
 					continue
 				}
 				removedContainers++
+				if isExposureContainer {
+					exposureSummary.RemovedContainers++
+				}
 			}
 		}
+	} else if exposureSummary.TargetContainers > 0 {
+		exposureSummary.SkippedContainers = exposureSummary.TargetContainers
+		logger.Logf("service-exposure container cleanup skipped because removeContainers=false (%d target(s))", exposureSummary.TargetContainers)
 	}
 
 	runtimeCfg, err := w.resolveArchiveRuntimeConfig(ctx)
@@ -60,8 +110,17 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 	localIngressRemoved := 0
 	if options.RemoveIngress {
 		hostnames := dedupeHostnames(req.Targets.Hostnames)
+		targetHostnameSet := stringSliceSet(hostnames)
+		for hostname := range exposureHostnameSet {
+			if _, ok := targetHostnameSet[hostname]; ok {
+				continue
+			}
+			exposureSummary.SkippedIngress++
+		}
+
 		if len(hostnames) == 0 {
 			addArchiveWarning(warnings, "ingress cleanup requested but no hostnames were targeted")
+			exposureSummary.SkippedIngress += exposureSummary.TargetHostnames
 		} else {
 			cfClient := cloudflare.NewClient(runtimeCfg)
 			removedRemote, removeErr := cfClient.RemoveIngressHostnames(ctx, hostnames)
@@ -70,8 +129,10 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 					removedLocal, localErr := cloudflare.RemoveLocalIngressHostnames(runtimeCfg.CloudflaredConfig, hostnames)
 					if localErr != nil {
 						addArchiveWarning(warnings, fmt.Sprintf("remove local ingress rules failed: %v", localErr))
+						exposureSummary.FailedIngress += countHostnamesInSet(hostnames, exposureHostnameSet)
 					} else {
 						localIngressRemoved = len(removedLocal)
+						exposureSummary.RemovedIngressLocal += countIngressRulesForHostnames(removedLocal, exposureHostnameSet)
 						logger.Logf("removed %d local ingress rules", localIngressRemoved)
 						if localIngressRemoved > 0 {
 							if restartErr := w.restartTunnelForArchive(ctx, logger, fmt.Sprintf("job-%d", job.ID), runtimeCfg.CloudflaredConfig); restartErr != nil {
@@ -81,19 +142,37 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 					}
 				} else {
 					addArchiveWarning(warnings, fmt.Sprintf("remove remote ingress rules failed: %v", removeErr))
+					exposureSummary.FailedIngress += countHostnamesInSet(hostnames, exposureHostnameSet)
 				}
 			} else {
 				remoteIngressRemoved = len(removedRemote)
+				exposureSummary.RemovedIngressRemote += countIngressRulesForHostnames(removedRemote, exposureHostnameSet)
 				logger.Logf("removed %d remote ingress rules", remoteIngressRemoved)
 			}
+		}
+	} else if exposureSummary.TargetHostnames > 0 {
+		exposureSummary.SkippedIngress = exposureSummary.TargetHostnames
+		logger.Logf("service-exposure ingress cleanup skipped because removeIngress=false (%d target(s))", exposureSummary.TargetHostnames)
+	}
+
+	if exposureSummary.TargetHostnames > 0 {
+		remainingIngress := exposureSummary.TargetHostnames -
+			exposureSummary.RemovedIngressRemote -
+			exposureSummary.RemovedIngressLocal -
+			exposureSummary.FailedIngress -
+			exposureSummary.SkippedIngress
+		if remainingIngress > 0 {
+			exposureSummary.SkippedIngress += remainingIngress
 		}
 	}
 
 	dnsRemoved := 0
+	dnsTargets := dedupeDNSDeleteTargets(req.Targets.DNSRecords)
+	exposureSummary.TargetDNS = countExposureDNSTargets(dnsTargets, exposureHostnameSet)
 	if options.RemoveDNS {
-		targets := dedupeDNSDeleteTargets(req.Targets.DNSRecords)
-		if len(targets) == 0 {
+		if len(dnsTargets) == 0 {
 			addArchiveWarning(warnings, "DNS cleanup requested but no deletable records were targeted")
+			exposureSummary.SkippedDNS += exposureSummary.TargetDNS
 		} else {
 			cfClient := cloudflare.NewClient(runtimeCfg)
 			expectedTarget, expectedErr := cfClient.ExpectedTunnelCNAME(ctx)
@@ -102,47 +181,87 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 			}
 			expectedTarget = strings.ToLower(strings.TrimSpace(expectedTarget))
 
-			for _, target := range targets {
+			for _, target := range dnsTargets {
+				targetHostname := strings.ToLower(strings.TrimSpace(target.Hostname))
+				_, isExposureTarget := exposureHostnameSet[targetHostname]
+
 				if strings.TrimSpace(target.ZoneID) == "" || strings.TrimSpace(target.RecordID) == "" {
 					addArchiveWarning(warnings, fmt.Sprintf("skip DNS record with incomplete target metadata: zone=%q id=%q", target.ZoneID, target.RecordID))
+					if isExposureTarget {
+						exposureSummary.SkippedDNS++
+					}
 					continue
 				}
 				if expectedTarget == "" {
 					addArchiveWarning(warnings, fmt.Sprintf("skip DNS record %s because expected tunnel target is unavailable", target.RecordID))
+					if isExposureTarget {
+						exposureSummary.SkippedDNS++
+					}
 					continue
 				}
 				if strings.TrimSpace(target.Hostname) == "" {
 					addArchiveWarning(warnings, fmt.Sprintf("skip DNS record %s because hostname metadata is missing", target.RecordID))
+					if isExposureTarget {
+						exposureSummary.SkippedDNS++
+					}
 					continue
 				}
 
 				records, err := cfClient.ListDNSRecordsByName(ctx, target.Hostname, target.ZoneID)
 				if err != nil {
 					addArchiveWarning(warnings, fmt.Sprintf("list DNS records for %s failed: %v", target.Hostname, err))
+					if isExposureTarget {
+						exposureSummary.FailedDNS++
+					}
 					continue
 				}
 
 				record := findDNSRecordByID(records, target.RecordID)
 				if record == nil {
 					addArchiveWarning(warnings, fmt.Sprintf("skip DNS record %s because it no longer exists", target.RecordID))
+					if isExposureTarget {
+						exposureSummary.SkippedDNS++
+					}
 					continue
 				}
 				if !strings.EqualFold(strings.TrimSpace(record.Type), "CNAME") {
 					addArchiveWarning(warnings, fmt.Sprintf("skip DNS record %s because type is %s", target.RecordID, record.Type))
+					if isExposureTarget {
+						exposureSummary.SkippedDNS++
+					}
 					continue
 				}
 				if strings.ToLower(strings.TrimSpace(record.Content)) != expectedTarget {
 					addArchiveWarning(warnings, fmt.Sprintf("skip DNS record %s because target %s no longer matches %s", target.RecordID, strings.TrimSpace(record.Content), expectedTarget))
+					if isExposureTarget {
+						exposureSummary.SkippedDNS++
+					}
 					continue
 				}
 
 				logger.Logf("deleting Cloudflare DNS record %s for %s", target.RecordID, target.Hostname)
 				if err := cfClient.DeleteDNSRecord(ctx, target.ZoneID, target.RecordID); err != nil {
 					addArchiveWarning(warnings, fmt.Sprintf("delete DNS record %s failed: %v", target.RecordID, err))
+					if isExposureTarget {
+						exposureSummary.FailedDNS++
+					}
 					continue
 				}
 				dnsRemoved++
+				if isExposureTarget {
+					exposureSummary.RemovedDNS++
+				}
 			}
+		}
+	} else if exposureSummary.TargetDNS > 0 {
+		exposureSummary.SkippedDNS = exposureSummary.TargetDNS
+		logger.Logf("service-exposure DNS cleanup skipped because removeDns=false (%d target(s))", exposureSummary.TargetDNS)
+	}
+
+	if exposureSummary.TargetDNS > 0 {
+		remainingDNS := exposureSummary.TargetDNS - exposureSummary.RemovedDNS - exposureSummary.FailedDNS - exposureSummary.SkippedDNS
+		if remainingDNS > 0 {
+			exposureSummary.SkippedDNS += remainingDNS
 		}
 	}
 
@@ -159,6 +278,27 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 		} else {
 			statusPersisted = true
 		}
+	}
+
+	if exposureSummary.TargetContainers+exposureSummary.TargetHostnames+exposureSummary.TargetDNS == 0 {
+		logger.Log("service-exposure cleanup summary: no resolved forward_local/quick_service targets")
+	} else {
+		logger.Logf(
+			"service-exposure cleanup summary: containers target=%d removed=%d skipped=%d failed=%d | ingress target=%d removed_remote=%d removed_local=%d skipped=%d failed=%d | dns target=%d removed=%d skipped=%d failed=%d",
+			exposureSummary.TargetContainers,
+			exposureSummary.RemovedContainers,
+			exposureSummary.SkippedContainers,
+			exposureSummary.FailedContainers,
+			exposureSummary.TargetHostnames,
+			exposureSummary.RemovedIngressRemote,
+			exposureSummary.RemovedIngressLocal,
+			exposureSummary.SkippedIngress,
+			exposureSummary.FailedIngress,
+			exposureSummary.TargetDNS,
+			exposureSummary.RemovedDNS,
+			exposureSummary.SkippedDNS,
+			exposureSummary.FailedDNS,
+		)
 	}
 
 	if len(warnings) == 0 {
@@ -184,7 +324,22 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 			"removedIngressLocal":  localIngressRemoved,
 			"removedDnsRecords":    dnsRemoved,
 			"statusPersisted":      statusPersisted,
-			"warnings":             sortedArchiveWarnings(warnings),
+			"serviceExposureCleanup": map[string]any{
+				"targetContainers":     exposureSummary.TargetContainers,
+				"removedContainers":    exposureSummary.RemovedContainers,
+				"skippedContainers":    exposureSummary.SkippedContainers,
+				"failedContainers":     exposureSummary.FailedContainers,
+				"targetHostnames":      exposureSummary.TargetHostnames,
+				"removedIngressRemote": exposureSummary.RemovedIngressRemote,
+				"removedIngressLocal":  exposureSummary.RemovedIngressLocal,
+				"skippedIngress":       exposureSummary.SkippedIngress,
+				"failedIngress":        exposureSummary.FailedIngress,
+				"targetDnsRecords":     exposureSummary.TargetDNS,
+				"removedDnsRecords":    exposureSummary.RemovedDNS,
+				"skippedDnsRecords":    exposureSummary.SkippedDNS,
+				"failedDnsRecords":     exposureSummary.FailedDNS,
+			},
+			"warnings": sortedArchiveWarnings(warnings),
 		}
 		if err := w.audit.Log(ctx, AuditEntry{
 			UserID:    req.RequestedBy.UserID,
@@ -296,4 +451,67 @@ func findDNSRecordByID(records []cloudflare.DNSRecord, id string) *cloudflare.DN
 		return &recordCopy
 	}
 	return nil
+}
+
+func stringSliceSet(values []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		result[trimmed] = struct{}{}
+	}
+	return result
+}
+
+func countHostnamesInSet(hostnames []string, targets map[string]struct{}) int {
+	if len(hostnames) == 0 || len(targets) == 0 {
+		return 0
+	}
+	count := 0
+	for _, hostname := range hostnames {
+		normalized := strings.ToLower(strings.TrimSpace(hostname))
+		if normalized == "" {
+			continue
+		}
+		if _, ok := targets[normalized]; ok {
+			count++
+		}
+	}
+	return count
+}
+
+func countIngressRulesForHostnames(rules []cloudflare.IngressRule, targets map[string]struct{}) int {
+	if len(rules) == 0 || len(targets) == 0 {
+		return 0
+	}
+	count := 0
+	for _, rule := range rules {
+		hostname := strings.ToLower(strings.TrimSpace(rule.Hostname))
+		if hostname == "" {
+			continue
+		}
+		if _, ok := targets[hostname]; ok {
+			count++
+		}
+	}
+	return count
+}
+
+func countExposureDNSTargets(targets []ProjectArchiveDNSDeleteTarget, exposureHostnames map[string]struct{}) int {
+	if len(targets) == 0 || len(exposureHostnames) == 0 {
+		return 0
+	}
+	count := 0
+	for _, target := range targets {
+		hostname := strings.ToLower(strings.TrimSpace(target.Hostname))
+		if hostname == "" {
+			continue
+		}
+		if _, ok := exposureHostnames[hostname]; ok {
+			count++
+		}
+	}
+	return count
 }

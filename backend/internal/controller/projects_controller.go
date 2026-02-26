@@ -830,9 +830,11 @@ func (c *ProjectsController) parseProjectArchiveRequest(ctx *gin.Context) (servi
 
 func jobTargetsFromPlan(plan service.ProjectArchivePlan, options service.ProjectArchiveOptions) service.ProjectArchiveTargets {
 	targets := service.ProjectArchiveTargets{
-		Containers: []string{},
-		Hostnames:  []string{},
-		DNSRecords: []service.ProjectArchiveDNSDeleteTarget{},
+		Containers:         []string{},
+		Hostnames:          []string{},
+		ExposureContainers: []string{},
+		ExposureHostnames:  []string{},
+		DNSRecords:         []service.ProjectArchiveDNSDeleteTarget{},
 	}
 	if options.RemoveContainers {
 		for _, container := range plan.Containers {
@@ -841,9 +843,23 @@ func jobTargetsFromPlan(plan service.ProjectArchivePlan, options service.Project
 			}
 			targets.Containers = append(targets.Containers, container.Name)
 		}
+		for _, exposure := range plan.ServiceExposures {
+			container := strings.TrimSpace(exposure.Container)
+			if container == "" {
+				continue
+			}
+			targets.ExposureContainers = append(targets.ExposureContainers, container)
+		}
 	}
 	if options.RemoveIngress {
 		targets.Hostnames = append(targets.Hostnames, plan.Hostnames...)
+		for _, exposure := range plan.ServiceExposures {
+			hostname := strings.ToLower(strings.TrimSpace(exposure.Hostname))
+			if hostname == "" {
+				continue
+			}
+			targets.ExposureHostnames = append(targets.ExposureHostnames, hostname)
+		}
 	}
 	if options.RemoveDNS {
 		for _, record := range plan.DNSRecords {

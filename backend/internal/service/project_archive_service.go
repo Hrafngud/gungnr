@@ -24,13 +24,14 @@ type ProjectArchiveOptions struct {
 }
 
 type ProjectArchivePlan struct {
-	Project    ProjectArchivePlanProject     `json:"project"`
-	Defaults   ProjectArchiveOptions         `json:"defaults"`
-	Hostnames  []string                      `json:"hostnames"`
-	Containers []ProjectArchivePlanContainer `json:"containers"`
-	Ingress    []ProjectArchivePlanIngress   `json:"ingressRules"`
-	DNSRecords []ProjectArchivePlanDNSRecord `json:"dnsRecords"`
-	Warnings   []string                      `json:"warnings"`
+	Project          ProjectArchivePlanProject          `json:"project"`
+	Defaults         ProjectArchiveOptions              `json:"defaults"`
+	Hostnames        []string                           `json:"hostnames"`
+	Containers       []ProjectArchivePlanContainer      `json:"containers"`
+	ServiceExposures []ProjectArchivePlanServiceCleanup `json:"serviceExposures"`
+	Ingress          []ProjectArchivePlanIngress        `json:"ingressRules"`
+	DNSRecords       []ProjectArchivePlanDNSRecord      `json:"dnsRecords"`
+	Warnings         []string                           `json:"warnings"`
 }
 
 type ProjectArchivePlanProject struct {
@@ -46,6 +47,14 @@ type ProjectArchivePlanContainer struct {
 	Image   string `json:"image"`
 	Status  string `json:"status"`
 	Service string `json:"service"`
+}
+
+type ProjectArchivePlanServiceCleanup struct {
+	JobID      uint   `json:"jobId"`
+	Type       string `json:"type"`
+	Hostname   string `json:"hostname"`
+	Container  string `json:"container,omitempty"`
+	Resolution string `json:"resolution"`
 }
 
 type ProjectArchivePlanIngress struct {
@@ -78,9 +87,11 @@ type ProjectArchiveDNSDeleteTarget struct {
 }
 
 type ProjectArchiveTargets struct {
-	Containers []string                        `json:"containers"`
-	Hostnames  []string                        `json:"hostnames"`
-	DNSRecords []ProjectArchiveDNSDeleteTarget `json:"dnsRecords"`
+	Containers         []string                        `json:"containers"`
+	Hostnames          []string                        `json:"hostnames"`
+	ExposureContainers []string                        `json:"exposureContainers,omitempty"`
+	ExposureHostnames  []string                        `json:"exposureHostnames,omitempty"`
+	DNSRecords         []ProjectArchiveDNSDeleteTarget `json:"dnsRecords"`
 }
 
 type ProjectArchiveJobRequest struct {
@@ -142,30 +153,33 @@ func (s *ProjectArchiveService) Plan(ctx context.Context, projectName string) (P
 			Path:           resolved.ProjectDir,
 			Status:         "unknown",
 		},
-		Defaults:   DefaultProjectArchiveOptions(),
-		Hostnames:  []string{},
-		Containers: []ProjectArchivePlanContainer{},
-		Ingress:    []ProjectArchivePlanIngress{},
-		DNSRecords: []ProjectArchivePlanDNSRecord{},
-		Warnings:   []string{},
+		Defaults:         DefaultProjectArchiveOptions(),
+		Hostnames:        []string{},
+		Containers:       []ProjectArchivePlanContainer{},
+		ServiceExposures: []ProjectArchivePlanServiceCleanup{},
+		Ingress:          []ProjectArchivePlanIngress{},
+		DNSRecords:       []ProjectArchivePlanDNSRecord{},
+		Warnings:         []string{},
 	}
 	if resolved.ProjectRecord != nil && strings.TrimSpace(resolved.ProjectRecord.Status) != "" {
 		plan.Project.Status = strings.TrimSpace(resolved.ProjectRecord.Status)
 	}
 
 	warnings := make(map[string]struct{})
-	containers := s.planContainers(ctx, resolved.NormalizedName, warnings)
-	plan.Containers = containers
+	baseDomain := normalizeDomain(runtimeCfg.Domain)
+	projectHostnames := s.discoverHostnames(ctx, resolved.NormalizedName, baseDomain, warnings)
+	plan.ServiceExposures = s.planServiceExposures(ctx, resolved.NormalizedName, baseDomain, warnings)
 
-	hostnames := s.discoverHostnames(ctx, resolved.NormalizedName, normalizeDomain(runtimeCfg.Domain), warnings)
-	plan.Hostnames = hostnames
+	exposureHostnames, exposureContainers := archiveExposureTargets(plan.ServiceExposures)
+	plan.Hostnames = mergeArchiveHostnames(projectHostnames, exposureHostnames)
 	if len(plan.Hostnames) == 0 {
 		addArchiveWarning(warnings, "no managed hostnames were discovered for this project")
 	}
+	plan.Containers = s.planContainers(ctx, resolved.NormalizedName, exposureContainers, warnings)
 
 	cfClient := cloudflare.NewClient(runtimeCfg)
-	plan.Ingress = s.planIngress(ctx, runtimeCfg, cfClient, hostnames, warnings)
-	plan.DNSRecords = s.planDNSRecords(ctx, runtimeCfg, cfClient, hostnames, warnings)
+	plan.Ingress = s.planIngress(ctx, runtimeCfg, cfClient, plan.Hostnames, warnings)
+	plan.DNSRecords = s.planDNSRecords(ctx, runtimeCfg, cfClient, plan.Hostnames, warnings)
 	plan.Warnings = sortedArchiveWarnings(warnings)
 	return plan, nil
 }
@@ -187,9 +201,11 @@ func (s *ProjectArchiveService) Queue(
 
 	options = normalizeArchiveOptions(options)
 	targets := ProjectArchiveTargets{
-		Containers: []string{},
-		Hostnames:  []string{},
-		DNSRecords: []ProjectArchiveDNSDeleteTarget{},
+		Containers:         []string{},
+		Hostnames:          []string{},
+		ExposureContainers: []string{},
+		ExposureHostnames:  []string{},
+		DNSRecords:         []ProjectArchiveDNSDeleteTarget{},
 	}
 
 	if options.RemoveContainers {
@@ -200,9 +216,23 @@ func (s *ProjectArchiveService) Queue(
 			}
 			targets.Containers = append(targets.Containers, name)
 		}
+		for _, exposure := range plan.ServiceExposures {
+			container := strings.TrimSpace(exposure.Container)
+			if container == "" {
+				continue
+			}
+			targets.ExposureContainers = append(targets.ExposureContainers, container)
+		}
 	}
 	if options.RemoveIngress {
 		targets.Hostnames = append(targets.Hostnames, plan.Hostnames...)
+		for _, exposure := range plan.ServiceExposures {
+			hostname := strings.ToLower(strings.TrimSpace(exposure.Hostname))
+			if hostname == "" {
+				continue
+			}
+			targets.ExposureHostnames = append(targets.ExposureHostnames, hostname)
+		}
 	}
 	if options.RemoveDNS {
 		for _, record := range plan.DNSRecords {
@@ -251,6 +281,7 @@ func (s *ProjectArchiveService) resolveRuntimeConfig(ctx context.Context) (confi
 func (s *ProjectArchiveService) planContainers(
 	ctx context.Context,
 	project string,
+	exposureContainers []string,
 	warnings map[string]struct{},
 ) []ProjectArchivePlanContainer {
 	if s.host == nil {
@@ -264,19 +295,53 @@ func (s *ProjectArchiveService) planContainers(
 		return []ProjectArchivePlanContainer{}
 	}
 
-	result := make([]ProjectArchivePlanContainer, 0)
-	for _, container := range containers {
-		if !strings.EqualFold(strings.TrimSpace(container.Project), project) {
+	exposureSet := make(map[string]struct{}, len(exposureContainers))
+	for _, value := range exposureContainers {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
 			continue
 		}
+		exposureSet[trimmed] = struct{}{}
+	}
+
+	foundExposureContainers := make(map[string]struct{}, len(exposureSet))
+	result := make([]ProjectArchivePlanContainer, 0)
+	for _, container := range containers {
+		containerName := strings.TrimSpace(container.Name)
+		if containerName == "" {
+			continue
+		}
+
+		_, exposureMatch := exposureSet[containerName]
+		projectMatch := strings.EqualFold(strings.TrimSpace(container.Project), project)
+		if !projectMatch && !exposureMatch {
+			continue
+		}
+
+		service := strings.TrimSpace(container.Service)
+		if exposureMatch {
+			foundExposureContainers[containerName] = struct{}{}
+			if service == "" {
+				service = JobTypeQuickService
+			}
+		}
+
 		result = append(result, ProjectArchivePlanContainer{
 			ID:      container.ID,
-			Name:    container.Name,
+			Name:    containerName,
 			Image:   container.Image,
 			Status:  container.Status,
-			Service: container.Service,
+			Service: service,
 		})
 	}
+
+	for container := range exposureSet {
+		if _, ok := foundExposureContainers[container]; ok {
+			continue
+		}
+		addArchiveWarning(warnings, fmt.Sprintf("resolved quick_service container %s was not found on host while planning archive cleanup", container))
+	}
+
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Name < result[j].Name
 	})
@@ -318,6 +383,245 @@ func (s *ProjectArchiveService) discoverHostnames(
 	}
 	sort.Strings(result)
 	return result
+}
+
+func (s *ProjectArchiveService) planServiceExposures(
+	ctx context.Context,
+	project string,
+	baseDomain string,
+	warnings map[string]struct{},
+) []ProjectArchivePlanServiceCleanup {
+	if s.jobs == nil {
+		addArchiveWarning(warnings, "job service unavailable while resolving service-exposure cleanup targets")
+		return []ProjectArchivePlanServiceCleanup{}
+	}
+
+	jobs, err := s.jobs.List(ctx)
+	if err != nil {
+		addArchiveWarning(warnings, fmt.Sprintf("failed to inspect forward_local/quick_service jobs: %v", err))
+		return []ProjectArchivePlanServiceCleanup{}
+	}
+
+	seen := make(map[string]struct{})
+	result := make([]ProjectArchivePlanServiceCleanup, 0)
+	for _, job := range jobs {
+		switch strings.TrimSpace(job.Type) {
+		case JobTypeForwardLocal:
+			candidate, ok := resolveForwardLocalServiceExposure(project, baseDomain, job, warnings)
+			if !ok {
+				continue
+			}
+			key := fmt.Sprintf("%s:%s", candidate.Type, candidate.Hostname)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			result = append(result, candidate)
+		case JobTypeQuickService:
+			candidate, ok := resolveQuickServiceExposure(project, baseDomain, job, warnings)
+			if !ok {
+				continue
+			}
+			key := fmt.Sprintf("%s:%s:%s", candidate.Type, candidate.Hostname, candidate.Container)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			result = append(result, candidate)
+		}
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Hostname == result[j].Hostname {
+			if result[i].Type == result[j].Type {
+				return result[i].JobID < result[j].JobID
+			}
+			return result[i].Type < result[j].Type
+		}
+		return result[i].Hostname < result[j].Hostname
+	})
+	return result
+}
+
+func resolveForwardLocalServiceExposure(
+	project string,
+	baseDomain string,
+	job models.Job,
+	warnings map[string]struct{},
+) (ProjectArchivePlanServiceCleanup, bool) {
+	var payload ForwardLocalRequest
+	if err := json.Unmarshal([]byte(job.Input), &payload); err != nil {
+		return ProjectArchivePlanServiceCleanup{}, false
+	}
+
+	project = strings.ToLower(strings.TrimSpace(project))
+	subdomain := strings.ToLower(strings.TrimSpace(payload.Subdomain))
+
+	resolution := ""
+	switch {
+	case subdomain == project:
+		resolution = "subdomain.exact"
+	case strings.HasPrefix(subdomain, project+"-"):
+		resolution = "subdomain.prefix"
+	default:
+		if strings.HasPrefix(subdomain, project) {
+			addArchiveWarning(
+				warnings,
+				fmt.Sprintf(
+					"unresolved forward_local ownership for job %d (subdomain=%q): deterministic project mapping is unavailable",
+					job.ID,
+					subdomain,
+				),
+			)
+		}
+		return ProjectArchivePlanServiceCleanup{}, false
+	}
+
+	hostname, hostErr := resolveExposureHostname(subdomain, payload.Domain, baseDomain)
+	if hostErr != "" {
+		addArchiveWarning(
+			warnings,
+			fmt.Sprintf("unresolved forward_local ownership for job %d: %s", job.ID, hostErr),
+		)
+		return ProjectArchivePlanServiceCleanup{}, false
+	}
+
+	return ProjectArchivePlanServiceCleanup{
+		JobID:      job.ID,
+		Type:       JobTypeForwardLocal,
+		Hostname:   hostname,
+		Resolution: resolution,
+	}, true
+}
+
+func resolveQuickServiceExposure(
+	project string,
+	baseDomain string,
+	job models.Job,
+	warnings map[string]struct{},
+) (ProjectArchivePlanServiceCleanup, bool) {
+	var payload QuickServiceRequest
+	if err := json.Unmarshal([]byte(job.Input), &payload); err != nil {
+		return ProjectArchivePlanServiceCleanup{}, false
+	}
+
+	project = strings.ToLower(strings.TrimSpace(project))
+	subdomain := strings.ToLower(strings.TrimSpace(payload.Subdomain))
+
+	resolution := ""
+	switch {
+	case subdomain == project:
+		resolution = "subdomain.exact"
+	case strings.HasPrefix(subdomain, project+"-"):
+		resolution = "subdomain.prefix"
+	default:
+		if strings.HasPrefix(subdomain, project) {
+			addArchiveWarning(
+				warnings,
+				fmt.Sprintf(
+					"unresolved quick_service ownership for job %d (subdomain=%q): deterministic project mapping is unavailable",
+					job.ID,
+					subdomain,
+				),
+			)
+		}
+		return ProjectArchivePlanServiceCleanup{}, false
+	}
+
+	hostname, hostErr := resolveExposureHostname(subdomain, payload.Domain, baseDomain)
+	if hostErr != "" {
+		addArchiveWarning(
+			warnings,
+			fmt.Sprintf("unresolved quick_service ownership for job %d: %s", job.ID, hostErr),
+		)
+		return ProjectArchivePlanServiceCleanup{}, false
+	}
+
+	container := quickServiceContainerFromLogs(job.LogLines)
+	if container == "" {
+		addArchiveWarning(
+			warnings,
+			fmt.Sprintf(
+				"quick_service job %d resolved to %s but container ownership is unresolved; container cleanup will be skipped for this exposure",
+				job.ID,
+				hostname,
+			),
+		)
+	}
+
+	return ProjectArchivePlanServiceCleanup{
+		JobID:      job.ID,
+		Type:       JobTypeQuickService,
+		Hostname:   hostname,
+		Container:  container,
+		Resolution: resolution,
+	}, true
+}
+
+func resolveExposureHostname(subdomain, domain, baseDomain string) (string, string) {
+	subdomain = strings.ToLower(strings.TrimSpace(subdomain))
+	if subdomain == "" {
+		return "", "subdomain is missing"
+	}
+
+	domain = normalizeDomain(domain)
+	if domain == "" {
+		domain = normalizeDomain(baseDomain)
+	}
+	if domain == "" {
+		return "", "domain is missing"
+	}
+
+	hostname := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%s.%s", subdomain, domain)))
+	if ValidateDomain(hostname) != nil {
+		return "", fmt.Sprintf("hostname %q is invalid", hostname)
+	}
+	return hostname, ""
+}
+
+func quickServiceContainerFromLogs(logLines string) string {
+	const prefix = "starting docker container "
+	for _, line := range strings.Split(logLines, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, prefix) {
+			continue
+		}
+		container := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
+		if idx := strings.Index(container, " ("); idx != -1 {
+			container = strings.TrimSpace(container[:idx])
+		}
+		if container == "" {
+			continue
+		}
+		if err := validateContainerName(container); err != nil {
+			continue
+		}
+		return container
+	}
+	return ""
+}
+
+func archiveExposureTargets(exposures []ProjectArchivePlanServiceCleanup) ([]string, []string) {
+	hostnames := make([]string, 0, len(exposures))
+	containers := make([]string, 0, len(exposures))
+	for _, exposure := range exposures {
+		hostname := strings.ToLower(strings.TrimSpace(exposure.Hostname))
+		if hostname != "" {
+			hostnames = append(hostnames, hostname)
+		}
+		container := strings.TrimSpace(exposure.Container)
+		if container != "" {
+			containers = append(containers, container)
+		}
+	}
+	return dedupeHostnames(hostnames), dedupeStrings(containers)
+}
+
+func mergeArchiveHostnames(projectHostnames []string, exposureHostnames []string) []string {
+	merged := make([]string, 0, len(projectHostnames)+len(exposureHostnames))
+	merged = append(merged, projectHostnames...)
+	merged = append(merged, exposureHostnames...)
+	return dedupeHostnames(merged)
 }
 
 func addHostnamesFromJobInput(target map[string]struct{}, input string, baseDomain string) {
