@@ -88,6 +88,29 @@ type NetBirdModeApplyRequest struct {
 	AdminPeerIDs   []string `json:"adminPeerIds,omitempty"`
 }
 
+type NetBirdStatus struct {
+	ClientInstalled       bool                   `json:"clientInstalled"`
+	DaemonRunning         bool                   `json:"daemonRunning"`
+	Connected             bool                   `json:"connected"`
+	PeerID                string                 `json:"peerId,omitempty"`
+	PeerName              string                 `json:"peerName,omitempty"`
+	WG0IP                 string                 `json:"wg0Ip,omitempty"`
+	CurrentMode           string                 `json:"currentMode"`
+	LastPolicySyncAt      *time.Time             `json:"lastPolicySyncAt,omitempty"`
+	LastPolicySyncStatus  string                 `json:"lastPolicySyncStatus"`
+	LastPolicySyncWarning int                    `json:"lastPolicySyncWarnings"`
+	APIReachable          bool                   `json:"apiReachable"`
+	APIReachability       NetBirdAPIReachability `json:"apiReachability"`
+	ManagedGroups         int                    `json:"managedGroups"`
+	ManagedPolicies       int                    `json:"managedPolicies"`
+	Warnings              []string               `json:"warnings"`
+}
+
+type NetBirdAPIReachability struct {
+	Source  string `json:"source"`
+	Message string `json:"message,omitempty"`
+}
+
 type Job struct {
 	ID     uint64 `json:"id"`
 	Type   string `json:"type"`
@@ -181,6 +204,16 @@ func (c *Client) ApplyNetBirdMode(ctx context.Context, request NetBirdModeApplyR
 		return Job{}, err
 	}
 	return response.Job, nil
+}
+
+func (c *Client) GetNetBirdStatus(ctx context.Context) (NetBirdStatus, error) {
+	var response struct {
+		Status NetBirdStatus `json:"status"`
+	}
+	if err := c.requestJSON(ctx, http.MethodGet, "/api/v1/netbird/status", nil, &response, true); err != nil {
+		return NetBirdStatus{}, err
+	}
+	return response.Status, nil
 }
 
 func (c *Client) GetJob(ctx context.Context, id uint64) (JobDetail, error) {

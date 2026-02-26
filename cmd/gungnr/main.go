@@ -56,6 +56,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  gungnr tunnel run")
 	fmt.Fprintln(os.Stderr, "  gungnr keepalive <enable|disable|status|all|recover>")
 	fmt.Fprintln(os.Stderr, "  gungnr netbird mode --set <legacy|mode_a|mode_b> [--allow-localhost]")
+	fmt.Fprintln(os.Stderr, "  gungnr netbird status")
 	fmt.Fprintln(os.Stderr, "  gungnr uninstall [--yes]")
 }
 
@@ -187,6 +188,8 @@ func runNetBird(args []string) {
 	switch args[0] {
 	case "mode":
 		runNetBirdMode(args[1:])
+	case "status":
+		runNetBirdStatus(args[1:])
 	default:
 		printNetBirdUsage()
 		os.Exit(2)
@@ -243,11 +246,36 @@ func runNetBirdMode(args []string) {
 func printNetBirdUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  gungnr netbird mode --set <legacy|mode_a|mode_b> [--allow-localhost]")
+	fmt.Fprintln(os.Stderr, "  gungnr netbird status [--api-url URL] [--auth-token TOKEN]")
 }
 
 func printNetBirdModeUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  gungnr netbird mode --set <legacy|mode_a|mode_b> [--allow-localhost] [--api-url URL] [--auth-token TOKEN] [--netbird-api-base-url URL] [--netbird-api-token TOKEN] [--host-peer-id ID] [--admin-peer-ids id1,id2] [--yes] [--poll-interval 2s] [--poll-timeout 30m]")
+}
+
+func runNetBirdStatus(args []string) {
+	flags := flag.NewFlagSet("netbird status", flag.ExitOnError)
+	panelAPIURL := flags.String("api-url", "", "Panel API base URL (default: http://localhost)")
+	panelAuthToken := flags.String("auth-token", "", "Panel bearer auth token")
+	_ = flags.Parse(args)
+
+	if flags.NArg() > 0 {
+		printNetBirdUsage()
+		os.Exit(2)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := app.NetBirdStatus(ctx, app.NetBirdStatusOptions{
+		PanelAPIBaseURL: *panelAPIURL,
+		PanelAuthToken:  *panelAuthToken,
+		Stdout:          os.Stdout,
+	}); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }
 
 func parseCSVArg(raw string) []string {
