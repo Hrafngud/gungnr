@@ -5,6 +5,7 @@ import OverviewView from '@/views/OverviewView.vue'
 import ContainerLogsView from '@/views/ContainerLogsView.vue'
 import HostSettingsView from '@/views/HostSettingsView.vue'
 import NetworkingView from '@/views/NetworkingView.vue'
+import NetbirdView from '@/views/NetbirdView.vue'
 import GitHubView from '@/views/GitHubView.vue'
 import UsersView from '@/views/UsersView.vue'
 import JobsView from '@/views/JobsView.vue'
@@ -58,6 +59,12 @@ const router = createRouter({
       name: 'networking',
       component: NetworkingView,
       meta: { title: 'Networking' },
+    },
+    {
+      path: '/netbird',
+      name: 'netbird',
+      component: NetbirdView,
+      meta: { title: 'NetBird' },
     },
     {
       path: '/github',

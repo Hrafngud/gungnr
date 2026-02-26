@@ -4,6 +4,7 @@ import { computed } from 'vue'
 type IconName =
   | 'home'
   | 'overview'
+  | 'netbird'
   | 'host'
   | 'network'
   | 'github'
@@ -45,6 +46,10 @@ const paths: Record<IconName, string[]> = {
     'M13 5h7v4h-7z',
     'M13 11h7v8h-7z',
     'M4 14h7v5H4z',
+  ],
+  netbird: [
+    'M12 3l7 3v6c0 5-3.5 8-7 9c-3.5-1-7-4-7-9V6z',
+    'M8.5 12l2.2 2.2L15.5 9.5',
   ],
   host: [
     'M5 5.5h14v5H5z',

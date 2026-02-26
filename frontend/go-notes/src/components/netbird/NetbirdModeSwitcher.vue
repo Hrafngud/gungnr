@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
@@ -13,6 +13,7 @@ import UiToggle from '@/components/ui/UiToggle.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useNetbirdStore } from '@/stores/netbird'
 import type { NetBirdMode, NetBirdServiceRebindingOperation } from '@/types/netbird'
+import { jobStatusLabel, jobStatusTone } from '@/utils/jobStatus'
 
 type SelectOption = {
   value: string | number
@@ -53,6 +54,56 @@ const planError = computed(() => netbirdStore.modePlan.error)
 const applySubmitting = computed(() => netbirdStore.modeApply.submitting)
 const applyError = computed(() => netbirdStore.modeApply.error)
 const applyJob = computed(() => netbirdStore.modeApply.job)
+const applyPolling = computed(() => netbirdStore.modeApplyPolling)
+const applyPollingLifecycle = computed(() => applyPolling.value.lifecycle)
+const applyPollingError = computed(() => applyPolling.value.error)
+const applyPollingJob = computed(() => applyPolling.value.lastJob)
+const applyPollingSummary = computed(() => applyPolling.value.summary)
+
+const applyPollingJobId = computed(() => applyPolling.value.jobId ?? applyJob.value?.id ?? null)
+const applyPollingStatus = computed(
+  () =>
+    applyPollingJob.value?.status ??
+    applyJob.value?.status ??
+    (applyPollingLifecycle.value === 'running' ? 'pending' : ''),
+)
+const applyPollingStatusLabel = computed(() => jobStatusLabel(applyPollingStatus.value))
+const applyPollingStatusTone = computed(() => jobStatusTone(applyPollingStatus.value))
+const applyPollingWarnings = computed(() => applyPollingSummary.value?.warnings ?? [])
+const applyPollingRebindingFailures = computed(
+  () => applyPollingSummary.value?.rebindingExecution?.counts?.failed ?? 0,
+)
+const applyPollingRedeployFailures = computed(
+  () => applyPollingSummary.value?.redeployExecution?.counts?.failed ?? 0,
+)
+const applyPollingFailureCount = computed(
+  () => applyPollingRebindingFailures.value + applyPollingRedeployFailures.value,
+)
+const applyPollingHasWarnings = computed(
+  () => applyPollingWarnings.value.length > 0 || applyPollingFailureCount.value > 0,
+)
+const applyPollingTerminalTone = computed<'ok' | 'warn' | 'error'>(() => {
+  if (applyPollingStatus.value === 'failed') return 'error'
+  return applyPollingHasWarnings.value ? 'warn' : 'ok'
+})
+const applyPollingRunningMessage = computed(() => {
+  if (applyPollingStatus.value === 'running') {
+    return 'Mode apply is running. NetBird reconcile and rebinding steps are in progress.'
+  }
+  if (applyPollingStatus.value === 'pending') {
+    return 'Mode apply is queued. Polling will continue until the job reaches a terminal state.'
+  }
+  return 'Polling latest mode-apply job status...'
+})
+const applyPollingTerminalMessage = computed(() => {
+  if (applyPollingStatus.value === 'failed') {
+    return applyPollingJob.value?.error?.trim() || 'Mode apply failed. Open the job log for details.'
+  }
+  if (applyPollingHasWarnings.value) {
+    return 'Mode apply completed with warnings. Review warning details below.'
+  }
+  return 'Mode apply completed successfully.'
+})
 
 const parsedAdminPeerIds = computed(() =>
   adminPeerIdsInput.value
@@ -127,6 +178,24 @@ const triggerApply = async () => {
   })
 }
 
+const retryApplyPolling = () => {
+  if (!applyPollingJobId.value) return
+  void netbirdStore.startModeApplyJobPolling(applyPollingJobId.value)
+}
+
+const isTerminalJobStatus = (value?: string) => {
+  const normalized = (value || '').trim().toLowerCase()
+  return normalized === 'completed' || normalized === 'failed'
+}
+
+const syncStatusToJobStatus = (value?: string): string => {
+  const normalized = (value || '').trim().toLowerCase()
+  if (normalized === 'pending') return 'pending'
+  if (normalized === 'succeeded') return 'completed'
+  if (normalized === 'failed') return 'failed'
+  return ''
+}
+
 const onTargetModeUpdate = (value: string | number) => {
   if (!isNetBirdMode(value)) return
   targetModeTouched.value = true
@@ -148,10 +217,34 @@ watch([targetMode, allowLocalhost], () => {
   confirmInput.value = ''
 })
 
+watch(
+  () => [status.value?.lastPolicySyncJobId ?? null, status.value?.lastPolicySyncStatus ?? ''] as const,
+  ([jobId, syncStatus]) => {
+    if (!jobId) return
+
+    const localSnapshot = applyPolling.value.lastJob
+    const hasSameSnapshot = localSnapshot?.id === jobId
+    const localSnapshotStatus = (localSnapshot?.status || '').trim().toLowerCase()
+    const expectedStatus = syncStatusToJobStatus(syncStatus)
+    const snapshotMatchesExpected =
+      hasSameSnapshot && expectedStatus !== '' && localSnapshotStatus === expectedStatus
+
+    if (applyPolling.value.jobId === jobId && applyPolling.value.lifecycle === 'running') return
+    if (snapshotMatchesExpected && isTerminalJobStatus(localSnapshotStatus)) return
+
+    void netbirdStore.startModeApplyJobPolling(jobId)
+  },
+  { immediate: true },
+)
+
 onMounted(() => {
   if (!status.value) {
     void netbirdStore.loadStatus()
   }
+})
+
+onBeforeUnmount(() => {
+  netbirdStore.stopModeApplyJobPolling()
 })
 </script>
 
@@ -454,18 +547,74 @@ onMounted(() => {
       <UiState v-if="applyError" tone="error">
         {{ applyError }}
       </UiState>
-      <UiState v-if="applyJob" tone="ok">
-        Mode apply queued as job #{{ applyJob.id }}.
+      <UiState v-if="applyPollingLifecycle === 'error'" tone="error">
+        {{ applyPollingError || 'Mode apply polling failed.' }}
       </UiState>
-      <UiButton
-        v-if="applyJob"
-        :as="RouterLink"
-        :to="`/jobs/${applyJob.id}`"
-        variant="ghost"
-        size="sm"
-      >
-        Open job log
-      </UiButton>
+
+      <UiPanel v-if="applyPollingJobId" variant="soft" class="space-y-3 p-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+            Mode apply job
+          </p>
+          <UiBadge :tone="applyPollingStatusTone">
+            {{ applyPollingStatusLabel }}
+          </UiBadge>
+        </div>
+        <p class="text-xs text-[color:var(--muted)]">
+          Job #{{ applyPollingJobId }}
+        </p>
+
+        <UiState v-if="applyPollingLifecycle === 'running'" loading>
+          {{ applyPollingRunningMessage }}
+        </UiState>
+        <UiState
+          v-else-if="applyPollingLifecycle === 'terminal'"
+          :tone="applyPollingTerminalTone"
+        >
+          {{ applyPollingTerminalMessage }}
+        </UiState>
+
+        <UiState
+          v-if="applyPollingLifecycle === 'terminal' && applyPollingHasWarnings"
+          tone="warn"
+        >
+          Warnings: {{ applyPollingWarnings.length }} |
+          Rebinding failures: {{ applyPollingRebindingFailures }} |
+          Redeploy failures: {{ applyPollingRedeployFailures }}
+        </UiState>
+
+        <ul
+          v-if="applyPollingLifecycle === 'terminal' && applyPollingWarnings.length > 0"
+          class="space-y-2 text-xs text-[color:var(--muted)]"
+        >
+          <li
+            v-for="(warning, index) in applyPollingWarnings.slice(0, 5)"
+            :key="`mode-apply-warning-${index}`"
+            class="rounded border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-2"
+          >
+            {{ warning }}
+          </li>
+        </ul>
+
+        <div class="flex flex-wrap items-center gap-3">
+          <UiButton
+            v-if="applyPollingLifecycle === 'error'"
+            variant="ghost"
+            size="sm"
+            @click="retryApplyPolling"
+          >
+            Retry polling
+          </UiButton>
+          <UiButton
+            :as="RouterLink"
+            :to="`/jobs/${applyPollingJobId}`"
+            variant="ghost"
+            size="sm"
+          >
+            Open job log
+          </UiButton>
+        </div>
+      </UiPanel>
     </UiPanel>
   </UiPanel>
 </template>

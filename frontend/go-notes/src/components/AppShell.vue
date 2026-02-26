@@ -10,7 +10,7 @@ import HostStatusHeader from '@/components/home/HostStatusHeader.vue'
 type NavItem = {
   label: string
   to: string
-  icon: 'home' | 'overview' | 'activity' | 'projects' | 'logs' | 'host' | 'network' | 'github' | 'users'
+  icon: 'home' | 'overview' | 'activity' | 'projects' | 'logs' | 'netbird' | 'host' | 'network' | 'github' | 'users'
   helper: string
 }
 
@@ -44,6 +44,12 @@ const baseNavItems: NavItem[] = [
     to: '/logs',
     icon: 'logs',
     helper: 'Container output',
+  },
+  {
+    label: 'NetBird',
+    to: '/netbird',
+    icon: 'netbird',
+    helper: 'ACL + modes',
   },
   {
     label: 'Host Settings',
