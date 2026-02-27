@@ -151,9 +151,10 @@ func BuildNetBirdModeApplyJobRequest(input NetBirdModeApplyRequest, actor NetBir
 		TargetMode:     normalized.TargetMode,
 		AllowLocalhost: normalized.AllowLocalhost,
 		APIBaseURL:     normalized.APIBaseURL,
-		APIToken:       normalized.APIToken,
-		HostPeerID:     normalized.HostPeerID,
-		AdminPeerIDs:   normalized.AdminPeerIDs,
+		// Do not persist API tokens in async job payloads.
+		APIToken:     "",
+		HostPeerID:   normalized.HostPeerID,
+		AdminPeerIDs: normalized.AdminPeerIDs,
 		RequestedBy: NetBirdModeApplyActor{
 			UserID: actor.UserID,
 			Login:  strings.TrimSpace(actor.Login),

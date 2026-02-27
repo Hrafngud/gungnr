@@ -5,6 +5,8 @@ import { jobsApi } from '@/services/jobs'
 import { netbirdApi } from '@/services/netbird'
 import type {
   NetBirdACLGraph,
+  NetBirdModeConfig,
+  NetBirdModeConfigUpdateRequest,
   NetBirdModeApplyRequest,
   NetBirdModePlan,
   NetBirdModePlanRequest,
@@ -36,6 +38,14 @@ interface NetBirdModeApplySlice {
   submitting: boolean
   error: string | null
   job: Job | null
+}
+
+interface NetBirdModeConfigSlice {
+  loading: boolean
+  error: string | null
+  saving: boolean
+  saveError: string | null
+  data: NetBirdModeConfig | null
 }
 
 interface NetBirdModeApplyExecutionCounts {
@@ -129,6 +139,13 @@ export const useNetbirdStore = defineStore('netbird', () => {
     submitting: false,
     error: null,
     job: null,
+  })
+  const modeConfig = ref<NetBirdModeConfigSlice>({
+    loading: false,
+    error: null,
+    saving: false,
+    saveError: null,
+    data: null,
   })
   const modeApplyPolling = ref<NetBirdModeApplyPollingSlice>(createModeApplyPollingState())
   const policyReapply = ref<NetBirdPolicyReapplySlice>({
@@ -249,6 +266,35 @@ export const useNetbirdStore = defineStore('netbird', () => {
     }
   }
 
+  async function loadModeConfig() {
+    if (modeConfig.value.loading) return
+    modeConfig.value.loading = true
+    modeConfig.value.error = null
+    try {
+      const { data } = await netbirdApi.getModeConfig()
+      modeConfig.value.data = data.config
+    } catch (err: unknown) {
+      modeConfig.value.error = apiErrorMessage(err)
+      modeConfig.value.data = null
+    } finally {
+      modeConfig.value.loading = false
+    }
+  }
+
+  async function saveModeConfig(payload: NetBirdModeConfigUpdateRequest) {
+    if (modeConfig.value.saving) return
+    modeConfig.value.saving = true
+    modeConfig.value.saveError = null
+    try {
+      const { data } = await netbirdApi.updateModeConfig(payload)
+      modeConfig.value.data = data.config
+    } catch (err: unknown) {
+      modeConfig.value.saveError = apiErrorMessage(err)
+    } finally {
+      modeConfig.value.saving = false
+    }
+  }
+
   function stopModeApplyJobPolling(reset = false) {
     clearModeApplyPollTimer()
     modeApplyPollSession += 1
@@ -328,12 +374,15 @@ export const useNetbirdStore = defineStore('netbird', () => {
     status,
     modePlan,
     modeApply,
+    modeConfig,
     modeApplyPolling,
     policyReapply,
     aclGraph,
     loadStatus,
+    loadModeConfig,
     loadAclGraph,
     planModeSwitch,
+    saveModeConfig,
     applyModeSwitch,
     startModeApplyJobPolling,
     stopModeApplyJobPolling,

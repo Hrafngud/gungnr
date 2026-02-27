@@ -21,6 +21,7 @@ const (
 
 type NetBirdService struct {
 	cfg      config.Config
+	settings *SettingsService
 	projects repository.ProjectRepository
 	jobs     repository.JobRepository
 }
@@ -75,12 +76,28 @@ type NetBirdRedeployProjectTarget struct {
 	Reason      string `json:"reason"`
 }
 
-func NewNetBirdService(cfg config.Config, projects repository.ProjectRepository, jobs repository.JobRepository) *NetBirdService {
+func NewNetBirdService(cfg config.Config, settings *SettingsService, projects repository.ProjectRepository, jobs repository.JobRepository) *NetBirdService {
 	return &NetBirdService{
 		cfg:      cfg,
+		settings: settings,
 		projects: projects,
 		jobs:     jobs,
 	}
+}
+
+func (s *NetBirdService) ResolveModeApplyExecutionRequest(ctx context.Context, input NetBirdModeApplyJobRequest) (NetBirdModeApplyRequest, bool, error) {
+	request := NormalizeNetBirdModeApplyRequest(NetBirdModeApplyRequest{
+		TargetMode:     input.TargetMode,
+		AllowLocalhost: input.AllowLocalhost,
+		APIBaseURL:     input.APIBaseURL,
+		APIToken:       input.APIToken,
+		HostPeerID:     input.HostPeerID,
+		AdminPeerIDs:   input.AdminPeerIDs,
+	})
+	if s == nil || s.settings == nil {
+		return request, false, nil
+	}
+	return s.settings.ResolveNetBirdModeApplyJobRequest(ctx, input)
 }
 
 func (s *NetBirdService) PlanMode(ctx context.Context, targetModeRaw string, allowLocalhost bool) (NetBirdModePlan, error) {
@@ -93,11 +110,8 @@ func (s *NetBirdService) PlanMode(ctx context.Context, targetModeRaw string, all
 		return NetBirdModePlan{}, err
 	}
 
-	currentMode := normalizeMode(s.cfg.NetBirdMode)
-	currentModeKnown := currentMode == NetBirdModeLegacy || currentMode == NetBirdModeA || currentMode == NetBirdModeB
-	if !currentModeKnown {
-		currentMode = NetBirdModeLegacy
-	}
+	runtimeState := s.resolveNetBirdRuntimeState(ctx)
+	currentMode := runtimeState.EffectiveMode
 
 	panelPort, panelPortFallback := resolvePanelPort(s.cfg.Port)
 	projectInputs, projectWarnings, err := s.loadProjectCatalogInputs(ctx)
@@ -118,13 +132,11 @@ func (s *NetBirdService) PlanMode(ctx context.Context, targetModeRaw string, all
 
 	groupOps := buildGroupOperations(currentCatalog.Groups, targetCatalog.Groups, targetMode)
 	policyOps := buildPolicyOperations(currentCatalog.Policies, targetCatalog.Policies, targetMode)
-	rebindings := buildServiceRebindings(currentMode, targetMode, s.cfg.NetBirdAllowLocalhost, allowLocalhost, panelPort, projectInputs)
+	rebindings := buildServiceRebindings(currentMode, targetMode, runtimeState.EffectiveAllowLocalhost, allowLocalhost, panelPort, projectInputs)
 	redeployTargets := buildRedeployTargets(rebindings)
 
-	warnings := make([]string, 0, 4+len(projectWarnings))
-	if !currentModeKnown {
-		warnings = append(warnings, "Current mode is not configured; planner assumed legacy as baseline.")
-	}
+	warnings := make([]string, 0, 4+len(projectWarnings)+len(runtimeState.Warnings))
+	warnings = append(warnings, runtimeState.Warnings...)
 	if panelPortFallback {
 		warnings = append(warnings, "Panel port was not a valid integer; planner used default port 8080.")
 	}

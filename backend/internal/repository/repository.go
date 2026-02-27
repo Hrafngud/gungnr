@@ -34,6 +34,7 @@ type JobRepository interface {
 	List(ctx context.Context) ([]models.Job, error)
 	ListPage(ctx context.Context, offset int, limit int) ([]models.Job, int64, error)
 	GetLatestByType(ctx context.Context, jobType string) (*models.Job, error)
+	GetLatestByTypeAndStatus(ctx context.Context, jobType string, status string) (*models.Job, error)
 	Create(ctx context.Context, job *models.Job) error
 	Get(ctx context.Context, id uint) (*models.Job, error)
 	MarkRunning(ctx context.Context, id uint, startedAt time.Time) error

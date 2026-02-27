@@ -58,25 +58,32 @@ func (w *NetBirdWorkflows) handleModeApply(ctx context.Context, job models.Job, 
 		return fmt.Errorf("parse netbird mode apply request: %w", err)
 	}
 	req = normalizeNetBirdModeApplyJobRequest(req)
+	resolvedReq, usedStoredConfig, err := w.netbird.ResolveModeApplyExecutionRequest(ctx, req)
+	if err != nil {
+		return fmt.Errorf("resolve netbird mode apply config: %w", err)
+	}
 
-	targetMode, err := ParseNetBirdMode(req.TargetMode)
+	targetMode, err := ParseNetBirdMode(resolvedReq.TargetMode)
 	if err != nil {
 		return err
 	}
-	if req.APIToken == "" {
+	if resolvedReq.APIToken == "" {
 		return fmt.Errorf("apiToken is required")
 	}
 	if targetMode != NetBirdModeLegacy {
-		if req.HostPeerID == "" {
+		if resolvedReq.HostPeerID == "" {
 			return fmt.Errorf("hostPeerId is required for target mode %q", targetMode)
 		}
-		if len(req.AdminPeerIDs) == 0 {
+		if len(resolvedReq.AdminPeerIDs) == 0 {
 			return fmt.Errorf("adminPeerIds is required for target mode %q", targetMode)
 		}
 	}
+	if usedStoredConfig {
+		logger.Log("using persisted NetBird mode config for API credentials/peer context")
+	}
 
 	logger.Logf("step 1/5: building mode plan for target mode %s", targetMode)
-	plan, err := w.netbird.PlanMode(ctx, string(targetMode), req.AllowLocalhost)
+	plan, err := w.netbird.PlanMode(ctx, string(targetMode), resolvedReq.AllowLocalhost)
 	if err != nil {
 		return err
 	}
@@ -94,10 +101,10 @@ func (w *NetBirdWorkflows) handleModeApply(ctx context.Context, job models.Job, 
 	}
 
 	logger.Log("step 2/5: reconciling managed groups and policies with NetBird API")
-	reconcileResult, err := w.netbird.ReconcileManagedCatalogWithToken(ctx, req.APIBaseURL, req.APIToken, NetBirdReconcileInput{
+	reconcileResult, err := w.netbird.ReconcileManagedCatalogWithToken(ctx, resolvedReq.APIBaseURL, resolvedReq.APIToken, NetBirdReconcileInput{
 		Catalog:             plan.Catalog,
-		HostPeerID:          req.HostPeerID,
-		AdminPeerIDs:        req.AdminPeerIDs,
+		HostPeerID:          resolvedReq.HostPeerID,
+		AdminPeerIDs:        resolvedReq.AdminPeerIDs,
 		DefaultPolicyAction: defaultPolicyAction,
 	})
 	if err != nil {

@@ -36,6 +36,7 @@ const (
 )
 
 const netBirdModeApplySummaryPrefix = "netbird_mode_apply_summary="
+const netBirdDaemonRecentHeartbeatWindow = 5 * time.Minute
 
 type NetBirdStatus struct {
 	ClientInstalled       bool                   `json:"clientInstalled"`
@@ -45,6 +46,10 @@ type NetBirdStatus struct {
 	PeerName              string                 `json:"peerName,omitempty"`
 	WG0IP                 string                 `json:"wg0Ip,omitempty"`
 	CurrentMode           NetBirdMode            `json:"currentMode"`
+	ConfiguredMode        NetBirdMode            `json:"configuredMode"`
+	ModeSource            string                 `json:"modeSource"`
+	ModeSourceJobID       uint                   `json:"modeSourceJobId,omitempty"`
+	ModeDrift             bool                   `json:"modeDrift"`
 	LastPolicySyncAt      *time.Time             `json:"lastPolicySyncAt,omitempty"`
 	LastPolicySyncStatus  string                 `json:"lastPolicySyncStatus"`
 	LastPolicySyncJobID   uint                   `json:"lastPolicySyncJobId,omitempty"`
@@ -67,11 +72,15 @@ type NetBirdAPIReachability struct {
 }
 
 type NetBirdACLGraph struct {
-	CurrentMode   NetBirdMode      `json:"currentMode"`
-	DefaultAction string           `json:"defaultAction"`
-	Nodes         []NetBirdACLNode `json:"nodes"`
-	Edges         []NetBirdACLEdge `json:"edges"`
-	Notes         []string         `json:"notes"`
+	CurrentMode     NetBirdMode      `json:"currentMode"`
+	ConfiguredMode  NetBirdMode      `json:"configuredMode"`
+	ModeSource      string           `json:"modeSource"`
+	ModeSourceJobID uint             `json:"modeSourceJobId,omitempty"`
+	ModeDrift       bool             `json:"modeDrift"`
+	DefaultAction   string           `json:"defaultAction"`
+	Nodes           []NetBirdACLNode `json:"nodes"`
+	Edges           []NetBirdACLEdge `json:"edges"`
+	Notes           []string         `json:"notes"`
 }
 
 type NetBirdACLNode struct {
@@ -108,12 +117,15 @@ type netBirdModeApplySnapshot struct {
 type netBirdLiveStatus struct {
 	ManagedGroups   int
 	ManagedPolicies int
+	GroupsKnown     bool
+	PoliciesKnown   bool
 	ClientInstalled bool
 	DaemonRunning   bool
 	Connected       bool
 	PeerID          string
 	PeerName        string
 	WG0IP           string
+	Warnings        []string
 }
 
 func (s *NetBirdService) Status(ctx context.Context) (NetBirdStatus, error) {
@@ -121,20 +133,24 @@ func (s *NetBirdService) Status(ctx context.Context) (NetBirdStatus, error) {
 		return NetBirdStatus{}, errs.New(errs.CodeNetBirdUnavailable, "netbird service unavailable")
 	}
 
-	currentMode, currentModeKnown := configuredNetBirdMode(s.cfg.NetBirdMode)
+	runtimeState := s.resolveNetBirdRuntimeState(ctx)
 	panelPort, panelPortFallback := resolvePanelPort(s.cfg.Port)
 	projectInputs, projectWarnings, err := s.loadProjectCatalogInputs(ctx)
 	if err != nil {
 		return NetBirdStatus{}, errs.Wrap(errs.CodeNetBirdStatusFailed, "failed to load netbird status project catalog", err)
 	}
 	catalog := BuildNetBirdCatalog(NetBirdCatalogInput{
-		Mode:      currentMode,
+		Mode:      runtimeState.EffectiveMode,
 		PanelPort: panelPort,
 		Projects:  projectInputs,
 	})
 
 	status := NetBirdStatus{
-		CurrentMode:          currentMode,
+		CurrentMode:          runtimeState.EffectiveMode,
+		ConfiguredMode:       runtimeState.ConfiguredMode,
+		ModeSource:           runtimeState.Source,
+		ModeSourceJobID:      runtimeState.SourceJobID,
+		ModeDrift:            runtimeState.Drift,
 		LastPolicySyncStatus: netBirdSyncStatusNever,
 		APIReachability: NetBirdAPIReachability{
 			Source: netBirdReachabilitySourceCatalog,
@@ -145,9 +161,7 @@ func (s *NetBirdService) Status(ctx context.Context) (NetBirdStatus, error) {
 		Warnings:           []string{},
 	}
 
-	if !currentModeKnown {
-		status.Warnings = append(status.Warnings, "Current mode is not configured; status assumed legacy mode.")
-	}
+	status.Warnings = append(status.Warnings, runtimeState.Warnings...)
 	if panelPortFallback {
 		status.Warnings = append(status.Warnings, "Panel port was not a valid integer; status used default port 8080.")
 	}
@@ -184,19 +198,44 @@ func (s *NetBirdService) Status(ctx context.Context) (NetBirdStatus, error) {
 		status.Warnings = append(status.Warnings, "Latest NetBird apply job request could not be parsed; live API status fallback may be incomplete.")
 	}
 
-	apiToken := ""
-	apiBaseURL := ""
-	hostPeerID := ""
+	resolvedRequest := NetBirdModeApplyRequest{}
 	if snapshot.RequestParsed {
-		apiToken = strings.TrimSpace(snapshot.Request.APIToken)
-		apiBaseURL = strings.TrimSpace(snapshot.Request.APIBaseURL)
-		hostPeerID = strings.TrimSpace(snapshot.Request.HostPeerID)
+		resolvedRequest = NetBirdModeApplyRequest{
+			TargetMode:     snapshot.Request.TargetMode,
+			AllowLocalhost: snapshot.Request.AllowLocalhost,
+			APIBaseURL:     snapshot.Request.APIBaseURL,
+			APIToken:       snapshot.Request.APIToken,
+			HostPeerID:     snapshot.Request.HostPeerID,
+			AdminPeerIDs:   append([]string(nil), snapshot.Request.AdminPeerIDs...),
+		}
+	}
+	if s.settings != nil {
+		mergedRequest, _, err := s.settings.ResolveNetBirdModeApplyRequest(ctx, resolvedRequest)
+		if err != nil {
+			status.Warnings = append(status.Warnings, fmt.Sprintf("Failed to resolve saved NetBird mode config for live status: %v", err))
+		} else {
+			resolvedRequest = mergedRequest
+		}
+	}
+
+	apiToken := strings.TrimSpace(resolvedRequest.APIToken)
+	apiBaseURL := strings.TrimSpace(resolvedRequest.APIBaseURL)
+	hostPeerID := strings.TrimSpace(resolvedRequest.HostPeerID)
+	if hostPeerID != "" {
+		status.ClientInstalled = true
+		if status.LastPolicySyncStatus == netBirdSyncStatusSucceeded {
+			status.DaemonRunning = true
+			status.Connected = true
+		}
 	}
 	if apiToken == "" {
 		status.APIReachability.Source = netBirdReachabilitySourceLastSync
 		status.APIReachable = status.LastPolicySyncStatus == netBirdSyncStatusSucceeded
 		if !status.APIReachable && status.APIReachability.Message == "" {
-			status.APIReachability.Message = "No API token was available from the latest mode apply job."
+			status.APIReachability.Message = "No API token was available from saved NetBird mode config or latest mode apply context."
+		}
+		if status.ClientInstalled || status.DaemonRunning || status.Connected {
+			status.Warnings = append(status.Warnings, "Live NetBird API credentials were unavailable; connectivity indicators reflect the latest successful sync snapshot.")
 		}
 		return status, nil
 	}
@@ -207,19 +246,45 @@ func (s *NetBirdService) Status(ctx context.Context) (NetBirdStatus, error) {
 	live, err := fetchNetBirdLiveStatus(ctx, apiBaseURL, apiToken, hostPeerID)
 	if err != nil {
 		status.APIReachability.Message = fmt.Sprintf("Live NetBird API check failed: %v", err)
+		restoredFromLastSuccess := false
+		if isNetBirdLiveAuthFailure(err) {
+			lastSuccessSnapshot, snapshotErr := s.latestSuccessfulModeApplySnapshot(ctx)
+			if snapshotErr != nil {
+				status.Warnings = append(status.Warnings, fmt.Sprintf("Failed to load last successful NetBird sync snapshot: %v", snapshotErr))
+			} else {
+				restoredFromLastSuccess = applyLastKnownNetBirdConnectivity(&status, lastSuccessSnapshot)
+			}
+		}
+		if status.ClientInstalled || status.DaemonRunning || status.Connected {
+			if restoredFromLastSuccess {
+				status.Warnings = append(status.Warnings, "Live NetBird API authentication failed; connectivity indicators are using last known successful sync state.")
+			} else {
+				status.Warnings = append(status.Warnings, "Live NetBird API check failed; connectivity indicators currently reflect the latest successful sync snapshot.")
+			}
+		}
 		return status, nil
 	}
 
 	status.APIReachable = true
-	status.ManagedGroups = live.ManagedGroups
-	status.ManagedPolicies = live.ManagedPolicies
-	status.ManagedCountSource = netBirdManagedCountSourceAPI
+	if live.GroupsKnown {
+		status.ManagedGroups = live.ManagedGroups
+	}
+	if live.PoliciesKnown {
+		status.ManagedPolicies = live.ManagedPolicies
+	}
+	if live.GroupsKnown && live.PoliciesKnown {
+		status.ManagedCountSource = netBirdManagedCountSourceAPI
+	}
 	status.ClientInstalled = live.ClientInstalled
 	status.DaemonRunning = live.DaemonRunning
 	status.Connected = live.Connected
 	status.PeerID = live.PeerID
 	status.PeerName = live.PeerName
 	status.WG0IP = live.WG0IP
+	status.Warnings = append(status.Warnings, live.Warnings...)
+	if len(live.Warnings) > 0 {
+		status.APIReachability.Message = strings.Join(live.Warnings, " | ")
+	}
 
 	return status, nil
 }
@@ -229,27 +294,29 @@ func (s *NetBirdService) ACLGraph(ctx context.Context) (NetBirdACLGraph, error) 
 		return NetBirdACLGraph{}, errs.New(errs.CodeNetBirdUnavailable, "netbird service unavailable")
 	}
 
-	currentMode, currentModeKnown := configuredNetBirdMode(s.cfg.NetBirdMode)
+	runtimeState := s.resolveNetBirdRuntimeState(ctx)
 	panelPort, panelPortFallback := resolvePanelPort(s.cfg.Port)
 	projectInputs, projectWarnings, err := s.loadProjectCatalogInputs(ctx)
 	if err != nil {
 		return NetBirdACLGraph{}, errs.Wrap(errs.CodeNetBirdACLGraphFailed, "failed to load netbird acl graph project catalog", err)
 	}
 	catalog := BuildNetBirdCatalog(NetBirdCatalogInput{
-		Mode:      currentMode,
+		Mode:      runtimeState.EffectiveMode,
 		PanelPort: panelPort,
 		Projects:  projectInputs,
 	})
 
-	graph := buildNetBirdACLGraph(currentMode, catalog, projectInputs)
-	if !currentModeKnown {
-		graph.Notes = append(graph.Notes, "Current mode is not configured; ACL graph assumed legacy mode.")
-	}
+	graph := buildNetBirdACLGraph(runtimeState.EffectiveMode, catalog, projectInputs)
+	graph.ConfiguredMode = runtimeState.ConfiguredMode
+	graph.ModeSource = runtimeState.Source
+	graph.ModeSourceJobID = runtimeState.SourceJobID
+	graph.ModeDrift = runtimeState.Drift
+	graph.Notes = append(graph.Notes, runtimeState.Warnings...)
 	if panelPortFallback {
 		graph.Notes = append(graph.Notes, "Panel port was not a valid integer; ACL graph used default port 8080.")
 	}
 	graph.Notes = append(graph.Notes, projectWarnings...)
-	if currentMode == NetBirdModeLegacy {
+	if runtimeState.EffectiveMode == NetBirdModeLegacy {
 		graph.Notes = append(graph.Notes, "Legacy mode has no managed NetBird ACL edges.")
 	}
 
@@ -287,8 +354,34 @@ func (s *NetBirdService) latestModeApplySnapshot(ctx context.Context) (netBirdMo
 		return result, nil
 	}
 
-	result.Found = true
-	result.Job = *job
+	return parseModeApplySnapshot(*job), nil
+}
+
+func (s *NetBirdService) latestSuccessfulModeApplySnapshot(ctx context.Context) (netBirdModeApplySnapshot, error) {
+	result := netBirdModeApplySnapshot{}
+	if s == nil || s.jobs == nil {
+		return result, nil
+	}
+
+	job, err := s.jobs.GetLatestByTypeAndStatus(ctx, JobTypeNetBirdModeApply, "completed")
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return result, nil
+		}
+		return result, err
+	}
+	if job == nil {
+		return result, nil
+	}
+
+	return parseModeApplySnapshot(*job), nil
+}
+
+func parseModeApplySnapshot(job models.Job) netBirdModeApplySnapshot {
+	result := netBirdModeApplySnapshot{
+		Found: true,
+		Job:   job,
+	}
 
 	trimmedInput := strings.TrimSpace(job.Input)
 	if trimmedInput != "" {
@@ -304,10 +397,42 @@ func (s *NetBirdService) latestModeApplySnapshot(ctx context.Context) (netBirdMo
 	summary, err := parseNetBirdModeApplySummary(job.LogLines)
 	if err != nil {
 		result.SummaryParseError = err
-		return result, nil
+		return result
 	}
 	result.Summary = summary
-	return result, nil
+	return result
+}
+
+func applyLastKnownNetBirdConnectivity(status *NetBirdStatus, snapshot netBirdModeApplySnapshot) bool {
+	if status == nil || !snapshot.Found || !snapshot.RequestParsed {
+		return false
+	}
+	hostPeerID := strings.TrimSpace(snapshot.Request.HostPeerID)
+	if hostPeerID == "" {
+		return false
+	}
+	status.ClientInstalled = true
+	status.DaemonRunning = true
+	status.Connected = true
+	if strings.TrimSpace(status.PeerID) == "" {
+		status.PeerID = hostPeerID
+	}
+	return true
+}
+
+func isNetBirdLiveAuthFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	if message == "" {
+		return false
+	}
+	return strings.Contains(message, "invalid token") ||
+		strings.Contains(message, "status=401") ||
+		strings.Contains(message, "status=403") ||
+		strings.Contains(message, "unauthorized") ||
+		strings.Contains(message, "forbidden")
 }
 
 func parseNetBirdModeApplySummary(logLines string) (*NetBirdModeApplySummary, error) {
@@ -341,32 +466,99 @@ func fetchNetBirdLiveStatus(ctx context.Context, apiBaseURL, apiToken, hostPeerI
 	if err != nil {
 		return netBirdLiveStatus{}, err
 	}
-	groups, err := client.ListGroups(ctx)
-	if err != nil {
-		return netBirdLiveStatus{}, err
-	}
-	policies, err := client.ListPolicies(ctx)
-	if err != nil {
-		return netBirdLiveStatus{}, err
-	}
 
 	result := netBirdLiveStatus{
-		ManagedGroups:   countManagedGroups(groups),
-		ManagedPolicies: countManagedPolicies(policies),
+		ClientInstalled: strings.TrimSpace(hostPeerID) != "",
+		Warnings:        []string{},
 	}
 
-	host := resolveHostPeer(peers, groups, hostPeerID)
+	host := resolveHostPeer(peers, nil, hostPeerID)
 	if host == nil {
-		return result, nil
+		groups, groupsErr := client.ListGroups(ctx)
+		if groupsErr != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("Live NetBird groups check failed: %v", groupsErr))
+		} else {
+			result.ManagedGroups = countManagedGroups(groups)
+			result.GroupsKnown = true
+			host = resolveHostPeer(peers, groups, hostPeerID)
+		}
+	} else {
+		groups, groupsErr := client.ListGroups(ctx)
+		if groupsErr != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("Live NetBird groups check failed: %v", groupsErr))
+		} else {
+			result.ManagedGroups = countManagedGroups(groups)
+			result.GroupsKnown = true
+		}
 	}
 
-	result.ClientInstalled = true
-	result.DaemonRunning = host.Connected
-	result.Connected = host.Connected
-	result.PeerID = strings.TrimSpace(host.ID)
-	result.PeerName = strings.TrimSpace(host.Name)
-	result.WG0IP = strings.TrimSpace(host.IP)
+	policies, policiesErr := client.ListPolicies(ctx)
+	if policiesErr != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("Live NetBird policies check failed: %v", policiesErr))
+	} else {
+		result.ManagedPolicies = countManagedPolicies(policies)
+		result.PoliciesKnown = true
+	}
+
+	if host != nil {
+		result.ClientInstalled = true
+		result.Connected = host.Connected
+		result.DaemonRunning = host.Connected
+		result.PeerID = strings.TrimSpace(host.ID)
+		result.PeerName = strings.TrimSpace(host.Name)
+		result.WG0IP = strings.TrimSpace(host.IP)
+		if !host.Connected {
+			inferredDaemonRunning, warning := inferDaemonRunningFromPeer(*host, time.Now().UTC())
+			result.DaemonRunning = inferredDaemonRunning
+			if warning != "" {
+				result.Warnings = append(result.Warnings, warning)
+			}
+		}
+	} else if strings.TrimSpace(hostPeerID) != "" {
+		result.Warnings = append(result.Warnings, "Host peer ID was not found in the live NetBird peer list.")
+	}
+
 	return result, nil
+}
+
+func inferDaemonRunningFromPeer(peer netbirdapi.Peer, now time.Time) (bool, string) {
+	lastSeenRaw := strings.TrimSpace(peer.LastSeen)
+	if lastSeenRaw == "" {
+		return false, "Live peer is disconnected and has no heartbeat timestamp; daemon status assumed offline."
+	}
+
+	lastSeen, err := parseNetBirdTimestamp(lastSeenRaw)
+	if err != nil {
+		return false, "Live peer heartbeat timestamp could not be parsed; daemon status assumed offline."
+	}
+
+	age := now.Sub(lastSeen)
+	if age <= netBirdDaemonRecentHeartbeatWindow {
+		return true, fmt.Sprintf("Live peer is disconnected but heartbeat is recent (%s ago); daemon may still be running.", roundDuration(age))
+	}
+
+	return false, fmt.Sprintf("Live peer heartbeat is stale (%s ago); daemon status marked offline.", roundDuration(age))
+}
+
+func parseNetBirdTimestamp(raw string) (time.Time, error) {
+	if value, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return value.UTC(), nil
+	}
+	value, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return value.UTC(), nil
+}
+
+func roundDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return 0
+	}
+	if d < time.Second {
+		return d
+	}
+	return d.Round(time.Second)
 }
 
 func countManagedGroups(groups []netbirdapi.Group) int {

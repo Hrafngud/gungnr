@@ -52,5 +52,17 @@ func CleanupLegacyHostWorker(db *gorm.DB) error {
 		}
 	}
 
+	// Redact legacy NetBird API tokens from persisted async job payloads.
+	if err := db.Exec(`
+		UPDATE jobs
+		SET input = regexp_replace(input, '"apiToken"\s*:\s*"[^"]*"', '"apiToken":""', 'g')
+		WHERE type = 'netbird_mode_apply'
+		  AND input IS NOT NULL
+		  AND input <> ''
+		  AND input LIKE '%"apiToken"%'
+	`).Error; err != nil {
+		return fmt.Errorf("redact netbird apiToken in legacy jobs: %w", err)
+	}
+
 	return nil
 }

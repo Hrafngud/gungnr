@@ -128,6 +128,9 @@ onMounted(() => {
           <UiBadge tone="neutral">
             {{ modeLabel(graph.currentMode) }}
           </UiBadge>
+          <p class="text-xs text-[color:var(--muted)]">
+            Source: <span class="text-[color:var(--text)]">{{ graph.modeSource || 'n/a' }}</span>
+          </p>
         </UiPanel>
         <UiPanel variant="soft" class="space-y-2 p-3">
           <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">

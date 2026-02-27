@@ -109,6 +109,12 @@ func (s *NetBirdService) ReconcileManagedCatalog(ctx context.Context, api NetBir
 		return NetBirdReconcileResult{}, errs.Wrap(errs.CodeNetBirdReconcileFailed, "failed to reconcile netbird policies", err)
 	}
 
+	staleGroupOps, err := cleanupStaleManagedGroups(ctx, api, targetGroups)
+	if err != nil {
+		return NetBirdReconcileResult{}, errs.Wrap(errs.CodeNetBirdReconcileFailed, "failed to clean up stale netbird groups", err)
+	}
+	groupOps = append(groupOps, staleGroupOps...)
+
 	return NetBirdReconcileResult{
 		DefaultPolicy:    defaultOp,
 		GroupOperations:  groupOps,
@@ -123,7 +129,6 @@ func reconcileGroups(ctx context.Context, api NetBirdAPI, target []netbirdapi.Gr
 	}
 
 	currentByName := indexGroupsByName(existing)
-	targetSet := make(map[string]struct{}, len(target))
 	ops := make([]NetBirdReconcileOperation, 0, len(existing)+len(target))
 
 	for _, desired := range target {
@@ -131,7 +136,6 @@ func reconcileGroups(ctx context.Context, api NetBirdAPI, target []netbirdapi.Gr
 		if name == "" {
 			continue
 		}
-		targetSet[name] = struct{}{}
 		current := currentByName[name]
 		if len(current) == 0 {
 			created, err := api.CreateGroup(ctx, desired)
@@ -164,12 +168,27 @@ func reconcileGroups(ctx context.Context, api NetBirdAPI, target []netbirdapi.Gr
 		}
 	}
 
+	return ops, nil
+}
+
+func cleanupStaleManagedGroups(ctx context.Context, api NetBirdAPI, target []netbirdapi.GroupRequest) ([]NetBirdReconcileOperation, error) {
+	existing, err := api.ListGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	targetSet := targetGroupSet(target)
 	stale := staleGroups(existing, targetSet)
+	ops := make([]NetBirdReconcileOperation, 0, len(stale))
 	for _, entry := range stale {
 		if err := api.DeleteGroup(ctx, entry.ID); err != nil {
 			return nil, err
 		}
-		ops = append(ops, NetBirdReconcileOperation{Name: strings.TrimSpace(entry.Name), ResourceID: strings.TrimSpace(entry.ID), Result: netBirdResultDeleted})
+		ops = append(ops, NetBirdReconcileOperation{
+			Name:       strings.TrimSpace(entry.Name),
+			ResourceID: strings.TrimSpace(entry.ID),
+			Result:     netBirdResultDeleted,
+		})
 	}
 
 	return ops, nil
@@ -668,6 +687,18 @@ func groupIDMap(groups []netbirdapi.Group) map[string]string {
 		result[name] = strings.TrimSpace(entries[0].ID)
 	}
 	return result
+}
+
+func targetGroupSet(groups []netbirdapi.GroupRequest) map[string]struct{} {
+	set := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		name := strings.TrimSpace(group.Name)
+		if name == "" {
+			continue
+		}
+		set[name] = struct{}{}
+	}
+	return set
 }
 
 func indexPoliciesByName(policies []netbirdapi.Policy) map[string][]netbirdapi.Policy {

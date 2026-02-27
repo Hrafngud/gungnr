@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import NetbirdAclGraph from '@/components/netbird/NetbirdAclGraph.vue'
 import NetbirdModeSwitcher from '@/components/netbird/NetbirdModeSwitcher.vue'
 import NetbirdStatusCard from '@/components/netbird/NetbirdStatusCard.vue'
@@ -13,6 +13,8 @@ import { usePageLoadingStore } from '@/stores/pageLoading'
 const authStore = useAuthStore()
 const netbirdStore = useNetbirdStore()
 const pageLoading = usePageLoadingStore()
+const statusPollIntervalMs = 15000
+let statusPollTimer: ReturnType<typeof setInterval> | null = null
 
 const isAdmin = computed(() => authStore.isAdmin)
 const accessLabel = computed(() => (isAdmin.value ? 'Admin controls enabled' : 'Read-only access'))
@@ -33,6 +35,16 @@ const loadPage = async () => {
 
 onMounted(() => {
   void loadPage()
+  statusPollTimer = setInterval(() => {
+    void netbirdStore.loadStatus()
+  }, statusPollIntervalMs)
+})
+
+onBeforeUnmount(() => {
+  if (statusPollTimer !== null) {
+    clearInterval(statusPollTimer)
+    statusPollTimer = null
+  }
 })
 </script>
 

@@ -14,7 +14,27 @@ func (s *NetBirdService) ReapplyPolicies(ctx context.Context, input NetBirdPolic
 	}
 
 	request := NormalizeNetBirdPolicyReapplyRequest(input)
-	currentMode, currentModeKnown := configuredNetBirdMode(s.cfg.NetBirdMode)
+	usedStoredConfig := false
+	if s.settings != nil {
+		resolvedReq, usedStored, err := s.settings.ResolveNetBirdModeApplyRequest(ctx, NetBirdModeApplyRequest{
+			APIBaseURL:   request.APIBaseURL,
+			APIToken:     request.APIToken,
+			HostPeerID:   request.HostPeerID,
+			AdminPeerIDs: request.AdminPeerIDs,
+		})
+		if err != nil {
+			return NetBirdPolicyReapplySummary{}, errs.Wrap(errs.CodeNetBirdReapplyFailed, "failed to resolve saved netbird mode config", err)
+		}
+		request = NormalizeNetBirdPolicyReapplyRequest(NetBirdPolicyReapplyRequest{
+			APIBaseURL:   resolvedReq.APIBaseURL,
+			APIToken:     resolvedReq.APIToken,
+			HostPeerID:   resolvedReq.HostPeerID,
+			AdminPeerIDs: resolvedReq.AdminPeerIDs,
+		})
+		usedStoredConfig = usedStored
+	}
+	runtimeState := s.resolveNetBirdRuntimeState(ctx)
+	currentMode := runtimeState.EffectiveMode
 	panelPort, panelPortFallback := resolvePanelPort(s.cfg.Port)
 	projectInputs, projectWarnings, err := s.loadProjectCatalogInputs(ctx)
 	if err != nil {
@@ -26,9 +46,10 @@ func (s *NetBirdService) ReapplyPolicies(ctx context.Context, input NetBirdPolic
 		Projects:  projectInputs,
 	})
 
-	warnings := make([]string, 0, 6+len(projectWarnings))
-	if !currentModeKnown {
-		warnings = append(warnings, "Current mode is not configured; policy reapply assumed legacy mode.")
+	warnings := make([]string, 0, 7+len(projectWarnings)+len(runtimeState.Warnings))
+	warnings = append(warnings, runtimeState.Warnings...)
+	if usedStoredConfig {
+		warnings = append(warnings, "Missing policy reapply context was populated from saved NetBird mode config.")
 	}
 	if panelPortFallback {
 		warnings = append(warnings, "Panel port was not a valid integer; policy reapply used default port 8080.")

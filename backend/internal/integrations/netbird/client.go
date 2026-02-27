@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -28,6 +29,7 @@ type Peer struct {
 	Name       string `json:"name"`
 	IP         string `json:"ip"`
 	DNSLabel   string `json:"dns_label"`
+	LastSeen   string `json:"last_seen,omitempty"`
 	UserID     string `json:"user_id,omitempty"`
 	Connected  bool   `json:"connected"`
 	SSHEnabled bool   `json:"ssh_enabled"`
@@ -62,6 +64,68 @@ type PolicyRule struct {
 	Ports         []string `json:"ports"`
 	Sources       []string `json:"sources"`
 	Destinations  []string `json:"destinations"`
+}
+
+type referenceObject struct {
+	ID string `json:"id"`
+}
+
+func (g *Group) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID    string          `json:"id"`
+		Name  string          `json:"name"`
+		Peers json.RawMessage `json:"peers"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	peers, err := decodeStringReferences(raw.Peers)
+	if err != nil {
+		return fmt.Errorf("decode group peers: %w", err)
+	}
+	g.ID = strings.TrimSpace(raw.ID)
+	g.Name = strings.TrimSpace(raw.Name)
+	g.Peers = peers
+	return nil
+}
+
+func (r *PolicyRule) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Name          string          `json:"name"`
+		Description   string          `json:"description,omitempty"`
+		Enabled       bool            `json:"enabled"`
+		Action        string          `json:"action"`
+		Bidirectional bool            `json:"bidirectional"`
+		Protocol      string          `json:"protocol"`
+		Ports         json.RawMessage `json:"ports"`
+		Sources       json.RawMessage `json:"sources"`
+		Destinations  json.RawMessage `json:"destinations"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	ports, err := decodePorts(raw.Ports)
+	if err != nil {
+		return fmt.Errorf("decode policy rule ports: %w", err)
+	}
+	sources, err := decodeStringReferences(raw.Sources)
+	if err != nil {
+		return fmt.Errorf("decode policy rule sources: %w", err)
+	}
+	destinations, err := decodeStringReferences(raw.Destinations)
+	if err != nil {
+		return fmt.Errorf("decode policy rule destinations: %w", err)
+	}
+	r.Name = strings.TrimSpace(raw.Name)
+	r.Description = strings.TrimSpace(raw.Description)
+	r.Enabled = raw.Enabled
+	r.Action = strings.TrimSpace(raw.Action)
+	r.Bidirectional = raw.Bidirectional
+	r.Protocol = strings.TrimSpace(raw.Protocol)
+	r.Ports = ports
+	r.Sources = sources
+	r.Destinations = destinations
+	return nil
 }
 
 type PolicyRequest struct {
@@ -277,20 +341,37 @@ func decodeWithFallback[T any](raw []byte, out *T, keys ...string) error {
 		return fmt.Errorf("decode netbird response: %w", err)
 	}
 
-	candidates := make([]json.RawMessage, 0, len(keys)+4)
-	for _, key := range keys {
-		key = strings.TrimSpace(key)
+	candidates := make([]json.RawMessage, 0, len(keys)+len(envelope)+8)
+	seenKeys := map[string]struct{}{}
+	appendKeyCandidate := func(rawKey string) {
+		key := strings.TrimSpace(rawKey)
 		if key == "" {
-			continue
+			return
 		}
-		if value, ok := envelope[key]; ok {
-			candidates = append(candidates, value)
+		if _, seen := seenKeys[key]; seen {
+			return
 		}
+		value, ok := envelope[key]
+		if !ok {
+			return
+		}
+		seenKeys[key] = struct{}{}
+		candidates = append(candidates, value)
 	}
-	for _, fallbackKey := range []string{"result", "data", "items"} {
-		if value, ok := envelope[fallbackKey]; ok {
-			candidates = append(candidates, value)
-		}
+
+	for _, key := range keys {
+		appendKeyCandidate(key)
+	}
+	for _, fallbackKey := range []string{"result", "results", "data", "items"} {
+		appendKeyCandidate(fallbackKey)
+	}
+	availableKeys := make([]string, 0, len(envelope))
+	for key := range envelope {
+		availableKeys = append(availableKeys, key)
+	}
+	sort.Strings(availableKeys)
+	for _, key := range availableKeys {
+		appendKeyCandidate(key)
 	}
 
 	for _, candidate := range candidates {
@@ -312,9 +393,28 @@ func decodeWithFallback[T any](raw []byte, out *T, keys ...string) error {
 				}
 			}
 		}
+		for _, fallbackKey := range []string{"result", "results", "data", "items"} {
+			if value, ok := nested[fallbackKey]; ok {
+				if err := json.Unmarshal(value, out); err == nil {
+					return nil
+				}
+			}
+		}
+		nestedKeys := make([]string, 0, len(nested))
+		for key := range nested {
+			nestedKeys = append(nestedKeys, key)
+		}
+		sort.Strings(nestedKeys)
+		for _, key := range nestedKeys {
+			if value, ok := nested[key]; ok {
+				if err := json.Unmarshal(value, out); err == nil {
+					return nil
+				}
+			}
+		}
 	}
 
-	return fmt.Errorf("decode netbird response: no compatible payload for keys %v", keys)
+	return fmt.Errorf("decode netbird response: no compatible payload for keys %v (available keys: %v)", keys, availableKeys)
 }
 
 func describeNetBirdError(raw []byte) string {
@@ -356,4 +456,81 @@ func compactBody(raw []byte) string {
 		return trimmed[:maxLen] + "..."
 	}
 	return trimmed
+}
+
+func decodeStringReferences(raw json.RawMessage) ([]string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return []string{}, nil
+	}
+
+	var values []string
+	if err := json.Unmarshal(trimmed, &values); err == nil {
+		return normalizeStringSlice(values), nil
+	}
+
+	var refs []referenceObject
+	if err := json.Unmarshal(trimmed, &refs); err == nil {
+		values = make([]string, 0, len(refs))
+		for _, ref := range refs {
+			values = append(values, strings.TrimSpace(ref.ID))
+		}
+		return normalizeStringSlice(values), nil
+	}
+
+	var value string
+	if err := json.Unmarshal(trimmed, &value); err == nil {
+		return normalizeStringSlice([]string{value}), nil
+	}
+
+	return nil, fmt.Errorf("unsupported reference payload: %s", compactBody(trimmed))
+}
+
+func decodePorts(raw json.RawMessage) ([]string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return []string{}, nil
+	}
+
+	var asStrings []string
+	if err := json.Unmarshal(trimmed, &asStrings); err == nil {
+		return normalizeStringSlice(asStrings), nil
+	}
+
+	var asInts []int
+	if err := json.Unmarshal(trimmed, &asInts); err == nil {
+		values := make([]string, 0, len(asInts))
+		for _, item := range asInts {
+			values = append(values, strconv.Itoa(item))
+		}
+		return normalizeStringSlice(values), nil
+	}
+
+	var mixed []any
+	if err := json.Unmarshal(trimmed, &mixed); err == nil {
+		values := make([]string, 0, len(mixed))
+		for _, item := range mixed {
+			switch typed := item.(type) {
+			case string:
+				values = append(values, typed)
+			case float64:
+				values = append(values, strconv.FormatFloat(typed, 'f', -1, 64))
+			}
+		}
+		return normalizeStringSlice(values), nil
+	}
+
+	return nil, fmt.Errorf("unsupported ports payload: %s", compactBody(trimmed))
+}
+
+func normalizeStringSlice(values []string) []string {
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		normalized = append(normalized, trimmed)
+	}
+	return normalized
 }

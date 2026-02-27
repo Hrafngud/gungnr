@@ -540,7 +540,7 @@ func (w *ProjectWorkflows) upsertProject(ctx context.Context, project *models.Pr
 		}
 		return existing, nil
 	}
-	if err != nil && err != repository.ErrNotFound {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return nil, err
 	}
 	if err := w.projects.Create(ctx, project); err != nil {

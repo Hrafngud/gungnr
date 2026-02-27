@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
+import UiFormSidePanel from '@/components/ui/UiFormSidePanel.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
@@ -33,18 +34,25 @@ const modeDescriptions: Record<NetBirdMode, string> = {
   mode_b: 'Admins can reach panel plus per-project ingress over NetBird.',
 }
 
+const isNetBirdMode = (value: unknown): value is NetBirdMode =>
+  value === 'legacy' || value === 'mode_a' || value === 'mode_b'
+
 const authStore = useAuthStore()
 const netbirdStore = useNetbirdStore()
 
 const targetMode = ref<NetBirdMode>('legacy')
 const targetModeTouched = ref(false)
 const allowLocalhost = ref(false)
-const apiToken = ref('')
-const apiBaseUrl = ref('')
-const hostPeerId = ref('')
-const adminPeerIdsInput = ref('')
 const confirmInput = ref('')
 const modeInitialized = ref(false)
+const terminalRefreshJobId = ref<number | null>(null)
+
+const configPanelOpen = ref(false)
+const configApiBaseUrl = ref('')
+const configApiToken = ref('')
+const configHostPeerId = ref('')
+const configAdminPeerIdsInput = ref('')
+const configSaveSuccess = ref<string | null>(null)
 
 const isAdmin = computed(() => authStore.isAdmin)
 const status = computed(() => netbirdStore.status.data)
@@ -59,6 +67,12 @@ const applyPollingLifecycle = computed(() => applyPolling.value.lifecycle)
 const applyPollingError = computed(() => applyPolling.value.error)
 const applyPollingJob = computed(() => applyPolling.value.lastJob)
 const applyPollingSummary = computed(() => applyPolling.value.summary)
+
+const modeConfig = computed(() => netbirdStore.modeConfig.data)
+const modeConfigLoading = computed(() => netbirdStore.modeConfig.loading)
+const modeConfigError = computed(() => netbirdStore.modeConfig.error)
+const modeConfigSaving = computed(() => netbirdStore.modeConfig.saving)
+const modeConfigSaveError = computed(() => netbirdStore.modeConfig.saveError)
 
 const applyPollingJobId = computed(() => applyPolling.value.jobId ?? applyJob.value?.id ?? null)
 const applyPollingStatus = computed(
@@ -105,8 +119,8 @@ const applyPollingTerminalMessage = computed(() => {
   return 'Mode apply completed successfully.'
 })
 
-const parsedAdminPeerIds = computed(() =>
-  adminPeerIdsInput.value
+const parsedConfigAdminPeerIds = computed(() =>
+  configAdminPeerIdsInput.value
     .split(',')
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0),
@@ -115,9 +129,9 @@ const parsedAdminPeerIds = computed(() =>
 const requiresPeerInputs = computed(() => targetMode.value !== 'legacy')
 const confirmationPhrase = computed(() => `apply ${targetMode.value}`)
 const confirmationReady = computed(() => confirmInput.value.trim() === confirmationPhrase.value)
-const hasApiToken = computed(() => apiToken.value.trim().length > 0)
-const hasHostPeerId = computed(() => hostPeerId.value.trim().length > 0)
-const hasAdminPeerIds = computed(() => parsedAdminPeerIds.value.length > 0)
+const modeConfigHasToken = computed(() => Boolean(modeConfig.value?.apiTokenSet))
+const modeConfigHasHostPeer = computed(() => (modeConfig.value?.hostPeerId || '').trim().length > 0)
+const modeConfigHasAdminPeers = computed(() => (modeConfig.value?.adminPeerIds?.length ?? 0) > 0)
 const planMatchesSelection = computed(() => {
   if (!plan.value) return false
   return (
@@ -134,13 +148,10 @@ const canApply = computed(() =>
   isAdmin.value &&
   !applySubmitting.value &&
   planMatchesSelection.value &&
-  hasApiToken.value &&
-  (!requiresPeerInputs.value || (hasHostPeerId.value && hasAdminPeerIds.value)) &&
+  modeConfigHasToken.value &&
+  (!requiresPeerInputs.value || (modeConfigHasHostPeer.value && modeConfigHasAdminPeers.value)) &&
   confirmationReady.value,
 )
-
-const isNetBirdMode = (value: string | number): value is NetBirdMode =>
-  value === 'legacy' || value === 'mode_a' || value === 'mode_b'
 
 const modeLabel = (mode: NetBirdMode) => {
   if (mode === 'mode_a') return 'Mode A'
@@ -158,6 +169,19 @@ const rebindingTitle = (operation: NetBirdServiceRebindingOperation) => {
   return operation.service
 }
 
+const hydrateConfigForm = () => {
+  configApiBaseUrl.value = modeConfig.value?.apiBaseUrl || ''
+  configHostPeerId.value = modeConfig.value?.hostPeerId || status.value?.peerId || ''
+  configAdminPeerIdsInput.value = (modeConfig.value?.adminPeerIds || []).join(',')
+  configApiToken.value = ''
+}
+
+const openConfigPanel = () => {
+  configSaveSuccess.value = null
+  hydrateConfigForm()
+  configPanelOpen.value = true
+}
+
 const triggerPlan = async () => {
   if (!isAdmin.value) return
   await netbirdStore.planModeSwitch({
@@ -171,11 +195,39 @@ const triggerApply = async () => {
   await netbirdStore.applyModeSwitch({
     targetMode: targetMode.value,
     allowLocalhost: allowLocalhost.value,
-    apiToken: apiToken.value.trim(),
-    apiBaseUrl: apiBaseUrl.value.trim() || undefined,
-    hostPeerId: hostPeerId.value.trim() || undefined,
-    adminPeerIds: parsedAdminPeerIds.value.length > 0 ? parsedAdminPeerIds.value : undefined,
   })
+}
+
+const saveModeConfig = async () => {
+  if (!isAdmin.value || modeConfigSaving.value) return
+  configSaveSuccess.value = null
+
+  const payload: {
+    apiBaseUrl?: string
+    apiToken?: string
+    hostPeerId?: string
+    adminPeerIds: string[]
+  } = {
+    apiBaseUrl: configApiBaseUrl.value.trim() || undefined,
+    hostPeerId: configHostPeerId.value.trim() || undefined,
+    adminPeerIds: parsedConfigAdminPeerIds.value,
+  }
+  const token = configApiToken.value.trim()
+  if (token !== '') {
+    payload.apiToken = token
+  }
+
+  await netbirdStore.saveModeConfig(payload)
+  if (!modeConfigSaveError.value) {
+    configApiToken.value = ''
+    configSaveSuccess.value = 'NetBird mode config saved.'
+    await netbirdStore.loadModeConfig()
+  }
+}
+
+const reloadModeConfig = async () => {
+  await netbirdStore.loadModeConfig()
+  hydrateConfigForm()
 }
 
 const retryApplyPolling = () => {
@@ -218,6 +270,25 @@ watch([targetMode, allowLocalhost], () => {
 })
 
 watch(
+  () => status.value?.peerId,
+  (peerId) => {
+    if (!peerId) return
+    if (configHostPeerId.value.trim().length > 0) return
+    configHostPeerId.value = peerId
+  },
+)
+
+watch(
+  () => [applyPollingLifecycle.value, applyPollingJobId.value] as const,
+  ([lifecycle, jobId]) => {
+    if (!jobId || lifecycle !== 'terminal') return
+    if (terminalRefreshJobId.value === jobId) return
+    terminalRefreshJobId.value = jobId
+    void Promise.all([netbirdStore.loadStatus(), netbirdStore.loadAclGraph()])
+  },
+)
+
+watch(
   () => [status.value?.lastPolicySyncJobId ?? null, status.value?.lastPolicySyncStatus ?? ''] as const,
   ([jobId, syncStatus]) => {
     if (!jobId) return
@@ -238,8 +309,19 @@ watch(
 )
 
 onMounted(() => {
+  const loaders: Promise<unknown>[] = []
   if (!status.value) {
-    void netbirdStore.loadStatus()
+    loaders.push(netbirdStore.loadStatus())
+  }
+  if (isAdmin.value && !modeConfig.value && !modeConfigLoading.value) {
+    loaders.push(netbirdStore.loadModeConfig())
+  }
+  if (loaders.length > 0) {
+    void Promise.all(loaders).then(() => {
+      if (isAdmin.value) {
+        hydrateConfigForm()
+      }
+    })
   }
 })
 
@@ -262,13 +344,39 @@ onBeforeUnmount(() => {
           Plan first, then apply mode changes through an explicit confirmation gate.
         </p>
       </div>
-      <UiBadge tone="neutral">
-        Current: {{ status ? modeLabel(status.currentMode) : 'unknown' }}
-      </UiBadge>
+      <div class="flex flex-wrap items-center gap-2">
+        <UiBadge tone="neutral">
+          Current: {{ status ? modeLabel(status.currentMode) : 'unknown' }}
+        </UiBadge>
+        <UiBadge :tone="modeConfigHasToken ? 'ok' : 'warn'">
+          Config token: {{ modeConfigHasToken ? 'set' : 'missing' }}
+        </UiBadge>
+      </div>
     </div>
 
     <UiState v-if="!isAdmin" tone="warn">
       Read-only access: admin permissions are required for mode planning and apply actions.
+    </UiState>
+
+    <div class="flex flex-wrap items-center gap-3">
+      <UiButton
+        variant="ghost"
+        size="sm"
+        :disabled="!isAdmin || modeConfigLoading"
+        @click="openConfigPanel"
+      >
+        <span class="inline-flex items-center gap-2">
+          <UiInlineSpinner v-if="modeConfigLoading" />
+          {{ modeConfigLoading ? 'Loading config...' : 'Edit mode config' }}
+        </span>
+      </UiButton>
+      <p class="text-xs text-[color:var(--muted)]">
+        Credentials are saved once and reused across mode switches.
+      </p>
+    </div>
+
+    <UiState v-if="modeConfigError" tone="error">
+      {{ modeConfigError }}
     </UiState>
 
     <UiPanel variant="soft" class="space-y-4 p-4">
@@ -439,63 +547,39 @@ onBeforeUnmount(() => {
         </p>
       </div>
 
-      <label class="grid gap-2 text-sm">
-        <span class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-          NetBird API token <span class="text-[color:var(--danger)]">*</span>
-        </span>
-        <UiInput
-          v-model="apiToken"
-          type="password"
-          autocomplete="off"
-          spellcheck="false"
-          :disabled="!isAdmin || applySubmitting"
-          placeholder="Paste API token"
-        />
-      </label>
-
-      <label class="grid gap-2 text-sm">
-        <span class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-          NetBird API base URL (optional)
-        </span>
-        <UiInput
-          v-model="apiBaseUrl"
-          type="text"
-          autocomplete="off"
-          spellcheck="false"
-          :disabled="!isAdmin || applySubmitting"
-          placeholder="https://api.netbird.io"
-        />
-      </label>
-
-      <label class="grid gap-2 text-sm">
-        <span class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-          Host peer ID
-          <span v-if="requiresPeerInputs" class="text-[color:var(--danger)]">*</span>
-        </span>
-        <UiInput
-          v-model="hostPeerId"
-          type="text"
-          autocomplete="off"
-          spellcheck="false"
-          :disabled="!isAdmin || applySubmitting || !requiresPeerInputs"
-          placeholder="Host peer ID used for panel/project groups"
-        />
-      </label>
-
-      <label class="grid gap-2 text-sm">
-        <span class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-          Admin peer IDs (comma separated)
-          <span v-if="requiresPeerInputs" class="text-[color:var(--danger)]">*</span>
-        </span>
-        <UiInput
-          v-model="adminPeerIdsInput"
-          type="text"
-          autocomplete="off"
-          spellcheck="false"
-          :disabled="!isAdmin || applySubmitting || !requiresPeerInputs"
-          placeholder="peer-id-1,peer-id-2"
-        />
-      </label>
+      <UiPanel variant="soft" class="space-y-2 p-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+            Saved mode config
+          </p>
+          <UiButton
+            variant="ghost"
+            size="sm"
+            :disabled="!isAdmin"
+            @click="openConfigPanel"
+          >
+            Edit config
+          </UiButton>
+        </div>
+        <div class="grid gap-1 text-xs text-[color:var(--muted)]">
+          <p>
+            API token:
+            <span class="text-[color:var(--text)]">{{ modeConfigHasToken ? 'configured' : 'missing' }}</span>
+          </p>
+          <p>
+            API base URL:
+            <span class="text-[color:var(--text)]">{{ modeConfig?.apiBaseUrl || 'default (api.netbird.io)' }}</span>
+          </p>
+          <p>
+            Host peer ID:
+            <span class="font-mono text-[color:var(--text)]">{{ modeConfig?.hostPeerId || 'n/a' }}</span>
+          </p>
+          <p>
+            Admin peer IDs:
+            <span class="text-[color:var(--text)]">{{ modeConfig?.adminPeerIds?.length ?? 0 }}</span>
+          </p>
+        </div>
+      </UiPanel>
 
       <label class="grid gap-2 text-sm">
         <span class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
@@ -511,14 +595,14 @@ onBeforeUnmount(() => {
         />
       </label>
 
-      <UiState v-if="isAdmin && !hasApiToken" tone="warn">
-        API token is required to queue apply.
+      <UiState v-if="isAdmin && !modeConfigHasToken" tone="warn">
+        Save NetBird API credentials before queueing apply.
       </UiState>
-      <UiState v-if="isAdmin && requiresPeerInputs && !hasHostPeerId" tone="warn">
-        Host peer ID is required for Mode A and Mode B.
+      <UiState v-if="isAdmin && requiresPeerInputs && !modeConfigHasHostPeer" tone="warn">
+        Saved host peer ID is required for Mode A and Mode B.
       </UiState>
-      <UiState v-if="isAdmin && requiresPeerInputs && !hasAdminPeerIds" tone="warn">
-        At least one admin peer ID is required for Mode A and Mode B.
+      <UiState v-if="isAdmin && requiresPeerInputs && !modeConfigHasAdminPeers" tone="warn">
+        Save at least one admin peer ID for Mode A and Mode B.
       </UiState>
       <UiState v-if="isAdmin && !planMatchesSelection" tone="warn">
         Apply requires a dry-run plan for the current target mode and localhost toggle.
@@ -617,4 +701,104 @@ onBeforeUnmount(() => {
       </UiPanel>
     </UiPanel>
   </UiPanel>
+
+  <UiFormSidePanel
+    v-model="configPanelOpen"
+    title="NetBird mode config"
+    eyebrow="NetBird"
+  >
+    <form class="space-y-5" @submit.prevent="saveModeConfig">
+      <div>
+        <p class="text-xs text-[color:var(--muted)]">
+          Saved here once and reused for future mode switches.
+        </p>
+      </div>
+
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+          NetBird API token
+        </span>
+        <UiInput
+          v-model="configApiToken"
+          type="password"
+          autocomplete="off"
+          spellcheck="false"
+          :disabled="!isAdmin || modeConfigSaving"
+          placeholder="Leave empty to keep current token"
+        />
+      </label>
+
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+          NetBird API base URL (optional)
+        </span>
+        <UiInput
+          v-model="configApiBaseUrl"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          :disabled="!isAdmin || modeConfigSaving"
+          placeholder="https://api.netbird.io"
+        />
+      </label>
+
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+          Host peer ID
+        </span>
+        <UiInput
+          v-model="configHostPeerId"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          :disabled="!isAdmin || modeConfigSaving"
+          placeholder="Host peer ID used for panel/project groups"
+        />
+      </label>
+
+      <label class="grid gap-2 text-sm">
+        <span class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+          Admin peer IDs (comma separated)
+        </span>
+        <UiInput
+          v-model="configAdminPeerIdsInput"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          :disabled="!isAdmin || modeConfigSaving"
+          placeholder="peer-id-1,peer-id-2"
+        />
+      </label>
+
+      <UiState v-if="modeConfigSaveError" tone="error">
+        {{ modeConfigSaveError }}
+      </UiState>
+      <UiState v-if="configSaveSuccess" tone="ok">
+        {{ configSaveSuccess }}
+      </UiState>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <UiButton
+          type="submit"
+          variant="primary"
+          size="sm"
+          :disabled="!isAdmin || modeConfigSaving"
+        >
+          <span class="inline-flex items-center gap-2">
+            <UiInlineSpinner v-if="modeConfigSaving" />
+            {{ modeConfigSaving ? 'Saving...' : 'Save mode config' }}
+          </span>
+        </UiButton>
+        <UiButton
+          type="button"
+          variant="ghost"
+          size="sm"
+          :disabled="modeConfigLoading || modeConfigSaving"
+          @click="reloadModeConfig"
+        >
+          Reload
+        </UiButton>
+      </div>
+    </form>
+  </UiFormSidePanel>
 </template>

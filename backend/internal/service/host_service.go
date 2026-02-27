@@ -346,7 +346,7 @@ func (s *HostService) resolveProjectDirFromRepository(ctx context.Context, baseD
 
 	if dir, err := pathFromRecord(project); err == nil {
 		return dir, nil
-	} else if err != repository.ErrNotFound {
+	} else if !errors.Is(err, repository.ErrNotFound) {
 		return "", fmt.Errorf("load project record: %w", err)
 	}
 
@@ -354,7 +354,7 @@ func (s *HostService) resolveProjectDirFromRepository(ctx context.Context, baseD
 	if lower != project {
 		if dir, err := pathFromRecord(lower); err == nil {
 			return dir, nil
-		} else if err != repository.ErrNotFound {
+		} else if !errors.Is(err, repository.ErrNotFound) {
 			return "", fmt.Errorf("load project record: %w", err)
 		}
 	}

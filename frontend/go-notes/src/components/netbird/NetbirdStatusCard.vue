@@ -192,10 +192,20 @@ onMounted(() => {
           Mode and Sync
         </p>
         <UiListRow class="flex items-center justify-between gap-3">
-          <span class="text-xs text-[color:var(--muted)]">Current mode</span>
+          <span class="text-xs text-[color:var(--muted)]">Effective mode</span>
           <UiBadge tone="neutral">
             {{ modeLabel(status.currentMode) }}
           </UiBadge>
+        </UiListRow>
+        <UiListRow class="flex items-center justify-between gap-3">
+          <span class="text-xs text-[color:var(--muted)]">Configured mode</span>
+          <UiBadge :tone="status.modeDrift ? 'warn' : 'neutral'">
+            {{ modeLabel(status.configuredMode) }}
+          </UiBadge>
+        </UiListRow>
+        <UiListRow class="flex items-center justify-between gap-3">
+          <span class="text-xs text-[color:var(--muted)]">Mode source</span>
+          <span class="text-xs text-[color:var(--text)]">{{ status.modeSource || 'n/a' }}</span>
         </UiListRow>
         <UiListRow class="flex items-center justify-between gap-3">
           <span class="text-xs text-[color:var(--muted)]">Last policy sync</span>
@@ -253,7 +263,11 @@ onMounted(() => {
       </UiPanel>
     </div>
 
-    <UiState v-else tone="neutral">
+    <UiState v-if="status && status.modeDrift" tone="warn">
+      Runtime mode was restored from the latest successful apply and differs from configured mode.
+    </UiState>
+
+    <UiState v-else-if="!status" tone="neutral">
       NetBird status is not available yet.
     </UiState>
 

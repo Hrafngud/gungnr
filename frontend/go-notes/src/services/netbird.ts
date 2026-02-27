@@ -1,6 +1,8 @@
 import { api } from '@/services/api'
 import type {
   NetBirdACLGraphResponse,
+  NetBirdModeConfigResponse,
+  NetBirdModeConfigUpdateRequest,
   NetBirdModeApplyRequest,
   NetBirdModeApplyResponse,
   NetBirdModePlanRequest,
@@ -12,6 +14,9 @@ import type {
 
 export const netbirdApi = {
   getStatus: () => api.get<NetBirdStatusResponse>('/api/v1/netbird/status'),
+  getModeConfig: () => api.get<NetBirdModeConfigResponse>('/api/v1/netbird/config'),
+  updateModeConfig: (payload: NetBirdModeConfigUpdateRequest) =>
+    api.put<NetBirdModeConfigResponse>('/api/v1/netbird/config', payload),
   planModeSwitch: (payload: NetBirdModePlanRequest) =>
     api.post<NetBirdModePlanResponse>('/api/v1/netbird/mode/plan', payload),
   applyModeSwitch: (payload: NetBirdModeApplyRequest) =>

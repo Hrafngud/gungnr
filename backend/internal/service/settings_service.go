@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -86,7 +87,7 @@ func NewSettingsService(cfg config.Config, repo repository.SettingsRepository) *
 
 func (s *SettingsService) Get(ctx context.Context) (SettingsPayload, error) {
 	stored, err := s.repo.Get(ctx)
-	if err != nil && err != repository.ErrNotFound {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return SettingsPayload{}, err
 	}
 	return s.resolve(stored), nil
@@ -111,7 +112,7 @@ func (s *SettingsService) GitHubAppSettings(ctx context.Context) (GitHubAppSetti
 
 func (s *SettingsService) Update(ctx context.Context, input SettingsPayload) (SettingsPayload, error) {
 	stored, err := s.repo.Get(ctx)
-	if err != nil && err != repository.ErrNotFound {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return SettingsPayload{}, err
 	}
 	if stored == nil {
@@ -171,7 +172,7 @@ func (s *SettingsService) Update(ctx context.Context, input SettingsPayload) (Se
 func (s *SettingsService) SyncCloudflareFromEnv(ctx context.Context) (SettingsPayload, error) {
 	stored, err := s.repo.Get(ctx)
 	if err != nil {
-		if err == repository.ErrNotFound {
+		if errors.Is(err, repository.ErrNotFound) {
 			stored = &models.Settings{}
 		} else {
 			return SettingsPayload{}, err
@@ -250,7 +251,7 @@ func (s *SettingsService) ResolveConfig(ctx context.Context) (config.Config, err
 
 func (s *SettingsService) ResolveTemplateCatalog(ctx context.Context) ([]GitHubTemplateSource, *GitHubTemplateSource, bool, error) {
 	stored, err := s.repo.Get(ctx)
-	if err != nil && err != repository.ErrNotFound {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return nil, nil, false, err
 	}
 
@@ -301,7 +302,7 @@ func (s *SettingsService) ResolveTemplateSelection(ctx context.Context, ref stri
 
 func (s *SettingsService) ResolveConfigWithSources(ctx context.Context) (config.Config, SettingsSources, error) {
 	stored, err := s.repo.Get(ctx)
-	if err != nil && err != repository.ErrNotFound {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return config.Config{}, SettingsSources{}, err
 	}
 

@@ -15,9 +15,10 @@ import (
 )
 
 type NetBirdController struct {
-	service *service.NetBirdService
-	jobs    *service.JobService
-	audit   *service.AuditService
+	service  *service.NetBirdService
+	settings *service.SettingsService
+	jobs     *service.JobService
+	audit    *service.AuditService
 }
 
 type netBirdModePlanRequest struct {
@@ -25,11 +26,19 @@ type netBirdModePlanRequest struct {
 	AllowLocalhost bool   `json:"allowLocalhost"`
 }
 
-func NewNetBirdController(service *service.NetBirdService, jobs *service.JobService, audit *service.AuditService) *NetBirdController {
+type netBirdModeConfigUpsertRequest struct {
+	APIBaseURL   *string   `json:"apiBaseUrl,omitempty"`
+	APIToken     *string   `json:"apiToken,omitempty"`
+	HostPeerID   *string   `json:"hostPeerId,omitempty"`
+	AdminPeerIDs *[]string `json:"adminPeerIds,omitempty"`
+}
+
+func NewNetBirdController(service *service.NetBirdService, settings *service.SettingsService, jobs *service.JobService, audit *service.AuditService) *NetBirdController {
 	return &NetBirdController{
-		service: service,
-		jobs:    jobs,
-		audit:   audit,
+		service:  service,
+		settings: settings,
+		jobs:     jobs,
+		audit:    audit,
 	}
 }
 
@@ -114,14 +123,28 @@ func (c *NetBirdController) ApplyMode(ctx *gin.Context) {
 		return
 	}
 	req = service.NormalizeNetBirdModeApplyRequest(req)
+	inlineConfigRequest := req
+	inlineConfigProvided := inlineConfigRequest.APIToken != "" || inlineConfigRequest.APIBaseURL != "" || inlineConfigRequest.HostPeerID != "" || len(inlineConfigRequest.AdminPeerIDs) > 0
 
 	targetMode, err := service.ParseNetBirdMode(req.TargetMode)
 	if err != nil {
 		apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeNetBirdInvalidMode, "invalid netbird target mode")
 		return
 	}
+
+	usedStoredConfig := false
+	if c.settings != nil {
+		resolvedReq, usedStored, resolveErr := c.settings.ResolveNetBirdModeApplyRequest(ctx.Request.Context(), req)
+		if resolveErr != nil {
+			apierror.RespondWithError(ctx, http.StatusInternalServerError, resolveErr, errs.CodeNetBirdApplyFailed, "failed to resolve netbird mode config")
+			return
+		}
+		req = resolvedReq
+		usedStoredConfig = usedStored
+	}
+
 	if req.APIToken == "" {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeNetBirdInvalidBody, "apiToken is required", nil)
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeNetBirdInvalidBody, "apiToken is required; save NetBird mode config first or provide apiToken in request", nil)
 		return
 	}
 	if targetMode != service.NetBirdModeLegacy {
@@ -131,6 +154,32 @@ func (c *NetBirdController) ApplyMode(ctx *gin.Context) {
 		}
 		if len(req.AdminPeerIDs) == 0 {
 			apierror.Respond(ctx, http.StatusBadRequest, errs.CodeNetBirdInvalidBody, "adminPeerIds is required for this mode", nil)
+			return
+		}
+	}
+
+	if c.settings != nil && inlineConfigProvided {
+		update := service.NetBirdModeConfigUpdate{}
+		if inlineConfigRequest.APIBaseURL != "" {
+			value := inlineConfigRequest.APIBaseURL
+			update.APIBaseURL = &value
+		}
+		if inlineConfigRequest.APIToken != "" {
+			value := inlineConfigRequest.APIToken
+			update.APIToken = &value
+		}
+		if inlineConfigRequest.HostPeerID != "" {
+			value := inlineConfigRequest.HostPeerID
+			update.HostPeerID = &value
+		}
+		if len(inlineConfigRequest.AdminPeerIDs) > 0 {
+			value := append([]string(nil), inlineConfigRequest.AdminPeerIDs...)
+			update.AdminPeerIDs = &value
+		}
+
+		_, upsertErr := c.settings.UpsertNetBirdModeConfig(ctx.Request.Context(), update)
+		if upsertErr != nil {
+			apierror.RespondWithError(ctx, http.StatusInternalServerError, upsertErr, errs.CodeNetBirdApplyFailed, "failed to persist netbird mode config")
 			return
 		}
 	}
@@ -158,11 +207,79 @@ func (c *NetBirdController) ApplyMode(ctx *gin.Context) {
 				"apiBaseUrlSet":    req.APIBaseURL != "",
 				"hostPeerIdSet":    req.HostPeerID != "",
 				"adminPeerIdCount": len(req.AdminPeerIDs),
+				"usedStoredConfig": usedStoredConfig,
 			},
 		})
 	}
 
 	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
+}
+
+func (c *NetBirdController) ModeConfig(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeNetBirdAdminRequired, "admin role required", nil)
+		return
+	}
+	if c.settings == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeNetBirdUnavailable, "settings service unavailable", nil)
+		return
+	}
+
+	config, err := c.settings.GetNetBirdModeConfig(ctx.Request.Context())
+	if err != nil {
+		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeNetBirdUnavailable, "failed to load netbird mode config")
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"config": config})
+}
+
+func (c *NetBirdController) UpdateModeConfig(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeNetBirdAdminRequired, "admin role required", nil)
+		return
+	}
+	if c.settings == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeNetBirdUnavailable, "settings service unavailable", nil)
+		return
+	}
+
+	var req netBirdModeConfigUpsertRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeNetBirdInvalidBody, "invalid request body", nil)
+		return
+	}
+
+	updated, err := c.settings.UpsertNetBirdModeConfig(ctx.Request.Context(), service.NetBirdModeConfigUpdate{
+		APIBaseURL:   req.APIBaseURL,
+		APIToken:     req.APIToken,
+		HostPeerID:   req.HostPeerID,
+		AdminPeerIDs: req.AdminPeerIDs,
+	})
+	if err != nil {
+		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeNetBirdUnavailable, "failed to persist netbird mode config")
+		return
+	}
+
+	if c.audit != nil {
+		_ = c.audit.Log(ctx.Request.Context(), service.AuditEntry{
+			UserID:    session.UserID,
+			UserLogin: session.Login,
+			Action:    "netbird.mode.config.update",
+			Target:    "settings",
+			Metadata: map[string]any{
+				"apiBaseUrlSet":    strings.TrimSpace(updated.APIBaseURL) != "",
+				"apiTokenUpdated":  req.APIToken != nil && strings.TrimSpace(*req.APIToken) != "",
+				"apiTokenSet":      updated.APITokenSet,
+				"hostPeerIdSet":    strings.TrimSpace(updated.HostPeerID) != "",
+				"adminPeerIdCount": len(updated.AdminPeerIDs),
+			},
+		})
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"config": updated})
 }
 
 func (c *NetBirdController) ReapplyPolicies(ctx *gin.Context) {

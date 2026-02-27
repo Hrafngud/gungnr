@@ -76,4 +76,5 @@ type Settings struct {
 	CloudflareZoneID        string `gorm:"size:255"`
 	CloudflaredTunnel       string `gorm:"size:255"`
 	CloudflaredConfigPath   string `gorm:"size:512"`
+	NetBirdConfigEncrypted  string `gorm:"type:text"`
 }

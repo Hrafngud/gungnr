@@ -23,6 +23,10 @@ export interface NetBirdStatus {
   peerName?: string
   wg0Ip?: string
   currentMode: NetBirdMode
+  configuredMode: NetBirdMode
+  modeSource: string
+  modeSourceJobId?: number
+  modeDrift: boolean
   lastPolicySyncAt?: string
   lastPolicySyncStatus: string
   lastPolicySyncJobId?: number
@@ -134,7 +138,7 @@ export interface NetBirdModeApplyRequest {
   targetMode: NetBirdMode
   allowLocalhost: boolean
   apiBaseUrl?: string
-  apiToken: string
+  apiToken?: string
   hostPeerId?: string
   adminPeerIds?: string[]
 }
@@ -198,6 +202,10 @@ export interface NetBirdACLEdge {
 
 export interface NetBirdACLGraph {
   currentMode: NetBirdMode
+  configuredMode: NetBirdMode
+  modeSource: string
+  modeSourceJobId?: number
+  modeDrift: boolean
   defaultAction: string
   nodes: NetBirdACLNode[]
   edges: NetBirdACLEdge[]
@@ -206,4 +214,22 @@ export interface NetBirdACLGraph {
 
 export interface NetBirdACLGraphResponse {
   graph: NetBirdACLGraph
+}
+
+export interface NetBirdModeConfig {
+  apiBaseUrl?: string
+  apiTokenSet: boolean
+  hostPeerId?: string
+  adminPeerIds: string[]
+}
+
+export interface NetBirdModeConfigUpdateRequest {
+  apiBaseUrl?: string
+  apiToken?: string
+  hostPeerId?: string
+  adminPeerIds: string[]
+}
+
+export interface NetBirdModeConfigResponse {
+  config: NetBirdModeConfig
 }
