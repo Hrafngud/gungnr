@@ -39,30 +39,32 @@ const netBirdModeApplySummaryPrefix = "netbird_mode_apply_summary="
 const netBirdDaemonRecentHeartbeatWindow = 5 * time.Minute
 
 type NetBirdStatus struct {
-	ClientInstalled       bool                   `json:"clientInstalled"`
-	DaemonRunning         bool                   `json:"daemonRunning"`
-	Connected             bool                   `json:"connected"`
-	PeerID                string                 `json:"peerId,omitempty"`
-	PeerName              string                 `json:"peerName,omitempty"`
-	WG0IP                 string                 `json:"wg0Ip,omitempty"`
-	CurrentMode           NetBirdMode            `json:"currentMode"`
-	ConfiguredMode        NetBirdMode            `json:"configuredMode"`
-	ModeSource            string                 `json:"modeSource"`
-	ModeSourceJobID       uint                   `json:"modeSourceJobId,omitempty"`
-	ModeDrift             bool                   `json:"modeDrift"`
-	LastPolicySyncAt      *time.Time             `json:"lastPolicySyncAt,omitempty"`
-	LastPolicySyncStatus  string                 `json:"lastPolicySyncStatus"`
-	LastPolicySyncJobID   uint                   `json:"lastPolicySyncJobId,omitempty"`
-	LastPolicySyncError   string                 `json:"lastPolicySyncError,omitempty"`
-	LastPolicySyncWarning int                    `json:"lastPolicySyncWarnings"`
-	LastGroupResults      NetBirdOperationCounts `json:"lastGroupResults"`
-	LastPolicyResults     NetBirdOperationCounts `json:"lastPolicyResults"`
-	APIReachable          bool                   `json:"apiReachable"`
-	APIReachability       NetBirdAPIReachability `json:"apiReachability"`
-	ManagedGroups         int                    `json:"managedGroups"`
-	ManagedPolicies       int                    `json:"managedPolicies"`
-	ManagedCountSource    string                 `json:"managedCountSource"`
-	Warnings              []string               `json:"warnings"`
+	ClientInstalled           bool                   `json:"clientInstalled"`
+	DaemonRunning             bool                   `json:"daemonRunning"`
+	Connected                 bool                   `json:"connected"`
+	PeerID                    string                 `json:"peerId,omitempty"`
+	PeerName                  string                 `json:"peerName,omitempty"`
+	WG0IP                     string                 `json:"wg0Ip,omitempty"`
+	CurrentMode               NetBirdMode            `json:"currentMode"`
+	ConfiguredMode            NetBirdMode            `json:"configuredMode"`
+	EffectiveModeBProjectIDs  []uint                 `json:"effectiveModeBProjectIds"`
+	ConfiguredModeBProjectIDs []uint                 `json:"configuredModeBProjectIds"`
+	ModeSource                string                 `json:"modeSource"`
+	ModeSourceJobID           uint                   `json:"modeSourceJobId,omitempty"`
+	ModeDrift                 bool                   `json:"modeDrift"`
+	LastPolicySyncAt          *time.Time             `json:"lastPolicySyncAt,omitempty"`
+	LastPolicySyncStatus      string                 `json:"lastPolicySyncStatus"`
+	LastPolicySyncJobID       uint                   `json:"lastPolicySyncJobId,omitempty"`
+	LastPolicySyncError       string                 `json:"lastPolicySyncError,omitempty"`
+	LastPolicySyncWarning     int                    `json:"lastPolicySyncWarnings"`
+	LastGroupResults          NetBirdOperationCounts `json:"lastGroupResults"`
+	LastPolicyResults         NetBirdOperationCounts `json:"lastPolicyResults"`
+	APIReachable              bool                   `json:"apiReachable"`
+	APIReachability           NetBirdAPIReachability `json:"apiReachability"`
+	ManagedGroups             int                    `json:"managedGroups"`
+	ManagedPolicies           int                    `json:"managedPolicies"`
+	ManagedCountSource        string                 `json:"managedCountSource"`
+	Warnings                  []string               `json:"warnings"`
 }
 
 type NetBirdAPIReachability struct {
@@ -72,15 +74,17 @@ type NetBirdAPIReachability struct {
 }
 
 type NetBirdACLGraph struct {
-	CurrentMode     NetBirdMode      `json:"currentMode"`
-	ConfiguredMode  NetBirdMode      `json:"configuredMode"`
-	ModeSource      string           `json:"modeSource"`
-	ModeSourceJobID uint             `json:"modeSourceJobId,omitempty"`
-	ModeDrift       bool             `json:"modeDrift"`
-	DefaultAction   string           `json:"defaultAction"`
-	Nodes           []NetBirdACLNode `json:"nodes"`
-	Edges           []NetBirdACLEdge `json:"edges"`
-	Notes           []string         `json:"notes"`
+	CurrentMode               NetBirdMode      `json:"currentMode"`
+	ConfiguredMode            NetBirdMode      `json:"configuredMode"`
+	EffectiveModeBProjectIDs  []uint           `json:"effectiveModeBProjectIds"`
+	ConfiguredModeBProjectIDs []uint           `json:"configuredModeBProjectIds"`
+	ModeSource                string           `json:"modeSource"`
+	ModeSourceJobID           uint             `json:"modeSourceJobId,omitempty"`
+	ModeDrift                 bool             `json:"modeDrift"`
+	DefaultAction             string           `json:"defaultAction"`
+	Nodes                     []NetBirdACLNode `json:"nodes"`
+	Edges                     []NetBirdACLEdge `json:"edges"`
+	Notes                     []string         `json:"notes"`
 }
 
 type NetBirdACLNode struct {
@@ -139,19 +143,26 @@ func (s *NetBirdService) Status(ctx context.Context) (NetBirdStatus, error) {
 	if err != nil {
 		return NetBirdStatus{}, errs.Wrap(errs.CodeNetBirdStatusFailed, "failed to load netbird status project catalog", err)
 	}
+	runtimeModeProjects := []NetBirdProjectCatalogInput{}
+	runtimeProjectWarnings := []string{}
+	if runtimeState.EffectiveMode == NetBirdModeB {
+		runtimeModeProjects, runtimeProjectWarnings = selectModeBProjects(projectInputs, runtimeState.EffectiveModeBProjectIDs)
+	}
 	catalog := BuildNetBirdCatalog(NetBirdCatalogInput{
 		Mode:      runtimeState.EffectiveMode,
 		PanelPort: panelPort,
-		Projects:  projectInputs,
+		Projects:  runtimeModeProjects,
 	})
 
 	status := NetBirdStatus{
-		CurrentMode:          runtimeState.EffectiveMode,
-		ConfiguredMode:       runtimeState.ConfiguredMode,
-		ModeSource:           runtimeState.Source,
-		ModeSourceJobID:      runtimeState.SourceJobID,
-		ModeDrift:            runtimeState.Drift,
-		LastPolicySyncStatus: netBirdSyncStatusNever,
+		CurrentMode:               runtimeState.EffectiveMode,
+		ConfiguredMode:            runtimeState.ConfiguredMode,
+		EffectiveModeBProjectIDs:  normalizeUintList(runtimeState.EffectiveModeBProjectIDs),
+		ConfiguredModeBProjectIDs: normalizeUintList(runtimeState.ConfiguredModeBProjectIDs),
+		ModeSource:                runtimeState.Source,
+		ModeSourceJobID:           runtimeState.SourceJobID,
+		ModeDrift:                 runtimeState.Drift,
+		LastPolicySyncStatus:      netBirdSyncStatusNever,
 		APIReachability: NetBirdAPIReachability{
 			Source: netBirdReachabilitySourceCatalog,
 		},
@@ -166,6 +177,10 @@ func (s *NetBirdService) Status(ctx context.Context) (NetBirdStatus, error) {
 		status.Warnings = append(status.Warnings, "Panel port was not a valid integer; status used default port 8080.")
 	}
 	status.Warnings = append(status.Warnings, projectWarnings...)
+	status.Warnings = append(status.Warnings, runtimeProjectWarnings...)
+	if runtimeState.EffectiveMode == NetBirdModeB && len(runtimeState.EffectiveModeBProjectIDs) == 0 {
+		status.Warnings = append(status.Warnings, "Mode B is active with no assigned projects; only panel isolation policies are managed.")
+	}
 
 	snapshot, err := s.latestModeApplySnapshot(ctx)
 	if err != nil {
@@ -300,14 +315,21 @@ func (s *NetBirdService) ACLGraph(ctx context.Context) (NetBirdACLGraph, error) 
 	if err != nil {
 		return NetBirdACLGraph{}, errs.Wrap(errs.CodeNetBirdACLGraphFailed, "failed to load netbird acl graph project catalog", err)
 	}
+	runtimeModeProjects := []NetBirdProjectCatalogInput{}
+	runtimeProjectWarnings := []string{}
+	if runtimeState.EffectiveMode == NetBirdModeB {
+		runtimeModeProjects, runtimeProjectWarnings = selectModeBProjects(projectInputs, runtimeState.EffectiveModeBProjectIDs)
+	}
 	catalog := BuildNetBirdCatalog(NetBirdCatalogInput{
 		Mode:      runtimeState.EffectiveMode,
 		PanelPort: panelPort,
-		Projects:  projectInputs,
+		Projects:  runtimeModeProjects,
 	})
 
-	graph := buildNetBirdACLGraph(runtimeState.EffectiveMode, catalog, projectInputs)
+	graph := buildNetBirdACLGraph(runtimeState.EffectiveMode, catalog, runtimeModeProjects)
 	graph.ConfiguredMode = runtimeState.ConfiguredMode
+	graph.EffectiveModeBProjectIDs = normalizeUintList(runtimeState.EffectiveModeBProjectIDs)
+	graph.ConfiguredModeBProjectIDs = normalizeUintList(runtimeState.ConfiguredModeBProjectIDs)
 	graph.ModeSource = runtimeState.Source
 	graph.ModeSourceJobID = runtimeState.SourceJobID
 	graph.ModeDrift = runtimeState.Drift
@@ -316,6 +338,10 @@ func (s *NetBirdService) ACLGraph(ctx context.Context) (NetBirdACLGraph, error) 
 		graph.Notes = append(graph.Notes, "Panel port was not a valid integer; ACL graph used default port 8080.")
 	}
 	graph.Notes = append(graph.Notes, projectWarnings...)
+	graph.Notes = append(graph.Notes, runtimeProjectWarnings...)
+	if runtimeState.EffectiveMode == NetBirdModeB && len(runtimeState.EffectiveModeBProjectIDs) == 0 {
+		graph.Notes = append(graph.Notes, "Mode B is active with no assigned projects; ACL graph includes panel-only policies.")
+	}
 	if runtimeState.EffectiveMode == NetBirdModeLegacy {
 		graph.Notes = append(graph.Notes, "Legacy mode has no managed NetBird ACL edges.")
 	}

@@ -13,7 +13,9 @@ import UiState from '@/components/ui/UiState.vue'
 import UiToggle from '@/components/ui/UiToggle.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useNetbirdStore } from '@/stores/netbird'
+import { useProjectsStore } from '@/stores/projects'
 import type { NetBirdMode, NetBirdServiceRebindingOperation } from '@/types/netbird'
+import type { Project } from '@/types/projects'
 import { jobStatusLabel, jobStatusTone } from '@/utils/jobStatus'
 
 type SelectOption = {
@@ -37,12 +39,29 @@ const modeDescriptions: Record<NetBirdMode, string> = {
 const isNetBirdMode = (value: unknown): value is NetBirdMode =>
   value === 'legacy' || value === 'mode_a' || value === 'mode_b'
 
+function normalizeProjectIDs(values: number[]) {
+  return Array.from(new Set((values || []).filter((value) => Number.isFinite(value) && value > 0)))
+    .map((value) => Math.trunc(value))
+    .sort((left, right) => left - right)
+}
+
+function arraysEqual(left: number[], right: number[]) {
+  if (left.length !== right.length) return false
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false
+  }
+  return true
+}
+
 const authStore = useAuthStore()
 const netbirdStore = useNetbirdStore()
+const projectsStore = useProjectsStore()
 
 const targetMode = ref<NetBirdMode>('legacy')
 const targetModeTouched = ref(false)
+const modeBProjectsTouched = ref(false)
 const allowLocalhost = ref(false)
+const modeBProjectIds = ref<number[]>([])
 const confirmInput = ref('')
 const modeInitialized = ref(false)
 const terminalRefreshJobId = ref<number | null>(null)
@@ -56,6 +75,9 @@ const configSaveSuccess = ref<string | null>(null)
 
 const isAdmin = computed(() => authStore.isAdmin)
 const status = computed(() => netbirdStore.status.data)
+const projects = computed(() => projectsStore.projects)
+const projectsLoading = computed(() => projectsStore.loading)
+const projectsError = computed(() => projectsStore.error)
 const plan = computed(() => netbirdStore.modePlan.data)
 const planLoading = computed(() => netbirdStore.modePlan.loading)
 const planError = computed(() => netbirdStore.modePlan.error)
@@ -127,6 +149,7 @@ const parsedConfigAdminPeerIds = computed(() =>
 )
 
 const requiresPeerInputs = computed(() => targetMode.value !== 'legacy')
+const requiresModeBSelection = computed(() => targetMode.value === 'mode_b')
 const confirmationPhrase = computed(() => `apply ${targetMode.value}`)
 const confirmationReady = computed(() => confirmInput.value.trim() === confirmationPhrase.value)
 const modeConfigHasToken = computed(() => Boolean(modeConfig.value?.apiTokenSet))
@@ -134,9 +157,12 @@ const modeConfigHasHostPeer = computed(() => (modeConfig.value?.hostPeerId || ''
 const modeConfigHasAdminPeers = computed(() => (modeConfig.value?.adminPeerIds?.length ?? 0) > 0)
 const planMatchesSelection = computed(() => {
   if (!plan.value) return false
+  const planModeBProjectIds = normalizeProjectIDs(plan.value.targetModeBProjectIds || [])
+  const selectedModeBProjectIds = normalizeProjectIDs(modeBProjectIds.value)
   return (
     plan.value.targetMode === targetMode.value &&
-    plan.value.allowLocalhost === allowLocalhost.value
+    plan.value.allowLocalhost === allowLocalhost.value &&
+    (!requiresModeBSelection.value || arraysEqual(planModeBProjectIds, selectedModeBProjectIds))
   )
 })
 
@@ -157,6 +183,21 @@ const modeLabel = (mode: NetBirdMode) => {
   if (mode === 'mode_a') return 'Mode A'
   if (mode === 'mode_b') return 'Mode B'
   return 'Legacy'
+}
+
+const projectStatusTone = (project: Project): 'ok' | 'warn' | 'neutral' => {
+  const statusValue = (project.status || '').trim().toLowerCase()
+  if (statusValue === 'running') return 'ok'
+  if (statusValue === 'degraded') return 'warn'
+  return 'neutral'
+}
+
+const projectStatusLabel = (project: Project) => {
+  const statusValue = (project.status || '').trim().toLowerCase()
+  if (statusValue === 'running') return 'running'
+  if (statusValue === 'degraded') return 'degraded'
+  if (statusValue === 'down') return 'down'
+  return statusValue || 'unknown'
 }
 
 const listenerLabel = (listeners: string[]) =>
@@ -187,6 +228,7 @@ const triggerPlan = async () => {
   await netbirdStore.planModeSwitch({
     targetMode: targetMode.value,
     allowLocalhost: allowLocalhost.value,
+    modeBProjectIds: requiresModeBSelection.value ? normalizeProjectIDs(modeBProjectIds.value) : [],
   })
 }
 
@@ -195,7 +237,43 @@ const triggerApply = async () => {
   await netbirdStore.applyModeSwitch({
     targetMode: targetMode.value,
     allowLocalhost: allowLocalhost.value,
+    modeBProjectIds: requiresModeBSelection.value ? normalizeProjectIDs(modeBProjectIds.value) : [],
   })
+}
+
+const toggleModeBProject = (projectId: number) => {
+  modeBProjectsTouched.value = true
+  const next = new Set(modeBProjectIds.value)
+  if (next.has(projectId)) {
+    next.delete(projectId)
+  } else {
+    next.add(projectId)
+  }
+  modeBProjectIds.value = normalizeProjectIDs(Array.from(next))
+}
+
+const clearModeBProjects = () => {
+  modeBProjectsTouched.value = true
+  modeBProjectIds.value = []
+}
+
+const selectAllModeBProjects = () => {
+  modeBProjectsTouched.value = true
+  modeBProjectIds.value = normalizeProjectIDs(projects.value.map((project) => project.id))
+}
+
+const selectRunningModeBProjects = () => {
+  modeBProjectsTouched.value = true
+  modeBProjectIds.value = normalizeProjectIDs(
+    projects.value
+      .filter((project) => (project.status || '').trim().toLowerCase() === 'running')
+      .map((project) => project.id),
+  )
+}
+
+const resetModeBProjectsToEffective = () => {
+  modeBProjectsTouched.value = false
+  modeBProjectIds.value = normalizeProjectIDs(status.value?.effectiveModeBProjectIds || [])
 }
 
 const saveModeConfig = async () => {
@@ -265,7 +343,16 @@ watch(
   { immediate: true },
 )
 
-watch([targetMode, allowLocalhost], () => {
+watch(
+  () => status.value?.effectiveModeBProjectIds,
+  (ids) => {
+    if (modeBProjectsTouched.value) return
+    modeBProjectIds.value = normalizeProjectIDs(ids || [])
+  },
+  { immediate: true },
+)
+
+watch([targetMode, allowLocalhost, modeBProjectIds], () => {
   confirmInput.value = ''
 })
 
@@ -312,6 +399,9 @@ onMounted(() => {
   const loaders: Promise<unknown>[] = []
   if (!status.value) {
     loaders.push(netbirdStore.loadStatus())
+  }
+  if (!projectsStore.initialized && !projectsLoading.value) {
+    loaders.push(projectsStore.fetchProjects())
   }
   if (isAdmin.value && !modeConfig.value && !modeConfigLoading.value) {
     loaders.push(netbirdStore.loadModeConfig())
@@ -408,6 +498,90 @@ onBeforeUnmount(() => {
         </UiBadge>
       </div>
 
+      <UiPanel
+        v-if="requiresModeBSelection"
+        variant="soft"
+        class="space-y-3 p-4"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+            Mode B project assignments
+          </p>
+          <UiBadge tone="neutral">{{ modeBProjectIds.length }}</UiBadge>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <UiButton
+            variant="ghost"
+            size="sm"
+            :disabled="!isAdmin || projectsLoading"
+            @click="selectRunningModeBProjects"
+          >
+            Select running
+          </UiButton>
+          <UiButton
+            variant="ghost"
+            size="sm"
+            :disabled="!isAdmin || projectsLoading"
+            @click="selectAllModeBProjects"
+          >
+            Select all
+          </UiButton>
+          <UiButton
+            variant="ghost"
+            size="sm"
+            :disabled="!isAdmin"
+            @click="clearModeBProjects"
+          >
+            Clear
+          </UiButton>
+          <UiButton
+            variant="ghost"
+            size="sm"
+            :disabled="!isAdmin"
+            @click="resetModeBProjectsToEffective"
+          >
+            Reset to active
+          </UiButton>
+        </div>
+
+        <UiState v-if="projectsError" tone="error">
+          {{ projectsError }}
+        </UiState>
+        <UiState v-else-if="projectsLoading" loading>
+          Loading projects...
+        </UiState>
+        <UiState v-else-if="projects.length === 0">
+          No projects found.
+        </UiState>
+        <ul v-else class="max-h-56 space-y-2 overflow-y-auto pr-1">
+          <UiListRow
+            v-for="project in projects"
+            :key="`mode-b-project-${project.id}`"
+            as="li"
+            class="flex items-center justify-between gap-3"
+          >
+            <label class="flex min-w-0 items-center gap-3 text-left">
+              <input
+                type="checkbox"
+                class="h-4 w-4 rounded border border-[color:var(--border)] bg-[color:var(--surface)]"
+                :checked="modeBProjectIds.includes(project.id)"
+                :disabled="!isAdmin"
+                @change="toggleModeBProject(project.id)"
+              />
+              <span class="truncate text-sm text-[color:var(--text)]">{{ project.name }}</span>
+            </label>
+            <UiBadge :tone="projectStatusTone(project)">
+              {{ projectStatusLabel(project) }}
+            </UiBadge>
+          </UiListRow>
+        </ul>
+
+        <p class="text-xs text-[color:var(--muted)]">
+          Selected projects will run ingress listeners under NetBird in Mode B. Unselected projects remain on legacy listeners.
+        </p>
+      </UiPanel>
+
       <div class="flex flex-wrap items-center gap-3">
         <UiButton
           variant="primary"
@@ -422,7 +596,8 @@ onBeforeUnmount(() => {
         </UiButton>
         <p class="text-xs text-[color:var(--muted)]">
           Dry-run uses <span class="font-mono">targetMode</span> and
-          <span class="font-mono">allowLocalhost</span> only.
+          <span class="font-mono">allowLocalhost</span>
+          <span v-if="requiresModeBSelection"> + <span class="font-mono">modeBProjectIds</span></span>.
         </p>
       </div>
     </UiPanel>
@@ -578,6 +753,10 @@ onBeforeUnmount(() => {
             Admin peer IDs:
             <span class="text-[color:var(--text)]">{{ modeConfig?.adminPeerIds?.length ?? 0 }}</span>
           </p>
+          <p>
+            Saved Mode B projects:
+            <span class="text-[color:var(--text)]">{{ modeConfig?.modeBProjectIds?.length ?? 0 }}</span>
+          </p>
         </div>
       </UiPanel>
 
@@ -603,6 +782,9 @@ onBeforeUnmount(() => {
       </UiState>
       <UiState v-if="isAdmin && requiresPeerInputs && !modeConfigHasAdminPeers" tone="warn">
         Save at least one admin peer ID for Mode A and Mode B.
+      </UiState>
+      <UiState v-if="isAdmin && requiresModeBSelection && modeBProjectIds.length === 0" tone="warn">
+        Mode B currently has no assigned projects. Apply will isolate only the panel.
       </UiState>
       <UiState v-if="isAdmin && !planMatchesSelection" tone="warn">
         Apply requires a dry-run plan for the current target mode and localhost toggle.

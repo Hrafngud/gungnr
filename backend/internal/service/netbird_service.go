@@ -30,6 +30,8 @@ type NetBirdModePlan struct {
 	CurrentMode                NetBirdMode                        `json:"currentMode"`
 	TargetMode                 NetBirdMode                        `json:"targetMode"`
 	AllowLocalhost             bool                               `json:"allowLocalhost"`
+	CurrentModeBProjectIDs     []uint                             `json:"currentModeBProjectIds"`
+	TargetModeBProjectIDs      []uint                             `json:"targetModeBProjectIds"`
 	Catalog                    NetBirdCatalog                     `json:"catalog"`
 	GroupOperations            []NetBirdGroupOperation            `json:"groupOperations"`
 	PolicyOperations           []NetBirdPolicyOperation           `json:"policyOperations"`
@@ -87,12 +89,13 @@ func NewNetBirdService(cfg config.Config, settings *SettingsService, projects re
 
 func (s *NetBirdService) ResolveModeApplyExecutionRequest(ctx context.Context, input NetBirdModeApplyJobRequest) (NetBirdModeApplyRequest, bool, error) {
 	request := NormalizeNetBirdModeApplyRequest(NetBirdModeApplyRequest{
-		TargetMode:     input.TargetMode,
-		AllowLocalhost: input.AllowLocalhost,
-		APIBaseURL:     input.APIBaseURL,
-		APIToken:       input.APIToken,
-		HostPeerID:     input.HostPeerID,
-		AdminPeerIDs:   input.AdminPeerIDs,
+		TargetMode:      input.TargetMode,
+		AllowLocalhost:  input.AllowLocalhost,
+		ModeBProjectIDs: input.ModeBProjectIDs,
+		APIBaseURL:      input.APIBaseURL,
+		APIToken:        input.APIToken,
+		HostPeerID:      input.HostPeerID,
+		AdminPeerIDs:    input.AdminPeerIDs,
 	})
 	if s == nil || s.settings == nil {
 		return request, false, nil
@@ -100,7 +103,7 @@ func (s *NetBirdService) ResolveModeApplyExecutionRequest(ctx context.Context, i
 	return s.settings.ResolveNetBirdModeApplyJobRequest(ctx, input)
 }
 
-func (s *NetBirdService) PlanMode(ctx context.Context, targetModeRaw string, allowLocalhost bool) (NetBirdModePlan, error) {
+func (s *NetBirdService) PlanMode(ctx context.Context, targetModeRaw string, allowLocalhost bool, modeBProjectIDs []uint) (NetBirdModePlan, error) {
 	if s == nil || s.projects == nil {
 		return NetBirdModePlan{}, errs.New(errs.CodeNetBirdUnavailable, "netbird service unavailable")
 	}
@@ -112,37 +115,66 @@ func (s *NetBirdService) PlanMode(ctx context.Context, targetModeRaw string, all
 
 	runtimeState := s.resolveNetBirdRuntimeState(ctx)
 	currentMode := runtimeState.EffectiveMode
+	currentModeBProjectIDs := normalizeUintList(runtimeState.EffectiveModeBProjectIDs)
+	targetModeBProjectIDs := normalizeUintList(modeBProjectIDs)
 
 	panelPort, panelPortFallback := resolvePanelPort(s.cfg.Port)
 	projectInputs, projectWarnings, err := s.loadProjectCatalogInputs(ctx)
 	if err != nil {
 		return NetBirdModePlan{}, errs.Wrap(errs.CodeNetBirdPlanFailed, "failed to load projects for netbird planner", err)
 	}
+	currentModeProjects, currentProjectWarnings := selectModeBProjects(projectInputs, currentModeBProjectIDs)
+	targetModeProjects, targetProjectWarnings := selectModeBProjects(projectInputs, targetModeBProjectIDs)
+
+	if currentMode != NetBirdModeB {
+		currentModeBProjectIDs = nil
+		currentModeProjects = nil
+		currentProjectWarnings = nil
+	}
+	if targetMode != NetBirdModeB {
+		targetModeBProjectIDs = nil
+		targetModeProjects = nil
+		targetProjectWarnings = nil
+	}
 
 	currentCatalog := BuildNetBirdCatalog(NetBirdCatalogInput{
 		Mode:      currentMode,
 		PanelPort: panelPort,
-		Projects:  projectInputs,
+		Projects:  currentModeProjects,
 	})
 	targetCatalog := BuildNetBirdCatalog(NetBirdCatalogInput{
 		Mode:      targetMode,
 		PanelPort: panelPort,
-		Projects:  projectInputs,
+		Projects:  targetModeProjects,
 	})
 
 	groupOps := buildGroupOperations(currentCatalog.Groups, targetCatalog.Groups, targetMode)
 	policyOps := buildPolicyOperations(currentCatalog.Policies, targetCatalog.Policies, targetMode)
-	rebindings := buildServiceRebindings(currentMode, targetMode, runtimeState.EffectiveAllowLocalhost, allowLocalhost, panelPort, projectInputs)
+	rebindings := buildServiceRebindings(
+		currentMode,
+		targetMode,
+		runtimeState.EffectiveAllowLocalhost,
+		allowLocalhost,
+		panelPort,
+		projectInputs,
+		currentModeBProjectIDs,
+		targetModeBProjectIDs,
+	)
 	redeployTargets := buildRedeployTargets(rebindings)
 
-	warnings := make([]string, 0, 4+len(projectWarnings)+len(runtimeState.Warnings))
+	warnings := make([]string, 0, 5+len(projectWarnings)+len(currentProjectWarnings)+len(targetProjectWarnings)+len(runtimeState.Warnings))
 	warnings = append(warnings, runtimeState.Warnings...)
 	if panelPortFallback {
 		warnings = append(warnings, "Panel port was not a valid integer; planner used default port 8080.")
 	}
 	warnings = append(warnings, projectWarnings...)
-	if targetMode == NetBirdModeB && len(projectInputs) == 0 {
-		warnings = append(warnings, "Mode B selected with no projects; only panel isolation policy will be planned.")
+	warnings = append(warnings, currentProjectWarnings...)
+	warnings = append(warnings, targetProjectWarnings...)
+	if targetMode == NetBirdModeB && len(targetModeBProjectIDs) == 0 {
+		warnings = append(warnings, "Mode B selected with no assigned projects; only panel isolation policy will be planned.")
+	}
+	if targetMode != NetBirdModeB && len(modeBProjectIDs) > 0 {
+		warnings = append(warnings, "Mode B project IDs were provided for a non-Mode B target and were ignored.")
 	}
 	if targetMode == currentMode && len(rebindings) == 0 {
 		warnings = append(warnings, "Target mode matches current mode; plan is a policy reconcile only.")
@@ -152,6 +184,8 @@ func (s *NetBirdService) PlanMode(ctx context.Context, targetModeRaw string, all
 		CurrentMode:                currentMode,
 		TargetMode:                 targetMode,
 		AllowLocalhost:             allowLocalhost,
+		CurrentModeBProjectIDs:     normalizeUintList(currentModeBProjectIDs),
+		TargetModeBProjectIDs:      normalizeUintList(targetModeBProjectIDs),
 		Catalog:                    targetCatalog,
 		GroupOperations:            groupOps,
 		PolicyOperations:           policyOps,
@@ -191,6 +225,30 @@ func resolvePanelPort(raw string) (int, bool) {
 		return defaultPanelPort, true
 	}
 	return parsed, false
+}
+
+func selectModeBProjects(all []NetBirdProjectCatalogInput, selectedIDs []uint) ([]NetBirdProjectCatalogInput, []string) {
+	if len(selectedIDs) == 0 {
+		return []NetBirdProjectCatalogInput{}, nil
+	}
+
+	byID := make(map[uint]NetBirdProjectCatalogInput, len(all))
+	for _, project := range all {
+		byID[project.ProjectID] = project
+	}
+
+	selected := make([]NetBirdProjectCatalogInput, 0, len(selectedIDs))
+	warnings := make([]string, 0)
+	for _, projectID := range normalizeUintList(selectedIDs) {
+		project, ok := byID[projectID]
+		if !ok {
+			warnings = append(warnings, fmt.Sprintf("Mode B project assignment %d was not found and was ignored.", projectID))
+			continue
+		}
+		selected = append(selected, project)
+	}
+
+	return normalizeCatalogProjects(selected), warnings
 }
 
 func buildGroupOperations(current, target []NetBirdGroupPayload, targetMode NetBirdMode) []NetBirdGroupOperation {
@@ -447,6 +505,8 @@ func buildServiceRebindings(
 	targetAllowLocalhost bool,
 	panelPort int,
 	projects []NetBirdProjectCatalogInput,
+	currentModeBProjectIDs []uint,
+	targetModeBProjectIDs []uint,
 ) []NetBirdServiceRebindingOperation {
 	currentPanelListeners := panelListeners(currentMode, currentAllowLocalhost)
 	targetPanelListeners := panelListeners(targetMode, targetAllowLocalhost)
@@ -462,13 +522,15 @@ func buildServiceRebindings(
 		})
 	}
 
-	currentProjectListeners := projectListeners(currentMode, currentAllowLocalhost)
-	targetProjectListeners := projectListeners(targetMode, targetAllowLocalhost)
-	if listenersEqual(currentProjectListeners, targetProjectListeners) {
-		return ops
-	}
+	currentModeBProjectSet := modeBProjectIDSet(currentModeBProjectIDs)
+	targetModeBProjectSet := modeBProjectIDSet(targetModeBProjectIDs)
 
 	for _, project := range projects {
+		currentProjectListeners := projectListeners(currentMode, currentAllowLocalhost, project.ProjectID, currentModeBProjectSet)
+		targetProjectListeners := projectListeners(targetMode, targetAllowLocalhost, project.ProjectID, targetModeBProjectSet)
+		if listenersEqual(currentProjectListeners, targetProjectListeners) {
+			continue
+		}
 		ops = append(ops, NetBirdServiceRebindingOperation{
 			Service:       "project_ingress",
 			ProjectID:     project.ProjectID,
@@ -495,14 +557,25 @@ func panelListeners(mode NetBirdMode, allowLocalhost bool) []string {
 	}
 }
 
-func projectListeners(mode NetBirdMode, allowLocalhost bool) []string {
+func projectListeners(mode NetBirdMode, allowLocalhost bool, projectID uint, modeBProjectSet map[uint]struct{}) []string {
 	if mode == NetBirdModeB {
+		if _, selected := modeBProjectSet[projectID]; !selected {
+			return []string{"0.0.0.0"}
+		}
 		if allowLocalhost {
 			return []string{"wg0", "127.0.0.1"}
 		}
 		return []string{"wg0"}
 	}
 	return []string{"0.0.0.0"}
+}
+
+func modeBProjectIDSet(values []uint) map[uint]struct{} {
+	set := make(map[uint]struct{}, len(values))
+	for _, value := range normalizeUintList(values) {
+		set[value] = struct{}{}
+	}
+	return set
 }
 
 func listenersEqual(a []string, b []string) bool {

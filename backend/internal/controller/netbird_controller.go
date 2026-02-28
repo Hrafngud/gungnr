@@ -22,15 +22,17 @@ type NetBirdController struct {
 }
 
 type netBirdModePlanRequest struct {
-	TargetMode     string `json:"targetMode"`
-	AllowLocalhost bool   `json:"allowLocalhost"`
+	TargetMode      string `json:"targetMode"`
+	AllowLocalhost  bool   `json:"allowLocalhost"`
+	ModeBProjectIDs []uint `json:"modeBProjectIds,omitempty"`
 }
 
 type netBirdModeConfigUpsertRequest struct {
-	APIBaseURL   *string   `json:"apiBaseUrl,omitempty"`
-	APIToken     *string   `json:"apiToken,omitempty"`
-	HostPeerID   *string   `json:"hostPeerId,omitempty"`
-	AdminPeerIDs *[]string `json:"adminPeerIds,omitempty"`
+	APIBaseURL      *string   `json:"apiBaseUrl,omitempty"`
+	APIToken        *string   `json:"apiToken,omitempty"`
+	HostPeerID      *string   `json:"hostPeerId,omitempty"`
+	AdminPeerIDs    *[]string `json:"adminPeerIds,omitempty"`
+	ModeBProjectIDs *[]uint   `json:"modeBProjectIds,omitempty"`
 }
 
 func NewNetBirdController(service *service.NetBirdService, settings *service.SettingsService, jobs *service.JobService, audit *service.AuditService) *NetBirdController {
@@ -91,7 +93,7 @@ func (c *NetBirdController) PlanMode(ctx *gin.Context) {
 		return
 	}
 
-	plan, err := c.service.PlanMode(ctx.Request.Context(), req.TargetMode, req.AllowLocalhost)
+	plan, err := c.service.PlanMode(ctx.Request.Context(), req.TargetMode, req.AllowLocalhost, req.ModeBProjectIDs)
 	if err != nil {
 		status := netBirdHTTPStatus(err, http.StatusInternalServerError)
 		apierror.RespondWithError(ctx, status, err, errs.CodeNetBirdPlanFailed, "failed to build netbird mode plan")
@@ -124,13 +126,18 @@ func (c *NetBirdController) ApplyMode(ctx *gin.Context) {
 	}
 	req = service.NormalizeNetBirdModeApplyRequest(req)
 	inlineConfigRequest := req
-	inlineConfigProvided := inlineConfigRequest.APIToken != "" || inlineConfigRequest.APIBaseURL != "" || inlineConfigRequest.HostPeerID != "" || len(inlineConfigRequest.AdminPeerIDs) > 0
 
 	targetMode, err := service.ParseNetBirdMode(req.TargetMode)
 	if err != nil {
 		apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeNetBirdInvalidMode, "invalid netbird target mode")
 		return
 	}
+	inlineConfigProvided := inlineConfigRequest.APIToken != "" ||
+		inlineConfigRequest.APIBaseURL != "" ||
+		inlineConfigRequest.HostPeerID != "" ||
+		len(inlineConfigRequest.AdminPeerIDs) > 0 ||
+		len(inlineConfigRequest.ModeBProjectIDs) > 0 ||
+		targetMode == service.NetBirdModeB
 
 	usedStoredConfig := false
 	if c.settings != nil {
@@ -157,7 +164,6 @@ func (c *NetBirdController) ApplyMode(ctx *gin.Context) {
 			return
 		}
 	}
-
 	if c.settings != nil && inlineConfigProvided {
 		update := service.NetBirdModeConfigUpdate{}
 		if inlineConfigRequest.APIBaseURL != "" {
@@ -175,6 +181,10 @@ func (c *NetBirdController) ApplyMode(ctx *gin.Context) {
 		if len(inlineConfigRequest.AdminPeerIDs) > 0 {
 			value := append([]string(nil), inlineConfigRequest.AdminPeerIDs...)
 			update.AdminPeerIDs = &value
+		}
+		if len(inlineConfigRequest.ModeBProjectIDs) > 0 || targetMode == service.NetBirdModeB {
+			value := append([]uint(nil), inlineConfigRequest.ModeBProjectIDs...)
+			update.ModeBProjectIDs = &value
 		}
 
 		_, upsertErr := c.settings.UpsertNetBirdModeConfig(ctx.Request.Context(), update)
@@ -201,13 +211,14 @@ func (c *NetBirdController) ApplyMode(ctx *gin.Context) {
 			Action:    "netbird.mode.apply",
 			Target:    string(targetMode),
 			Metadata: map[string]any{
-				"jobId":            job.ID,
-				"targetMode":       targetMode,
-				"allowLocalhost":   req.AllowLocalhost,
-				"apiBaseUrlSet":    req.APIBaseURL != "",
-				"hostPeerIdSet":    req.HostPeerID != "",
-				"adminPeerIdCount": len(req.AdminPeerIDs),
-				"usedStoredConfig": usedStoredConfig,
+				"jobId":             job.ID,
+				"targetMode":        targetMode,
+				"allowLocalhost":    req.AllowLocalhost,
+				"apiBaseUrlSet":     req.APIBaseURL != "",
+				"hostPeerIdSet":     req.HostPeerID != "",
+				"adminPeerIdCount":  len(req.AdminPeerIDs),
+				"modeBProjectCount": len(req.ModeBProjectIDs),
+				"usedStoredConfig":  usedStoredConfig,
 			},
 		})
 	}
@@ -253,10 +264,11 @@ func (c *NetBirdController) UpdateModeConfig(ctx *gin.Context) {
 	}
 
 	updated, err := c.settings.UpsertNetBirdModeConfig(ctx.Request.Context(), service.NetBirdModeConfigUpdate{
-		APIBaseURL:   req.APIBaseURL,
-		APIToken:     req.APIToken,
-		HostPeerID:   req.HostPeerID,
-		AdminPeerIDs: req.AdminPeerIDs,
+		APIBaseURL:      req.APIBaseURL,
+		APIToken:        req.APIToken,
+		HostPeerID:      req.HostPeerID,
+		AdminPeerIDs:    req.AdminPeerIDs,
+		ModeBProjectIDs: req.ModeBProjectIDs,
 	})
 	if err != nil {
 		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeNetBirdUnavailable, "failed to persist netbird mode config")
@@ -270,11 +282,12 @@ func (c *NetBirdController) UpdateModeConfig(ctx *gin.Context) {
 			Action:    "netbird.mode.config.update",
 			Target:    "settings",
 			Metadata: map[string]any{
-				"apiBaseUrlSet":    strings.TrimSpace(updated.APIBaseURL) != "",
-				"apiTokenUpdated":  req.APIToken != nil && strings.TrimSpace(*req.APIToken) != "",
-				"apiTokenSet":      updated.APITokenSet,
-				"hostPeerIdSet":    strings.TrimSpace(updated.HostPeerID) != "",
-				"adminPeerIdCount": len(updated.AdminPeerIDs),
+				"apiBaseUrlSet":     strings.TrimSpace(updated.APIBaseURL) != "",
+				"apiTokenUpdated":   req.APIToken != nil && strings.TrimSpace(*req.APIToken) != "",
+				"apiTokenSet":       updated.APITokenSet,
+				"hostPeerIdSet":     strings.TrimSpace(updated.HostPeerID) != "",
+				"adminPeerIdCount":  len(updated.AdminPeerIDs),
+				"modeBProjectCount": len(updated.ModeBProjectIDs),
 			},
 		})
 	}
@@ -340,13 +353,15 @@ func (c *NetBirdController) logAudit(ctx *gin.Context, userID uint, userLogin st
 		Action:    "netbird.mode.plan",
 		Target:    string(plan.TargetMode),
 		Metadata: map[string]any{
-			"currentMode":    plan.CurrentMode,
-			"targetMode":     plan.TargetMode,
-			"allowLocalhost": plan.AllowLocalhost,
-			"groups":         len(plan.Catalog.Groups),
-			"policies":       len(plan.Catalog.Policies),
-			"rebindings":     len(plan.ServiceRebindingOperations),
-			"warnings":       len(plan.Warnings),
+			"currentMode":              plan.CurrentMode,
+			"targetMode":               plan.TargetMode,
+			"allowLocalhost":           plan.AllowLocalhost,
+			"currentModeBProjectCount": len(plan.CurrentModeBProjectIDs),
+			"targetModeBProjectCount":  len(plan.TargetModeBProjectIDs),
+			"groups":                   len(plan.Catalog.Groups),
+			"policies":                 len(plan.Catalog.Policies),
+			"rebindings":               len(plan.ServiceRebindingOperations),
+			"warnings":                 len(plan.Warnings),
 		},
 	})
 }

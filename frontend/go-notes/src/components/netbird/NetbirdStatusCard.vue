@@ -207,6 +207,24 @@ onMounted(() => {
           <span class="text-xs text-[color:var(--muted)]">Mode source</span>
           <span class="text-xs text-[color:var(--text)]">{{ status.modeSource || 'n/a' }}</span>
         </UiListRow>
+        <UiListRow
+          v-if="status.currentMode === 'mode_b' || status.configuredMode === 'mode_b'"
+          class="flex items-center justify-between gap-3"
+        >
+          <span class="text-xs text-[color:var(--muted)]">Effective Mode B projects</span>
+          <UiBadge tone="neutral">
+            {{ status.effectiveModeBProjectIds?.length ?? 0 }}
+          </UiBadge>
+        </UiListRow>
+        <UiListRow
+          v-if="status.currentMode === 'mode_b' || status.configuredMode === 'mode_b'"
+          class="flex items-center justify-between gap-3"
+        >
+          <span class="text-xs text-[color:var(--muted)]">Configured Mode B projects</span>
+          <UiBadge :tone="status.modeDrift ? 'warn' : 'neutral'">
+            {{ status.configuredModeBProjectIds?.length ?? 0 }}
+          </UiBadge>
+        </UiListRow>
         <UiListRow class="flex items-center justify-between gap-3">
           <span class="text-xs text-[color:var(--muted)]">Last policy sync</span>
           <span class="text-xs text-[color:var(--text)]">{{ formatDate(status.lastPolicySyncAt) }}</span>

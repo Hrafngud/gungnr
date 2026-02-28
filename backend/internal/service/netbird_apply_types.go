@@ -1,17 +1,19 @@
 package service
 
 import (
+	"sort"
 	"strings"
 	"time"
 )
 
 type NetBirdModeApplyRequest struct {
-	TargetMode     string   `json:"targetMode"`
-	AllowLocalhost bool     `json:"allowLocalhost"`
-	APIBaseURL     string   `json:"apiBaseUrl,omitempty"`
-	APIToken       string   `json:"apiToken"`
-	HostPeerID     string   `json:"hostPeerId,omitempty"`
-	AdminPeerIDs   []string `json:"adminPeerIds,omitempty"`
+	TargetMode      string   `json:"targetMode"`
+	AllowLocalhost  bool     `json:"allowLocalhost"`
+	ModeBProjectIDs []uint   `json:"modeBProjectIds,omitempty"`
+	APIBaseURL      string   `json:"apiBaseUrl,omitempty"`
+	APIToken        string   `json:"apiToken"`
+	HostPeerID      string   `json:"hostPeerId,omitempty"`
+	AdminPeerIDs    []string `json:"adminPeerIds,omitempty"`
 }
 
 type NetBirdModeApplyActor struct {
@@ -27,14 +29,15 @@ type NetBirdPolicyReapplyRequest struct {
 }
 
 type NetBirdModeApplyJobRequest struct {
-	TargetMode     string                `json:"targetMode"`
-	AllowLocalhost bool                  `json:"allowLocalhost"`
-	APIBaseURL     string                `json:"apiBaseUrl,omitempty"`
-	APIToken       string                `json:"apiToken"`
-	HostPeerID     string                `json:"hostPeerId,omitempty"`
-	AdminPeerIDs   []string              `json:"adminPeerIds,omitempty"`
-	RequestedBy    NetBirdModeApplyActor `json:"requestedBy"`
-	RequestedAt    time.Time             `json:"requestedAt"`
+	TargetMode      string                `json:"targetMode"`
+	AllowLocalhost  bool                  `json:"allowLocalhost"`
+	ModeBProjectIDs []uint                `json:"modeBProjectIds,omitempty"`
+	APIBaseURL      string                `json:"apiBaseUrl,omitempty"`
+	APIToken        string                `json:"apiToken"`
+	HostPeerID      string                `json:"hostPeerId,omitempty"`
+	AdminPeerIDs    []string              `json:"adminPeerIds,omitempty"`
+	RequestedBy     NetBirdModeApplyActor `json:"requestedBy"`
+	RequestedAt     time.Time             `json:"requestedAt"`
 }
 
 type NetBirdOperationCounts struct {
@@ -94,20 +97,21 @@ type NetBirdRedeployExecutionSummary struct {
 }
 
 type NetBirdModeApplySummary struct {
-	CurrentMode         NetBirdMode                      `json:"currentMode"`
-	TargetMode          NetBirdMode                      `json:"targetMode"`
-	AllowLocalhost      bool                             `json:"allowLocalhost"`
-	DefaultPolicyAction string                           `json:"defaultPolicyAction"`
-	Plan                NetBirdModePlan                  `json:"plan"`
-	Reconcile           NetBirdReconcileResult           `json:"reconcile"`
-	RebindingExecution  NetBirdRebindingExecutionSummary `json:"rebindingExecution"`
-	RedeployExecution   NetBirdRedeployExecutionSummary  `json:"redeployExecution"`
-	GroupResultCounts   NetBirdOperationCounts           `json:"groupResultCounts"`
-	PolicyResultCounts  NetBirdOperationCounts           `json:"policyResultCounts"`
-	Warnings            []string                         `json:"warnings"`
-	RequestedBy         NetBirdModeApplyActor            `json:"requestedBy"`
-	RequestedAt         time.Time                        `json:"requestedAt"`
-	CompletedAt         time.Time                        `json:"completedAt"`
+	CurrentMode           NetBirdMode                      `json:"currentMode"`
+	TargetMode            NetBirdMode                      `json:"targetMode"`
+	AllowLocalhost        bool                             `json:"allowLocalhost"`
+	TargetModeBProjectIDs []uint                           `json:"targetModeBProjectIds,omitempty"`
+	DefaultPolicyAction   string                           `json:"defaultPolicyAction"`
+	Plan                  NetBirdModePlan                  `json:"plan"`
+	Reconcile             NetBirdReconcileResult           `json:"reconcile"`
+	RebindingExecution    NetBirdRebindingExecutionSummary `json:"rebindingExecution"`
+	RedeployExecution     NetBirdRedeployExecutionSummary  `json:"redeployExecution"`
+	GroupResultCounts     NetBirdOperationCounts           `json:"groupResultCounts"`
+	PolicyResultCounts    NetBirdOperationCounts           `json:"policyResultCounts"`
+	Warnings              []string                         `json:"warnings"`
+	RequestedBy           NetBirdModeApplyActor            `json:"requestedBy"`
+	RequestedAt           time.Time                        `json:"requestedAt"`
+	CompletedAt           time.Time                        `json:"completedAt"`
 }
 
 type NetBirdDefaultPolicySummary struct {
@@ -127,12 +131,13 @@ type NetBirdPolicyReapplySummary struct {
 
 func NormalizeNetBirdModeApplyRequest(input NetBirdModeApplyRequest) NetBirdModeApplyRequest {
 	return NetBirdModeApplyRequest{
-		TargetMode:     strings.ToLower(strings.TrimSpace(input.TargetMode)),
-		AllowLocalhost: input.AllowLocalhost,
-		APIBaseURL:     strings.TrimSpace(input.APIBaseURL),
-		APIToken:       strings.TrimSpace(input.APIToken),
-		HostPeerID:     strings.TrimSpace(input.HostPeerID),
-		AdminPeerIDs:   normalizeStringList(input.AdminPeerIDs),
+		TargetMode:      strings.ToLower(strings.TrimSpace(input.TargetMode)),
+		AllowLocalhost:  input.AllowLocalhost,
+		ModeBProjectIDs: normalizeUintList(input.ModeBProjectIDs),
+		APIBaseURL:      strings.TrimSpace(input.APIBaseURL),
+		APIToken:        strings.TrimSpace(input.APIToken),
+		HostPeerID:      strings.TrimSpace(input.HostPeerID),
+		AdminPeerIDs:    normalizeStringList(input.AdminPeerIDs),
 	}
 }
 
@@ -148,9 +153,10 @@ func NormalizeNetBirdPolicyReapplyRequest(input NetBirdPolicyReapplyRequest) Net
 func BuildNetBirdModeApplyJobRequest(input NetBirdModeApplyRequest, actor NetBirdModeApplyActor) NetBirdModeApplyJobRequest {
 	normalized := NormalizeNetBirdModeApplyRequest(input)
 	return NetBirdModeApplyJobRequest{
-		TargetMode:     normalized.TargetMode,
-		AllowLocalhost: normalized.AllowLocalhost,
-		APIBaseURL:     normalized.APIBaseURL,
+		TargetMode:      normalized.TargetMode,
+		AllowLocalhost:  normalized.AllowLocalhost,
+		ModeBProjectIDs: normalized.ModeBProjectIDs,
+		APIBaseURL:      normalized.APIBaseURL,
 		// Do not persist API tokens in async job payloads.
 		APIToken:     "",
 		HostPeerID:   normalized.HostPeerID,
@@ -161,4 +167,20 @@ func BuildNetBirdModeApplyJobRequest(input NetBirdModeApplyRequest, actor NetBir
 		},
 		RequestedAt: time.Now().UTC(),
 	}
+}
+
+func normalizeUintList(values []uint) []uint {
+	set := make(map[uint]struct{}, len(values))
+	for _, value := range values {
+		if value == 0 {
+			continue
+		}
+		set[value] = struct{}{}
+	}
+	out := make([]uint, 0, len(set))
+	for value := range set {
+		out = append(out, value)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
 }

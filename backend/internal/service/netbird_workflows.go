@@ -83,7 +83,7 @@ func (w *NetBirdWorkflows) handleModeApply(ctx context.Context, job models.Job, 
 	}
 
 	logger.Logf("step 1/5: building mode plan for target mode %s", targetMode)
-	plan, err := w.netbird.PlanMode(ctx, string(targetMode), resolvedReq.AllowLocalhost)
+	plan, err := w.netbird.PlanMode(ctx, string(targetMode), resolvedReq.AllowLocalhost, resolvedReq.ModeBProjectIDs)
 	if err != nil {
 		return err
 	}
@@ -140,20 +140,21 @@ func (w *NetBirdWorkflows) handleModeApply(ctx context.Context, job models.Job, 
 	warnings = appendNetBirdExecutionWarnings(warnings, rebindingExecution, redeployExecution)
 
 	summary := NetBirdModeApplySummary{
-		CurrentMode:         plan.CurrentMode,
-		TargetMode:          plan.TargetMode,
-		AllowLocalhost:      plan.AllowLocalhost,
-		DefaultPolicyAction: defaultPolicyAction,
-		Plan:                plan,
-		Reconcile:           reconcileResult,
-		RebindingExecution:  rebindingExecution,
-		RedeployExecution:   redeployExecution,
-		GroupResultCounts:   groupCounts,
-		PolicyResultCounts:  policyCounts,
-		Warnings:            warnings,
-		RequestedBy:         req.RequestedBy,
-		RequestedAt:         req.RequestedAt,
-		CompletedAt:         time.Now().UTC(),
+		CurrentMode:           plan.CurrentMode,
+		TargetMode:            plan.TargetMode,
+		AllowLocalhost:        plan.AllowLocalhost,
+		TargetModeBProjectIDs: normalizeUintList(plan.TargetModeBProjectIDs),
+		DefaultPolicyAction:   defaultPolicyAction,
+		Plan:                  plan,
+		Reconcile:             reconcileResult,
+		RebindingExecution:    rebindingExecution,
+		RedeployExecution:     redeployExecution,
+		GroupResultCounts:     groupCounts,
+		PolicyResultCounts:    policyCounts,
+		Warnings:              warnings,
+		RequestedBy:           req.RequestedBy,
+		RequestedAt:           req.RequestedAt,
+		CompletedAt:           time.Now().UTC(),
 	}
 
 	logger.Log("step 5/5: writing deterministic mode apply summary payload")
@@ -645,6 +646,7 @@ func normalizeNetBirdModeApplyJobRequest(input NetBirdModeApplyJobRequest) NetBi
 	input.APIToken = strings.TrimSpace(input.APIToken)
 	input.HostPeerID = strings.TrimSpace(input.HostPeerID)
 	input.AdminPeerIDs = normalizeStringList(input.AdminPeerIDs)
+	input.ModeBProjectIDs = normalizeUintList(input.ModeBProjectIDs)
 	input.RequestedBy.Login = strings.TrimSpace(input.RequestedBy.Login)
 	return input
 }

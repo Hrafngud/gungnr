@@ -18,11 +18,13 @@ func TestUpsertNetBirdModeConfig_PartialUpdatePreservesExistingFields(t *testing
 	apiToken := "token-old"
 	hostPeerID := "peer-host"
 	adminPeerIDs := []string{"peer-admin-1", "peer-admin-2"}
+	modeBProjectIDs := []uint{7, 3, 7}
 	if _, err := svc.UpsertNetBirdModeConfig(ctx, NetBirdModeConfigUpdate{
-		APIBaseURL:   &apiBaseURL,
-		APIToken:     &apiToken,
-		HostPeerID:   &hostPeerID,
-		AdminPeerIDs: &adminPeerIDs,
+		APIBaseURL:      &apiBaseURL,
+		APIToken:        &apiToken,
+		HostPeerID:      &hostPeerID,
+		AdminPeerIDs:    &adminPeerIDs,
+		ModeBProjectIDs: &modeBProjectIDs,
 	}); err != nil {
 		t.Fatalf("seed upsert failed: %v", err)
 	}
@@ -44,6 +46,9 @@ func TestUpsertNetBirdModeConfig_PartialUpdatePreservesExistingFields(t *testing
 	if len(updated.AdminPeerIDs) != 2 {
 		t.Fatalf("expected 2 admin peer ids, got %d", len(updated.AdminPeerIDs))
 	}
+	if len(updated.ModeBProjectIDs) != 2 || updated.ModeBProjectIDs[0] != 3 || updated.ModeBProjectIDs[1] != 7 {
+		t.Fatalf("expected normalized mode b project ids [3 7], got %v", updated.ModeBProjectIDs)
+	}
 	if !updated.APITokenSet {
 		t.Fatal("expected api token to remain set")
 	}
@@ -60,6 +65,9 @@ func TestUpsertNetBirdModeConfig_PartialUpdatePreservesExistingFields(t *testing
 	}
 	if len(stored.AdminPeerIDs) != 2 {
 		t.Fatalf("expected stored admin peers to be preserved, got %d", len(stored.AdminPeerIDs))
+	}
+	if len(stored.ModeBProjectIDs) != 2 || stored.ModeBProjectIDs[0] != 3 || stored.ModeBProjectIDs[1] != 7 {
+		t.Fatalf("expected stored mode b project ids [3 7], got %v", stored.ModeBProjectIDs)
 	}
 }
 

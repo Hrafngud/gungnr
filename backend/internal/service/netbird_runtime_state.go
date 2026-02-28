@@ -11,31 +11,44 @@ const (
 )
 
 type netBirdRuntimeState struct {
-	ConfiguredMode           NetBirdMode
-	ConfiguredModeKnown      bool
-	ConfiguredAllowLocalhost bool
-	EffectiveMode            NetBirdMode
-	EffectiveAllowLocalhost  bool
-	Source                   string
-	SourceJobID              uint
-	Drift                    bool
-	Warnings                 []string
+	ConfiguredMode            NetBirdMode
+	ConfiguredModeKnown       bool
+	ConfiguredAllowLocalhost  bool
+	ConfiguredModeBProjectIDs []uint
+	EffectiveMode             NetBirdMode
+	EffectiveAllowLocalhost   bool
+	EffectiveModeBProjectIDs  []uint
+	Source                    string
+	SourceJobID               uint
+	Drift                     bool
+	Warnings                  []string
 }
 
 func (s *NetBirdService) resolveNetBirdRuntimeState(ctx context.Context) netBirdRuntimeState {
 	configuredMode, configuredKnown := configuredNetBirdMode(s.cfg.NetBirdMode)
 	state := netBirdRuntimeState{
-		ConfiguredMode:           configuredMode,
-		ConfiguredModeKnown:      configuredKnown,
-		ConfiguredAllowLocalhost: s.cfg.NetBirdAllowLocalhost,
-		EffectiveMode:            configuredMode,
-		EffectiveAllowLocalhost:  s.cfg.NetBirdAllowLocalhost,
-		Source:                   netBirdModeSourceConfig,
-		Warnings:                 []string{},
+		ConfiguredMode:            configuredMode,
+		ConfiguredModeKnown:       configuredKnown,
+		ConfiguredAllowLocalhost:  s.cfg.NetBirdAllowLocalhost,
+		ConfiguredModeBProjectIDs: []uint{},
+		EffectiveMode:             configuredMode,
+		EffectiveAllowLocalhost:   s.cfg.NetBirdAllowLocalhost,
+		EffectiveModeBProjectIDs:  []uint{},
+		Source:                    netBirdModeSourceConfig,
+		Warnings:                  []string{},
 	}
 
 	if !configuredKnown {
 		state.Warnings = append(state.Warnings, "Configured mode is not valid; runtime assumed legacy mode.")
+	}
+	if s != nil && s.settings != nil {
+		cfg, err := s.settings.GetNetBirdModeConfig(ctx)
+		if err != nil {
+			state.Warnings = append(state.Warnings, fmt.Sprintf("Failed to load configured Mode B project assignments: %v", err))
+		} else {
+			state.ConfiguredModeBProjectIDs = normalizeUintList(cfg.ModeBProjectIDs)
+			state.EffectiveModeBProjectIDs = append([]uint(nil), state.ConfiguredModeBProjectIDs...)
+		}
 	}
 	if s == nil || s.jobs == nil {
 		return state
@@ -50,7 +63,7 @@ func (s *NetBirdService) resolveNetBirdRuntimeState(ctx context.Context) netBird
 		return state
 	}
 
-	mode, allowLocalhost, resolved, warning := runtimeStateFromSuccessfulSnapshot(snapshot)
+	mode, allowLocalhost, modeBProjectIDs, resolved, warning := runtimeStateFromSuccessfulSnapshot(snapshot)
 	if warning != "" {
 		state.Warnings = append(state.Warnings, warning)
 	}
@@ -60,19 +73,27 @@ func (s *NetBirdService) resolveNetBirdRuntimeState(ctx context.Context) netBird
 
 	state.EffectiveMode = mode
 	state.EffectiveAllowLocalhost = allowLocalhost
+	state.EffectiveModeBProjectIDs = normalizeUintList(modeBProjectIDs)
 	state.Source = netBirdModeSourceLastSuccessfulSync
 	state.SourceJobID = snapshot.Job.ID
 
-	if state.ConfiguredMode != state.EffectiveMode || state.ConfiguredAllowLocalhost != state.EffectiveAllowLocalhost {
+	modeBSelectionDrift := (state.ConfiguredMode == NetBirdModeB || state.EffectiveMode == NetBirdModeB) &&
+		!modeBProjectIDsEqual(state.ConfiguredModeBProjectIDs, state.EffectiveModeBProjectIDs)
+
+	if state.ConfiguredMode != state.EffectiveMode ||
+		state.ConfiguredAllowLocalhost != state.EffectiveAllowLocalhost ||
+		modeBSelectionDrift {
 		state.Drift = true
 		state.Warnings = append(
 			state.Warnings,
 			fmt.Sprintf(
-				"Configured mode state (%s, allowLocalhost=%t) differs from the latest successful apply (%s, allowLocalhost=%t).",
+				"Configured mode state (%s, allowLocalhost=%t, modeBProjectIds=%v) differs from the latest successful apply (%s, allowLocalhost=%t, modeBProjectIds=%v).",
 				state.ConfiguredMode,
 				state.ConfiguredAllowLocalhost,
+				state.ConfiguredModeBProjectIDs,
 				state.EffectiveMode,
 				state.EffectiveAllowLocalhost,
+				state.EffectiveModeBProjectIDs,
 			),
 		)
 	}
@@ -80,22 +101,36 @@ func (s *NetBirdService) resolveNetBirdRuntimeState(ctx context.Context) netBird
 	return state
 }
 
-func runtimeStateFromSuccessfulSnapshot(snapshot netBirdModeApplySnapshot) (NetBirdMode, bool, bool, string) {
+func runtimeStateFromSuccessfulSnapshot(snapshot netBirdModeApplySnapshot) (NetBirdMode, bool, []uint, bool, string) {
 	if snapshot.Summary != nil {
 		mode, err := ParseNetBirdMode(string(snapshot.Summary.TargetMode))
 		if err == nil {
-			return mode, snapshot.Summary.AllowLocalhost, true, ""
+			return mode, snapshot.Summary.AllowLocalhost, normalizeUintList(snapshot.Summary.TargetModeBProjectIDs), true, ""
 		}
-		return NetBirdModeLegacy, false, false, "Latest successful NetBird apply summary had an invalid target mode; runtime fallback uses configured mode."
+		return NetBirdModeLegacy, false, nil, false, "Latest successful NetBird apply summary had an invalid target mode; runtime fallback uses configured mode."
 	}
 
 	if snapshot.RequestParsed {
 		mode, err := ParseNetBirdMode(snapshot.Request.TargetMode)
 		if err == nil {
-			return mode, snapshot.Request.AllowLocalhost, true, "Latest successful NetBird apply summary was missing; runtime mode was derived from the successful request payload."
+			return mode, snapshot.Request.AllowLocalhost, normalizeUintList(snapshot.Request.ModeBProjectIDs), true, "Latest successful NetBird apply summary was missing; runtime mode was derived from the successful request payload."
 		}
-		return NetBirdModeLegacy, false, false, "Latest successful NetBird apply request had an invalid target mode; runtime fallback uses configured mode."
+		return NetBirdModeLegacy, false, nil, false, "Latest successful NetBird apply request had an invalid target mode; runtime fallback uses configured mode."
 	}
 
-	return NetBirdModeLegacy, false, false, "Latest successful NetBird apply payload could not be parsed; runtime fallback uses configured mode."
+	return NetBirdModeLegacy, false, nil, false, "Latest successful NetBird apply payload could not be parsed; runtime fallback uses configured mode."
+}
+
+func modeBProjectIDsEqual(left []uint, right []uint) bool {
+	l := normalizeUintList(left)
+	r := normalizeUintList(right)
+	if len(l) != len(r) {
+		return false
+	}
+	for i := range l {
+		if l[i] != r[i] {
+			return false
+		}
+	}
+	return true
 }

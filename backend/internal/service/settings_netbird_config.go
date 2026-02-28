@@ -13,24 +13,27 @@ import (
 )
 
 type NetBirdModeConfig struct {
-	APIBaseURL   string   `json:"apiBaseUrl,omitempty"`
-	APITokenSet  bool     `json:"apiTokenSet"`
-	HostPeerID   string   `json:"hostPeerId,omitempty"`
-	AdminPeerIDs []string `json:"adminPeerIds"`
+	APIBaseURL      string   `json:"apiBaseUrl,omitempty"`
+	APITokenSet     bool     `json:"apiTokenSet"`
+	HostPeerID      string   `json:"hostPeerId,omitempty"`
+	AdminPeerIDs    []string `json:"adminPeerIds"`
+	ModeBProjectIDs []uint   `json:"modeBProjectIds"`
 }
 
 type NetBirdModeConfigUpdate struct {
-	APIBaseURL   *string   `json:"apiBaseUrl,omitempty"`
-	APIToken     *string   `json:"apiToken,omitempty"`
-	HostPeerID   *string   `json:"hostPeerId,omitempty"`
-	AdminPeerIDs *[]string `json:"adminPeerIds,omitempty"`
+	APIBaseURL      *string   `json:"apiBaseUrl,omitempty"`
+	APIToken        *string   `json:"apiToken,omitempty"`
+	HostPeerID      *string   `json:"hostPeerId,omitempty"`
+	AdminPeerIDs    *[]string `json:"adminPeerIds,omitempty"`
+	ModeBProjectIDs *[]uint   `json:"modeBProjectIds,omitempty"`
 }
 
 type netBirdStoredConfig struct {
-	APIBaseURL   string   `json:"apiBaseUrl,omitempty"`
-	APIToken     string   `json:"apiToken,omitempty"`
-	HostPeerID   string   `json:"hostPeerId,omitempty"`
-	AdminPeerIDs []string `json:"adminPeerIds,omitempty"`
+	APIBaseURL      string   `json:"apiBaseUrl,omitempty"`
+	APIToken        string   `json:"apiToken,omitempty"`
+	HostPeerID      string   `json:"hostPeerId,omitempty"`
+	AdminPeerIDs    []string `json:"adminPeerIds,omitempty"`
+	ModeBProjectIDs []uint   `json:"modeBProjectIds,omitempty"`
 }
 
 func (s *SettingsService) GetNetBirdModeConfig(ctx context.Context) (NetBirdModeConfig, error) {
@@ -68,6 +71,9 @@ func (s *SettingsService) UpsertNetBirdModeConfig(ctx context.Context, input Net
 	}
 	if input.AdminPeerIDs != nil {
 		next.AdminPeerIDs = normalizeStringList(*input.AdminPeerIDs)
+	}
+	if input.ModeBProjectIDs != nil {
+		next.ModeBProjectIDs = normalizeUintList(*input.ModeBProjectIDs)
 	}
 	if input.APIToken != nil {
 		next.APIToken = strings.TrimSpace(*input.APIToken)
@@ -109,18 +115,18 @@ func (s *SettingsService) ResolveNetBirdModeApplyRequest(ctx context.Context, in
 		request.AdminPeerIDs = append([]string(nil), stored.AdminPeerIDs...)
 		usedStored = true
 	}
-
 	return NormalizeNetBirdModeApplyRequest(request), usedStored, nil
 }
 
 func (s *SettingsService) ResolveNetBirdModeApplyJobRequest(ctx context.Context, input NetBirdModeApplyJobRequest) (NetBirdModeApplyRequest, bool, error) {
 	resolved, usedStored, err := s.ResolveNetBirdModeApplyRequest(ctx, NetBirdModeApplyRequest{
-		TargetMode:     input.TargetMode,
-		AllowLocalhost: input.AllowLocalhost,
-		APIBaseURL:     input.APIBaseURL,
-		APIToken:       input.APIToken,
-		HostPeerID:     input.HostPeerID,
-		AdminPeerIDs:   input.AdminPeerIDs,
+		TargetMode:      input.TargetMode,
+		AllowLocalhost:  input.AllowLocalhost,
+		APIBaseURL:      input.APIBaseURL,
+		APIToken:        input.APIToken,
+		HostPeerID:      input.HostPeerID,
+		AdminPeerIDs:    input.AdminPeerIDs,
+		ModeBProjectIDs: input.ModeBProjectIDs,
 	})
 	if err != nil {
 		return NetBirdModeApplyRequest{}, false, err
@@ -149,19 +155,21 @@ func (s *SettingsService) loadNetBirdStoredConfig(ctx context.Context) (netBirdS
 func netBirdModeConfigView(stored netBirdStoredConfig) NetBirdModeConfig {
 	normalized := normalizeStoredNetBirdConfig(stored)
 	return NetBirdModeConfig{
-		APIBaseURL:   normalized.APIBaseURL,
-		APITokenSet:  normalized.APIToken != "",
-		HostPeerID:   normalized.HostPeerID,
-		AdminPeerIDs: append([]string(nil), normalized.AdminPeerIDs...),
+		APIBaseURL:      normalized.APIBaseURL,
+		APITokenSet:     normalized.APIToken != "",
+		HostPeerID:      normalized.HostPeerID,
+		AdminPeerIDs:    append([]string(nil), normalized.AdminPeerIDs...),
+		ModeBProjectIDs: normalizeUintList(normalized.ModeBProjectIDs),
 	}
 }
 
 func normalizeStoredNetBirdConfig(input netBirdStoredConfig) netBirdStoredConfig {
 	return netBirdStoredConfig{
-		APIBaseURL:   strings.TrimSpace(input.APIBaseURL),
-		APIToken:     strings.TrimSpace(input.APIToken),
-		HostPeerID:   strings.TrimSpace(input.HostPeerID),
-		AdminPeerIDs: normalizeStringList(input.AdminPeerIDs),
+		APIBaseURL:      strings.TrimSpace(input.APIBaseURL),
+		APIToken:        strings.TrimSpace(input.APIToken),
+		HostPeerID:      strings.TrimSpace(input.HostPeerID),
+		AdminPeerIDs:    normalizeStringList(input.AdminPeerIDs),
+		ModeBProjectIDs: normalizeUintList(input.ModeBProjectIDs),
 	}
 }
 
@@ -188,7 +196,7 @@ func decodeStoredNetBirdConfig(secret, encrypted string) (netBirdStoredConfig, e
 
 func encodeStoredNetBirdConfig(secret string, config netBirdStoredConfig) (string, error) {
 	normalized := normalizeStoredNetBirdConfig(config)
-	if normalized.APIBaseURL == "" && normalized.APIToken == "" && normalized.HostPeerID == "" && len(normalized.AdminPeerIDs) == 0 {
+	if normalized.APIBaseURL == "" && normalized.APIToken == "" && normalized.HostPeerID == "" && len(normalized.AdminPeerIDs) == 0 && len(normalized.ModeBProjectIDs) == 0 {
 		return "", nil
 	}
 

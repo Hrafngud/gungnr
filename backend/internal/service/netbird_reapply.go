@@ -40,10 +40,15 @@ func (s *NetBirdService) ReapplyPolicies(ctx context.Context, input NetBirdPolic
 	if err != nil {
 		return NetBirdPolicyReapplySummary{}, errs.Wrap(errs.CodeNetBirdReapplyFailed, "failed to load netbird policy reapply project catalog", err)
 	}
+	runtimeModeProjects := []NetBirdProjectCatalogInput{}
+	runtimeProjectWarnings := []string{}
+	if currentMode == NetBirdModeB {
+		runtimeModeProjects, runtimeProjectWarnings = selectModeBProjects(projectInputs, runtimeState.EffectiveModeBProjectIDs)
+	}
 	catalog := BuildNetBirdCatalog(NetBirdCatalogInput{
 		Mode:      currentMode,
 		PanelPort: panelPort,
-		Projects:  projectInputs,
+		Projects:  runtimeModeProjects,
 	})
 
 	warnings := make([]string, 0, 7+len(projectWarnings)+len(runtimeState.Warnings))
@@ -55,6 +60,7 @@ func (s *NetBirdService) ReapplyPolicies(ctx context.Context, input NetBirdPolic
 		warnings = append(warnings, "Panel port was not a valid integer; policy reapply used default port 8080.")
 	}
 	warnings = append(warnings, projectWarnings...)
+	warnings = append(warnings, runtimeProjectWarnings...)
 
 	if netBirdReapplyNeedsContext(currentMode, request) {
 		snapshot, err := s.latestModeApplySnapshot(ctx)
