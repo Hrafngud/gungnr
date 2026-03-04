@@ -19,13 +19,14 @@ import (
 )
 
 type ProjectsController struct {
-	service *service.ProjectService
-	archive *service.ProjectArchiveService
-	runtime *service.ProjectRuntimeService
-	env     *service.ProjectEnvService
-	host    *service.HostService
-	jobs    *service.JobService
-	audit   *service.AuditService
+	service   *service.ProjectService
+	archive   *service.ProjectArchiveService
+	runtime   *service.ProjectRuntimeService
+	workbench *service.WorkbenchService
+	env       *service.ProjectEnvService
+	host      *service.HostService
+	jobs      *service.JobService
+	audit     *service.AuditService
 }
 
 type projectResponse struct {
@@ -65,19 +66,21 @@ func NewProjectsController(
 	service *service.ProjectService,
 	archive *service.ProjectArchiveService,
 	runtime *service.ProjectRuntimeService,
+	workbench *service.WorkbenchService,
 	env *service.ProjectEnvService,
 	host *service.HostService,
 	jobs *service.JobService,
 	audit *service.AuditService,
 ) *ProjectsController {
 	return &ProjectsController{
-		service: service,
-		archive: archive,
-		runtime: runtime,
-		env:     env,
-		host:    host,
-		jobs:    jobs,
-		audit:   audit,
+		service:   service,
+		archive:   archive,
+		runtime:   runtime,
+		workbench: workbench,
+		env:       env,
+		host:      host,
+		jobs:      jobs,
+		audit:     audit,
 	}
 }
 
@@ -159,6 +162,31 @@ func (c *ProjectsController) Detail(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, detail)
+}
+
+// Workbench returns the read-only Workbench snapshot contract.
+// Success envelope example:
+// {"stack":{"project":{"name":"sample","normalizedName":"sample","path":"/templates/sample","composePath":"/templates/sample/docker-compose.yml"},"modelVersion":1,"revision":0,"sourceFingerprint":null,"services":[],"ports":[],"resources":[],"modules":[],"warnings":[]}}
+// Storage failure envelope example:
+// {"code":"WB-500-STORAGE","message":"failed to load project workbench snapshot","error":"failed to load project workbench snapshot"}
+func (c *ProjectsController) Workbench(ctx *gin.Context) {
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.workbench == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeWorkbenchStorageFailed, "workbench service unavailable", nil)
+		return
+	}
+
+	snapshot, err := c.workbench.GetSnapshot(ctx.Request.Context(), project)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		apierror.RespondWithError(ctx, status, err, errs.CodeWorkbenchStorageFailed, "failed to load project workbench snapshot")
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"stack": snapshot})
 }
 
 func (c *ProjectsController) ListJobs(ctx *gin.Context) {

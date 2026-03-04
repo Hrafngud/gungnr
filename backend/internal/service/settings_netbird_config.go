@@ -2,14 +2,7 @@ package service
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"strings"
-
-	"go-notes/internal/models"
-	"go-notes/internal/repository"
-	"go-notes/internal/utils/cryptox"
 )
 
 type NetBirdModeConfig struct {
@@ -45,21 +38,14 @@ func (s *SettingsService) GetNetBirdModeConfig(ctx context.Context) (NetBirdMode
 }
 
 func (s *SettingsService) UpsertNetBirdModeConfig(ctx context.Context, input NetBirdModeConfigUpdate) (NetBirdModeConfig, error) {
-	stored, err := s.repo.Get(ctx)
+	blob, stored, err := s.loadSecureSettingsBlob(ctx)
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			stored = &models.Settings{}
-		} else {
-			return NetBirdModeConfig{}, err
-		}
-	}
-	if stored == nil {
-		stored = &models.Settings{}
+		return NetBirdModeConfig{}, err
 	}
 
-	current, err := decodeStoredNetBirdConfig(s.cfg.SessionSecret, stored.NetBirdConfigEncrypted)
-	if err != nil {
-		return NetBirdModeConfig{}, fmt.Errorf("decode stored netbird config: %w", err)
+	current := netBirdStoredConfig{}
+	if blob.NetBird != nil {
+		current = *blob.NetBird
 	}
 
 	next := current
@@ -79,13 +65,15 @@ func (s *SettingsService) UpsertNetBirdModeConfig(ctx context.Context, input Net
 		next.APIToken = strings.TrimSpace(*input.APIToken)
 	}
 
-	encoded, err := encodeStoredNetBirdConfig(s.cfg.SessionSecret, next)
-	if err != nil {
-		return NetBirdModeConfig{}, err
+	next = normalizeStoredNetBirdConfig(next)
+	if isEmptyNetBirdStoredConfig(next) {
+		blob.NetBird = nil
+	} else {
+		copyConfig := next
+		blob.NetBird = &copyConfig
 	}
-	stored.NetBirdConfigEncrypted = encoded
 
-	if err := s.repo.Save(ctx, stored); err != nil {
+	if err := s.saveSecureSettingsBlob(ctx, stored, blob); err != nil {
 		return NetBirdModeConfig{}, err
 	}
 	return netBirdModeConfigView(next), nil
@@ -135,21 +123,14 @@ func (s *SettingsService) ResolveNetBirdModeApplyJobRequest(ctx context.Context,
 }
 
 func (s *SettingsService) loadNetBirdStoredConfig(ctx context.Context) (netBirdStoredConfig, bool, error) {
-	stored, err := s.repo.Get(ctx)
+	blob, _, err := s.loadSecureSettingsBlob(ctx)
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return netBirdStoredConfig{}, false, nil
-		}
 		return netBirdStoredConfig{}, false, err
 	}
-	if stored == nil {
+	if blob.NetBird == nil {
 		return netBirdStoredConfig{}, false, nil
 	}
-	config, err := decodeStoredNetBirdConfig(s.cfg.SessionSecret, stored.NetBirdConfigEncrypted)
-	if err != nil {
-		return netBirdStoredConfig{}, false, fmt.Errorf("decode stored netbird config: %w", err)
-	}
-	return config, true, nil
+	return normalizeStoredNetBirdConfig(*blob.NetBird), true, nil
 }
 
 func netBirdModeConfigView(stored netBirdStoredConfig) NetBirdModeConfig {
@@ -174,39 +155,22 @@ func normalizeStoredNetBirdConfig(input netBirdStoredConfig) netBirdStoredConfig
 }
 
 func decodeStoredNetBirdConfig(secret, encrypted string) (netBirdStoredConfig, error) {
-	trimmed := strings.TrimSpace(encrypted)
-	if trimmed == "" {
-		return netBirdStoredConfig{}, nil
-	}
-
-	raw, err := cryptox.DecryptWithSecret(secret, trimmed)
+	blob, err := decodeSettingsSecureBlob(secret, encrypted)
 	if err != nil {
 		return netBirdStoredConfig{}, err
 	}
-	if strings.TrimSpace(raw) == "" {
+	if blob.NetBird == nil {
 		return netBirdStoredConfig{}, nil
 	}
-
-	var parsed netBirdStoredConfig
-	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-		return netBirdStoredConfig{}, fmt.Errorf("unmarshal netbird config: %w", err)
-	}
-	return normalizeStoredNetBirdConfig(parsed), nil
+	return normalizeStoredNetBirdConfig(*blob.NetBird), nil
 }
 
 func encodeStoredNetBirdConfig(secret string, config netBirdStoredConfig) (string, error) {
 	normalized := normalizeStoredNetBirdConfig(config)
-	if normalized.APIBaseURL == "" && normalized.APIToken == "" && normalized.HostPeerID == "" && len(normalized.AdminPeerIDs) == 0 && len(normalized.ModeBProjectIDs) == 0 {
-		return "", nil
+	blob := settingsSecureBlob{}
+	if !isEmptyNetBirdStoredConfig(normalized) {
+		copyConfig := normalized
+		blob.NetBird = &copyConfig
 	}
-
-	raw, err := json.Marshal(normalized)
-	if err != nil {
-		return "", fmt.Errorf("marshal netbird config: %w", err)
-	}
-	encrypted, err := cryptox.EncryptWithSecret(secret, string(raw))
-	if err != nil {
-		return "", fmt.Errorf("encrypt netbird config: %w", err)
-	}
-	return encrypted, nil
+	return encodeSettingsSecureBlob(secret, blob)
 }

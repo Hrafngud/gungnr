@@ -191,6 +191,7 @@ const (
 	CodeProjectEnvReadFailed     Code = "PROJECT-500-ENV-READ"
 	CodeProjectEnvWriteFailed    Code = "PROJECT-500-ENV-WRITE"
 	CodeProjectEnvTooLarge       Code = "PROJECT-400-ENV-SIZE"
+	CodeWorkbenchStorageFailed   Code = "WB-500-STORAGE"
 
 	CodeRBACSuperUserCap Code = "RBAC-409-SUPERUSER-CAP"
 

@@ -71,6 +71,55 @@ func TestUpsertNetBirdModeConfig_PartialUpdatePreservesExistingFields(t *testing
 	}
 }
 
+func TestUpsertNetBirdModeConfig_PreservesWorkbenchSnapshotsInSecureBlob(t *testing.T) {
+	ctx := context.Background()
+	repo := &fakeSettingsRepo{}
+	secret := "test-session-secret"
+	svc := NewSettingsService(config.Config{SessionSecret: secret}, repo)
+
+	seed, err := encodeSettingsSecureBlob(secret, settingsSecureBlob{
+		WorkbenchSnapshots: map[string]workbenchStoredSnapshot{
+			"alpha": {
+				ModelVersion: 1,
+				Revision:     2,
+				Services: []WorkbenchSnapshotService{
+					{ServiceName: "api"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed blob encode failed: %v", err)
+	}
+	repo.settings = &models.Settings{NetBirdConfigEncrypted: seed}
+
+	apiToken := "token-new"
+	updated, err := svc.UpsertNetBirdModeConfig(ctx, NetBirdModeConfigUpdate{
+		APIToken: &apiToken,
+	})
+	if err != nil {
+		t.Fatalf("upsert failed: %v", err)
+	}
+	if !updated.APITokenSet {
+		t.Fatal("expected api token to be set")
+	}
+
+	blob, err := decodeSettingsSecureBlob(secret, repo.settings.NetBirdConfigEncrypted)
+	if err != nil {
+		t.Fatalf("decode blob failed: %v", err)
+	}
+	snapshot, ok := blob.WorkbenchSnapshots["alpha"]
+	if !ok {
+		t.Fatal("expected workbench snapshot alpha to be preserved")
+	}
+	if snapshot.Revision != 2 {
+		t.Fatalf("expected preserved revision 2, got %d", snapshot.Revision)
+	}
+	if len(snapshot.Services) != 1 || snapshot.Services[0].ServiceName != "api" {
+		t.Fatalf("expected preserved services [api], got %+v", snapshot.Services)
+	}
+}
+
 type fakeSettingsRepo struct {
 	settings *models.Settings
 }
