@@ -96,6 +96,37 @@ func (s *WorkbenchService) ResolveComposeSourceWithLock(
 	return source, release, nil
 }
 
+func (s *WorkbenchService) ParseComposeCore(ctx context.Context, projectName string) (WorkbenchComposeParseResult, error) {
+	source, release, err := s.ResolveComposeSourceWithLock(ctx, projectName)
+	if err != nil {
+		return WorkbenchComposeParseResult{}, err
+	}
+	defer release()
+
+	return s.ParseComposeCoreFromSource(source)
+}
+
+func (s *WorkbenchService) ParseComposeCoreFromSource(source WorkbenchComposeSource) (WorkbenchComposeParseResult, error) {
+	result, err := ParseWorkbenchComposeCore(source.Normalized)
+	if err != nil {
+		return WorkbenchComposeParseResult{}, errs.WithDetails(
+			errs.Wrap(errs.CodeWorkbenchSourceInvalid, "failed to parse compose source", err),
+			map[string]any{
+				"project":     source.ProjectName,
+				"projectPath": source.ProjectDir,
+				"composePath": source.ComposePath,
+				"fingerprint": source.Fingerprint,
+			},
+		)
+	}
+
+	result.ProjectName = source.ProjectName
+	result.ProjectDir = source.ProjectDir
+	result.ComposePath = source.ComposePath
+	result.SourceFingerprint = source.Fingerprint
+	return result, nil
+}
+
 func normalizeWorkbenchProjectName(projectName string) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(projectName))
 	if err := ValidateProjectName(normalized); err != nil {
