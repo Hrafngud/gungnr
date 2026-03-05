@@ -28,14 +28,27 @@ type WorkbenchComposeSource struct {
 type WorkbenchService struct {
 	templatesDir    string
 	projects        repository.ProjectRepository
+	settings        repository.SettingsRepository
+	sessionSecret   string
 	lockManager     *workbenchProjectLockManager
 	lockWaitTimeout time.Duration
 }
 
 func NewWorkbenchService(templatesDir string, projects repository.ProjectRepository) *WorkbenchService {
+	return NewWorkbenchServiceWithStorage(templatesDir, projects, nil, "")
+}
+
+func NewWorkbenchServiceWithStorage(
+	templatesDir string,
+	projects repository.ProjectRepository,
+	settings repository.SettingsRepository,
+	sessionSecret string,
+) *WorkbenchService {
 	return &WorkbenchService{
 		templatesDir:    strings.TrimSpace(templatesDir),
 		projects:        projects,
+		settings:        settings,
+		sessionSecret:   strings.TrimSpace(sessionSecret),
 		lockManager:     newWorkbenchProjectLockManager(),
 		lockWaitTimeout: defaultWorkbenchLockWaitTimeout,
 	}

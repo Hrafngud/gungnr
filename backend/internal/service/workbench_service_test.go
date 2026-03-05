@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"go-notes/internal/config"
 	"go-notes/internal/errs"
 	"go-notes/internal/models"
 )
@@ -188,23 +189,61 @@ func TestWorkbenchParseComposeCoreFromProject(t *testing.T) {
 name: demo
 x-meta:
   owner: "${OWNER}"
+networks:
+  edge:
+    driver: bridge
+  backplane: {}
+volumes:
+  cache: {}
+  pgdata:
+    external: false
 services:
   db:
     build:
       context: "./db"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: "512M"
+        reservations:
+          cpus: "0.25"
+          memory: "256M"
     env_file:
       - ".env"
       - "${DB_ENV_FILE}"
+    networks:
+      - backplane
     ports:
       - "5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - type: volume
+        source: cache
+        target: /cache
+      - ./local:/tmp/local
   api:
     image: "ghcr.io/demo/api:${API_TAG:-latest}"
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "${API_CPU_LIMIT:-1.00}"
+        reservations:
+          memory: "256M"
+      placement:
+        constraints:
+          - node.role==manager
     depends_on:
       redis:
         condition: service_started
       db:
         condition: service_healthy
+    networks:
+      edge:
+        aliases:
+          - api-internal
+      backplane: {}
     ports:
       - "127.0.0.1:8080:80/tcp"
       - target: 8443
@@ -214,6 +253,8 @@ services:
     environment:
       APP_ENV: "${APP_ENV:-dev}"
       API_URL: "http://${API_HOST}:8080"
+    volumes:
+      - cache:/srv/cache:rw
     command: ["serve"]
 `
 	if err := os.WriteFile(filepath.Join(projectDir, "docker-compose.yml"), []byte(compose), 0o644); err != nil {
@@ -278,11 +319,57 @@ services:
 		t.Fatalf("unexpected third parsed port: %#v", parsed.Ports[2])
 	}
 
+	if got, want := len(parsed.Resources), 2; got != want {
+		t.Fatalf("expected %d resources, got %d", want, got)
+	}
+	if parsed.Resources[0] != (WorkbenchComposeResource{
+		ServiceName:       "api",
+		LimitCPUs:         "${API_CPU_LIMIT:-1.00}",
+		ReservationMemory: "256M",
+	}) {
+		t.Fatalf("unexpected api resources: %#v", parsed.Resources[0])
+	}
+	if parsed.Resources[1] != (WorkbenchComposeResource{
+		ServiceName:       "db",
+		LimitCPUs:         "0.50",
+		LimitMemory:       "512M",
+		ReservationCPUs:   "0.25",
+		ReservationMemory: "256M",
+	}) {
+		t.Fatalf("unexpected db resources: %#v", parsed.Resources[1])
+	}
+
+	if got, want := len(parsed.NetworkRefs), 3; got != want {
+		t.Fatalf("expected %d network refs, got %d", want, got)
+	}
+	if parsed.NetworkRefs[0] != (WorkbenchComposeNetworkRef{ServiceName: "api", NetworkName: "backplane"}) {
+		t.Fatalf("unexpected first network ref: %#v", parsed.NetworkRefs[0])
+	}
+	if parsed.NetworkRefs[1] != (WorkbenchComposeNetworkRef{ServiceName: "api", NetworkName: "edge"}) {
+		t.Fatalf("unexpected second network ref: %#v", parsed.NetworkRefs[1])
+	}
+	if parsed.NetworkRefs[2] != (WorkbenchComposeNetworkRef{ServiceName: "db", NetworkName: "backplane"}) {
+		t.Fatalf("unexpected third network ref: %#v", parsed.NetworkRefs[2])
+	}
+
+	if got, want := len(parsed.VolumeRefs), 3; got != want {
+		t.Fatalf("expected %d volume refs, got %d", want, got)
+	}
+	if parsed.VolumeRefs[0] != (WorkbenchComposeVolumeRef{ServiceName: "api", VolumeName: "cache"}) {
+		t.Fatalf("unexpected first volume ref: %#v", parsed.VolumeRefs[0])
+	}
+	if parsed.VolumeRefs[1] != (WorkbenchComposeVolumeRef{ServiceName: "db", VolumeName: "cache"}) {
+		t.Fatalf("unexpected second volume ref: %#v", parsed.VolumeRefs[1])
+	}
+	if parsed.VolumeRefs[2] != (WorkbenchComposeVolumeRef{ServiceName: "db", VolumeName: "pgdata"}) {
+		t.Fatalf("unexpected third volume ref: %#v", parsed.VolumeRefs[2])
+	}
+
 	variables := make(map[string]bool, len(parsed.EnvRefs))
 	for _, ref := range parsed.EnvRefs {
 		variables[ref.Variable] = true
 	}
-	for _, variable := range []string{"API_TAG", "API_TLS_PORT", "APP_ENV", "API_HOST", "DB_ENV_FILE"} {
+	for _, variable := range []string{"API_TAG", "API_TLS_PORT", "APP_ENV", "API_HOST", "DB_ENV_FILE", "API_CPU_LIMIT"} {
 		if !variables[variable] {
 			t.Fatalf("expected env ref variable %q to be extracted", variable)
 		}
@@ -294,26 +381,64 @@ services:
 	if parsed.Warnings[0].Code == "" || parsed.Warnings[0].Path == "" {
 		t.Fatalf("expected warning code/path fields, got %#v", parsed.Warnings[0])
 	}
+	if !containsWorkbenchWarningCode(parsed.Warnings, workbenchWarningPassThrough) {
+		t.Fatalf("expected pass-through warning code %q in warnings: %#v", workbenchWarningPassThrough, parsed.Warnings)
+	}
 }
 
 func TestParseWorkbenchComposeCoreDeterministicOrdering(t *testing.T) {
 	t.Parallel()
 
 	source := `
+networks:
+  edge:
+    driver: bridge
+  data: {}
+volumes:
+  cache:
+    labels:
+      managed-by: wb
+  pgdata: {}
 services:
   worker:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: "384M"
+        reservations:
+          memory: "128M"
+    networks:
+      - data
     ports:
       - "127.0.0.1:9100:9000/udp"
       - "9001"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
   api:
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+      placement:
+        constraints:
+          - node.role==manager
     depends_on:
       - db
       - redis
+    networks:
+      edge:
+        aliases:
+          - api
     ports:
       - "8080:80"
       - target: 443
         published: "8443"
+    volumes:
+      - cache:/srv/cache
   db:
+    networks:
+      - data
     ports:
       - "5432"
 `
@@ -389,6 +514,149 @@ services:
 			t.Fatalf("did not expect invalid port warning for valid $VAR interpolation: %#v", warning)
 		}
 	}
+}
+
+func TestWorkbenchImportComposeSnapshotIdempotentOnUnchangedSource(t *testing.T) {
+	t.Parallel()
+
+	templatesDir := t.TempDir()
+	projectDir := filepath.Join(templatesDir, "demo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+
+	composePath := filepath.Join(projectDir, "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte("services:\n  app:\n    image: nginx:1.25\n"), 0o644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+
+	settingsRepo := &fakeSettingsRepo{}
+	svc := NewWorkbenchServiceWithStorage(templatesDir, nil, settingsRepo, "test-session-secret")
+
+	first, changed, err := svc.ImportComposeSnapshot(context.Background(), "demo", "manual")
+	if err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected first import to report changed=true")
+	}
+	if first.Revision != 1 {
+		t.Fatalf("expected first revision=1, got %d", first.Revision)
+	}
+	if first.SourceFingerprint == "" {
+		t.Fatal("expected fingerprint on first import")
+	}
+
+	second, changed, err := svc.ImportComposeSnapshot(context.Background(), "demo", "manual")
+	if err != nil {
+		t.Fatalf("second import: %v", err)
+	}
+	if changed {
+		t.Fatal("expected unchanged import to report changed=false")
+	}
+	if second.Revision != first.Revision {
+		t.Fatalf("expected unchanged revision=%d, got %d", first.Revision, second.Revision)
+	}
+	if second.SourceFingerprint != first.SourceFingerprint {
+		t.Fatalf("expected unchanged fingerprint=%q, got %q", first.SourceFingerprint, second.SourceFingerprint)
+	}
+
+	if err := os.WriteFile(composePath, []byte("services:\n  app:\n    image: nginx:1.26\n"), 0o644); err != nil {
+		t.Fatalf("rewrite compose: %v", err)
+	}
+
+	third, changed, err := svc.ImportComposeSnapshot(context.Background(), "demo", "manual")
+	if err != nil {
+		t.Fatalf("third import after compose change: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected changed import after compose mutation")
+	}
+	if third.Revision != 2 {
+		t.Fatalf("expected revision=2 after source change, got %d", third.Revision)
+	}
+	if third.SourceFingerprint == first.SourceFingerprint {
+		t.Fatalf("expected changed fingerprint, both were %q", third.SourceFingerprint)
+	}
+}
+
+func TestWorkbenchImportAndNetBirdConfigShareSettingsPayload(t *testing.T) {
+	t.Parallel()
+
+	templatesDir := t.TempDir()
+	projectDir := filepath.Join(templatesDir, "demo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "docker-compose.yml"), []byte("services:\n  app:\n    image: nginx:1.25\n"), 0o644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+
+	settingsRepo := &fakeSettingsRepo{}
+	settingsService := NewSettingsService(config.Config{SessionSecret: "test-session-secret"}, settingsRepo)
+	workbenchService := NewWorkbenchServiceWithStorage(templatesDir, nil, settingsRepo, "test-session-secret")
+
+	apiBaseURL := "https://api.netbird.example"
+	apiToken := "token-1"
+	hostPeerID := "peer-host"
+	adminPeerIDs := []string{"peer-admin-1", "peer-admin-2"}
+	if _, err := settingsService.UpsertNetBirdModeConfig(context.Background(), NetBirdModeConfigUpdate{
+		APIBaseURL:   &apiBaseURL,
+		APIToken:     &apiToken,
+		HostPeerID:   &hostPeerID,
+		AdminPeerIDs: &adminPeerIDs,
+	}); err != nil {
+		t.Fatalf("seed netbird config: %v", err)
+	}
+
+	first, changed, err := workbenchService.ImportComposeSnapshot(context.Background(), "demo", "manual")
+	if err != nil {
+		t.Fatalf("workbench import: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected first workbench import to report changed=true")
+	}
+
+	apiTokenRotated := "token-2"
+	if _, err := settingsService.UpsertNetBirdModeConfig(context.Background(), NetBirdModeConfigUpdate{
+		APIToken: &apiTokenRotated,
+	}); err != nil {
+		t.Fatalf("rotate netbird token: %v", err)
+	}
+
+	netbirdConfig, err := settingsService.GetNetBirdModeConfig(context.Background())
+	if err != nil {
+		t.Fatalf("load netbird config: %v", err)
+	}
+	if !netbirdConfig.APITokenSet {
+		t.Fatal("expected netbird token to remain configured")
+	}
+	if netbirdConfig.APIBaseURL != apiBaseURL {
+		t.Fatalf("expected api base url %q, got %q", apiBaseURL, netbirdConfig.APIBaseURL)
+	}
+	if netbirdConfig.HostPeerID != hostPeerID {
+		t.Fatalf("expected host peer id %q, got %q", hostPeerID, netbirdConfig.HostPeerID)
+	}
+
+	second, changed, err := workbenchService.ImportComposeSnapshot(context.Background(), "demo", "manual")
+	if err != nil {
+		t.Fatalf("second workbench import after netbird update: %v", err)
+	}
+	if changed {
+		t.Fatal("expected unchanged workbench import after netbird-only settings update")
+	}
+	if second.Revision != first.Revision {
+		t.Fatalf("expected revision to stay at %d, got %d", first.Revision, second.Revision)
+	}
+}
+
+func containsWorkbenchWarningCode(warnings []WorkbenchComposeWarning, code string) bool {
+	for _, warning := range warnings {
+		if warning.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 type fakeWorkbenchProjectRepo struct{}
