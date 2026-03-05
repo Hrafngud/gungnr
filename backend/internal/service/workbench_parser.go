@@ -43,12 +43,14 @@ type WorkbenchComposeDependency struct {
 }
 
 type WorkbenchComposePort struct {
-	ServiceName   string `json:"serviceName"`
-	ContainerPort int    `json:"containerPort"`
-	HostPort      *int   `json:"hostPort,omitempty"`
-	HostPortRaw   string `json:"hostPortRaw,omitempty"`
-	Protocol      string `json:"protocol"`
-	HostIP        string `json:"hostIp,omitempty"`
+	ServiceName        string `json:"serviceName"`
+	ContainerPort      int    `json:"containerPort"`
+	HostPort           *int   `json:"hostPort,omitempty"`
+	HostPortRaw        string `json:"hostPortRaw,omitempty"`
+	Protocol           string `json:"protocol"`
+	HostIP             string `json:"hostIp,omitempty"`
+	AssignmentStrategy string `json:"assignmentStrategy,omitempty"`
+	AllocationStatus   string `json:"allocationStatus,omitempty"`
 }
 
 type WorkbenchComposeResource struct {

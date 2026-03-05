@@ -29,6 +29,24 @@ type workbenchHostBinding struct {
 	protocol    string
 }
 
+const (
+	workbenchValidationClassSchema       = "schema"
+	workbenchValidationClassDependency   = "dependency"
+	workbenchValidationClassPortConflict = "port_conflict"
+)
+
+type WorkbenchValidationIssue struct {
+	Class      string `json:"class"`
+	Code       string `json:"code"`
+	Path       string `json:"path"`
+	Message    string `json:"message"`
+	Service    string `json:"service,omitempty"`
+	Dependency string `json:"dependency,omitempty"`
+	Protocol   string `json:"protocol,omitempty"`
+	HostIP     string `json:"hostIp,omitempty"`
+	HostPort   string `json:"hostPort,omitempty"`
+}
+
 func (s *WorkbenchService) GenerateComposeFromStoredSnapshot(
 	ctx context.Context,
 	projectName string,
@@ -63,6 +81,40 @@ func (s *WorkbenchService) GenerateComposeFromStoredSnapshot(
 	}
 
 	return snapshot, compose, nil
+}
+
+func (s *WorkbenchService) ValidateStoredSnapshotForCompose(
+	ctx context.Context,
+	projectName string,
+) (WorkbenchStackSnapshot, error) {
+	normalizedProject, err := normalizeWorkbenchProjectName(projectName)
+	if err != nil {
+		return WorkbenchStackSnapshot{}, err
+	}
+
+	release, err := s.AcquireProjectLock(ctx, normalizedProject)
+	if err != nil {
+		return WorkbenchStackSnapshot{}, err
+	}
+	defer release()
+
+	snapshot, exists, err := s.loadStoredWorkbenchSnapshot(ctx, normalizedProject)
+	if err != nil {
+		return WorkbenchStackSnapshot{}, err
+	}
+	if !exists {
+		return WorkbenchStackSnapshot{}, errs.WithDetails(
+			errs.New(errs.CodeWorkbenchSourceNotFound, fmt.Sprintf("workbench snapshot not found for project %q", normalizedProject)),
+			map[string]any{
+				"project": normalizedProject,
+			},
+		)
+	}
+
+	if _, err := buildWorkbenchComposeGenerationModel(snapshot); err != nil {
+		return WorkbenchStackSnapshot{}, err
+	}
+	return snapshot, nil
 }
 
 func generateWorkbenchCompose(snapshot WorkbenchStackSnapshot) (string, error) {
@@ -179,16 +231,43 @@ func buildWorkbenchComposeGenerationModel(snapshot WorkbenchStackSnapshot) (work
 		networkRefs:  make(map[string][]string),
 	}
 
-	issues := []string{}
+	issues := []WorkbenchValidationIssue{}
+	addIssue := func(issue WorkbenchValidationIssue) {
+		issue.Class = strings.TrimSpace(strings.ToLower(issue.Class))
+		issue.Code = strings.TrimSpace(strings.ToUpper(issue.Code))
+		issue.Path = strings.TrimSpace(issue.Path)
+		issue.Message = strings.TrimSpace(issue.Message)
+		issue.Service = strings.TrimSpace(issue.Service)
+		issue.Dependency = strings.TrimSpace(issue.Dependency)
+		issue.Protocol = strings.ToLower(strings.TrimSpace(issue.Protocol))
+		issue.HostIP = normalizeHostIP(strings.TrimSpace(issue.HostIP))
+		issue.HostPort = strings.TrimSpace(issue.HostPort)
+		if issue.Class == "" || issue.Code == "" || issue.Path == "" || issue.Message == "" {
+			return
+		}
+		issues = append(issues, issue)
+	}
 	serviceNames := make(map[string]struct{}, len(normalizedSnapshot.Services))
-	for _, service := range normalizedSnapshot.Services {
+	for idx, service := range normalizedSnapshot.Services {
+		path := fmt.Sprintf("$.services[%d]", idx)
 		name := strings.TrimSpace(service.ServiceName)
 		if name == "" {
-			issues = append(issues, "service name is required")
+			addIssue(WorkbenchValidationIssue{
+				Class:   workbenchValidationClassSchema,
+				Code:    "WB-VAL-SERVICE-NAME-REQUIRED",
+				Path:    path + ".serviceName",
+				Message: "service name is required",
+			})
 			continue
 		}
 		if _, exists := serviceNames[name]; exists {
-			issues = append(issues, fmt.Sprintf("duplicate service definition %q", name))
+			addIssue(WorkbenchValidationIssue{
+				Class:   workbenchValidationClassSchema,
+				Code:    "WB-VAL-SERVICE-DUPLICATE",
+				Path:    path + ".serviceName",
+				Message: fmt.Sprintf("duplicate service definition %q", name),
+				Service: name,
+			})
 			continue
 		}
 		serviceNames[name] = struct{}{}
@@ -200,25 +279,53 @@ func buildWorkbenchComposeGenerationModel(snapshot WorkbenchStackSnapshot) (work
 			RestartPolicy: strings.TrimSpace(service.RestartPolicy),
 		}
 		if normalizedService.Image == "" && normalizedService.BuildSource == "" {
-			issues = append(issues, fmt.Sprintf("service %q must define image or build source", name))
+			addIssue(WorkbenchValidationIssue{
+				Class:   workbenchValidationClassSchema,
+				Code:    "WB-VAL-SERVICE-SOURCE-REQUIRED",
+				Path:    path,
+				Message: fmt.Sprintf("service %q must define image or build source", name),
+				Service: name,
+			})
 		}
 		model.services = append(model.services, normalizedService)
 	}
 
 	dependencySet := make(map[string]struct{})
-	for _, dependency := range normalizedSnapshot.Dependencies {
+	for idx, dependency := range normalizedSnapshot.Dependencies {
+		path := fmt.Sprintf("$.dependencies[%d]", idx)
 		serviceName := strings.TrimSpace(dependency.ServiceName)
 		dependsOn := strings.TrimSpace(dependency.DependsOn)
 		if serviceName == "" || dependsOn == "" {
-			issues = append(issues, "dependency entries must define serviceName and dependsOn")
+			addIssue(WorkbenchValidationIssue{
+				Class:      workbenchValidationClassSchema,
+				Code:       "WB-VAL-DEPENDENCY-FIELDS-REQUIRED",
+				Path:       path,
+				Message:    "dependency entries must define serviceName and dependsOn",
+				Service:    serviceName,
+				Dependency: dependsOn,
+			})
 			continue
 		}
 		if _, exists := serviceNames[serviceName]; !exists {
-			issues = append(issues, fmt.Sprintf("dependency references unknown service %q", serviceName))
+			addIssue(WorkbenchValidationIssue{
+				Class:      workbenchValidationClassDependency,
+				Code:       "WB-VAL-DEPENDENCY-SERVICE-UNKNOWN",
+				Path:       path + ".serviceName",
+				Message:    fmt.Sprintf("dependency references unknown service %q", serviceName),
+				Service:    serviceName,
+				Dependency: dependsOn,
+			})
 			continue
 		}
 		if _, exists := serviceNames[dependsOn]; !exists {
-			issues = append(issues, fmt.Sprintf("dependency %q -> %q references unknown target service", serviceName, dependsOn))
+			addIssue(WorkbenchValidationIssue{
+				Class:      workbenchValidationClassDependency,
+				Code:       "WB-VAL-DEPENDENCY-TARGET-UNKNOWN",
+				Path:       path + ".dependsOn",
+				Message:    fmt.Sprintf("dependency %q -> %q references unknown target service", serviceName, dependsOn),
+				Service:    serviceName,
+				Dependency: dependsOn,
+			})
 			continue
 		}
 
@@ -232,18 +339,38 @@ func buildWorkbenchComposeGenerationModel(snapshot WorkbenchStackSnapshot) (work
 
 	portSet := make(map[string]struct{})
 	hostBindings := []workbenchHostBinding{}
-	for _, port := range normalizedSnapshot.Ports {
+	for idx, port := range normalizedSnapshot.Ports {
+		path := fmt.Sprintf("$.ports[%d]", idx)
 		serviceName := strings.TrimSpace(port.ServiceName)
 		if _, exists := serviceNames[serviceName]; !exists {
-			issues = append(issues, fmt.Sprintf("port entry references unknown service %q", serviceName))
+			addIssue(WorkbenchValidationIssue{
+				Class:   workbenchValidationClassSchema,
+				Code:    "WB-VAL-PORT-SERVICE-UNKNOWN",
+				Path:    path + ".serviceName",
+				Message: fmt.Sprintf("port entry references unknown service %q", serviceName),
+				Service: serviceName,
+			})
 			continue
 		}
 		if port.ContainerPort < 1 || port.ContainerPort > 65535 {
-			issues = append(issues, fmt.Sprintf("service %q has invalid containerPort %d", serviceName, port.ContainerPort))
+			addIssue(WorkbenchValidationIssue{
+				Class:   workbenchValidationClassSchema,
+				Code:    "WB-VAL-PORT-CONTAINER-RANGE",
+				Path:    path + ".containerPort",
+				Message: fmt.Sprintf("service %q has invalid containerPort %d", serviceName, port.ContainerPort),
+				Service: serviceName,
+			})
 			continue
 		}
 		if port.HostPort != nil && (*port.HostPort < 1 || *port.HostPort > 65535) {
-			issues = append(issues, fmt.Sprintf("service %q has invalid hostPort %d", serviceName, *port.HostPort))
+			addIssue(WorkbenchValidationIssue{
+				Class:    workbenchValidationClassSchema,
+				Code:     "WB-VAL-PORT-HOST-RANGE",
+				Path:     path + ".hostPort",
+				Message:  fmt.Sprintf("service %q has invalid hostPort %d", serviceName, *port.HostPort),
+				Service:  serviceName,
+				HostPort: strconv.Itoa(*port.HostPort),
+			})
 			continue
 		}
 
@@ -272,14 +399,16 @@ func buildWorkbenchComposeGenerationModel(snapshot WorkbenchStackSnapshot) (work
 			hostPortValue,
 		)
 		if _, exists := portSet[portKey]; exists {
-			issues = append(issues, fmt.Sprintf(
-				"duplicate port mapping for service %q (container=%d host=%q protocol=%s hostIP=%q)",
-				serviceName,
-				normalizedPort.ContainerPort,
-				hostPortValue,
-				normalizedPort.Protocol,
-				normalizedPort.HostIP,
-			))
+			addIssue(WorkbenchValidationIssue{
+				Class:    workbenchValidationClassSchema,
+				Code:     "WB-VAL-PORT-DUPLICATE",
+				Path:     path,
+				Message:  fmt.Sprintf("duplicate port mapping for service %q (container=%d host=%q protocol=%s hostIP=%q)", serviceName, normalizedPort.ContainerPort, hostPortValue, normalizedPort.Protocol, normalizedPort.HostIP),
+				Service:  serviceName,
+				Protocol: normalizedPort.Protocol,
+				HostIP:   normalizedPort.HostIP,
+				HostPort: hostPortValue,
+			})
 			continue
 		}
 		portSet[portKey] = struct{}{}
@@ -295,15 +424,17 @@ func buildWorkbenchComposeGenerationModel(snapshot WorkbenchStackSnapshot) (work
 				if !workbenchHostBindingConflicts(existing, current) {
 					continue
 				}
-				issues = append(issues, fmt.Sprintf(
-					"host port conflict between services %q and %q (protocol=%s hostPort=%q hostIPs=%q/%q)",
-					existing.serviceName,
-					current.serviceName,
-					current.protocol,
-					current.hostPort,
-					existing.hostIP,
-					current.hostIP,
-				))
+				addIssue(WorkbenchValidationIssue{
+					Class:      workbenchValidationClassPortConflict,
+					Code:       "WB-VAL-PORT-HOST-CONFLICT",
+					Path:       path,
+					Message:    fmt.Sprintf("host port conflict between services %q and %q (protocol=%s hostPort=%q hostIPs=%q/%q)", existing.serviceName, current.serviceName, current.protocol, current.hostPort, existing.hostIP, current.hostIP),
+					Service:    current.serviceName,
+					Dependency: existing.serviceName,
+					Protocol:   current.protocol,
+					HostIP:     current.hostIP,
+					HostPort:   current.hostPort,
+				})
 				break
 			}
 			hostBindings = append(hostBindings, current)
@@ -312,14 +443,27 @@ func buildWorkbenchComposeGenerationModel(snapshot WorkbenchStackSnapshot) (work
 		model.ports[serviceName] = append(model.ports[serviceName], normalizedPort)
 	}
 
-	for _, resource := range normalizedSnapshot.Resources {
+	for idx, resource := range normalizedSnapshot.Resources {
+		path := fmt.Sprintf("$.resources[%d]", idx)
 		serviceName := strings.TrimSpace(resource.ServiceName)
 		if _, exists := serviceNames[serviceName]; !exists {
-			issues = append(issues, fmt.Sprintf("resource entry references unknown service %q", serviceName))
+			addIssue(WorkbenchValidationIssue{
+				Class:   workbenchValidationClassSchema,
+				Code:    "WB-VAL-RESOURCE-SERVICE-UNKNOWN",
+				Path:    path + ".serviceName",
+				Message: fmt.Sprintf("resource entry references unknown service %q", serviceName),
+				Service: serviceName,
+			})
 			continue
 		}
 		if _, exists := model.resources[serviceName]; exists {
-			issues = append(issues, fmt.Sprintf("duplicate resource entry for service %q", serviceName))
+			addIssue(WorkbenchValidationIssue{
+				Class:   workbenchValidationClassSchema,
+				Code:    "WB-VAL-RESOURCE-DUPLICATE",
+				Path:    path + ".serviceName",
+				Message: fmt.Sprintf("duplicate resource entry for service %q", serviceName),
+				Service: serviceName,
+			})
 			continue
 		}
 		normalizedResource := WorkbenchComposeResource{
@@ -334,16 +478,29 @@ func buildWorkbenchComposeGenerationModel(snapshot WorkbenchStackSnapshot) (work
 
 	networkSet := make(map[string]struct{})
 	perServiceNetworkSet := make(map[string]struct{})
-	for _, networkRef := range normalizedSnapshot.NetworkRefs {
+	for idx, networkRef := range normalizedSnapshot.NetworkRefs {
+		path := fmt.Sprintf("$.networkRefs[%d]", idx)
 		serviceName := strings.TrimSpace(networkRef.ServiceName)
 		networkName := strings.TrimSpace(networkRef.NetworkName)
 
 		if _, exists := serviceNames[serviceName]; !exists {
-			issues = append(issues, fmt.Sprintf("network ref references unknown service %q", serviceName))
+			addIssue(WorkbenchValidationIssue{
+				Class:   workbenchValidationClassSchema,
+				Code:    "WB-VAL-NETWORK-SERVICE-UNKNOWN",
+				Path:    path + ".serviceName",
+				Message: fmt.Sprintf("network ref references unknown service %q", serviceName),
+				Service: serviceName,
+			})
 			continue
 		}
 		if networkName == "" {
-			issues = append(issues, fmt.Sprintf("service %q has an empty network reference", serviceName))
+			addIssue(WorkbenchValidationIssue{
+				Class:   workbenchValidationClassSchema,
+				Code:    "WB-VAL-NETWORK-NAME-REQUIRED",
+				Path:    path + ".networkName",
+				Message: fmt.Sprintf("service %q has an empty network reference", serviceName),
+				Service: serviceName,
+			})
 			continue
 		}
 
@@ -359,27 +516,102 @@ func buildWorkbenchComposeGenerationModel(snapshot WorkbenchStackSnapshot) (work
 	}
 	sort.Strings(model.topLevelNetwork)
 
-	for _, volumeRef := range normalizedSnapshot.VolumeRefs {
+	for idx, volumeRef := range normalizedSnapshot.VolumeRefs {
+		path := fmt.Sprintf("$.volumeRefs[%d]", idx)
 		serviceName := strings.TrimSpace(volumeRef.ServiceName)
 		volumeName := strings.TrimSpace(volumeRef.VolumeName)
 		if serviceName == "" || volumeName == "" {
-			issues = append(issues, "volume refs must include serviceName and volumeName")
+			addIssue(WorkbenchValidationIssue{
+				Class:   workbenchValidationClassSchema,
+				Code:    "WB-VAL-VOLUME-FIELDS-REQUIRED",
+				Path:    path,
+				Message: "volume refs must include serviceName and volumeName",
+				Service: serviceName,
+			})
 			continue
 		}
-		issues = append(issues, fmt.Sprintf("service %q volume %q is not yet supported by generator baseline", serviceName, volumeName))
+		addIssue(WorkbenchValidationIssue{
+			Class:   workbenchValidationClassSchema,
+			Code:    "WB-VAL-VOLUME-UNSUPPORTED",
+			Path:    path,
+			Message: fmt.Sprintf("service %q volume %q is not yet supported by generator baseline", serviceName, volumeName),
+			Service: serviceName,
+		})
 	}
 
-	for _, module := range normalizedSnapshot.Modules {
+	for idx, module := range normalizedSnapshot.Modules {
+		path := fmt.Sprintf("$.modules[%d]", idx)
 		moduleType := strings.TrimSpace(module.ModuleType)
 		serviceName := strings.TrimSpace(module.ServiceName)
-		issues = append(issues, fmt.Sprintf("module %q for service %q is not yet supported by generator baseline", moduleType, serviceName))
+		addIssue(WorkbenchValidationIssue{
+			Class:   workbenchValidationClassSchema,
+			Code:    "WB-VAL-MODULE-UNSUPPORTED",
+			Path:    path,
+			Message: fmt.Sprintf("module %q for service %q is not yet supported by generator baseline", moduleType, serviceName),
+			Service: serviceName,
+		})
 	}
 
 	if len(issues) > 0 {
+		sort.SliceStable(issues, func(i, j int) bool {
+			return workbenchValidationIssueLess(issues[i], issues[j])
+		})
 		return workbenchComposeGenerationModel{}, workbenchComposeValidationError(normalizedSnapshot, issues)
 	}
 
 	return model, nil
+}
+
+func workbenchValidationIssueLess(left, right WorkbenchValidationIssue) bool {
+	leftClass := strings.TrimSpace(strings.ToLower(left.Class))
+	rightClass := strings.TrimSpace(strings.ToLower(right.Class))
+	if leftClass != rightClass {
+		return leftClass < rightClass
+	}
+
+	leftCode := strings.TrimSpace(strings.ToUpper(left.Code))
+	rightCode := strings.TrimSpace(strings.ToUpper(right.Code))
+	if leftCode != rightCode {
+		return leftCode < rightCode
+	}
+
+	leftPath := strings.TrimSpace(left.Path)
+	rightPath := strings.TrimSpace(right.Path)
+	if leftPath != rightPath {
+		return leftPath < rightPath
+	}
+
+	leftService := strings.TrimSpace(strings.ToLower(left.Service))
+	rightService := strings.TrimSpace(strings.ToLower(right.Service))
+	if leftService != rightService {
+		return leftService < rightService
+	}
+
+	leftDependency := strings.TrimSpace(strings.ToLower(left.Dependency))
+	rightDependency := strings.TrimSpace(strings.ToLower(right.Dependency))
+	if leftDependency != rightDependency {
+		return leftDependency < rightDependency
+	}
+
+	leftProtocol := strings.TrimSpace(strings.ToLower(left.Protocol))
+	rightProtocol := strings.TrimSpace(strings.ToLower(right.Protocol))
+	if leftProtocol != rightProtocol {
+		return leftProtocol < rightProtocol
+	}
+
+	leftHostIP := strings.TrimSpace(strings.ToLower(left.HostIP))
+	rightHostIP := strings.TrimSpace(strings.ToLower(right.HostIP))
+	if leftHostIP != rightHostIP {
+		return leftHostIP < rightHostIP
+	}
+
+	leftHostPort := strings.TrimSpace(left.HostPort)
+	rightHostPort := strings.TrimSpace(right.HostPort)
+	if leftHostPort != rightHostPort {
+		return leftHostPort < rightHostPort
+	}
+
+	return strings.TrimSpace(left.Message) < strings.TrimSpace(right.Message)
 }
 
 func formatWorkbenchComposePort(port WorkbenchComposePort) string {
@@ -434,7 +666,8 @@ func encodeWorkbenchComposeYAML(root *yaml.Node) (string, error) {
 	return out, nil
 }
 
-func workbenchComposeValidationError(snapshot WorkbenchStackSnapshot, issues []string) error {
+func workbenchComposeValidationError(snapshot WorkbenchStackSnapshot, issues []WorkbenchValidationIssue) error {
+	normalized := append([]WorkbenchValidationIssue(nil), issues...)
 	return errs.WithDetails(
 		errs.New(errs.CodeWorkbenchValidationFailed, "invalid workbench snapshot for compose generation"),
 		map[string]any{
@@ -442,7 +675,8 @@ func workbenchComposeValidationError(snapshot WorkbenchStackSnapshot, issues []s
 			"composePath":       strings.TrimSpace(snapshot.ComposePath),
 			"sourceFingerprint": strings.TrimSpace(snapshot.SourceFingerprint),
 			"revision":          snapshot.Revision,
-			"issues":            append([]string{}, issues...),
+			"issueCount":        len(normalized),
+			"issues":            normalized,
 		},
 	)
 }

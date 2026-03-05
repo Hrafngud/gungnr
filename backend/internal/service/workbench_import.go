@@ -162,6 +162,10 @@ func normalizeWorkbenchStackSnapshot(snapshot WorkbenchStackSnapshot) WorkbenchS
 		normalized.Warnings = []WorkbenchComposeWarning{}
 	}
 
+	for idx := range normalized.Ports {
+		normalized.Ports[idx] = normalizeWorkbenchComposePort(normalized.Ports[idx])
+	}
+
 	sort.SliceStable(normalized.Services, func(i, j int) bool {
 		return workbenchComposeServiceLess(normalized.Services[i], normalized.Services[j])
 	})
@@ -196,6 +200,35 @@ func normalizeWorkbenchStackSnapshot(snapshot WorkbenchStackSnapshot) WorkbenchS
 	sort.SliceStable(normalized.Warnings, func(i, j int) bool {
 		return workbenchComposeWarningLess(normalized.Warnings[i], normalized.Warnings[j])
 	})
+
+	return normalized
+}
+
+func normalizeWorkbenchComposePort(port WorkbenchComposePort) WorkbenchComposePort {
+	normalized := port
+	normalized.ServiceName = strings.TrimSpace(normalized.ServiceName)
+	normalized.HostPortRaw = strings.TrimSpace(normalized.HostPortRaw)
+	normalized.Protocol = strings.ToLower(strings.TrimSpace(normalized.Protocol))
+	if normalized.Protocol == "" {
+		normalized.Protocol = "tcp"
+	}
+	normalized.HostIP = normalizeHostIP(strings.TrimSpace(normalized.HostIP))
+
+	strategy := strings.ToLower(strings.TrimSpace(normalized.AssignmentStrategy))
+	switch strategy {
+	case workbenchPortStrategyAuto, workbenchPortStrategyManual:
+		normalized.AssignmentStrategy = strategy
+	default:
+		normalized.AssignmentStrategy = ""
+	}
+
+	status := strings.ToLower(strings.TrimSpace(normalized.AllocationStatus))
+	switch status {
+	case workbenchPortAllocationAssigned, workbenchPortAllocationConflict, workbenchPortAllocationUnavailable:
+		normalized.AllocationStatus = status
+	default:
+		normalized.AllocationStatus = ""
+	}
 
 	return normalized
 }
