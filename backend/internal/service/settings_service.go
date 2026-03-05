@@ -111,6 +111,9 @@ func (s *SettingsService) GitHubAppSettings(ctx context.Context) (GitHubAppSetti
 }
 
 func (s *SettingsService) Update(ctx context.Context, input SettingsPayload) (SettingsPayload, error) {
+	settingsWriteLock.Lock()
+	defer settingsWriteLock.Unlock()
+
 	stored, err := s.repo.Get(ctx)
 	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return SettingsPayload{}, err
@@ -170,6 +173,9 @@ func (s *SettingsService) Update(ctx context.Context, input SettingsPayload) (Se
 }
 
 func (s *SettingsService) SyncCloudflareFromEnv(ctx context.Context) (SettingsPayload, error) {
+	settingsWriteLock.Lock()
+	defer settingsWriteLock.Unlock()
+
 	stored, err := s.repo.Get(ctx)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {

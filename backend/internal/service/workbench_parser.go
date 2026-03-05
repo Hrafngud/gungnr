@@ -10,10 +10,9 @@ import (
 )
 
 const (
-	workbenchWarningUnsupportedTopLevel = "WB-PARSE-UNSUPPORTED-TOPLEVEL"
-	workbenchWarningUnsupportedField    = "WB-PARSE-UNSUPPORTED-FIELD"
-	workbenchWarningInvalidType         = "WB-PARSE-INVALID-TYPE"
-	workbenchWarningInvalidPort         = "WB-PARSE-INVALID-PORT"
+	workbenchWarningPassThrough = "WB-PARSE-PASSTHROUGH"
+	workbenchWarningInvalidType = "WB-PARSE-INVALID-TYPE"
+	workbenchWarningInvalidPort = "WB-PARSE-INVALID-PORT"
 )
 
 type WorkbenchComposeParseResult struct {
@@ -24,6 +23,9 @@ type WorkbenchComposeParseResult struct {
 	Services          []WorkbenchComposeService    `json:"services"`
 	Dependencies      []WorkbenchComposeDependency `json:"dependencies"`
 	Ports             []WorkbenchComposePort       `json:"ports"`
+	Resources         []WorkbenchComposeResource   `json:"resources"`
+	NetworkRefs       []WorkbenchComposeNetworkRef `json:"networkRefs"`
+	VolumeRefs        []WorkbenchComposeVolumeRef  `json:"volumeRefs"`
 	EnvRefs           []WorkbenchComposeEnvRef     `json:"envRefs"`
 	Warnings          []WorkbenchComposeWarning    `json:"warnings"`
 }
@@ -49,6 +51,24 @@ type WorkbenchComposePort struct {
 	HostIP        string `json:"hostIp,omitempty"`
 }
 
+type WorkbenchComposeResource struct {
+	ServiceName       string `json:"serviceName"`
+	LimitCPUs         string `json:"limitCpus,omitempty"`
+	LimitMemory       string `json:"limitMemory,omitempty"`
+	ReservationCPUs   string `json:"reservationCpus,omitempty"`
+	ReservationMemory string `json:"reservationMemory,omitempty"`
+}
+
+type WorkbenchComposeNetworkRef struct {
+	ServiceName string `json:"serviceName"`
+	NetworkName string `json:"networkName"`
+}
+
+type WorkbenchComposeVolumeRef struct {
+	ServiceName string `json:"serviceName"`
+	VolumeName  string `json:"volumeName"`
+}
+
 type WorkbenchComposeEnvRef struct {
 	ServiceName string `json:"serviceName,omitempty"`
 	Path        string `json:"path"`
@@ -63,15 +83,23 @@ type WorkbenchComposeWarning struct {
 }
 
 type workbenchComposeCoreParser struct {
-	result    WorkbenchComposeParseResult
-	envRefSet map[string]struct{}
-	depSet    map[string]struct{}
+	result           WorkbenchComposeParseResult
+	envRefSet        map[string]struct{}
+	depSet           map[string]struct{}
+	networkRefSet    map[string]struct{}
+	volumeRefSet     map[string]struct{}
+	topLevelNetworks map[string]struct{}
+	topLevelVolumes  map[string]struct{}
 }
 
 func ParseWorkbenchComposeCore(normalizedSource string) (WorkbenchComposeParseResult, error) {
 	parser := workbenchComposeCoreParser{
-		envRefSet: make(map[string]struct{}),
-		depSet:    make(map[string]struct{}),
+		envRefSet:        make(map[string]struct{}),
+		depSet:           make(map[string]struct{}),
+		networkRefSet:    make(map[string]struct{}),
+		volumeRefSet:     make(map[string]struct{}),
+		topLevelNetworks: make(map[string]struct{}),
+		topLevelVolumes:  make(map[string]struct{}),
 	}
 
 	if strings.TrimSpace(normalizedSource) == "" {
@@ -93,6 +121,7 @@ func ParseWorkbenchComposeCore(normalizedSource string) (WorkbenchComposeParseRe
 		return parser.result, nil
 	}
 
+	var servicesNode *yaml.Node
 	for idx := 0; idx+1 < len(root.Content); idx += 2 {
 		keyNode := root.Content[idx]
 		valueNode := root.Content[idx+1]
@@ -108,15 +137,21 @@ func ParseWorkbenchComposeCore(normalizedSource string) (WorkbenchComposeParseRe
 
 		switch key {
 		case "services":
-			parser.parseServices("$.services", valueNode)
+			servicesNode = valueNode
+		case "networks":
+			parser.parseTopLevelReferenceSet("$.networks", valueNode, parser.topLevelNetworks, "network")
+		case "volumes":
+			parser.parseTopLevelReferenceSet("$.volumes", valueNode, parser.topLevelVolumes, "volume")
 		case "version", "name":
 		default:
-			parser.warn(
-				workbenchWarningUnsupportedTopLevel,
+			parser.warnPassThrough(
 				"$."+key,
-				fmt.Sprintf("top-level key %q is not parsed in core slice", key),
+				fmt.Sprintf("top-level key %q is pass-through and not parsed", key),
 			)
 		}
+	}
+	if servicesNode != nil {
+		parser.parseServices("$.services", servicesNode)
 	}
 
 	parser.sort()
@@ -200,11 +235,16 @@ func (p *workbenchComposeCoreParser) parseService(serviceName, path string, node
 			p.collectEnvRefsFromEnvironment(serviceName, fieldPath, valueNode)
 		case "env_file":
 			p.collectEnvRefsFromEnvFile(serviceName, fieldPath, valueNode)
+		case "deploy":
+			p.parseDeployResources(serviceName, fieldPath, valueNode)
+		case "networks":
+			p.parseServiceNetworks(serviceName, fieldPath, valueNode)
+		case "volumes":
+			p.parseServiceVolumes(serviceName, fieldPath, valueNode)
 		default:
-			p.warn(
-				workbenchWarningUnsupportedField,
+			p.warnPassThrough(
 				fieldPath,
-				fmt.Sprintf("service field %q is not parsed in core slice", key),
+				fmt.Sprintf("service field %q is pass-through and not parsed", key),
 			)
 		}
 	}
@@ -449,10 +489,9 @@ func (p *workbenchComposeCoreParser) parseLongPort(serviceName, path string, nod
 			}
 		case "mode", "name", "app_protocol":
 		default:
-			p.warn(
-				workbenchWarningUnsupportedField,
+			p.warnPassThrough(
 				fieldPath,
-				fmt.Sprintf("port mapping field %q is not parsed in core slice", key),
+				fmt.Sprintf("port mapping field %q is pass-through and not parsed", key),
 			)
 		}
 	}
@@ -557,6 +596,381 @@ func (p *workbenchComposeCoreParser) collectEnvRefs(serviceName, path, value str
 	}
 }
 
+func (p *workbenchComposeCoreParser) parseTopLevelReferenceSet(
+	path string,
+	node *yaml.Node,
+	target map[string]struct{},
+	kind string,
+) {
+	if node == nil {
+		return
+	}
+	if node.Kind != yaml.MappingNode {
+		p.warn(workbenchWarningInvalidType, path, fmt.Sprintf("%ss must be a mapping", kind))
+		return
+	}
+
+	for idx := 0; idx+1 < len(node.Content); idx += 2 {
+		keyNode := node.Content[idx]
+		valueNode := node.Content[idx+1]
+		if keyNode == nil || keyNode.Kind != yaml.ScalarNode {
+			p.warn(workbenchWarningInvalidType, path, fmt.Sprintf("%s name must be a scalar", kind))
+			continue
+		}
+
+		name := strings.TrimSpace(keyNode.Value)
+		if name == "" {
+			p.warn(workbenchWarningInvalidType, path, fmt.Sprintf("%s name is empty", kind))
+			continue
+		}
+		target[name] = struct{}{}
+
+		entryPath := path + "." + name
+		if valueNode == nil || isWorkbenchYAMLNull(valueNode) {
+			continue
+		}
+		if valueNode.Kind != yaml.MappingNode {
+			p.warn(workbenchWarningInvalidType, entryPath, fmt.Sprintf("top-level %s definition must be a mapping or null", kind))
+			continue
+		}
+		if len(valueNode.Content) > 0 {
+			p.warnPassThrough(
+				entryPath,
+				fmt.Sprintf("top-level %s options are pass-through and not parsed", kind),
+			)
+		}
+	}
+}
+
+func (p *workbenchComposeCoreParser) parseDeployResources(serviceName, path string, node *yaml.Node) {
+	if node == nil {
+		return
+	}
+	if node.Kind != yaml.MappingNode {
+		p.warn(workbenchWarningInvalidType, path, "deploy must be a mapping")
+		return
+	}
+
+	resource := WorkbenchComposeResource{ServiceName: serviceName}
+	hasResource := false
+	for idx := 0; idx+1 < len(node.Content); idx += 2 {
+		keyNode := node.Content[idx]
+		valueNode := node.Content[idx+1]
+		if keyNode == nil {
+			continue
+		}
+
+		key := strings.TrimSpace(keyNode.Value)
+		fieldPath := path + "." + key
+		switch key {
+		case "resources":
+			if p.parseDeployResourceBlock(serviceName, fieldPath, valueNode, &resource) {
+				hasResource = true
+			}
+		default:
+			p.warnPassThrough(
+				fieldPath,
+				fmt.Sprintf("deploy field %q is pass-through and not parsed", key),
+			)
+		}
+	}
+
+	if hasResource {
+		p.result.Resources = append(p.result.Resources, resource)
+	}
+}
+
+func (p *workbenchComposeCoreParser) parseDeployResourceBlock(
+	serviceName, path string,
+	node *yaml.Node,
+	resource *WorkbenchComposeResource,
+) bool {
+	if node == nil {
+		return false
+	}
+	if node.Kind != yaml.MappingNode {
+		p.warn(workbenchWarningInvalidType, path, "deploy.resources must be a mapping")
+		return false
+	}
+
+	hasResource := false
+	for idx := 0; idx+1 < len(node.Content); idx += 2 {
+		keyNode := node.Content[idx]
+		valueNode := node.Content[idx+1]
+		if keyNode == nil {
+			continue
+		}
+
+		key := strings.TrimSpace(keyNode.Value)
+		fieldPath := path + "." + key
+		switch key {
+		case "limits":
+			if p.parseDeployResourceValues(serviceName, fieldPath, valueNode, &resource.LimitCPUs, &resource.LimitMemory, "limits") {
+				hasResource = true
+			}
+		case "reservations":
+			if p.parseDeployResourceValues(serviceName, fieldPath, valueNode, &resource.ReservationCPUs, &resource.ReservationMemory, "reservations") {
+				hasResource = true
+			}
+		default:
+			p.warnPassThrough(
+				fieldPath,
+				fmt.Sprintf("deploy.resources field %q is pass-through and not parsed", key),
+			)
+		}
+	}
+	return hasResource
+}
+
+func (p *workbenchComposeCoreParser) parseDeployResourceValues(
+	serviceName, path string,
+	node *yaml.Node,
+	cpus *string,
+	memory *string,
+	blockName string,
+) bool {
+	if node == nil {
+		return false
+	}
+	if node.Kind != yaml.MappingNode {
+		p.warn(workbenchWarningInvalidType, path, fmt.Sprintf("deploy.resources.%s must be a mapping", blockName))
+		return false
+	}
+
+	hasValue := false
+	for idx := 0; idx+1 < len(node.Content); idx += 2 {
+		keyNode := node.Content[idx]
+		valueNode := node.Content[idx+1]
+		if keyNode == nil {
+			continue
+		}
+
+		key := strings.TrimSpace(keyNode.Value)
+		fieldPath := path + "." + key
+		if valueNode != nil && valueNode.Kind == yaml.ScalarNode {
+			p.collectEnvRefs(serviceName, fieldPath, valueNode.Value)
+		}
+
+		switch key {
+		case "cpus":
+			if valueNode == nil || valueNode.Kind != yaml.ScalarNode {
+				p.warn(workbenchWarningInvalidType, fieldPath, "cpus must be a scalar")
+				continue
+			}
+			*cpus = strings.TrimSpace(valueNode.Value)
+			if *cpus != "" {
+				hasValue = true
+			}
+		case "memory":
+			if valueNode == nil || valueNode.Kind != yaml.ScalarNode {
+				p.warn(workbenchWarningInvalidType, fieldPath, "memory must be a scalar")
+				continue
+			}
+			*memory = strings.TrimSpace(valueNode.Value)
+			if *memory != "" {
+				hasValue = true
+			}
+		default:
+			p.warnPassThrough(
+				fieldPath,
+				fmt.Sprintf("deploy.resources.%s field %q is pass-through and not parsed", blockName, key),
+			)
+		}
+	}
+	return hasValue
+}
+
+func (p *workbenchComposeCoreParser) parseServiceNetworks(serviceName, path string, node *yaml.Node) {
+	if node == nil {
+		return
+	}
+
+	switch node.Kind {
+	case yaml.SequenceNode:
+		for idx, item := range node.Content {
+			itemPath := fmt.Sprintf("%s[%d]", path, idx)
+			if item == nil || item.Kind != yaml.ScalarNode {
+				p.warn(workbenchWarningInvalidType, itemPath, "network entry must be a scalar")
+				continue
+			}
+			networkName := strings.TrimSpace(item.Value)
+			if networkName == "" {
+				continue
+			}
+			p.collectEnvRefs(serviceName, itemPath, item.Value)
+			p.appendNetworkRef(serviceName, networkName)
+		}
+	case yaml.MappingNode:
+		for idx := 0; idx+1 < len(node.Content); idx += 2 {
+			keyNode := node.Content[idx]
+			valueNode := node.Content[idx+1]
+			if keyNode == nil || keyNode.Kind != yaml.ScalarNode {
+				p.warn(workbenchWarningInvalidType, path, "network name must be a scalar")
+				continue
+			}
+
+			networkName := strings.TrimSpace(keyNode.Value)
+			if networkName == "" {
+				continue
+			}
+
+			keyPath := path + "." + networkName
+			p.collectEnvRefs(serviceName, keyPath, keyNode.Value)
+			p.appendNetworkRef(serviceName, networkName)
+
+			if valueNode == nil || isWorkbenchYAMLNull(valueNode) {
+				continue
+			}
+			if valueNode.Kind != yaml.MappingNode {
+				p.warn(workbenchWarningInvalidType, keyPath, "network attachment must be a mapping or null")
+				continue
+			}
+			if len(valueNode.Content) > 0 {
+				p.warnPassThrough(
+					keyPath,
+					fmt.Sprintf("service network %q options are pass-through and not parsed", networkName),
+				)
+			}
+		}
+	default:
+		p.warn(workbenchWarningInvalidType, path, "networks must be a sequence or mapping")
+	}
+}
+
+func (p *workbenchComposeCoreParser) parseServiceVolumes(serviceName, path string, node *yaml.Node) {
+	if node == nil {
+		return
+	}
+	if node.Kind != yaml.SequenceNode {
+		p.warn(workbenchWarningInvalidType, path, "volumes must be a sequence")
+		return
+	}
+
+	for idx, item := range node.Content {
+		itemPath := fmt.Sprintf("%s[%d]", path, idx)
+		if item == nil {
+			continue
+		}
+		switch item.Kind {
+		case yaml.ScalarNode:
+			p.parseShortVolumeRef(serviceName, itemPath, item.Value)
+		case yaml.MappingNode:
+			p.parseLongVolumeRef(serviceName, itemPath, item)
+		default:
+			p.warn(workbenchWarningInvalidType, itemPath, "volume entry must be a scalar or mapping")
+		}
+	}
+}
+
+func (p *workbenchComposeCoreParser) parseShortVolumeRef(serviceName, path, raw string) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		p.warn(workbenchWarningInvalidType, path, "volume entry is empty")
+		return
+	}
+	p.collectEnvRefs(serviceName, path, trimmed)
+
+	source, ok := parseWorkbenchShortVolumeSource(trimmed)
+	if !ok {
+		return
+	}
+	p.appendVolumeRef(serviceName, source)
+}
+
+func (p *workbenchComposeCoreParser) parseLongVolumeRef(serviceName, path string, node *yaml.Node) {
+	volumeType := "volume"
+	source := ""
+
+	for idx := 0; idx+1 < len(node.Content); idx += 2 {
+		keyNode := node.Content[idx]
+		valueNode := node.Content[idx+1]
+		if keyNode == nil {
+			continue
+		}
+		key := strings.TrimSpace(keyNode.Value)
+		fieldPath := path + "." + key
+		if valueNode != nil && valueNode.Kind == yaml.ScalarNode {
+			p.collectEnvRefs(serviceName, fieldPath, valueNode.Value)
+		}
+
+		switch key {
+		case "type":
+			if valueNode == nil || valueNode.Kind != yaml.ScalarNode {
+				p.warn(workbenchWarningInvalidType, fieldPath, "type must be a scalar")
+				continue
+			}
+			value := strings.TrimSpace(valueNode.Value)
+			if value != "" {
+				volumeType = strings.ToLower(value)
+			}
+		case "source":
+			if valueNode == nil || valueNode.Kind != yaml.ScalarNode {
+				p.warn(workbenchWarningInvalidType, fieldPath, "source must be a scalar")
+				continue
+			}
+			source = strings.TrimSpace(valueNode.Value)
+		case "target", "read_only":
+			if valueNode == nil || valueNode.Kind != yaml.ScalarNode {
+				p.warn(workbenchWarningInvalidType, fieldPath, fmt.Sprintf("%s must be a scalar", key))
+			}
+		case "bind", "volume", "tmpfs", "consistency", "nocopy", "subpath":
+			p.warnPassThrough(
+				fieldPath,
+				fmt.Sprintf("volume mapping field %q is pass-through and not parsed", key),
+			)
+		default:
+			p.warnPassThrough(
+				fieldPath,
+				fmt.Sprintf("volume mapping field %q is pass-through and not parsed", key),
+			)
+		}
+	}
+
+	if volumeType != "volume" {
+		return
+	}
+	if source == "" || isWorkbenchPathLikeSource(source) || containsWorkbenchInterpolation(source) {
+		return
+	}
+	p.appendVolumeRef(serviceName, source)
+}
+
+func (p *workbenchComposeCoreParser) appendNetworkRef(serviceName, networkName string) {
+	if serviceName == "" || networkName == "" {
+		return
+	}
+	if _, ok := p.topLevelNetworks[networkName]; !ok {
+		return
+	}
+	key := serviceName + "|" + networkName
+	if _, exists := p.networkRefSet[key]; exists {
+		return
+	}
+	p.networkRefSet[key] = struct{}{}
+	p.result.NetworkRefs = append(p.result.NetworkRefs, WorkbenchComposeNetworkRef{
+		ServiceName: serviceName,
+		NetworkName: networkName,
+	})
+}
+
+func (p *workbenchComposeCoreParser) appendVolumeRef(serviceName, volumeName string) {
+	if serviceName == "" || volumeName == "" {
+		return
+	}
+	if _, ok := p.topLevelVolumes[volumeName]; !ok {
+		return
+	}
+	key := serviceName + "|" + volumeName
+	if _, exists := p.volumeRefSet[key]; exists {
+		return
+	}
+	p.volumeRefSet[key] = struct{}{}
+	p.result.VolumeRefs = append(p.result.VolumeRefs, WorkbenchComposeVolumeRef{
+		ServiceName: serviceName,
+		VolumeName:  volumeName,
+	})
+}
+
 func extractWorkbenchEnvVariable(expression string) string {
 	trimmed := strings.TrimSpace(expression)
 	if strings.HasPrefix(trimmed, "$") && !strings.HasPrefix(trimmed, "${") {
@@ -577,6 +991,35 @@ func extractWorkbenchEnvVariable(expression string) string {
 
 func containsWorkbenchInterpolation(value string) bool {
 	return len(findWorkbenchEnvExpressions(value)) > 0
+}
+
+func parseWorkbenchShortVolumeSource(value string) (string, bool) {
+	if value == "" || !strings.Contains(value, ":") {
+		return "", false
+	}
+	parts := strings.SplitN(value, ":", 2)
+	source := strings.TrimSpace(parts[0])
+	if source == "" {
+		return "", false
+	}
+	if containsWorkbenchInterpolation(source) || isWorkbenchPathLikeSource(source) {
+		return "", false
+	}
+	return source, true
+}
+
+func isWorkbenchPathLikeSource(source string) bool {
+	trimmed := strings.TrimSpace(source)
+	if trimmed == "" {
+		return false
+	}
+	if strings.HasPrefix(trimmed, ".") || strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "~") {
+		return true
+	}
+	if strings.Contains(trimmed, "/") || strings.Contains(trimmed, "\\") {
+		return true
+	}
+	return false
 }
 
 func findWorkbenchEnvExpressions(value string) []string {
@@ -685,6 +1128,24 @@ func parsePortLiteral(value string) (int, bool) {
 	return port, true
 }
 
+func isWorkbenchYAMLNull(node *yaml.Node) bool {
+	if node == nil {
+		return true
+	}
+	if node.Kind != yaml.ScalarNode {
+		return false
+	}
+	if node.Tag == "!!null" {
+		return true
+	}
+	trimmed := strings.TrimSpace(node.Value)
+	return trimmed == "" || strings.EqualFold(trimmed, "null") || trimmed == "~"
+}
+
+func (p *workbenchComposeCoreParser) warnPassThrough(path, message string) {
+	p.warn(workbenchWarningPassThrough, path, message)
+}
+
 func (p *workbenchComposeCoreParser) warn(code, path, message string) {
 	p.result.Warnings = append(p.result.Warnings, WorkbenchComposeWarning{
 		Code:    strings.TrimSpace(code),
@@ -702,6 +1163,15 @@ func (p *workbenchComposeCoreParser) sort() {
 	})
 	sort.Slice(p.result.Ports, func(i, j int) bool {
 		return workbenchComposePortLess(p.result.Ports[i], p.result.Ports[j])
+	})
+	sort.Slice(p.result.Resources, func(i, j int) bool {
+		return workbenchComposeResourceLess(p.result.Resources[i], p.result.Resources[j])
+	})
+	sort.Slice(p.result.NetworkRefs, func(i, j int) bool {
+		return workbenchComposeNetworkRefLess(p.result.NetworkRefs[i], p.result.NetworkRefs[j])
+	})
+	sort.Slice(p.result.VolumeRefs, func(i, j int) bool {
+		return workbenchComposeVolumeRefLess(p.result.VolumeRefs[i], p.result.VolumeRefs[j])
 	})
 	sort.Slice(p.result.EnvRefs, func(i, j int) bool {
 		return workbenchComposeEnvRefLess(p.result.EnvRefs[i], p.result.EnvRefs[j])
@@ -756,6 +1226,36 @@ func workbenchComposePortLess(left, right WorkbenchComposePort) bool {
 		return leftHostPort < rightHostPort
 	}
 	return left.HostPortRaw < right.HostPortRaw
+}
+
+func workbenchComposeResourceLess(left, right WorkbenchComposeResource) bool {
+	if left.ServiceName != right.ServiceName {
+		return left.ServiceName < right.ServiceName
+	}
+	if left.LimitCPUs != right.LimitCPUs {
+		return left.LimitCPUs < right.LimitCPUs
+	}
+	if left.LimitMemory != right.LimitMemory {
+		return left.LimitMemory < right.LimitMemory
+	}
+	if left.ReservationCPUs != right.ReservationCPUs {
+		return left.ReservationCPUs < right.ReservationCPUs
+	}
+	return left.ReservationMemory < right.ReservationMemory
+}
+
+func workbenchComposeNetworkRefLess(left, right WorkbenchComposeNetworkRef) bool {
+	if left.ServiceName != right.ServiceName {
+		return left.ServiceName < right.ServiceName
+	}
+	return left.NetworkName < right.NetworkName
+}
+
+func workbenchComposeVolumeRefLess(left, right WorkbenchComposeVolumeRef) bool {
+	if left.ServiceName != right.ServiceName {
+		return left.ServiceName < right.ServiceName
+	}
+	return left.VolumeName < right.VolumeName
 }
 
 func workbenchComposeEnvRefLess(left, right WorkbenchComposeEnvRef) bool {

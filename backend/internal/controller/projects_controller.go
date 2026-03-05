@@ -19,13 +19,14 @@ import (
 )
 
 type ProjectsController struct {
-	service *service.ProjectService
-	archive *service.ProjectArchiveService
-	runtime *service.ProjectRuntimeService
-	env     *service.ProjectEnvService
-	host    *service.HostService
-	jobs    *service.JobService
-	audit   *service.AuditService
+	service   *service.ProjectService
+	archive   *service.ProjectArchiveService
+	workbench *service.WorkbenchService
+	runtime   *service.ProjectRuntimeService
+	env       *service.ProjectEnvService
+	host      *service.HostService
+	jobs      *service.JobService
+	audit     *service.AuditService
 }
 
 type projectResponse struct {
@@ -61,9 +62,14 @@ type projectArchiveRequest struct {
 	RemoveDNS        *bool `json:"removeDns,omitempty"`
 }
 
+type projectWorkbenchImportRequest struct {
+	Reason string `json:"reason,omitempty"`
+}
+
 func NewProjectsController(
 	service *service.ProjectService,
 	archive *service.ProjectArchiveService,
+	workbench *service.WorkbenchService,
 	runtime *service.ProjectRuntimeService,
 	env *service.ProjectEnvService,
 	host *service.HostService,
@@ -71,13 +77,14 @@ func NewProjectsController(
 	audit *service.AuditService,
 ) *ProjectsController {
 	return &ProjectsController{
-		service: service,
-		archive: archive,
-		runtime: runtime,
-		env:     env,
-		host:    host,
-		jobs:    jobs,
-		audit:   audit,
+		service:   service,
+		archive:   archive,
+		workbench: workbench,
+		runtime:   runtime,
+		env:       env,
+		host:      host,
+		jobs:      jobs,
+		audit:     audit,
 	}
 }
 
@@ -289,6 +296,53 @@ func (c *ProjectsController) Archive(ctx *gin.Context) {
 	ctx.JSON(http.StatusAccepted, gin.H{
 		"job":  newJobResponse(*job),
 		"plan": plan,
+	})
+}
+
+func (c *ProjectsController) WorkbenchImport(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		return
+	}
+
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.workbench == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeWorkbenchStorageFailed, "workbench service unavailable", nil)
+		return
+	}
+
+	req := projectWorkbenchImportRequest{}
+	if err := ctx.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "invalid request body", nil)
+		return
+	}
+
+	stack, changed, err := c.workbench.ImportComposeSnapshot(ctx.Request.Context(), project, req.Reason)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectWorkbenchImportFailed, "failed to import workbench snapshot")
+		return
+	}
+
+	c.logAudit(ctx, "project.workbench.import", project, map[string]any{
+		"project":      project,
+		"reason":       strings.ToLower(strings.TrimSpace(req.Reason)),
+		"changed":      changed,
+		"idempotent":   !changed,
+		"revision":     stack.Revision,
+		"fingerprint":  stack.SourceFingerprint,
+		"serviceCount": len(stack.Services),
+		"warningCount": len(stack.Warnings),
+	})
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"stack":      stack,
+		"changed":    changed,
+		"idempotent": !changed,
 	})
 }
 
@@ -770,10 +824,13 @@ func projectHTTPStatus(err error, fallback int) int {
 	case errs.CodeProjectInvalidBody,
 		errs.CodeProjectInvalidName,
 		errs.CodeProjectInvalidContainer,
+		errs.CodeWorkbenchSourceInvalid,
 		errs.CodeProjectEnvTooLarge:
 		return http.StatusBadRequest
-	case errs.CodeProjectNotFound, errs.CodeProjectContainerNotFound:
+	case errs.CodeProjectNotFound, errs.CodeProjectContainerNotFound, errs.CodeWorkbenchSourceNotFound:
 		return http.StatusNotFound
+	case errs.CodeWorkbenchLocked:
+		return http.StatusConflict
 	case errs.CodeProjectAdminRequired:
 		return http.StatusForbidden
 	default:

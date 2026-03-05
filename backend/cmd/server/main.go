@@ -95,6 +95,7 @@ func main() {
 
 	hostService := service.NewHostService(cfg.TemplatesDir, projectRepo, bridgeClient)
 	projectService := service.NewProjectService(cfg, projectRepo, jobService, settingsService)
+	workbenchService := service.NewWorkbenchServiceWithStorage(cfg.TemplatesDir, projectRepo, settingsRepo, cfg.SessionSecret)
 	projectArchiveService := service.NewProjectArchiveService(cfg, projectRepo, settingsService, jobService, hostService)
 	projectRuntimeService := service.NewProjectRuntimeService(cfg.TemplatesDir, projectRepo, hostService)
 	projectEnvService := service.NewProjectEnvService(cfg.TemplatesDir, projectRepo)
@@ -116,7 +117,7 @@ func main() {
 	r := router.NewRouter(router.Dependencies{
 		Health:          controller.NewHealthController(healthService),
 		Auth:            controller.NewAuthController(authService, auditService, sessionManager, secureCookie, cookieDomain),
-		Projects:        controller.NewProjectsController(projectService, projectArchiveService, projectRuntimeService, projectEnvService, hostService, jobService, auditService),
+		Projects:        controller.NewProjectsController(projectService, projectArchiveService, workbenchService, projectRuntimeService, projectEnvService, hostService, jobService, auditService),
 		Jobs:            controller.NewJobsController(jobService),
 		Settings:        controller.NewSettingsController(settingsService, auditService),
 		Host:            controller.NewHostController(hostService, jobService, auditService),

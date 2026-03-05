@@ -2,14 +2,12 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
-	"go-notes/internal/utils/cryptox"
 )
 
 type NetBirdModeConfig struct {
@@ -45,6 +43,9 @@ func (s *SettingsService) GetNetBirdModeConfig(ctx context.Context) (NetBirdMode
 }
 
 func (s *SettingsService) UpsertNetBirdModeConfig(ctx context.Context, input NetBirdModeConfigUpdate) (NetBirdModeConfig, error) {
+	settingsWriteLock.Lock()
+	defer settingsWriteLock.Unlock()
+
 	stored, err := s.repo.Get(ctx)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
@@ -57,9 +58,13 @@ func (s *SettingsService) UpsertNetBirdModeConfig(ctx context.Context, input Net
 		stored = &models.Settings{}
 	}
 
-	current, err := decodeStoredNetBirdConfig(s.cfg.SessionSecret, stored.NetBirdConfigEncrypted)
+	payload, err := loadSettingsEncryptedPayload(s.cfg.SessionSecret, stored.NetBirdConfigEncrypted)
 	if err != nil {
 		return NetBirdModeConfig{}, fmt.Errorf("decode stored netbird config: %w", err)
+	}
+	current := netBirdStoredConfig{}
+	if payload.NetBird != nil {
+		current = *payload.NetBird
 	}
 
 	next := current
@@ -79,7 +84,8 @@ func (s *SettingsService) UpsertNetBirdModeConfig(ctx context.Context, input Net
 		next.APIToken = strings.TrimSpace(*input.APIToken)
 	}
 
-	encoded, err := encodeStoredNetBirdConfig(s.cfg.SessionSecret, next)
+	payload.NetBird = &next
+	encoded, err := encodeSettingsEncryptedPayload(s.cfg.SessionSecret, payload)
 	if err != nil {
 		return NetBirdModeConfig{}, err
 	}
@@ -145,11 +151,14 @@ func (s *SettingsService) loadNetBirdStoredConfig(ctx context.Context) (netBirdS
 	if stored == nil {
 		return netBirdStoredConfig{}, false, nil
 	}
-	config, err := decodeStoredNetBirdConfig(s.cfg.SessionSecret, stored.NetBirdConfigEncrypted)
+	payload, err := loadSettingsEncryptedPayload(s.cfg.SessionSecret, stored.NetBirdConfigEncrypted)
 	if err != nil {
 		return netBirdStoredConfig{}, false, fmt.Errorf("decode stored netbird config: %w", err)
 	}
-	return config, true, nil
+	if payload.NetBird == nil {
+		return netBirdStoredConfig{}, true, nil
+	}
+	return normalizeStoredNetBirdConfig(*payload.NetBird), true, nil
 }
 
 func netBirdModeConfigView(stored netBirdStoredConfig) NetBirdModeConfig {
@@ -174,39 +183,18 @@ func normalizeStoredNetBirdConfig(input netBirdStoredConfig) netBirdStoredConfig
 }
 
 func decodeStoredNetBirdConfig(secret, encrypted string) (netBirdStoredConfig, error) {
-	trimmed := strings.TrimSpace(encrypted)
-	if trimmed == "" {
-		return netBirdStoredConfig{}, nil
-	}
-
-	raw, err := cryptox.DecryptWithSecret(secret, trimmed)
+	payload, err := loadSettingsEncryptedPayload(secret, encrypted)
 	if err != nil {
 		return netBirdStoredConfig{}, err
 	}
-	if strings.TrimSpace(raw) == "" {
+	if payload.NetBird == nil {
 		return netBirdStoredConfig{}, nil
 	}
-
-	var parsed netBirdStoredConfig
-	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-		return netBirdStoredConfig{}, fmt.Errorf("unmarshal netbird config: %w", err)
-	}
-	return normalizeStoredNetBirdConfig(parsed), nil
+	return normalizeStoredNetBirdConfig(*payload.NetBird), nil
 }
 
 func encodeStoredNetBirdConfig(secret string, config netBirdStoredConfig) (string, error) {
-	normalized := normalizeStoredNetBirdConfig(config)
-	if normalized.APIBaseURL == "" && normalized.APIToken == "" && normalized.HostPeerID == "" && len(normalized.AdminPeerIDs) == 0 && len(normalized.ModeBProjectIDs) == 0 {
-		return "", nil
-	}
-
-	raw, err := json.Marshal(normalized)
-	if err != nil {
-		return "", fmt.Errorf("marshal netbird config: %w", err)
-	}
-	encrypted, err := cryptox.EncryptWithSecret(secret, string(raw))
-	if err != nil {
-		return "", fmt.Errorf("encrypt netbird config: %w", err)
-	}
-	return encrypted, nil
+	return encodeSettingsEncryptedPayload(secret, settingsEncryptedPayload{
+		NetBird: &config,
+	})
 }
