@@ -18,7 +18,7 @@ import { apiErrorMessage } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { usePageLoadingStore } from '@/stores/pageLoading'
 import { useToastStore } from '@/stores/toasts'
-import { useWorkbenchStore } from '@/stores/workbench'
+import { useWorkbenchStore, type WorkbenchRequestStatus } from '@/stores/workbench'
 import { jobStatusLabel, jobStatusTone } from '@/utils/jobStatus'
 import type { Job, JobDetail, JobListResponse } from '@/types/jobs'
 import type {
@@ -27,6 +27,17 @@ import type {
   ProjectContainer,
   ProjectDetail,
 } from '@/types/projects'
+import {
+  buildWorkbenchModuleSelectorKey,
+  buildWorkbenchPortSelectorKey,
+  type WorkbenchMutationIssue,
+  type WorkbenchModuleMutationSummary,
+  type WorkbenchPortMutationSummary,
+  type WorkbenchPortSelector,
+  type WorkbenchResourceField,
+  type WorkbenchResourceMutationRequest,
+  type WorkbenchResourceMutationSummary,
+} from '@/types/workbench'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
@@ -40,6 +51,7 @@ interface WorkbenchServiceInventoryRow {
 
 interface WorkbenchPortInventoryRow {
   key: string
+  selector: WorkbenchPortSelector
   serviceName: string
   containerPort: number
   protocol: string
@@ -55,6 +67,48 @@ interface WorkbenchPortInventoryRow {
   effectiveHostPortLabel: string
   mappingLabel: string
   guidance: string
+}
+
+interface WorkbenchResourceInventoryRow {
+  key: string
+  serviceName: string
+  tracked: boolean
+  limitCpus: string | null
+  limitMemory: string | null
+  reservationCpus: string | null
+  reservationMemory: string | null
+  hasLimits: boolean
+  hasReservations: boolean
+}
+
+interface WorkbenchResourceInputState {
+  limitCpus: string
+  limitMemory: string
+  reservationCpus: string
+  reservationMemory: string
+}
+
+interface WorkbenchModuleInventoryRow {
+  key: string
+  serviceName: string
+  moduleType: string
+  moduleLabel: string
+  enabled: boolean
+  count: number
+}
+
+interface WorkbenchTopologyInventoryRow {
+  key: string
+  serviceName: string
+  dependsOn: string[]
+  dependedBy: string[]
+  networkNames: string[]
+  moduleTypes: string[]
+}
+
+interface WorkbenchInlineFeedbackState {
+  tone: BadgeTone
+  message: string
 }
 
 const route = useRoute()
@@ -80,6 +134,8 @@ const archiveOptions = ref<ProjectArchiveOptions>({
   removeDns: true,
 })
 const archiveConfirmInput = ref('')
+const workbenchPortManualInputs = ref<Record<string, string>>({})
+const workbenchResourceInputs = ref<Record<string, WorkbenchResourceInputState>>({})
 const isAdmin = computed(() => authStore.isAdmin)
 
 const projectJobs = ref<Job[]>([])
@@ -124,8 +180,32 @@ const workbenchError = computed(() => workbenchStore.snapshotError)
 const workbenchImportStatus = computed(() => workbenchStore.importStatus)
 const workbenchImportError = computed(() => workbenchStore.importError)
 const workbenchLastImportResult = computed(() => workbenchStore.lastImportResult)
+const workbenchResolveStatus = computed(() => workbenchStore.resolveStatus)
+const workbenchResolveError = computed(() => workbenchStore.resolveError)
+const workbenchLastResolveResult = computed(() => workbenchStore.lastResolveResult)
+const workbenchPortMutationStatus = computed(() => workbenchStore.portMutationStatus)
+const workbenchPortMutationError = computed(() => workbenchStore.portMutationError)
+const workbenchActivePortMutationSelectorKey = computed(
+  () => workbenchStore.activePortMutationSelectorKey,
+)
+const workbenchLastPortMutationResult = computed(() => workbenchStore.lastPortMutationResult)
+const workbenchResourceMutationStatus = computed(() => workbenchStore.resourceMutationStatus)
+const workbenchResourceMutationError = computed(() => workbenchStore.resourceMutationError)
+const workbenchActiveResourceMutationServiceName = computed(
+  () => workbenchStore.activeResourceMutationServiceName,
+)
+const workbenchLastResourceMutationResult = computed(() => workbenchStore.lastResourceMutationResult)
+const workbenchModuleMutationStatus = computed(() => workbenchStore.moduleMutationStatus)
+const workbenchModuleMutationError = computed(() => workbenchStore.moduleMutationError)
+const workbenchActiveModuleMutationSelectorKey = computed(
+  () => workbenchStore.activeModuleMutationSelectorKey,
+)
+const workbenchLastModuleMutationResult = computed(() => workbenchStore.lastModuleMutationResult)
+const workbenchPortSuggestionStatusByKey = computed(() => workbenchStore.portSuggestionStatusByKey)
+const workbenchPortSuggestionErrorByKey = computed(() => workbenchStore.portSuggestionErrorByKey)
+const workbenchPortSuggestionResultByKey = computed(() => workbenchStore.portSuggestionResultByKey)
 const workbenchAccessLabel = computed(() =>
-  isAdmin.value ? 'Admin import enabled' : 'Read-only visibility',
+  isAdmin.value ? 'Admin edits enabled' : 'Read-only visibility',
 )
 const workbenchSnapshotReady = computed(() => {
   const snapshot = workbenchSnapshot.value
@@ -146,6 +226,10 @@ const workbenchSnapshotReady = computed(() => {
 const workbenchImportLabel = computed(() => {
   if (workbenchImportStatus.value === 'loading') return 'Importing compose...'
   return workbenchSnapshotReady.value ? 'Re-import compose' : 'Import compose'
+})
+const workbenchResolveLabel = computed(() => {
+  if (workbenchResolveStatus.value === 'loading') return 'Resolving ports...'
+  return 'Auto-resolve ports'
 })
 const workbenchStatusLabel = computed(() => {
   if (detail.value && !workbenchComposeSupported.value) return 'Unsupported'
@@ -193,6 +277,36 @@ const workbenchImportFeedback = computed(() => {
   }
   return `Workbench snapshot already matched the current compose at revision ${result.revision}.`
 })
+const workbenchResolveFeedback = computed<WorkbenchInlineFeedbackState | null>(() => {
+  const parsedError = workbenchResolveError.value
+  if (parsedError) {
+    const issues = workbenchIssueListFromDetails(parsedError.details)
+    const issueMessage = issues[0]?.message?.trim()
+    return {
+      tone: parsedError.code === 'WB-422-VALIDATION' ? 'warn' : 'error',
+      message: parsedError.code
+        ? issueMessage
+          ? `[${parsedError.code}] ${parsedError.message} ${issueMessage}`
+          : `[${parsedError.code}] ${parsedError.message}`
+        : parsedError.message,
+    }
+  }
+
+  const result = workbenchLastResolveResult.value
+  if (!result) return null
+
+  if (!result.changed) {
+    return {
+      tone: result.conflict > 0 || result.unavailable > 0 ? 'warn' : 'ok',
+      message: `Resolver found no persisted changes at revision ${result.revision}. Assigned ${result.assigned}, conflicts ${result.conflict}, unavailable ${result.unavailable}.`,
+    }
+  }
+
+  return {
+    tone: result.conflict > 0 || result.unavailable > 0 ? 'warn' : 'ok',
+    message: `Resolver saved revision ${result.revision}. Assigned ${result.assigned}, conflicts ${result.conflict}, unavailable ${result.unavailable}.`,
+  }
+})
 const workbenchFingerprintLabel = computed(() => {
   const fingerprint = workbenchSnapshot.value?.sourceFingerprint?.trim()
   return fingerprint || 'Not imported yet'
@@ -227,6 +341,12 @@ const workbenchPortInventory = computed<WorkbenchPortInventoryRow[]>(() => {
   return snapshot.ports.map((port, index) => {
     const normalizedProtocol = port.protocol?.trim().toLowerCase() || 'tcp'
     const hostIp = port.hostIp?.trim() || '0.0.0.0'
+    const selector = {
+      serviceName: port.serviceName,
+      containerPort: port.containerPort,
+      protocol: normalizedProtocol,
+      hostIp,
+    } satisfies WorkbenchPortSelector
     const assignmentStrategy = port.assignmentStrategy?.trim().toLowerCase() || 'auto'
     const requestedHostPort = port.hostPortRaw?.trim() || null
     const effectiveHostPort = port.hostPort != null ? String(port.hostPort) : null
@@ -252,7 +372,8 @@ const workbenchPortInventory = computed<WorkbenchPortInventoryRow[]>(() => {
     }
 
     return {
-      key: `${port.serviceName}-${port.containerPort}-${normalizedProtocol}-${hostIp}-${visibleHostPort}-${index}`,
+      key: buildWorkbenchPortSelectorKey(selector) || `${port.serviceName}-${port.containerPort}-${normalizedProtocol}-${hostIp}-${index}`,
+      selector,
       serviceName: port.serviceName,
       containerPort: port.containerPort,
       protocol: normalizedProtocol,
@@ -319,6 +440,602 @@ const workbenchPortBadgeTone = computed<BadgeTone>(() => {
   if (workbenchPortSummary.value.total > 0) return 'ok'
   return 'neutral'
 })
+const workbenchResourceInventory = computed<WorkbenchResourceInventoryRow[]>(() => {
+  const snapshot = workbenchSnapshot.value
+  if (!snapshot) return []
+
+  const resourcesByService = new Map(snapshot.resources.map((resource) => [resource.serviceName, resource]))
+
+  return snapshot.services.map((service) => {
+    const resource = resourcesByService.get(service.serviceName)
+    const limitCpus = resource?.limitCpus?.trim() || null
+    const limitMemory = resource?.limitMemory?.trim() || null
+    const reservationCpus = resource?.reservationCpus?.trim() || null
+    const reservationMemory = resource?.reservationMemory?.trim() || null
+
+    return {
+      key: service.serviceName,
+      serviceName: service.serviceName,
+      tracked: Boolean(resource),
+      limitCpus,
+      limitMemory,
+      reservationCpus,
+      reservationMemory,
+      hasLimits: Boolean(limitCpus || limitMemory),
+      hasReservations: Boolean(reservationCpus || reservationMemory),
+    }
+  })
+})
+const workbenchResourceSummary = computed(() => {
+  const summary = {
+    total: workbenchResourceInventory.value.length,
+    tracked: 0,
+    withLimits: 0,
+    withReservations: 0,
+    unconstrained: 0,
+  }
+
+  for (const resource of workbenchResourceInventory.value) {
+    if (resource.tracked) summary.tracked += 1
+    if (resource.hasLimits) summary.withLimits += 1
+    if (resource.hasReservations) summary.withReservations += 1
+    if (!resource.hasLimits && !resource.hasReservations) summary.unconstrained += 1
+  }
+
+  return summary
+})
+const workbenchResourceBadgeTone = computed<BadgeTone>(() => {
+  if (workbenchResourceSummary.value.total > 0) return 'ok'
+  return 'neutral'
+})
+const workbenchModuleInventory = computed<WorkbenchModuleInventoryRow[]>(() => {
+  const snapshot = workbenchSnapshot.value
+  if (!snapshot) return []
+
+  const redisCountsByService = new Map<string, number>()
+  for (const module of snapshot.modules) {
+    const serviceName = module.serviceName?.trim()
+    const moduleType = module.moduleType?.trim().toLowerCase()
+    if (!serviceName || moduleType !== 'redis') continue
+    redisCountsByService.set(serviceName, (redisCountsByService.get(serviceName) ?? 0) + 1)
+  }
+
+  return snapshot.services.map((service) => {
+    const selector = {
+      serviceName: service.serviceName,
+      moduleType: 'redis',
+    }
+    const count = redisCountsByService.get(service.serviceName) ?? 0
+
+    return {
+      key: buildWorkbenchModuleSelectorKey(selector),
+      serviceName: service.serviceName,
+      moduleType: 'redis',
+      moduleLabel: 'Redis',
+      enabled: count > 0,
+      count,
+    }
+  })
+})
+const workbenchModuleSummary = computed(() => {
+  const summary = {
+    services: workbenchModuleInventory.value.length,
+    redisEnabledServices: 0,
+    redisDisabledServices: 0,
+    redisModuleCount: 0,
+  }
+
+  for (const row of workbenchModuleInventory.value) {
+    summary.redisModuleCount += row.count
+    if (row.enabled) {
+      summary.redisEnabledServices += 1
+    } else {
+      summary.redisDisabledServices += 1
+    }
+  }
+
+  return summary
+})
+const workbenchModuleBadgeTone = computed<BadgeTone>(() => {
+  if (workbenchModuleSummary.value.redisEnabledServices > 0) return 'ok'
+  if (workbenchModuleSummary.value.services > 0) return 'neutral'
+  return 'neutral'
+})
+const workbenchTopologyInventory = computed<WorkbenchTopologyInventoryRow[]>(() => {
+  const snapshot = workbenchSnapshot.value
+  if (!snapshot) return []
+
+  const serviceNames: string[] = []
+  const seenServiceNames = new Set<string>()
+  const dependsOnByService = new Map<string, string[]>()
+  const dependedByByService = new Map<string, string[]>()
+  const networkNamesByService = new Map<string, string[]>()
+  const moduleTypesByService = new Map<string, string[]>()
+
+  const trackServiceName = (value?: string | null) => {
+    const normalized = value?.trim()
+    if (!normalized || seenServiceNames.has(normalized)) return
+    seenServiceNames.add(normalized)
+    serviceNames.push(normalized)
+  }
+
+  const appendUnique = (targetMap: Map<string, string[]>, serviceName: string, value: string) => {
+    const normalizedServiceName = serviceName.trim()
+    const normalizedValue = value.trim()
+    if (!normalizedServiceName || !normalizedValue) return
+
+    const currentValues = targetMap.get(normalizedServiceName)
+    if (currentValues) {
+      if (!currentValues.includes(normalizedValue)) currentValues.push(normalizedValue)
+      return
+    }
+
+    targetMap.set(normalizedServiceName, [normalizedValue])
+  }
+
+  for (const service of snapshot.services) {
+    trackServiceName(service.serviceName)
+  }
+
+  for (const dependency of snapshot.dependencies) {
+    trackServiceName(dependency.serviceName)
+    trackServiceName(dependency.dependsOn)
+    appendUnique(dependsOnByService, dependency.serviceName, dependency.dependsOn)
+    appendUnique(dependedByByService, dependency.dependsOn, dependency.serviceName)
+  }
+
+  for (const networkRef of snapshot.networkRefs) {
+    trackServiceName(networkRef.serviceName)
+    appendUnique(networkNamesByService, networkRef.serviceName, networkRef.networkName)
+  }
+
+  for (const module of snapshot.modules) {
+    const serviceName = module.serviceName?.trim()
+    if (!serviceName) continue
+    trackServiceName(serviceName)
+    appendUnique(moduleTypesByService, serviceName, module.moduleType)
+  }
+
+  return serviceNames.map((serviceName) => ({
+    key: serviceName,
+    serviceName,
+    dependsOn: dependsOnByService.get(serviceName) ?? [],
+    dependedBy: dependedByByService.get(serviceName) ?? [],
+    networkNames: networkNamesByService.get(serviceName) ?? [],
+    moduleTypes: moduleTypesByService.get(serviceName) ?? [],
+  }))
+})
+const workbenchTopologySummary = computed(() => {
+  const summary = {
+    services: workbenchTopologyInventory.value.length,
+    dependencyEdges: workbenchSnapshot.value?.dependencies.length ?? 0,
+    connectedServices: 0,
+    isolatedServices: 0,
+    networks: [] as string[],
+    moduleTypes: [] as string[],
+  }
+
+  const seenNetworks = new Set<string>()
+  const seenModuleTypes = new Set<string>()
+
+  for (const row of workbenchTopologyInventory.value) {
+    if (row.dependsOn.length > 0 || row.dependedBy.length > 0) {
+      summary.connectedServices += 1
+    } else {
+      summary.isolatedServices += 1
+    }
+
+    for (const networkName of row.networkNames) {
+      if (seenNetworks.has(networkName)) continue
+      seenNetworks.add(networkName)
+      summary.networks.push(networkName)
+    }
+
+    for (const moduleType of row.moduleTypes) {
+      if (seenModuleTypes.has(moduleType)) continue
+      seenModuleTypes.add(moduleType)
+      summary.moduleTypes.push(moduleType)
+    }
+  }
+
+  return summary
+})
+const workbenchTopologyBadgeTone = computed<BadgeTone>(() => {
+  if (workbenchTopologySummary.value.services > 0) return 'ok'
+  return 'neutral'
+})
+
+const workbenchResourceFieldOrder: WorkbenchResourceField[] = [
+  'limitCpus',
+  'limitMemory',
+  'reservationCpus',
+  'reservationMemory',
+]
+
+const workbenchResourceFieldLabels: Record<WorkbenchResourceField, string> = {
+  limitCpus: 'limit CPU',
+  limitMemory: 'limit memory',
+  reservationCpus: 'reservation CPU',
+  reservationMemory: 'reservation memory',
+}
+
+function createWorkbenchResourceInputState(resource?: {
+  limitCpus?: string | null
+  limitMemory?: string | null
+  reservationCpus?: string | null
+  reservationMemory?: string | null
+} | null): WorkbenchResourceInputState {
+  return {
+    limitCpus: resource?.limitCpus?.trim() || '',
+    limitMemory: resource?.limitMemory?.trim() || '',
+    reservationCpus: resource?.reservationCpus?.trim() || '',
+    reservationMemory: resource?.reservationMemory?.trim() || '',
+  }
+}
+
+function workbenchIssueListFromDetails(details: unknown): WorkbenchMutationIssue[] {
+  if (!details || typeof details !== 'object') return []
+  const rawIssues = (details as Record<string, unknown>).issues
+  if (!Array.isArray(rawIssues)) return []
+  return rawIssues.filter(
+    (issue): issue is WorkbenchMutationIssue =>
+      Boolean(issue) &&
+      typeof issue === 'object' &&
+      typeof (issue as Record<string, unknown>).code === 'string' &&
+      typeof (issue as Record<string, unknown>).message === 'string',
+  )
+}
+
+function workbenchMutationSummaryFromDetails(details: unknown): WorkbenchPortMutationSummary | null {
+  if (!details || typeof details !== 'object') return null
+  const summary = (details as Record<string, unknown>).summary
+  if (!summary || typeof summary !== 'object') return null
+  if (
+    typeof (summary as Record<string, unknown>).action !== 'string' ||
+    !('selector' in (summary as Record<string, unknown>))
+  ) {
+    return null
+  }
+  return summary as WorkbenchPortMutationSummary
+}
+
+function workbenchResourceMutationSummaryFromDetails(details: unknown): WorkbenchResourceMutationSummary | null {
+  if (!details || typeof details !== 'object') return null
+  const summary = (details as Record<string, unknown>).summary
+  if (!summary || typeof summary !== 'object') return null
+  if (
+    typeof (summary as Record<string, unknown>).action !== 'string' ||
+    !('selector' in (summary as Record<string, unknown>))
+  ) {
+    return null
+  }
+  return summary as WorkbenchResourceMutationSummary
+}
+
+function workbenchModuleMutationSummaryFromDetails(details: unknown): WorkbenchModuleMutationSummary | null {
+  if (!details || typeof details !== 'object') return null
+  const summary = (details as Record<string, unknown>).summary
+  if (!summary || typeof summary !== 'object') return null
+  if (
+    typeof (summary as Record<string, unknown>).action !== 'string' ||
+    !('selector' in (summary as Record<string, unknown>))
+  ) {
+    return null
+  }
+  return summary as WorkbenchModuleMutationSummary
+}
+
+function workbenchPortInputValue(port: WorkbenchPortInventoryRow): string {
+  return workbenchPortManualInputs.value[port.key] ?? ''
+}
+
+function syncWorkbenchPortManualInputs(ports: WorkbenchPortInventoryRow[]) {
+  const nextValues: Record<string, string> = {}
+  for (const port of ports) {
+    nextValues[port.key] =
+      workbenchPortManualInputs.value[port.key] ??
+      port.effectiveHostPort ??
+      port.requestedHostPort ??
+      ''
+  }
+  workbenchPortManualInputs.value = nextValues
+}
+
+function setWorkbenchPortInputValue(key: string, value: string) {
+  workbenchPortManualInputs.value = {
+    ...workbenchPortManualInputs.value,
+    [key]: value,
+  }
+}
+
+function workbenchResourceInputValue(
+  resource: WorkbenchResourceInventoryRow,
+  field: WorkbenchResourceField,
+): string {
+  return workbenchResourceInputs.value[resource.key]?.[field] ?? ''
+}
+
+function syncWorkbenchResourceInputs(resources: WorkbenchResourceInventoryRow[]) {
+  const nextValues: Record<string, WorkbenchResourceInputState> = {}
+  for (const resource of resources) {
+    nextValues[resource.key] =
+      workbenchResourceInputs.value[resource.key] ??
+      createWorkbenchResourceInputState(resource)
+  }
+  workbenchResourceInputs.value = nextValues
+}
+
+function syncWorkbenchResourceInputForService(
+  serviceName: string,
+  resource?: {
+    limitCpus?: string | null
+    limitMemory?: string | null
+    reservationCpus?: string | null
+    reservationMemory?: string | null
+  } | null,
+) {
+  workbenchResourceInputs.value = {
+    ...workbenchResourceInputs.value,
+    [serviceName]: createWorkbenchResourceInputState(resource),
+  }
+}
+
+function setWorkbenchResourceInputValue(
+  serviceName: string,
+  field: WorkbenchResourceField,
+  value: string,
+) {
+  workbenchResourceInputs.value = {
+    ...workbenchResourceInputs.value,
+    [serviceName]: {
+      ...createWorkbenchResourceInputState(workbenchResourceInputs.value[serviceName]),
+      [field]: value,
+    },
+  }
+}
+
+function resetWorkbenchResourceInputs(resource: WorkbenchResourceInventoryRow) {
+  syncWorkbenchResourceInputForService(resource.serviceName, resource)
+}
+
+function workbenchPortMutationBusy(port: WorkbenchPortInventoryRow): boolean {
+  return (
+    workbenchPortMutationStatus.value === 'loading' &&
+    workbenchActivePortMutationSelectorKey.value === port.key
+  )
+}
+
+function workbenchPortSuggestionStatus(port: WorkbenchPortInventoryRow): WorkbenchRequestStatus {
+  return workbenchPortSuggestionStatusByKey.value[port.key] ?? 'idle'
+}
+
+function workbenchPortSuggestionErrorMessage(port: WorkbenchPortInventoryRow): string {
+  const parsedError = workbenchPortSuggestionErrorByKey.value[port.key]
+  if (!parsedError) return ''
+  const issues = workbenchIssueListFromDetails(parsedError.details)
+  const issueMessage = issues[0]?.message?.trim()
+  if (parsedError.code) {
+    return issueMessage
+      ? `[${parsedError.code}] ${parsedError.message} ${issueMessage}`
+      : `[${parsedError.code}] ${parsedError.message}`
+  }
+  return parsedError.message
+}
+
+function workbenchPortMutationFeedback(port: WorkbenchPortInventoryRow): WorkbenchInlineFeedbackState | null {
+  const successfulResult = workbenchLastPortMutationResult.value
+  if (
+    successfulResult &&
+    buildWorkbenchPortSelectorKey(successfulResult.selector) === port.key
+  ) {
+    if (!successfulResult.changed) {
+      return {
+        tone: 'warn',
+        message: successfulResult.message || 'No port mutation changes were required.',
+      }
+    }
+
+    const label =
+      successfulResult.action === 'clear_manual'
+        ? `Returned to auto allocation at revision ${successfulResult.revision}.`
+        : `Manual host port saved at revision ${successfulResult.revision}.`
+    return {
+      tone:
+        successfulResult.status === 'conflict' || successfulResult.status === 'unavailable'
+          ? 'warn'
+          : 'ok',
+      message: successfulResult.message ? `${label} ${successfulResult.message}` : label,
+    }
+  }
+
+  const parsedError = workbenchPortMutationError.value
+  if (!parsedError) return null
+
+  const summary = workbenchMutationSummaryFromDetails(parsedError.details)
+  if (!summary || buildWorkbenchPortSelectorKey(summary.selector) !== port.key) {
+    return null
+  }
+
+  const issues = workbenchIssueListFromDetails(parsedError.details)
+  const issueMessage = issues[0]?.message?.trim()
+  return {
+    tone: parsedError.code === 'WB-422-VALIDATION' ? 'warn' : 'error',
+    message: parsedError.code
+      ? issueMessage
+        ? `[${parsedError.code}] ${parsedError.message} ${issueMessage}`
+        : `[${parsedError.code}] ${parsedError.message}`
+      : parsedError.message,
+  }
+}
+
+function workbenchPortSuggestionFeedback(port: WorkbenchPortInventoryRow): WorkbenchInlineFeedbackState | null {
+  const parsedError = workbenchPortSuggestionErrorByKey.value[port.key]
+  if (parsedError) {
+    return {
+      tone: parsedError.code === 'WB-422-VALIDATION' ? 'warn' : 'error',
+      message: workbenchPortSuggestionErrorMessage(port),
+    }
+  }
+
+  const result = workbenchPortSuggestionResultByKey.value[port.key]
+  if (!result) return null
+
+  if (result.suggestionCount === 0) {
+    return {
+      tone: 'warn',
+      message: 'No available host-port suggestions were found for this mapping.',
+    }
+  }
+
+  return {
+    tone: 'ok',
+    message: `Loaded ${result.suggestionCount} candidate host port${result.suggestionCount === 1 ? '' : 's'} starting at ${result.preferredHostPort ?? 'the current resolver preference'}.`,
+  }
+}
+
+function workbenchResourceMutationBusy(resource: WorkbenchResourceInventoryRow): boolean {
+  return (
+    workbenchResourceMutationStatus.value === 'loading' &&
+    workbenchActiveResourceMutationServiceName.value === resource.serviceName
+  )
+}
+
+function workbenchResourceActionDisabled(resource: WorkbenchResourceInventoryRow): boolean {
+  return (
+    workbenchImportStatus.value === 'loading' ||
+    workbenchResolveStatus.value === 'loading' ||
+    workbenchPortMutationStatus.value === 'loading' ||
+    workbenchResourceMutationStatus.value === 'loading' ||
+    workbenchModuleMutationStatus.value === 'loading' ||
+    workbenchResourceMutationBusy(resource)
+  )
+}
+
+function workbenchResourceMutationFeedback(
+  resource: WorkbenchResourceInventoryRow,
+): WorkbenchInlineFeedbackState | null {
+  const successfulResult = workbenchLastResourceMutationResult.value
+  if (successfulResult && successfulResult.serviceName === resource.serviceName) {
+    if (!successfulResult.changed) {
+      return {
+        tone: 'warn',
+        message: 'No resource mutation changes were required.',
+      }
+    }
+
+    if (successfulResult.action === 'clear') {
+      const cleared = successfulResult.clearedFields.map((field) => workbenchResourceFieldLabels[field])
+      return {
+        tone: 'ok',
+        message: `Cleared ${cleared.join(', ')} at revision ${successfulResult.revision}.`,
+      }
+    }
+
+    const updated = successfulResult.updatedFields.map((field) => workbenchResourceFieldLabels[field])
+    return {
+      tone: 'ok',
+      message: `Saved ${updated.join(', ')} at revision ${successfulResult.revision}.`,
+    }
+  }
+
+  const parsedError = workbenchResourceMutationError.value
+  if (!parsedError) return null
+
+  const summary = workbenchResourceMutationSummaryFromDetails(parsedError.details)
+  if (!summary || summary.selector.serviceName !== resource.serviceName) {
+    return null
+  }
+
+  const issues = workbenchIssueListFromDetails(parsedError.details)
+  const issueMessage = issues[0]?.message?.trim()
+  return {
+    tone: parsedError.code === 'WB-422-VALIDATION' ? 'warn' : 'error',
+    message: parsedError.code
+      ? issueMessage
+        ? `[${parsedError.code}] ${parsedError.message} ${issueMessage}`
+        : `[${parsedError.code}] ${parsedError.message}`
+      : parsedError.message,
+  }
+}
+
+function workbenchModuleMutationBusy(row: WorkbenchModuleInventoryRow): boolean {
+  return (
+    workbenchModuleMutationStatus.value === 'loading' &&
+    workbenchActiveModuleMutationSelectorKey.value === row.key
+  )
+}
+
+function workbenchModuleActionDisabled(row: WorkbenchModuleInventoryRow): boolean {
+  return (
+    workbenchImportStatus.value === 'loading' ||
+    workbenchResolveStatus.value === 'loading' ||
+    workbenchPortMutationStatus.value === 'loading' ||
+    workbenchResourceMutationStatus.value === 'loading' ||
+    workbenchModuleMutationStatus.value === 'loading' ||
+    workbenchModuleMutationBusy(row)
+  )
+}
+
+function workbenchModuleMutationFeedback(row: WorkbenchModuleInventoryRow): WorkbenchInlineFeedbackState | null {
+  const successfulResult = workbenchLastModuleMutationResult.value
+  if (successfulResult && buildWorkbenchModuleSelectorKey(successfulResult.selector) === row.key) {
+    if (!successfulResult.changed) {
+      return {
+        tone: 'warn',
+        message:
+          successfulResult.action === 'remove'
+            ? `${row.moduleLabel} was already absent for ${row.serviceName}.`
+            : 'No module changes were required.',
+      }
+    }
+
+    return {
+      tone: 'ok',
+      message:
+        successfulResult.action === 'add'
+          ? `${row.moduleLabel} enabled for ${row.serviceName} at revision ${successfulResult.revision}.`
+          : `${row.moduleLabel} removed from ${row.serviceName} at revision ${successfulResult.revision}.`,
+    }
+  }
+
+  const parsedError = workbenchModuleMutationError.value
+  if (!parsedError) return null
+
+  const summary = workbenchModuleMutationSummaryFromDetails(parsedError.details)
+  if (!summary || buildWorkbenchModuleSelectorKey(summary.selector) !== row.key) {
+    return null
+  }
+
+  const issues = workbenchIssueListFromDetails(parsedError.details)
+  const issueMessage = issues[0]?.message?.trim()
+  return {
+    tone: parsedError.code === 'WB-422-VALIDATION' ? 'warn' : 'error',
+    message: parsedError.code
+      ? issueMessage
+        ? `[${parsedError.code}] ${parsedError.message} ${issueMessage}`
+        : `[${parsedError.code}] ${parsedError.message}`
+      : parsedError.message,
+  }
+}
+
+function workbenchResourceSetPayload(
+  resource: WorkbenchResourceInventoryRow,
+): WorkbenchResourceMutationRequest | null {
+  const payload: WorkbenchResourceMutationRequest = {
+    action: 'set',
+  }
+
+  let changedFieldCount = 0
+  for (const field of workbenchResourceFieldOrder) {
+    const rawValue = workbenchResourceInputValue(resource, field).trim()
+    const currentValue = resource[field]?.trim() || ''
+    if (!rawValue || rawValue === currentValue) continue
+    payload[field] = rawValue
+    changedFieldCount += 1
+  }
+
+  return changedFieldCount > 0 ? payload : null
+}
 
 const statusTone = (status: string): BadgeTone => {
   const normalized = status.trim().toLowerCase()
@@ -497,6 +1214,224 @@ const importWorkbench = async () => {
   }
 }
 
+const resolveWorkbenchPorts = async () => {
+  const name = projectName.value
+  if (!name) return
+  if (!workbenchComposeSupported.value || !workbenchSnapshotReady.value) {
+    toastStore.warn('Import a Workbench snapshot before resolving ports.', 'Workbench')
+    return
+  }
+  if (!isAdmin.value) {
+    toastStore.error('Admin access required.', 'Workbench resolve blocked')
+    return
+  }
+
+  const result = await workbenchStore.resolvePorts(name)
+  if (!result) {
+    const parsedError = workbenchResolveError.value
+    toastStore.error(parsedError?.message ?? 'Workbench port resolution failed.', 'Workbench')
+    return
+  }
+
+  if (result.changed) {
+    toastStore.success(`Workbench ports resolved at revision ${result.revision}.`, 'Workbench')
+  } else {
+    toastStore.warn(`Workbench ports already matched the resolver output at revision ${result.revision}.`, 'Workbench')
+  }
+}
+
+const setManualWorkbenchPort = async (port: WorkbenchPortInventoryRow) => {
+  const name = projectName.value
+  if (!name) return
+  if (!isAdmin.value) {
+    toastStore.error('Admin access required.', 'Workbench edit blocked')
+    return
+  }
+
+  const rawValue = workbenchPortInputValue(port).trim()
+  const manualHostPort = Number(rawValue)
+  if (!rawValue || Number.isNaN(manualHostPort) || !Number.isInteger(manualHostPort)) {
+    toastStore.error('Enter a valid integer host port.', 'Workbench port')
+    return
+  }
+
+  const result = await workbenchStore.mutatePort(name, {
+    selector: port.selector,
+    action: 'set_manual',
+    manualHostPort,
+  })
+  if (!result) {
+    const parsedError = workbenchPortMutationError.value
+    toastStore.error(parsedError?.message ?? 'Workbench port update failed.', 'Workbench')
+    return
+  }
+
+  setWorkbenchPortInputValue(port.key, String(result.assignedHostPort ?? manualHostPort))
+  toastStore.success(`Manual host port saved for ${port.serviceName}.`, 'Workbench port')
+}
+
+const resetWorkbenchPortToAuto = async (port: WorkbenchPortInventoryRow) => {
+  const name = projectName.value
+  if (!name) return
+  if (!isAdmin.value) {
+    toastStore.error('Admin access required.', 'Workbench edit blocked')
+    return
+  }
+
+  const result = await workbenchStore.mutatePort(name, {
+    selector: port.selector,
+    action: 'clear_manual',
+  })
+  if (!result) {
+    const parsedError = workbenchPortMutationError.value
+    toastStore.error(parsedError?.message ?? 'Workbench auto-reset failed.', 'Workbench')
+    return
+  }
+
+  setWorkbenchPortInputValue(port.key, String(result.assignedHostPort ?? result.preferredHostPort ?? ''))
+  toastStore.success(`Auto allocation restored for ${port.serviceName}.`, 'Workbench port')
+}
+
+const loadWorkbenchPortSuggestions = async (port: WorkbenchPortInventoryRow) => {
+  const name = projectName.value
+  if (!name) return
+  if (!isAdmin.value) {
+    toastStore.error('Admin access required.', 'Workbench suggestions blocked')
+    return
+  }
+
+  const result = await workbenchStore.loadPortSuggestions(name, port.selector, 5)
+  if (!result) {
+    const parsedError = workbenchPortSuggestionErrorByKey.value[port.key]
+    toastStore.error(parsedError?.message ?? 'Workbench suggestions failed.', 'Workbench')
+    return
+  }
+
+  if (result.suggestionCount === 0) {
+    toastStore.warn(`No open host-port suggestions found for ${port.serviceName}.`, 'Workbench')
+    return
+  }
+
+  toastStore.success(`Loaded ${result.suggestionCount} host-port suggestion(s) for ${port.serviceName}.`, 'Workbench')
+}
+
+const saveWorkbenchResource = async (resource: WorkbenchResourceInventoryRow) => {
+  const name = projectName.value
+  if (!name) return
+  if (!isAdmin.value) {
+    toastStore.error('Admin access required.', 'Workbench edit blocked')
+    return
+  }
+
+  const payload = workbenchResourceSetPayload(resource)
+  if (!payload) {
+    toastStore.warn(
+      'Enter at least one changed CPU or memory value before saving. Use clear on an existing field to remove it.',
+      'Workbench resources',
+    )
+    return
+  }
+
+  const result = await workbenchStore.mutateResource(name, resource.serviceName, payload)
+  if (!result) {
+    const parsedError = workbenchResourceMutationError.value
+    toastStore.error(parsedError?.message ?? 'Workbench resource update failed.', 'Workbench')
+    return
+  }
+
+  syncWorkbenchResourceInputForService(resource.serviceName, result.currentResource)
+  toastStore.success(`Stored resources updated for ${resource.serviceName}.`, 'Workbench resources')
+}
+
+const enableWorkbenchRedisModule = async (row: WorkbenchModuleInventoryRow) => {
+  const name = projectName.value
+  if (!name) return
+  if (!isAdmin.value) {
+    toastStore.error('Admin access required.', 'Workbench module blocked')
+    return
+  }
+
+  const result = await workbenchStore.mutateModule(name, {
+    selector: {
+      serviceName: row.serviceName,
+      moduleType: row.moduleType,
+    },
+    action: 'add',
+  })
+  if (!result) {
+    const parsedError = workbenchModuleMutationError.value
+    toastStore.error(parsedError?.message ?? 'Workbench module enable failed.', 'Workbench modules')
+    return
+  }
+
+  if (!result.changed) {
+    toastStore.warn(`${row.moduleLabel} was already present for ${row.serviceName}.`, 'Workbench modules')
+    return
+  }
+
+  toastStore.success(`${row.moduleLabel} enabled for ${row.serviceName}.`, 'Workbench modules')
+}
+
+const removeWorkbenchRedisModule = async (row: WorkbenchModuleInventoryRow) => {
+  const name = projectName.value
+  if (!name) return
+  if (!isAdmin.value) {
+    toastStore.error('Admin access required.', 'Workbench module blocked')
+    return
+  }
+
+  const result = await workbenchStore.mutateModule(name, {
+    selector: {
+      serviceName: row.serviceName,
+      moduleType: row.moduleType,
+    },
+    action: 'remove',
+  })
+  if (!result) {
+    const parsedError = workbenchModuleMutationError.value
+    toastStore.error(parsedError?.message ?? 'Workbench module removal failed.', 'Workbench modules')
+    return
+  }
+
+  if (!result.changed) {
+    toastStore.warn(`${row.moduleLabel} was already absent for ${row.serviceName}.`, 'Workbench modules')
+    return
+  }
+
+  toastStore.success(`${row.moduleLabel} removed from ${row.serviceName}.`, 'Workbench modules')
+}
+
+const clearWorkbenchResourceFields = async (
+  resource: WorkbenchResourceInventoryRow,
+  fields: WorkbenchResourceField[],
+) => {
+  const name = projectName.value
+  if (!name) return
+  if (!isAdmin.value) {
+    toastStore.error('Admin access required.', 'Workbench edit blocked')
+    return
+  }
+
+  const clearFields = fields.filter((field) => Boolean(resource[field]))
+  if (clearFields.length === 0) {
+    toastStore.warn('No stored CPU or memory values are available to clear on this service.', 'Workbench resources')
+    return
+  }
+
+  const result = await workbenchStore.mutateResource(name, resource.serviceName, {
+    action: 'clear',
+    clearFields,
+  })
+  if (!result) {
+    const parsedError = workbenchResourceMutationError.value
+    toastStore.error(parsedError?.message ?? 'Workbench resource clear failed.', 'Workbench')
+    return
+  }
+
+  syncWorkbenchResourceInputForService(resource.serviceName, result.currentResource)
+  toastStore.success(`Stored resources cleared for ${resource.serviceName}.`, 'Workbench resources')
+}
+
 const restartStack = async () => {
   const name = projectName.value
   if (!name) return
@@ -626,6 +1561,14 @@ const goToJobsPage = async (nextPage: number) => {
   await loadProjectJobs(nextPage)
 }
 
+watch(workbenchPortInventory, (ports) => {
+  syncWorkbenchPortManualInputs(ports)
+}, { immediate: true })
+
+watch(workbenchResourceInventory, (resources) => {
+  syncWorkbenchResourceInputs(resources)
+}, { immediate: true })
+
 onMounted(load)
 watch(projectName, () => {
   stackRestartError.value = null
@@ -636,6 +1579,8 @@ watch(projectName, () => {
   archiveExecutedWithWarnings.value = false
   archiveConfirmInput.value = ''
   jobLogsPanelOpen.value = false
+  workbenchPortManualInputs.value = {}
+  workbenchResourceInputs.value = {}
   workbenchStore.reset()
   void load()
 })
@@ -839,7 +1784,7 @@ watch(
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Workbench</p>
             <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Compose authority shell</h2>
             <p class="mt-2 text-sm text-[color:var(--muted)]">
-              Read/import state for the stored Workbench model. Detailed service, port, resource, and topology cards land in the next slices.
+              Read/import state for the stored Workbench model plus the shipped admin-only port, resource, and Redis module mutation controls. Preview/apply and restore edits remain out of scope here.
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
@@ -857,7 +1802,13 @@ watch(
             <UiButton
               variant="ghost"
               size="sm"
-              :disabled="workbenchStatus === 'loading' || workbenchImportStatus === 'loading'"
+              :disabled="
+                workbenchStatus === 'loading' ||
+                workbenchImportStatus === 'loading' ||
+                workbenchResolveStatus === 'loading' ||
+                workbenchResourceMutationStatus === 'loading' ||
+                workbenchModuleMutationStatus === 'loading'
+              "
               @click="refreshWorkbench"
             >
               <span class="inline-flex items-center gap-2">
@@ -867,10 +1818,33 @@ watch(
               </span>
             </UiButton>
             <UiButton
+              v-if="isAdmin && workbenchSnapshotReady"
+              variant="ghost"
+              size="sm"
+              :disabled="
+                workbenchResolveStatus === 'loading' ||
+                workbenchPortMutationStatus === 'loading' ||
+                workbenchResourceMutationStatus === 'loading' ||
+                workbenchModuleMutationStatus === 'loading'
+              "
+              @click="resolveWorkbenchPorts"
+            >
+              <span class="inline-flex items-center gap-2">
+                <UiInlineSpinner v-if="workbenchResolveStatus === 'loading'" />
+                {{ workbenchResolveLabel }}
+              </span>
+            </UiButton>
+            <UiButton
               v-if="isAdmin"
               variant="primary"
               size="sm"
-              :disabled="workbenchImportStatus === 'loading'"
+              :disabled="
+                workbenchImportStatus === 'loading' ||
+                workbenchResolveStatus === 'loading' ||
+                workbenchPortMutationStatus === 'loading' ||
+                workbenchResourceMutationStatus === 'loading' ||
+                workbenchModuleMutationStatus === 'loading'
+              "
               @click="importWorkbench"
             >
               <span class="inline-flex items-center gap-2">
@@ -886,6 +1860,12 @@ watch(
         </UiInlineFeedback>
         <UiInlineFeedback v-else-if="workbenchLastImportResult" :tone="workbenchImportFeedbackTone">
           {{ workbenchImportFeedback }}
+        </UiInlineFeedback>
+        <UiInlineFeedback
+          v-if="workbenchResolveFeedback"
+          :tone="workbenchResolveFeedback.tone"
+        >
+          {{ workbenchResolveFeedback.message }}
         </UiInlineFeedback>
 
         <UiState v-if="workbenchStatus === 'loading'" loading>
@@ -1151,6 +2131,122 @@ watch(
                   >
                     {{ port.guidance }}
                   </p>
+
+                  <div
+                    v-if="isAdmin"
+                    class="space-y-3 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/45 p-3"
+                  >
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                          Manual override
+                        </p>
+                        <p class="mt-1 text-xs text-[color:var(--muted)]">
+                          Pin a host port for this mapping or clear manual mode to hand control back to the sequential resolver.
+                        </p>
+                      </div>
+                      <UiBadge :tone="port.assignmentStrategy === 'manual' ? 'ok' : 'neutral'">
+                        {{ port.assignmentStrategy === 'manual' ? 'Manual active' : 'Auto managed' }}
+                      </UiBadge>
+                    </div>
+
+                    <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto] lg:items-end">
+                      <label class="space-y-2">
+                        <span class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                          Host port
+                        </span>
+                        <UiInput
+                          :model-value="workbenchPortInputValue(port)"
+                          type="number"
+                          min="1"
+                          max="65535"
+                          step="1"
+                          placeholder="8080"
+                          :disabled="workbenchPortMutationBusy(port) || workbenchModuleMutationStatus === 'loading'"
+                          @update:model-value="setWorkbenchPortInputValue(port.key, $event)"
+                        />
+                      </label>
+                      <UiButton
+                        variant="primary"
+                        size="sm"
+                        :disabled="
+                          workbenchPortMutationBusy(port) ||
+                          workbenchResolveStatus === 'loading' ||
+                          workbenchModuleMutationStatus === 'loading'
+                        "
+                        @click="setManualWorkbenchPort(port)"
+                      >
+                        <span class="inline-flex items-center gap-2">
+                          <UiInlineSpinner v-if="workbenchPortMutationBusy(port)" />
+                          Set manual
+                        </span>
+                      </UiButton>
+                      <UiButton
+                        variant="ghost"
+                        size="sm"
+                        :disabled="
+                          workbenchPortMutationBusy(port) ||
+                          workbenchResolveStatus === 'loading' ||
+                          workbenchModuleMutationStatus === 'loading'
+                        "
+                        @click="resetWorkbenchPortToAuto(port)"
+                      >
+                        Reset to auto
+                      </UiButton>
+                      <UiButton
+                        variant="ghost"
+                        size="sm"
+                        :disabled="
+                          workbenchPortSuggestionStatus(port) === 'loading' ||
+                          workbenchPortMutationBusy(port) ||
+                          workbenchModuleMutationStatus === 'loading'
+                        "
+                        @click="loadWorkbenchPortSuggestions(port)"
+                      >
+                        <span class="inline-flex items-center gap-2">
+                          <UiInlineSpinner v-if="workbenchPortSuggestionStatus(port) === 'loading'" />
+                          Suggestions
+                        </span>
+                      </UiButton>
+                    </div>
+
+                    <UiInlineFeedback
+                      v-if="workbenchPortMutationFeedback(port)"
+                      :tone="workbenchPortMutationFeedback(port)?.tone || 'neutral'"
+                    >
+                      {{ workbenchPortMutationFeedback(port)?.message }}
+                    </UiInlineFeedback>
+                    <UiInlineFeedback
+                      v-if="workbenchPortSuggestionFeedback(port)"
+                      :tone="workbenchPortSuggestionFeedback(port)?.tone || 'neutral'"
+                    >
+                      {{ workbenchPortSuggestionFeedback(port)?.message }}
+                    </UiInlineFeedback>
+
+                    <div
+                      v-if="workbenchPortSuggestionResultByKey[port.key]?.suggestions?.length"
+                      class="space-y-2"
+                    >
+                      <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                        Suggested host ports
+                      </p>
+                      <div class="flex flex-wrap gap-2">
+                        <UiButton
+                          v-for="suggestion in workbenchPortSuggestionResultByKey[port.key]?.suggestions || []"
+                          :key="`${port.key}-suggestion-${suggestion.rank}-${suggestion.hostPort}`"
+                          variant="ghost"
+                          size="sm"
+                          :disabled="workbenchPortMutationBusy(port) || workbenchModuleMutationStatus === 'loading'"
+                          @click="setWorkbenchPortInputValue(port.key, String(suggestion.hostPort))"
+                        >
+                          #{{ suggestion.rank }} · {{ suggestion.hostPort }}
+                        </UiButton>
+                      </div>
+                    </div>
+                  </div>
+                  <p v-else class="text-xs text-[color:var(--muted)]">
+                    Read-only access: admin permissions are required to re-run the resolver or change stored host-port assignments.
+                  </p>
                 </UiListRow>
               </div>
             </UiPanel>
@@ -1187,17 +2283,609 @@ watch(
               </div>
 
               <p class="text-xs text-[color:var(--muted)]">
-                This slice stays read-only for every role. Port edits, suggestions, and re-resolution controls land in later Workbench slices.
+                Non-admin users stay read-only. Admin users can re-run auto resolution, inspect deterministic suggestions, and pin or clear manual host-port assignments directly from the stored Workbench snapshot.
               </p>
             </UiPanel>
           </div>
 
-          <UiPanel variant="raise" class="space-y-2 p-4 text-sm text-[color:var(--muted)]">
-            <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Next slices</p>
-            <p>
-              Resources and topology remain in follow-up Workbench slices. Port mutation controls, preview/apply, and restore stay out of scope here.
-            </p>
-          </UiPanel>
+          <div class="grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
+            <UiPanel variant="soft" class="space-y-4 p-4">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Resources</p>
+                  <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Stored service budgets</h3>
+                </div>
+                <UiBadge :tone="workbenchResourceBadgeTone">
+                  {{ workbenchResourceSummary.tracked }} rows / {{ workbenchResourceSummary.total }} services
+                </UiBadge>
+              </div>
+
+              <UiState v-if="workbenchResourceInventory.length === 0">
+                No Workbench services are stored for this snapshot yet.
+              </UiState>
+              <div v-else class="grid gap-3 md:grid-cols-2">
+                <UiPanel
+                  v-for="resource in workbenchResourceInventory"
+                  :key="resource.key"
+                  variant="raise"
+                  class="space-y-4 p-4"
+                >
+                  <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Service</p>
+                      <h4 class="mt-2 text-base font-semibold text-[color:var(--text)]">
+                        {{ resource.serviceName }}
+                      </h4>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <UiBadge :tone="resource.tracked ? 'ok' : 'neutral'">
+                        {{ resource.tracked ? 'Tracked row' : 'No stored row' }}
+                      </UiBadge>
+                      <UiBadge :tone="resource.hasLimits ? 'ok' : 'neutral'">
+                        {{ resource.hasLimits ? 'Limits set' : 'No limits' }}
+                      </UiBadge>
+                      <UiBadge :tone="resource.hasReservations ? 'ok' : 'neutral'">
+                        {{ resource.hasReservations ? 'Reservations set' : 'No reservations' }}
+                      </UiBadge>
+                    </div>
+                  </div>
+
+                  <div class="grid gap-3 text-xs text-[color:var(--muted)] sm:grid-cols-2">
+                    <UiPanel variant="soft" class="space-y-2 p-3">
+                      <div class="flex flex-wrap items-start justify-between gap-2">
+                        <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Limits</p>
+                        <UiBadge :tone="resource.hasLimits ? 'ok' : 'neutral'">
+                          {{ resource.hasLimits ? 'Configured' : 'Empty' }}
+                        </UiBadge>
+                      </div>
+                      <div class="space-y-3">
+                        <label class="space-y-2">
+                          <span class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">CPU</span>
+                          <UiInput
+                            :model-value="workbenchResourceInputValue(resource, 'limitCpus')"
+                            type="text"
+                            placeholder="0.50 or ${LIMIT_CPUS}"
+                            :disabled="!isAdmin || workbenchResourceActionDisabled(resource)"
+                            @update:model-value="setWorkbenchResourceInputValue(resource.serviceName, 'limitCpus', $event)"
+                          />
+                        </label>
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                          <span>Current</span>
+                          <span class="font-mono text-[color:var(--text)]">
+                            {{ resource.limitCpus || 'Not declared' }}
+                          </span>
+                        </div>
+                        <UiButton
+                          v-if="isAdmin"
+                          variant="ghost"
+                          size="sm"
+                          :disabled="!resource.limitCpus || workbenchResourceActionDisabled(resource)"
+                          @click="clearWorkbenchResourceFields(resource, ['limitCpus'])"
+                        >
+                          Clear CPU
+                        </UiButton>
+
+                        <label class="space-y-2">
+                          <span class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Memory</span>
+                          <UiInput
+                            :model-value="workbenchResourceInputValue(resource, 'limitMemory')"
+                            type="text"
+                            placeholder="512M or ${LIMIT_MEMORY}"
+                            :disabled="!isAdmin || workbenchResourceActionDisabled(resource)"
+                            @update:model-value="setWorkbenchResourceInputValue(resource.serviceName, 'limitMemory', $event)"
+                          />
+                        </label>
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                          <span>Current</span>
+                          <span class="font-mono text-[color:var(--text)]">
+                            {{ resource.limitMemory || 'Not declared' }}
+                          </span>
+                        </div>
+                        <UiButton
+                          v-if="isAdmin"
+                          variant="ghost"
+                          size="sm"
+                          :disabled="!resource.limitMemory || workbenchResourceActionDisabled(resource)"
+                          @click="clearWorkbenchResourceFields(resource, ['limitMemory'])"
+                        >
+                          Clear memory
+                        </UiButton>
+                      </div>
+                    </UiPanel>
+
+                    <UiPanel variant="soft" class="space-y-2 p-3">
+                      <div class="flex flex-wrap items-start justify-between gap-2">
+                        <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                          Reservations
+                        </p>
+                        <UiBadge :tone="resource.hasReservations ? 'ok' : 'neutral'">
+                          {{ resource.hasReservations ? 'Configured' : 'Empty' }}
+                        </UiBadge>
+                      </div>
+                      <div class="space-y-3">
+                        <label class="space-y-2">
+                          <span class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">CPU</span>
+                          <UiInput
+                            :model-value="workbenchResourceInputValue(resource, 'reservationCpus')"
+                            type="text"
+                            placeholder="0.25 or ${RESERVE_CPUS}"
+                            :disabled="!isAdmin || workbenchResourceActionDisabled(resource)"
+                            @update:model-value="setWorkbenchResourceInputValue(resource.serviceName, 'reservationCpus', $event)"
+                          />
+                        </label>
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                          <span>Current</span>
+                          <span class="font-mono text-[color:var(--text)]">
+                            {{ resource.reservationCpus || 'Not declared' }}
+                          </span>
+                        </div>
+                        <UiButton
+                          v-if="isAdmin"
+                          variant="ghost"
+                          size="sm"
+                          :disabled="!resource.reservationCpus || workbenchResourceActionDisabled(resource)"
+                          @click="clearWorkbenchResourceFields(resource, ['reservationCpus'])"
+                        >
+                          Clear CPU
+                        </UiButton>
+
+                        <label class="space-y-2">
+                          <span class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Memory</span>
+                          <UiInput
+                            :model-value="workbenchResourceInputValue(resource, 'reservationMemory')"
+                            type="text"
+                            placeholder="256M or ${RESERVE_MEMORY}"
+                            :disabled="!isAdmin || workbenchResourceActionDisabled(resource)"
+                            @update:model-value="setWorkbenchResourceInputValue(resource.serviceName, 'reservationMemory', $event)"
+                          />
+                        </label>
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                          <span>Current</span>
+                          <span class="font-mono text-[color:var(--text)]">
+                            {{ resource.reservationMemory || 'Not declared' }}
+                          </span>
+                        </div>
+                        <UiButton
+                          v-if="isAdmin"
+                          variant="ghost"
+                          size="sm"
+                          :disabled="!resource.reservationMemory || workbenchResourceActionDisabled(resource)"
+                          @click="clearWorkbenchResourceFields(resource, ['reservationMemory'])"
+                        >
+                          Clear memory
+                        </UiButton>
+                      </div>
+                    </UiPanel>
+                  </div>
+
+                  <div
+                    v-if="isAdmin"
+                    class="space-y-3 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/45 p-3"
+                  >
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                          Edit stored values
+                        </p>
+                        <p class="mt-1 text-xs text-[color:var(--muted)]">
+                          Save one or more changed CPU or memory values, or clear a stored field to remove it from the persisted Workbench snapshot.
+                        </p>
+                      </div>
+                      <UiBadge :tone="resource.tracked ? 'ok' : 'neutral'">
+                        {{ resource.tracked ? 'Mutable row ready' : 'Creates row on save' }}
+                      </UiBadge>
+                    </div>
+
+                    <div class="flex flex-wrap gap-2">
+                      <UiButton
+                        variant="primary"
+                        size="sm"
+                        :disabled="workbenchResourceActionDisabled(resource)"
+                        @click="saveWorkbenchResource(resource)"
+                      >
+                        <span class="inline-flex items-center gap-2">
+                          <UiInlineSpinner v-if="workbenchResourceMutationBusy(resource)" />
+                          Save values
+                        </span>
+                      </UiButton>
+                      <UiButton
+                        variant="ghost"
+                        size="sm"
+                        :disabled="workbenchResourceActionDisabled(resource)"
+                        @click="resetWorkbenchResourceInputs(resource)"
+                      >
+                        Reset form
+                      </UiButton>
+                      <UiButton
+                        variant="ghost"
+                        size="sm"
+                        :disabled="
+                          workbenchResourceActionDisabled(resource) ||
+                          (!resource.hasLimits && !resource.hasReservations)
+                        "
+                        @click="clearWorkbenchResourceFields(resource, ['limitCpus', 'limitMemory', 'reservationCpus', 'reservationMemory'])"
+                      >
+                        Clear stored values
+                      </UiButton>
+                    </div>
+
+                    <UiInlineFeedback
+                      v-if="workbenchResourceMutationFeedback(resource)"
+                      :tone="workbenchResourceMutationFeedback(resource)?.tone || 'neutral'"
+                    >
+                      {{ workbenchResourceMutationFeedback(resource)?.message }}
+                    </UiInlineFeedback>
+                  </div>
+                  <p v-else class="text-xs text-[color:var(--muted)]">
+                    Read-only access: admin permissions are required to change stored CPU and memory values.
+                  </p>
+                </UiPanel>
+              </div>
+            </UiPanel>
+
+            <UiPanel variant="raise" class="space-y-4 p-4 text-sm text-[color:var(--muted)]">
+              <div>
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Resource posture</p>
+                <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Constraint summary</h3>
+              </div>
+              <p>
+                Workbench stores imported CPU and memory values per service. Admins can now set or clear stored values directly from this section while non-admin users remain read-only.
+              </p>
+
+              <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Services</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchResourceSummary.total }}</p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Tracked rows</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchResourceSummary.tracked }}</p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">With limits</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">
+                    {{ workbenchResourceSummary.withLimits }}
+                  </p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">With reservations</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">
+                    {{ workbenchResourceSummary.withReservations }}
+                  </p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Unconstrained</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">
+                    {{ workbenchResourceSummary.unconstrained }}
+                  </p>
+                </UiPanel>
+              </div>
+
+              <p class="text-xs text-[color:var(--muted)]">
+                Values round-trip against the stored snapshot immediately after each successful edit. Preview/apply and restore controls remain out of scope here.
+              </p>
+            </UiPanel>
+          </div>
+
+          <div class="grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
+            <UiPanel variant="soft" class="space-y-4 p-4">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Modules</p>
+                  <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Redis injection controls</h3>
+                </div>
+                <UiBadge :tone="workbenchModuleBadgeTone">
+                  {{ workbenchModuleSummary.redisEnabledServices }} enabled / {{ workbenchModuleSummary.services }} services
+                </UiBadge>
+              </div>
+
+              <UiState v-if="workbenchModuleInventory.length === 0">
+                No Workbench services are stored for module injection yet.
+              </UiState>
+              <div v-else class="grid gap-3 md:grid-cols-2">
+                <UiPanel
+                  v-for="row in workbenchModuleInventory"
+                  :key="row.key"
+                  variant="raise"
+                  class="space-y-4 p-4"
+                >
+                  <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Service</p>
+                      <h4 class="mt-2 text-base font-semibold text-[color:var(--text)]">{{ row.serviceName }}</h4>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <UiBadge :tone="row.enabled ? 'ok' : 'neutral'">
+                        {{ row.enabled ? `${row.moduleLabel} enabled` : `${row.moduleLabel} available` }}
+                      </UiBadge>
+                      <UiBadge :tone="row.count > 0 ? 'ok' : 'neutral'">
+                        {{ row.count }} tracked
+                      </UiBadge>
+                    </div>
+                  </div>
+
+                  <UiPanel variant="soft" class="space-y-2 p-3 text-xs text-[color:var(--muted)]">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <span class="uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Baseline module</span>
+                      <span class="font-semibold text-[color:var(--text)]">{{ row.moduleLabel }}</span>
+                    </div>
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <span>Resolver default port</span>
+                      <span class="font-mono text-[color:var(--text)]">6379/tcp</span>
+                    </div>
+                    <p>
+                      {{
+                        row.enabled
+                          ? 'This service already carries Redis module metadata in the stored Workbench snapshot.'
+                          : 'Enable Redis to attach the first supported module baseline to this stored service.'
+                      }}
+                    </p>
+                  </UiPanel>
+
+                  <div
+                    v-if="isAdmin"
+                    class="space-y-3 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/45 p-3"
+                  >
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                          Stored module mutation
+                        </p>
+                        <p class="mt-1 text-xs text-[color:var(--muted)]">
+                          Mutations only update the stored Workbench snapshot. Successful changes immediately refresh the visible module inventory and topology badges.
+                        </p>
+                      </div>
+                      <UiBadge :tone="row.enabled ? 'ok' : 'neutral'">
+                        {{ row.enabled ? 'Ready to remove' : 'Ready to enable' }}
+                      </UiBadge>
+                    </div>
+
+                    <div class="flex flex-wrap gap-2">
+                      <UiButton
+                        variant="primary"
+                        size="sm"
+                        :disabled="row.enabled || workbenchModuleActionDisabled(row)"
+                        @click="enableWorkbenchRedisModule(row)"
+                      >
+                        <span class="inline-flex items-center gap-2">
+                          <UiInlineSpinner v-if="workbenchModuleMutationBusy(row)" />
+                          Enable Redis
+                        </span>
+                      </UiButton>
+                      <UiButton
+                        variant="ghost"
+                        size="sm"
+                        :disabled="!row.enabled || workbenchModuleActionDisabled(row)"
+                        @click="removeWorkbenchRedisModule(row)"
+                      >
+                        <span class="inline-flex items-center gap-2">
+                          <UiInlineSpinner v-if="workbenchModuleMutationBusy(row)" />
+                          Remove Redis
+                        </span>
+                      </UiButton>
+                    </div>
+
+                    <UiInlineFeedback
+                      v-if="workbenchModuleMutationFeedback(row)"
+                      :tone="workbenchModuleMutationFeedback(row)?.tone || 'neutral'"
+                    >
+                      {{ workbenchModuleMutationFeedback(row)?.message }}
+                    </UiInlineFeedback>
+                  </div>
+                  <p v-else class="text-xs text-[color:var(--muted)]">
+                    Read-only access: admin permissions are required to enable or remove Redis module metadata for a stored service.
+                  </p>
+                </UiPanel>
+              </div>
+            </UiPanel>
+
+            <UiPanel variant="raise" class="space-y-4 p-4 text-sm text-[color:var(--muted)]">
+              <div>
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Module posture</p>
+                <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Redis baseline summary</h3>
+              </div>
+              <p>
+                `WB-FE-09` keeps module scope narrow: Redis is the only exposed injection baseline, and edits stay limited to the stored Workbench model.
+              </p>
+
+              <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Services</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchModuleSummary.services }}</p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Redis enabled</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">
+                    {{ workbenchModuleSummary.redisEnabledServices }}
+                  </p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Still available</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">
+                    {{ workbenchModuleSummary.redisDisabledServices }}
+                  </p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Tracked Redis rows</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">
+                    {{ workbenchModuleSummary.redisModuleCount }}
+                  </p>
+                </UiPanel>
+              </div>
+
+              <p class="text-xs text-[color:var(--muted)]">
+                Duplicate-module, unsupported-target, lock, and storage failures surface through the same inline API error feedback used by the existing Workbench mutation cards. Preview/apply and restore still land in later slices.
+              </p>
+            </UiPanel>
+          </div>
+
+          <div class="grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
+            <UiPanel variant="soft" class="space-y-4 p-4">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Topology</p>
+                  <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Service relationships</h3>
+                </div>
+                <UiBadge :tone="workbenchTopologyBadgeTone">
+                  {{ workbenchTopologyInventory.length }} visible
+                </UiBadge>
+              </div>
+
+              <UiState v-if="workbenchTopologyInventory.length === 0">
+                No Workbench topology rows are stored for this snapshot yet.
+              </UiState>
+              <div v-else class="space-y-3">
+                <UiListRow
+                  v-for="row in workbenchTopologyInventory"
+                  :key="row.key"
+                  as="article"
+                  class="space-y-4"
+                >
+                  <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Service</p>
+                      <h4 class="mt-2 text-base font-semibold text-[color:var(--text)]">{{ row.serviceName }}</h4>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <UiBadge :tone="row.dependsOn.length > 0 || row.dependedBy.length > 0 ? 'ok' : 'neutral'">
+                        {{ row.dependsOn.length + row.dependedBy.length > 0 ? 'Connected' : 'Isolated' }}
+                      </UiBadge>
+                      <UiBadge :tone="row.networkNames.length > 0 ? 'ok' : 'neutral'">
+                        {{ row.networkNames.length > 0 ? `${row.networkNames.length} networks` : 'No networks' }}
+                      </UiBadge>
+                    </div>
+                  </div>
+
+                  <div class="grid gap-3 text-xs text-[color:var(--muted)] lg:grid-cols-2">
+                    <div class="space-y-2">
+                      <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Depends on</p>
+                      <div v-if="row.dependsOn.length > 0" class="flex flex-wrap gap-2">
+                        <UiBadge
+                          v-for="dependency in row.dependsOn"
+                          :key="`${row.serviceName}-depends-on-${dependency}`"
+                          tone="neutral"
+                        >
+                          {{ dependency }}
+                        </UiBadge>
+                      </div>
+                      <p v-else>No upstream dependencies recorded.</p>
+                    </div>
+
+                    <div class="space-y-2">
+                      <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Required by</p>
+                      <div v-if="row.dependedBy.length > 0" class="flex flex-wrap gap-2">
+                        <UiBadge
+                          v-for="dependent in row.dependedBy"
+                          :key="`${row.serviceName}-required-by-${dependent}`"
+                          tone="neutral"
+                        >
+                          {{ dependent }}
+                        </UiBadge>
+                      </div>
+                      <p v-else>No downstream dependents recorded.</p>
+                    </div>
+
+                    <div class="space-y-2">
+                      <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Networks</p>
+                      <div v-if="row.networkNames.length > 0" class="flex flex-wrap gap-2">
+                        <UiBadge
+                          v-for="networkName in row.networkNames"
+                          :key="`${row.serviceName}-network-${networkName}`"
+                          tone="neutral"
+                        >
+                          {{ networkName }}
+                        </UiBadge>
+                      </div>
+                      <p v-else>No network attachments recorded.</p>
+                    </div>
+
+                    <div class="space-y-2">
+                      <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Modules</p>
+                      <div v-if="row.moduleTypes.length > 0" class="flex flex-wrap gap-2">
+                        <UiBadge
+                          v-for="moduleType in row.moduleTypes"
+                          :key="`${row.serviceName}-module-${moduleType}`"
+                          tone="ok"
+                        >
+                          {{ moduleType }}
+                        </UiBadge>
+                      </div>
+                      <p v-else>No module metadata recorded.</p>
+                    </div>
+                  </div>
+                </UiListRow>
+              </div>
+            </UiPanel>
+
+            <UiPanel variant="raise" class="space-y-4 p-4 text-sm text-[color:var(--muted)]">
+              <div>
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Topology summary</p>
+                <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Dependency footprint</h3>
+              </div>
+              <p>
+                This view mirrors the stored dependency graph only. It exposes imported service edges plus any stored network and module annotations without widening into edit controls.
+              </p>
+
+              <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Services</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchTopologySummary.services }}</p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Dependency edges</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">
+                    {{ workbenchTopologySummary.dependencyEdges }}
+                  </p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Connected</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">
+                    {{ workbenchTopologySummary.connectedServices }}
+                  </p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Isolated</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">
+                    {{ workbenchTopologySummary.isolatedServices }}
+                  </p>
+                </UiPanel>
+              </div>
+
+              <div class="space-y-3">
+                <div class="space-y-2">
+                  <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Networks</p>
+                  <div v-if="workbenchTopologySummary.networks.length > 0" class="flex flex-wrap gap-2">
+                    <UiBadge
+                      v-for="networkName in workbenchTopologySummary.networks"
+                      :key="`topology-network-${networkName}`"
+                      tone="neutral"
+                    >
+                      {{ networkName }}
+                    </UiBadge>
+                  </div>
+                  <p v-else class="text-xs">No stored network summary is available in this snapshot.</p>
+                </div>
+
+                <div class="space-y-2">
+                  <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Module types</p>
+                  <div v-if="workbenchTopologySummary.moduleTypes.length > 0" class="flex flex-wrap gap-2">
+                    <UiBadge
+                      v-for="moduleType in workbenchTopologySummary.moduleTypes"
+                      :key="`topology-module-${moduleType}`"
+                      tone="ok"
+                    >
+                      {{ moduleType }}
+                    </UiBadge>
+                  </div>
+                  <p v-else class="text-xs">No stored module summary is available in this snapshot.</p>
+                </div>
+              </div>
+
+              <p class="text-xs text-[color:var(--muted)]">
+                Preview/apply and restore remain scheduled for later Workbench slices while the current shell now supports stored port, resource, and Redis module mutations.
+              </p>
+            </UiPanel>
+          </div>
         </template>
       </UiPanel>
 

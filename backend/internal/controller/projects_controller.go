@@ -66,6 +66,31 @@ type projectWorkbenchImportRequest struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+type projectWorkbenchPortMutationRequest struct {
+	Selector       service.WorkbenchPortSelector `json:"selector"`
+	Action         string                        `json:"action"`
+	ManualHostPort *int                          `json:"manualHostPort,omitempty"`
+}
+
+type projectWorkbenchPortSuggestionRequest struct {
+	Selector service.WorkbenchPortSelector `json:"selector"`
+	Limit    int                           `json:"limit,omitempty"`
+}
+
+type projectWorkbenchResourceMutationRequest struct {
+	Action            string   `json:"action"`
+	LimitCPUs         *string  `json:"limitCpus,omitempty"`
+	LimitMemory       *string  `json:"limitMemory,omitempty"`
+	ReservationCPUs   *string  `json:"reservationCpus,omitempty"`
+	ReservationMemory *string  `json:"reservationMemory,omitempty"`
+	ClearFields       []string `json:"clearFields,omitempty"`
+}
+
+type projectWorkbenchModuleMutationRequest struct {
+	Selector service.WorkbenchModuleSelector `json:"selector"`
+	Action   string                          `json:"action"`
+}
+
 type projectWorkbenchComposePreviewRequest struct {
 	ExpectedRevision *int `json:"expectedRevision,omitempty"`
 }
@@ -378,6 +403,347 @@ func (c *ProjectsController) WorkbenchSnapshot(ctx *gin.Context) {
 
 	ctx.JSON(http.StatusOK, gin.H{
 		"stack": stack,
+	})
+}
+
+func (c *ProjectsController) WorkbenchResolvePorts(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		return
+	}
+
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.workbench == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeWorkbenchStorageFailed, "workbench service unavailable", nil)
+		return
+	}
+
+	req := struct{}{}
+	if err := ctx.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "invalid request body", nil)
+		return
+	}
+
+	stack, summary, err := c.workbench.ResolveStoredSnapshotPorts(ctx.Request.Context(), project)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		errorCode, issueCount := workbenchErrorCodeAndIssueCount(err)
+		c.logAudit(ctx, "project.workbench.ports.resolve", project, map[string]any{
+			"project":           project,
+			"success":           false,
+			"changed":           false,
+			"revision":          nil,
+			"sourceFingerprint": "",
+			"assigned":          0,
+			"conflict":          0,
+			"unavailable":       0,
+			"issueCount":        issueCount,
+			"errorCode":         errorCode,
+		})
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectWorkbenchPortResolveFailed, "failed to resolve workbench ports")
+		return
+	}
+
+	c.logAudit(ctx, "project.workbench.ports.resolve", project, map[string]any{
+		"project":           project,
+		"success":           true,
+		"changed":           summary.Changed,
+		"revision":          stack.Revision,
+		"sourceFingerprint": stack.SourceFingerprint,
+		"assigned":          summary.Assigned,
+		"conflict":          summary.Conflict,
+		"unavailable":       summary.Unavailable,
+		"issueCount":        0,
+		"errorCode":         "",
+	})
+	ctx.JSON(http.StatusOK, gin.H{
+		"stack":   stack,
+		"resolve": summary,
+	})
+}
+
+func (c *ProjectsController) WorkbenchMutatePort(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		return
+	}
+
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.workbench == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeWorkbenchStorageFailed, "workbench service unavailable", nil)
+		return
+	}
+
+	req := projectWorkbenchPortMutationRequest{}
+	if err := ctx.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "invalid request body", nil)
+		return
+	}
+
+	stack, summary, err := c.workbench.MutateStoredSnapshotPort(
+		ctx.Request.Context(),
+		project,
+		service.WorkbenchPortMutationRequest{
+			Selector:       req.Selector,
+			Action:         req.Action,
+			ManualHostPort: req.ManualHostPort,
+		},
+	)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		errorCode, issueCount := workbenchErrorCodeAndIssueCount(err)
+		c.logAudit(ctx, "project.workbench.ports.mutate", project, map[string]any{
+			"project":           project,
+			"success":           false,
+			"selector":          req.Selector,
+			"action":            strings.ToLower(strings.TrimSpace(req.Action)),
+			"changed":           false,
+			"status":            "",
+			"assignedHostPort":  nil,
+			"revision":          nil,
+			"sourceFingerprint": "",
+			"issueCount":        issueCount,
+			"errorCode":         errorCode,
+		})
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectWorkbenchPortMutateFailed, "failed to mutate workbench port")
+		return
+	}
+
+	c.logAudit(ctx, "project.workbench.ports.mutate", project, map[string]any{
+		"project":           project,
+		"success":           true,
+		"selector":          summary.Selector,
+		"action":            summary.Action,
+		"changed":           summary.Changed,
+		"status":            summary.Status,
+		"assignedHostPort":  summary.AssignedHostPort,
+		"revision":          stack.Revision,
+		"sourceFingerprint": stack.SourceFingerprint,
+		"issueCount":        0,
+		"errorCode":         "",
+	})
+	ctx.JSON(http.StatusOK, gin.H{
+		"stack":    stack,
+		"mutation": summary,
+	})
+}
+
+func (c *ProjectsController) WorkbenchSuggestPorts(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		return
+	}
+
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.workbench == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeWorkbenchStorageFailed, "workbench service unavailable", nil)
+		return
+	}
+
+	req := projectWorkbenchPortSuggestionRequest{}
+	if err := ctx.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "invalid request body", nil)
+		return
+	}
+
+	stack, summary, err := c.workbench.SuggestStoredSnapshotHostPorts(
+		ctx.Request.Context(),
+		project,
+		service.WorkbenchPortSuggestionRequest{
+			Selector: req.Selector,
+			Limit:    req.Limit,
+		},
+	)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		errorCode, issueCount := workbenchErrorCodeAndIssueCount(err)
+		c.logAudit(ctx, "project.workbench.ports.suggest", project, map[string]any{
+			"project":           project,
+			"success":           false,
+			"selector":          req.Selector,
+			"limit":             req.Limit,
+			"suggestionCount":   0,
+			"revision":          nil,
+			"sourceFingerprint": "",
+			"issueCount":        issueCount,
+			"errorCode":         errorCode,
+		})
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectWorkbenchPortSuggestFailed, "failed to suggest workbench ports")
+		return
+	}
+
+	c.logAudit(ctx, "project.workbench.ports.suggest", project, map[string]any{
+		"project":           project,
+		"success":           true,
+		"selector":          summary.Selector,
+		"limit":             summary.Limit,
+		"suggestionCount":   summary.SuggestionCount,
+		"revision":          stack.Revision,
+		"sourceFingerprint": stack.SourceFingerprint,
+		"issueCount":        0,
+		"errorCode":         "",
+	})
+	ctx.JSON(http.StatusOK, gin.H{
+		"stack":       stack,
+		"suggestions": summary,
+	})
+}
+
+func (c *ProjectsController) WorkbenchMutateResource(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		return
+	}
+
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.workbench == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeWorkbenchStorageFailed, "workbench service unavailable", nil)
+		return
+	}
+
+	serviceName := strings.TrimSpace(ctx.Param("serviceName"))
+	req := projectWorkbenchResourceMutationRequest{}
+	if err := ctx.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "invalid request body", nil)
+		return
+	}
+
+	stack, summary, err := c.workbench.MutateStoredSnapshotResource(
+		ctx.Request.Context(),
+		project,
+		service.WorkbenchResourceMutationRequest{
+			Selector: service.WorkbenchResourceSelector{
+				ServiceName: serviceName,
+			},
+			Action:            req.Action,
+			LimitCPUs:         req.LimitCPUs,
+			LimitMemory:       req.LimitMemory,
+			ReservationCPUs:   req.ReservationCPUs,
+			ReservationMemory: req.ReservationMemory,
+			ClearFields:       req.ClearFields,
+		},
+	)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		errorCode, issueCount := workbenchErrorCodeAndIssueCount(err)
+		c.logAudit(ctx, "project.workbench.resources.mutate", project, map[string]any{
+			"project":           project,
+			"success":           false,
+			"service":           serviceName,
+			"action":            strings.ToLower(strings.TrimSpace(req.Action)),
+			"changed":           false,
+			"updatedFields":     []string{},
+			"clearedFields":     []string{},
+			"revision":          nil,
+			"sourceFingerprint": "",
+			"issueCount":        issueCount,
+			"errorCode":         errorCode,
+		})
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectWorkbenchResourceMutateFailed, "failed to mutate workbench resources")
+		return
+	}
+
+	c.logAudit(ctx, "project.workbench.resources.mutate", project, map[string]any{
+		"project":           project,
+		"success":           true,
+		"service":           summary.Selector.ServiceName,
+		"action":            summary.Action,
+		"changed":           summary.Changed,
+		"updatedFields":     summary.UpdatedFields,
+		"clearedFields":     summary.ClearedFields,
+		"revision":          stack.Revision,
+		"sourceFingerprint": stack.SourceFingerprint,
+		"issueCount":        0,
+		"errorCode":         "",
+	})
+	ctx.JSON(http.StatusOK, gin.H{
+		"stack":    stack,
+		"mutation": summary,
+	})
+}
+
+func (c *ProjectsController) WorkbenchMutateModule(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		return
+	}
+
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.workbench == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeWorkbenchStorageFailed, "workbench service unavailable", nil)
+		return
+	}
+
+	req := projectWorkbenchModuleMutationRequest{}
+	if err := ctx.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "invalid request body", nil)
+		return
+	}
+
+	stack, summary, err := c.workbench.MutateStoredSnapshotModule(
+		ctx.Request.Context(),
+		project,
+		service.WorkbenchModuleMutationRequest{
+			Selector: req.Selector,
+			Action:   req.Action,
+		},
+	)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		errorCode, issueCount := workbenchErrorCodeAndIssueCount(err)
+		c.logAudit(ctx, "project.workbench.modules.mutate", project, map[string]any{
+			"project":           project,
+			"success":           false,
+			"selector":          req.Selector,
+			"action":            strings.ToLower(strings.TrimSpace(req.Action)),
+			"changed":           false,
+			"previousCount":     0,
+			"currentCount":      0,
+			"revision":          nil,
+			"sourceFingerprint": "",
+			"issueCount":        issueCount,
+			"errorCode":         errorCode,
+		})
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectWorkbenchModuleMutateFailed, "failed to mutate workbench modules")
+		return
+	}
+
+	c.logAudit(ctx, "project.workbench.modules.mutate", project, map[string]any{
+		"project":           project,
+		"success":           true,
+		"selector":          summary.Selector,
+		"action":            summary.Action,
+		"changed":           summary.Changed,
+		"previousCount":     summary.PreviousCount,
+		"currentCount":      summary.CurrentCount,
+		"revision":          stack.Revision,
+		"sourceFingerprint": stack.SourceFingerprint,
+		"issueCount":        0,
+		"errorCode":         "",
+	})
+	ctx.JSON(http.StatusOK, gin.H{
+		"stack":    stack,
+		"mutation": summary,
 	})
 }
 
@@ -1174,6 +1540,34 @@ func workbenchComposePreviewAuditMetadata(
 		metadata["issueCount"] = issueCount
 	}
 	return metadata
+}
+
+func workbenchErrorCodeAndIssueCount(opErr error) (errs.Code, int) {
+	if opErr == nil {
+		return "", 0
+	}
+
+	var typed *errs.Error
+	if !errors.As(opErr, &typed) {
+		return "", 0
+	}
+
+	issueCount := 0
+	details, ok := typed.Details.(map[string]any)
+	if ok {
+		switch value := details["issueCount"].(type) {
+		case int:
+			issueCount = value
+		case int32:
+			issueCount = int(value)
+		case int64:
+			issueCount = int(value)
+		case float64:
+			issueCount = int(value)
+		}
+	}
+
+	return typed.Code, issueCount
 }
 
 func (c *ProjectsController) logAudit(ctx *gin.Context, action, target string, metadata map[string]any) {
