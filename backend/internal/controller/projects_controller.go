@@ -359,6 +359,28 @@ func (c *ProjectsController) WorkbenchImport(ctx *gin.Context) {
 	})
 }
 
+func (c *ProjectsController) WorkbenchSnapshot(ctx *gin.Context) {
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.workbench == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeWorkbenchStorageFailed, "workbench service unavailable", nil)
+		return
+	}
+
+	stack, err := c.workbench.GetSnapshot(ctx.Request.Context(), project)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectWorkbenchReadFailed, "failed to load workbench snapshot")
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"stack": stack,
+	})
+}
+
 func (c *ProjectsController) WorkbenchComposePreview(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {

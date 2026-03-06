@@ -580,6 +580,160 @@ func TestWorkbenchImportComposeSnapshotIdempotentOnUnchangedSource(t *testing.T)
 	}
 }
 
+func TestWorkbenchGetSnapshotEmptyState(t *testing.T) {
+	t.Parallel()
+
+	templatesDir := t.TempDir()
+	projectDir := filepath.Join(templatesDir, "demo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+
+	composePath := filepath.Join(projectDir, "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte("services:\n  app:\n    image: nginx:1.25\n"), 0o644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+
+	svc := NewWorkbenchServiceWithStorage(templatesDir, nil, &fakeSettingsRepo{}, "test-session-secret")
+
+	snapshot, err := svc.GetSnapshot(context.Background(), "demo")
+	if err != nil {
+		t.Fatalf("GetSnapshot: %v", err)
+	}
+
+	if snapshot.ProjectName != "demo" {
+		t.Fatalf("expected projectName demo, got %q", snapshot.ProjectName)
+	}
+	if snapshot.ProjectDir != projectDir {
+		t.Fatalf("expected projectDir %q, got %q", projectDir, snapshot.ProjectDir)
+	}
+	if snapshot.ComposePath != composePath {
+		t.Fatalf("expected composePath %q, got %q", composePath, snapshot.ComposePath)
+	}
+	if snapshot.ModelVersion != workbenchModelVersion {
+		t.Fatalf("expected modelVersion %d, got %d", workbenchModelVersion, snapshot.ModelVersion)
+	}
+	if snapshot.Revision != 0 {
+		t.Fatalf("expected empty snapshot revision 0, got %d", snapshot.Revision)
+	}
+	if snapshot.SourceFingerprint != "" {
+		t.Fatalf("expected empty fingerprint, got %q", snapshot.SourceFingerprint)
+	}
+	if len(snapshot.Services) != 0 || len(snapshot.Ports) != 0 || len(snapshot.Resources) != 0 ||
+		len(snapshot.Modules) != 0 || len(snapshot.Warnings) != 0 || len(snapshot.Dependencies) != 0 ||
+		len(snapshot.NetworkRefs) != 0 || len(snapshot.VolumeRefs) != 0 || len(snapshot.EnvRefs) != 0 {
+		t.Fatalf("expected deterministic empty snapshot, got %#v", snapshot)
+	}
+}
+
+func TestWorkbenchGetSnapshotNormalizesStoredOrdering(t *testing.T) {
+	t.Parallel()
+
+	templatesDir := t.TempDir()
+	projectDir := filepath.Join(templatesDir, "demo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+
+	encoded, err := encodeSettingsEncryptedPayload("test-session-secret", settingsEncryptedPayload{
+		Workbench: map[string]workbenchStoredSnapshot{
+			"demo": {
+				ProjectName:       "demo",
+				ProjectDir:        projectDir,
+				ComposePath:       filepath.Join(projectDir, "docker-compose.yml"),
+				ModelVersion:      workbenchModelVersion,
+				Revision:          4,
+				SourceFingerprint: "sha256:seeded",
+				Services: []WorkbenchComposeService{
+					{ServiceName: "web", Image: "nginx:stable"},
+					{ServiceName: "api", BuildSource: "./api"},
+				},
+				Dependencies: []WorkbenchComposeDependency{
+					{ServiceName: "web", DependsOn: "api"},
+					{ServiceName: "api", DependsOn: "db"},
+				},
+				Ports: []WorkbenchComposePort{
+					{ServiceName: "web", ContainerPort: 8080, Protocol: "tcp", HostIP: "127.0.0.1", HostPort: intPtr(8080)},
+					{ServiceName: "api", ContainerPort: 80, Protocol: "tcp", HostIP: "0.0.0.0", HostPort: intPtr(80)},
+				},
+				Resources: []WorkbenchComposeResource{
+					{ServiceName: "web", LimitMemory: "512M"},
+					{ServiceName: "api", LimitCPUs: "1.00"},
+				},
+				Modules: []WorkbenchStackModule{
+					{ModuleType: "redis", ServiceName: "web"},
+					{ModuleType: "postgres", ServiceName: "api"},
+				},
+				Warnings: []WorkbenchComposeWarning{
+					{Code: "WB-Z", Path: "services.web", Message: "last warning"},
+					{Code: "WB-A", Path: "services.api", Message: "first warning"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode payload: %v", err)
+	}
+
+	svc := NewWorkbenchServiceWithStorage(
+		templatesDir,
+		nil,
+		&fakeSettingsRepo{settings: &models.Settings{NetBirdConfigEncrypted: encoded}},
+		"test-session-secret",
+	)
+
+	snapshot, err := svc.GetSnapshot(context.Background(), "demo")
+	if err != nil {
+		t.Fatalf("GetSnapshot: %v", err)
+	}
+
+	if got, want := snapshot.Services[0].ServiceName, "api"; got != want {
+		t.Fatalf("expected first service %q, got %q", want, got)
+	}
+	if got, want := snapshot.Ports[0].ServiceName, "api"; got != want {
+		t.Fatalf("expected first port service %q, got %q", want, got)
+	}
+	if got, want := snapshot.Resources[0].ServiceName, "api"; got != want {
+		t.Fatalf("expected first resource service %q, got %q", want, got)
+	}
+	if got, want := snapshot.Modules[0].ModuleType, "postgres"; got != want {
+		t.Fatalf("expected first module type %q, got %q", want, got)
+	}
+	if got, want := snapshot.Warnings[0].Code, "WB-A"; got != want {
+		t.Fatalf("expected first warning code %q, got %q", want, got)
+	}
+}
+
+func TestWorkbenchGetSnapshotStorageDecodeFailure(t *testing.T) {
+	t.Parallel()
+
+	templatesDir := t.TempDir()
+	projectDir := filepath.Join(templatesDir, "demo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+
+	svc := NewWorkbenchServiceWithStorage(
+		templatesDir,
+		nil,
+		&fakeSettingsRepo{settings: &models.Settings{NetBirdConfigEncrypted: "not-valid"}},
+		"test-session-secret",
+	)
+
+	_, err := svc.GetSnapshot(context.Background(), "demo")
+	if err == nil {
+		t.Fatal("expected storage decode failure")
+	}
+
+	typed, ok := errs.From(err)
+	if !ok {
+		t.Fatalf("expected typed error, got %T", err)
+	}
+	if typed.Code != errs.CodeWorkbenchStorageFailed {
+		t.Fatalf("expected code %q, got %q", errs.CodeWorkbenchStorageFailed, typed.Code)
+	}
+}
+
 func TestWorkbenchImportAndNetBirdConfigShareSettingsPayload(t *testing.T) {
 	t.Parallel()
 

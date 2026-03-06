@@ -183,6 +183,7 @@ const (
 	CodeProjectContainerNotFound       Code = "PROJECT-404-CONTAINER"
 	CodeProjectDetailFailed            Code = "PROJECT-500-DETAIL"
 	CodeProjectJobsFailed              Code = "PROJECT-500-JOBS"
+	CodeProjectWorkbenchReadFailed     Code = "PROJECT-500-WB-READ"
 	CodeProjectWorkbenchImportFailed   Code = "PROJECT-500-WB-IMPORT"
 	CodeProjectWorkbenchPreviewFailed  Code = "PROJECT-500-WB-PREVIEW"
 	CodeProjectWorkbenchApplyFailed    Code = "PROJECT-500-WB-APPLY"

@@ -14,6 +14,7 @@ func RegisterProjects(r gin.IRoutes, c *controller.ProjectsController) {
 	r.GET("/projects/local", c.ListLocal)
 	r.GET("/projects/:name", c.Detail)
 	r.GET("/projects/:name/jobs", c.ListJobs)
+	r.GET("/projects/:name/workbench", c.WorkbenchSnapshot)
 	r.POST("/projects/:name/workbench/import", c.WorkbenchImport)
 	r.POST("/projects/:name/workbench/compose/preview", c.WorkbenchComposePreview)
 	r.POST("/projects/:name/workbench/compose/apply", c.WorkbenchComposeApply)
