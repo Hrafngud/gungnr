@@ -101,7 +101,7 @@ func main() {
 	projectEnvService := service.NewProjectEnvService(cfg.TemplatesDir, projectRepo)
 	healthService := service.NewHealthService(hostService, settingsService)
 
-	workflows := service.NewProjectWorkflows(cfg, projectRepo, settingsService, hostService, auditService, dockerRunner, bridgeClient)
+	workflows := service.NewProjectWorkflows(cfg, projectRepo, settingsService, hostService, auditService, workbenchService, dockerRunner, bridgeClient)
 	workflows.Register(jobRunner)
 	dockerWorkflows := service.NewDockerWorkflows(dockerRunner)
 	dockerWorkflows.Register(jobRunner)

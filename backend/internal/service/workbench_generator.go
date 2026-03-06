@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,6 +49,38 @@ type WorkbenchValidationIssue struct {
 	HostPort   string `json:"hostPort,omitempty"`
 }
 
+type WorkbenchComposePreviewRequest struct {
+	ExpectedRevision *int `json:"expectedRevision,omitempty"`
+}
+
+type WorkbenchComposePreviewMetadata struct {
+	Revision          int    `json:"revision"`
+	SourceFingerprint string `json:"sourceFingerprint,omitempty"`
+}
+
+type WorkbenchComposePreviewResult struct {
+	Compose  string                          `json:"compose"`
+	Metadata WorkbenchComposePreviewMetadata `json:"metadata"`
+}
+
+type WorkbenchComposeApplyRequest struct {
+	ExpectedRevision          *int   `json:"expectedRevision,omitempty"`
+	ExpectedSourceFingerprint string `json:"expectedSourceFingerprint,omitempty"`
+}
+
+type WorkbenchComposeApplyMetadata struct {
+	Revision          int    `json:"revision"`
+	SourceFingerprint string `json:"sourceFingerprint,omitempty"`
+	ComposePath       string `json:"composePath"`
+}
+
+type WorkbenchComposeApplyResult struct {
+	Metadata     WorkbenchComposeApplyMetadata       `json:"metadata"`
+	ComposeBytes int                                 `json:"composeBytes"`
+	Backup       WorkbenchComposeBackupMetadata      `json:"backup"`
+	Retention    WorkbenchComposeBackupRetentionInfo `json:"retention"`
+}
+
 func (s *WorkbenchService) GenerateComposeFromStoredSnapshot(
 	ctx context.Context,
 	projectName string,
@@ -62,17 +96,9 @@ func (s *WorkbenchService) GenerateComposeFromStoredSnapshot(
 	}
 	defer release()
 
-	snapshot, exists, err := s.loadStoredWorkbenchSnapshot(ctx, normalizedProject)
+	snapshot, err := s.loadStoredSnapshotForComposeLocked(ctx, normalizedProject)
 	if err != nil {
 		return WorkbenchStackSnapshot{}, "", err
-	}
-	if !exists {
-		return WorkbenchStackSnapshot{}, "", errs.WithDetails(
-			errs.New(errs.CodeWorkbenchSourceNotFound, fmt.Sprintf("workbench snapshot not found for project %q", normalizedProject)),
-			map[string]any{
-				"project": normalizedProject,
-			},
-		)
 	}
 
 	compose, err := generateWorkbenchCompose(snapshot)
@@ -98,6 +124,632 @@ func (s *WorkbenchService) ValidateStoredSnapshotForCompose(
 	}
 	defer release()
 
+	snapshot, err := s.loadStoredSnapshotForComposeLocked(ctx, normalizedProject)
+	if err != nil {
+		return WorkbenchStackSnapshot{}, err
+	}
+
+	if err := validateWorkbenchSnapshotForCompose(snapshot); err != nil {
+		return WorkbenchStackSnapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func (s *WorkbenchService) PreviewComposeFromStoredSnapshot(
+	ctx context.Context,
+	projectName string,
+	input WorkbenchComposePreviewRequest,
+) (WorkbenchComposePreviewResult, error) {
+	normalizedProject, err := normalizeWorkbenchProjectName(projectName)
+	if err != nil {
+		return WorkbenchComposePreviewResult{}, err
+	}
+
+	normalizedInput, err := normalizeWorkbenchComposePreviewRequest(input)
+	if err != nil {
+		return WorkbenchComposePreviewResult{}, err
+	}
+
+	release, err := s.AcquireProjectLock(ctx, normalizedProject)
+	if err != nil {
+		return WorkbenchComposePreviewResult{}, err
+	}
+	defer release()
+
+	snapshot, err := s.loadStoredSnapshotForComposeLocked(ctx, normalizedProject)
+	if err != nil {
+		return WorkbenchComposePreviewResult{}, err
+	}
+
+	if normalizedInput.ExpectedRevision != nil && snapshot.Revision != *normalizedInput.ExpectedRevision {
+		return WorkbenchComposePreviewResult{}, workbenchPreviewExpectedRevisionValidationError(
+			snapshot,
+			*normalizedInput.ExpectedRevision,
+		)
+	}
+
+	if err := validateWorkbenchSnapshotForCompose(snapshot); err != nil {
+		return WorkbenchComposePreviewResult{}, err
+	}
+
+	compose, err := generateWorkbenchCompose(snapshot)
+	if err != nil {
+		return WorkbenchComposePreviewResult{}, err
+	}
+
+	return WorkbenchComposePreviewResult{
+		Compose: compose,
+		Metadata: WorkbenchComposePreviewMetadata{
+			Revision:          snapshot.Revision,
+			SourceFingerprint: strings.TrimSpace(snapshot.SourceFingerprint),
+		},
+	}, nil
+}
+
+func (s *WorkbenchService) ApplyComposeFromStoredSnapshot(
+	ctx context.Context,
+	projectName string,
+	input WorkbenchComposeApplyRequest,
+) (WorkbenchComposeApplyResult, error) {
+	normalizedProject, err := normalizeWorkbenchProjectName(projectName)
+	if err != nil {
+		return WorkbenchComposeApplyResult{}, err
+	}
+
+	normalizedInput, err := normalizeWorkbenchComposeApplyRequest(input)
+	if err != nil {
+		return WorkbenchComposeApplyResult{}, err
+	}
+
+	release, err := s.AcquireProjectLock(ctx, normalizedProject)
+	if err != nil {
+		return WorkbenchComposeApplyResult{}, err
+	}
+	defer release()
+
+	snapshot, err := s.loadStoredSnapshotForComposeLocked(ctx, normalizedProject)
+	if err != nil {
+		return WorkbenchComposeApplyResult{}, err
+	}
+	if snapshot.Revision != *normalizedInput.ExpectedRevision {
+		return WorkbenchComposeApplyResult{}, workbenchApplyStaleRevisionError(
+			snapshot,
+			*normalizedInput.ExpectedRevision,
+		)
+	}
+
+	currentSource, err := s.ResolveComposeSource(ctx, normalizedProject)
+	if err != nil {
+		return WorkbenchComposeApplyResult{}, err
+	}
+	if err := workbenchApplyDriftCheck(snapshot, currentSource, normalizedInput.ExpectedSourceFingerprint); err != nil {
+		return WorkbenchComposeApplyResult{}, err
+	}
+
+	compose, err := mergeWorkbenchSnapshotIntoComposeSource(snapshot, currentSource)
+	if err != nil {
+		return WorkbenchComposeApplyResult{}, err
+	}
+
+	backup, retention, err := s.createComposeBackup(ctx, normalizedProject, snapshot, currentSource)
+	if err != nil {
+		return WorkbenchComposeApplyResult{}, err
+	}
+
+	normalizedCompose, appliedFingerprint := WorkbenchSourceFingerprint([]byte(compose))
+	if err := replaceWorkbenchComposeAtomically(currentSource.ComposePath, []byte(normalizedCompose)); err != nil {
+		return WorkbenchComposeApplyResult{}, workbenchComposeApplySourceInvalidError(
+			snapshot,
+			currentSource,
+			"failed to replace compose source",
+			err,
+		)
+	}
+
+	updatedSnapshot := snapshot
+	updatedSnapshot.ProjectName = normalizedProject
+	updatedSnapshot.ProjectDir = currentSource.ProjectDir
+	updatedSnapshot.ComposePath = currentSource.ComposePath
+	updatedSnapshot.SourceFingerprint = appliedFingerprint
+	if err := s.saveWorkbenchSnapshot(ctx, normalizedProject, updatedSnapshot); err != nil {
+		restoreErr := replaceWorkbenchComposeAtomically(currentSource.ComposePath, currentSource.Raw)
+		return WorkbenchComposeApplyResult{}, workbenchComposeApplyStorageError(
+			updatedSnapshot,
+			currentSource,
+			"failed to persist updated workbench source fingerprint",
+			err,
+			restoreErr,
+		)
+	}
+
+	return WorkbenchComposeApplyResult{
+		Metadata: WorkbenchComposeApplyMetadata{
+			Revision:          updatedSnapshot.Revision,
+			SourceFingerprint: updatedSnapshot.SourceFingerprint,
+			ComposePath:       currentSource.ComposePath,
+		},
+		ComposeBytes: len(normalizedCompose),
+		Backup:       backup,
+		Retention:    retention,
+	}, nil
+}
+
+type workbenchComposePatchModel struct {
+	snapshot     WorkbenchStackSnapshot
+	services     map[string]WorkbenchComposeService
+	dependencies map[string][]string
+	networkRefs  map[string][]string
+	ports        map[string][]WorkbenchComposePort
+	resources    map[string]WorkbenchComposeResource
+}
+
+func mergeWorkbenchSnapshotIntoComposeSource(
+	snapshot WorkbenchStackSnapshot,
+	source WorkbenchComposeSource,
+) (string, error) {
+	model, err := buildWorkbenchComposePatchModel(snapshot)
+	if err != nil {
+		return "", err
+	}
+
+	var document yaml.Node
+	if err := yaml.Unmarshal([]byte(source.Normalized), &document); err != nil {
+		return "", workbenchComposeApplySourceInvalidError(
+			model.snapshot,
+			source,
+			"failed to parse current compose source",
+			err,
+		)
+	}
+
+	root := workbenchDocumentRoot(&document)
+	if root == nil || root.Kind != yaml.MappingNode {
+		return "", workbenchComposeApplySourceInvalidError(
+			model.snapshot,
+			source,
+			"current compose source root must be a mapping",
+			nil,
+		)
+	}
+
+	servicesNode, ok := workbenchYAMLFindMapValue(root, "services")
+	if !ok || servicesNode == nil || servicesNode.Kind != yaml.MappingNode {
+		return "", workbenchComposeApplySourceInvalidError(
+			model.snapshot,
+			source,
+			"current compose source must define services as a mapping",
+			nil,
+		)
+	}
+
+	for serviceName, service := range model.services {
+		serviceNode, ok := workbenchYAMLFindMapValue(servicesNode, serviceName)
+		if !ok || serviceNode == nil || serviceNode.Kind != yaml.MappingNode {
+			return "", workbenchComposeApplySourceInvalidError(
+				model.snapshot,
+				source,
+				fmt.Sprintf("current compose source is missing service %q", serviceName),
+				nil,
+			)
+		}
+
+		workbenchPatchServiceDefinition(serviceNode, service, model.dependencies[serviceName], model.networkRefs[serviceName])
+		workbenchPatchServicePorts(serviceNode, model.ports[serviceName])
+		workbenchPatchServiceResources(serviceNode, model.resources[serviceName])
+	}
+
+	encoded, err := encodeWorkbenchComposeYAML(root)
+	if err != nil {
+		return "", workbenchComposeApplySourceInvalidError(
+			model.snapshot,
+			source,
+			"failed to encode merged compose source",
+			err,
+		)
+	}
+	return encoded, nil
+}
+
+func buildWorkbenchComposePatchModel(snapshot WorkbenchStackSnapshot) (workbenchComposePatchModel, error) {
+	normalizedSnapshot := normalizeWorkbenchStackSnapshot(snapshot)
+	if _, err := buildWorkbenchComposeGenerationModel(normalizedSnapshot); err != nil {
+		filteredErr := workbenchFilterValidationIssues(err, func(issue WorkbenchValidationIssue) bool {
+			return strings.EqualFold(strings.TrimSpace(issue.Code), "WB-VAL-VOLUME-UNSUPPORTED")
+		})
+		if filteredErr != nil {
+			return workbenchComposePatchModel{}, filteredErr
+		}
+	}
+
+	model := workbenchComposePatchModel{
+		snapshot:     normalizedSnapshot,
+		services:     make(map[string]WorkbenchComposeService, len(normalizedSnapshot.Services)),
+		dependencies: make(map[string][]string),
+		networkRefs:  make(map[string][]string),
+		ports:        make(map[string][]WorkbenchComposePort),
+		resources:    make(map[string]WorkbenchComposeResource),
+	}
+	for _, service := range normalizedSnapshot.Services {
+		name := strings.TrimSpace(service.ServiceName)
+		if name == "" {
+			continue
+		}
+		model.services[name] = WorkbenchComposeService{
+			ServiceName:   name,
+			Image:         strings.TrimSpace(service.Image),
+			BuildSource:   strings.TrimSpace(service.BuildSource),
+			RestartPolicy: strings.TrimSpace(service.RestartPolicy),
+		}
+	}
+	for _, dependency := range normalizedSnapshot.Dependencies {
+		serviceName := strings.TrimSpace(dependency.ServiceName)
+		dependsOn := strings.TrimSpace(dependency.DependsOn)
+		if serviceName == "" || dependsOn == "" {
+			continue
+		}
+		model.dependencies[serviceName] = append(model.dependencies[serviceName], dependsOn)
+	}
+	for _, networkRef := range normalizedSnapshot.NetworkRefs {
+		serviceName := strings.TrimSpace(networkRef.ServiceName)
+		networkName := strings.TrimSpace(networkRef.NetworkName)
+		if serviceName == "" || networkName == "" {
+			continue
+		}
+		model.networkRefs[serviceName] = append(model.networkRefs[serviceName], networkName)
+	}
+	for _, port := range normalizedSnapshot.Ports {
+		serviceName := strings.TrimSpace(port.ServiceName)
+		if serviceName == "" {
+			continue
+		}
+		model.ports[serviceName] = append(model.ports[serviceName], normalizeWorkbenchComposePort(port))
+	}
+	for _, resource := range normalizedSnapshot.Resources {
+		serviceName := strings.TrimSpace(resource.ServiceName)
+		if serviceName == "" {
+			continue
+		}
+		model.resources[serviceName] = WorkbenchComposeResource{
+			ServiceName:       serviceName,
+			LimitCPUs:         strings.TrimSpace(resource.LimitCPUs),
+			LimitMemory:       strings.TrimSpace(resource.LimitMemory),
+			ReservationCPUs:   strings.TrimSpace(resource.ReservationCPUs),
+			ReservationMemory: strings.TrimSpace(resource.ReservationMemory),
+		}
+	}
+	return model, nil
+}
+
+func workbenchFilterValidationIssues(err error, drop func(issue WorkbenchValidationIssue) bool) error {
+	if err == nil {
+		return nil
+	}
+
+	typed, ok := errs.From(err)
+	if !ok || typed.Code != errs.CodeWorkbenchValidationFailed {
+		return err
+	}
+
+	details, ok := typed.Details.(map[string]any)
+	if !ok {
+		return err
+	}
+
+	issues, ok := details["issues"].([]WorkbenchValidationIssue)
+	if !ok {
+		return err
+	}
+
+	filtered := make([]WorkbenchValidationIssue, 0, len(issues))
+	for _, issue := range issues {
+		if drop != nil && drop(issue) {
+			continue
+		}
+		filtered = append(filtered, issue)
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return workbenchComposeValidationError(typedSnapshotFromValidationDetails(details), filtered)
+}
+
+func typedSnapshotFromValidationDetails(details map[string]any) WorkbenchStackSnapshot {
+	snapshot := WorkbenchStackSnapshot{}
+	if project, ok := details["project"].(string); ok {
+		snapshot.ProjectName = project
+	}
+	if composePath, ok := details["composePath"].(string); ok {
+		snapshot.ComposePath = composePath
+	}
+	if fingerprint, ok := details["sourceFingerprint"].(string); ok {
+		snapshot.SourceFingerprint = fingerprint
+	}
+	if revision, ok := details["revision"].(int); ok {
+		snapshot.Revision = revision
+	}
+	return snapshot
+}
+
+func workbenchPatchServicePorts(serviceNode *yaml.Node, ports []WorkbenchComposePort) {
+	if len(ports) == 0 {
+		workbenchYAMLDeleteMapEntry(serviceNode, "ports")
+		return
+	}
+
+	portSequence := workbenchYAMLSequenceNode()
+	for _, port := range ports {
+		portSequence.Content = append(portSequence.Content, workbenchYAMLScalarNode(formatWorkbenchComposePort(port)))
+	}
+	workbenchYAMLSetMapEntry(serviceNode, "ports", portSequence)
+}
+
+func workbenchPatchServiceDefinition(
+	serviceNode *yaml.Node,
+	service WorkbenchComposeService,
+	dependencies []string,
+	networkRefs []string,
+) {
+	workbenchYAMLSetOrDeleteScalarEntry(serviceNode, "image", strings.TrimSpace(service.Image))
+	workbenchPatchServiceBuild(serviceNode, strings.TrimSpace(service.BuildSource))
+	workbenchYAMLSetOrDeleteScalarEntry(serviceNode, "restart", strings.TrimSpace(service.RestartPolicy))
+
+	if len(dependencies) == 0 {
+		workbenchYAMLDeleteMapEntry(serviceNode, "depends_on")
+	} else {
+		workbenchPatchServiceDependsOn(serviceNode, dependencies)
+	}
+
+	if len(networkRefs) == 0 {
+		workbenchYAMLDeleteMapEntry(serviceNode, "networks")
+	} else {
+		workbenchPatchServiceNetworks(serviceNode, networkRefs)
+	}
+}
+
+func workbenchPatchServiceBuild(serviceNode *yaml.Node, buildSource string) {
+	currentNode, ok := workbenchYAMLFindMapValue(serviceNode, "build")
+	if strings.TrimSpace(buildSource) == "" {
+		workbenchYAMLDeleteMapEntry(serviceNode, "build")
+		return
+	}
+	if ok && currentNode != nil && currentNode.Kind == yaml.MappingNode {
+		return
+	}
+	workbenchYAMLSetMapEntry(serviceNode, "build", workbenchYAMLScalarNode(buildSource))
+}
+
+func workbenchPatchServiceDependsOn(serviceNode *yaml.Node, dependencies []string) {
+	currentNode, ok := workbenchYAMLFindMapValue(serviceNode, "depends_on")
+	if ok && currentNode != nil && currentNode.Kind == yaml.MappingNode {
+		workbenchPatchNamedMappingEntries(currentNode, dependencies)
+		return
+	}
+
+	dependsOnNode := workbenchYAMLSequenceNode()
+	for _, dependency := range dependencies {
+		dependsOnNode.Content = append(dependsOnNode.Content, workbenchYAMLScalarNode(dependency))
+	}
+	workbenchYAMLSetMapEntry(serviceNode, "depends_on", dependsOnNode)
+}
+
+func workbenchPatchServiceNetworks(serviceNode *yaml.Node, networkRefs []string) {
+	currentNode, ok := workbenchYAMLFindMapValue(serviceNode, "networks")
+	if ok && currentNode != nil && currentNode.Kind == yaml.MappingNode {
+		workbenchPatchNamedMappingEntries(currentNode, networkRefs)
+		return
+	}
+
+	networksNode := workbenchYAMLSequenceNode()
+	for _, networkName := range networkRefs {
+		networksNode.Content = append(networksNode.Content, workbenchYAMLScalarNode(networkName))
+	}
+	workbenchYAMLSetMapEntry(serviceNode, "networks", networksNode)
+}
+
+func workbenchPatchNamedMappingEntries(mappingNode *yaml.Node, names []string) {
+	if mappingNode == nil || mappingNode.Kind != yaml.MappingNode {
+		return
+	}
+
+	desired := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		desired[trimmed] = struct{}{}
+	}
+
+	nextContent := make([]*yaml.Node, 0, len(mappingNode.Content))
+	present := make(map[string]struct{}, len(desired))
+	for idx := 0; idx+1 < len(mappingNode.Content); idx += 2 {
+		keyNode := mappingNode.Content[idx]
+		valueNode := mappingNode.Content[idx+1]
+		if keyNode == nil || keyNode.Kind != yaml.ScalarNode {
+			continue
+		}
+		name := strings.TrimSpace(keyNode.Value)
+		if _, keep := desired[name]; !keep {
+			continue
+		}
+		nextContent = append(nextContent, keyNode, valueNode)
+		present[name] = struct{}{}
+	}
+
+	for _, name := range names {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := present[trimmed]; exists {
+			continue
+		}
+		nextContent = append(nextContent, workbenchYAMLScalarNode(trimmed), workbenchYAMLMappingNode())
+	}
+
+	mappingNode.Content = nextContent
+}
+
+func workbenchPatchServiceResources(serviceNode *yaml.Node, resource WorkbenchComposeResource) {
+	if workbenchIsEmptyResource(resource) {
+		deployNode, ok := workbenchYAMLFindMapValue(serviceNode, "deploy")
+		if !ok || deployNode == nil || deployNode.Kind != yaml.MappingNode {
+			return
+		}
+		workbenchYAMLDeleteMapEntry(deployNode, "resources")
+		if len(deployNode.Content) == 0 {
+			workbenchYAMLDeleteMapEntry(serviceNode, "deploy")
+		}
+		return
+	}
+
+	deployNode, ok := workbenchYAMLFindMapValue(serviceNode, "deploy")
+	if !ok || deployNode == nil {
+		deployNode = workbenchYAMLMappingNode()
+		workbenchYAMLSetMapEntry(serviceNode, "deploy", deployNode)
+	} else if deployNode.Kind != yaml.MappingNode {
+		deployNode.Kind = yaml.MappingNode
+		deployNode.Style = 0
+		deployNode.Tag = "!!map"
+		deployNode.Content = nil
+	}
+
+	resourcesNode := workbenchYAMLMappingNode()
+
+	limitsNode := workbenchYAMLMappingNode()
+	if cpus := strings.TrimSpace(resource.LimitCPUs); cpus != "" {
+		workbenchYAMLAddMapEntry(limitsNode, "cpus", workbenchYAMLScalarNode(cpus))
+	}
+	if memory := strings.TrimSpace(resource.LimitMemory); memory != "" {
+		workbenchYAMLAddMapEntry(limitsNode, "memory", workbenchYAMLScalarNode(memory))
+	}
+	if len(limitsNode.Content) > 0 {
+		workbenchYAMLAddMapEntry(resourcesNode, "limits", limitsNode)
+	}
+
+	reservationsNode := workbenchYAMLMappingNode()
+	if cpus := strings.TrimSpace(resource.ReservationCPUs); cpus != "" {
+		workbenchYAMLAddMapEntry(reservationsNode, "cpus", workbenchYAMLScalarNode(cpus))
+	}
+	if memory := strings.TrimSpace(resource.ReservationMemory); memory != "" {
+		workbenchYAMLAddMapEntry(reservationsNode, "memory", workbenchYAMLScalarNode(memory))
+	}
+	if len(reservationsNode.Content) > 0 {
+		workbenchYAMLAddMapEntry(resourcesNode, "reservations", reservationsNode)
+	}
+
+	workbenchYAMLSetMapEntry(deployNode, "resources", resourcesNode)
+}
+
+func workbenchYAMLFindMapValue(node *yaml.Node, key string) (*yaml.Node, bool) {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil, false
+	}
+	for idx := 0; idx+1 < len(node.Content); idx += 2 {
+		keyNode := node.Content[idx]
+		if keyNode == nil || keyNode.Kind != yaml.ScalarNode {
+			continue
+		}
+		if keyNode.Value == key {
+			return node.Content[idx+1], true
+		}
+	}
+	return nil, false
+}
+
+func workbenchYAMLSetMapEntry(node *yaml.Node, key string, value *yaml.Node) {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return
+	}
+	for idx := 0; idx+1 < len(node.Content); idx += 2 {
+		keyNode := node.Content[idx]
+		if keyNode == nil || keyNode.Kind != yaml.ScalarNode {
+			continue
+		}
+		if keyNode.Value == key {
+			node.Content[idx+1] = value
+			return
+		}
+	}
+	workbenchYAMLAddMapEntry(node, key, value)
+}
+
+func workbenchYAMLDeleteMapEntry(node *yaml.Node, key string) {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return
+	}
+	for idx := 0; idx+1 < len(node.Content); idx += 2 {
+		keyNode := node.Content[idx]
+		if keyNode == nil || keyNode.Kind != yaml.ScalarNode {
+			continue
+		}
+		if keyNode.Value == key {
+			node.Content = append(node.Content[:idx], node.Content[idx+2:]...)
+			return
+		}
+	}
+}
+
+func workbenchYAMLSetOrDeleteScalarEntry(node *yaml.Node, key string, value string) {
+	if strings.TrimSpace(value) == "" {
+		workbenchYAMLDeleteMapEntry(node, key)
+		return
+	}
+	workbenchYAMLSetMapEntry(node, key, workbenchYAMLScalarNode(value))
+}
+
+func normalizeWorkbenchComposePreviewRequest(input WorkbenchComposePreviewRequest) (WorkbenchComposePreviewRequest, error) {
+	normalized := WorkbenchComposePreviewRequest{}
+	if input.ExpectedRevision == nil {
+		return normalized, nil
+	}
+
+	revision := *input.ExpectedRevision
+	if revision <= 0 {
+		return WorkbenchComposePreviewRequest{}, errs.New(
+			errs.CodeProjectInvalidBody,
+			"expectedRevision must be greater than zero",
+		)
+	}
+
+	normalized.ExpectedRevision = intPtr(revision)
+	return normalized, nil
+}
+
+func normalizeWorkbenchComposeApplyRequest(input WorkbenchComposeApplyRequest) (WorkbenchComposeApplyRequest, error) {
+	normalized := WorkbenchComposeApplyRequest{}
+	if input.ExpectedRevision == nil {
+		return WorkbenchComposeApplyRequest{}, errs.New(
+			errs.CodeProjectInvalidBody,
+			"expectedRevision is required",
+		)
+	}
+
+	revision := *input.ExpectedRevision
+	if revision <= 0 {
+		return WorkbenchComposeApplyRequest{}, errs.New(
+			errs.CodeProjectInvalidBody,
+			"expectedRevision must be greater than zero",
+		)
+	}
+
+	fingerprint := strings.TrimSpace(input.ExpectedSourceFingerprint)
+	if fingerprint == "" {
+		return WorkbenchComposeApplyRequest{}, errs.New(
+			errs.CodeProjectInvalidBody,
+			"expectedSourceFingerprint is required",
+		)
+	}
+
+	normalized.ExpectedRevision = intPtr(revision)
+	normalized.ExpectedSourceFingerprint = fingerprint
+	return normalized, nil
+}
+
+func (s *WorkbenchService) loadStoredSnapshotForComposeLocked(
+	ctx context.Context,
+	normalizedProject string,
+) (WorkbenchStackSnapshot, error) {
 	snapshot, exists, err := s.loadStoredWorkbenchSnapshot(ctx, normalizedProject)
 	if err != nil {
 		return WorkbenchStackSnapshot{}, err
@@ -110,11 +762,153 @@ func (s *WorkbenchService) ValidateStoredSnapshotForCompose(
 			},
 		)
 	}
-
-	if _, err := buildWorkbenchComposeGenerationModel(snapshot); err != nil {
-		return WorkbenchStackSnapshot{}, err
-	}
 	return snapshot, nil
+}
+
+func validateWorkbenchSnapshotForCompose(snapshot WorkbenchStackSnapshot) error {
+	_, err := buildWorkbenchComposeGenerationModel(snapshot)
+	return err
+}
+
+func workbenchPreviewExpectedRevisionValidationError(snapshot WorkbenchStackSnapshot, expectedRevision int) error {
+	issue := WorkbenchValidationIssue{
+		Class:   workbenchValidationClassSchema,
+		Code:    "WB-VAL-EXPECTED-REVISION-MISMATCH",
+		Path:    "$.expectedRevision",
+		Message: fmt.Sprintf("expected revision %d does not match current revision %d", expectedRevision, snapshot.Revision),
+	}
+	return errs.WithDetails(
+		errs.New(errs.CodeWorkbenchValidationFailed, "workbench preview blocked by validation errors"),
+		map[string]any{
+			"project":           strings.TrimSpace(snapshot.ProjectName),
+			"composePath":       strings.TrimSpace(snapshot.ComposePath),
+			"sourceFingerprint": strings.TrimSpace(snapshot.SourceFingerprint),
+			"revision":          snapshot.Revision,
+			"expectedRevision":  expectedRevision,
+			"issueCount":        1,
+			"issues":            []WorkbenchValidationIssue{issue},
+		},
+	)
+}
+
+func workbenchApplyStaleRevisionError(snapshot WorkbenchStackSnapshot, expectedRevision int) error {
+	issue := WorkbenchValidationIssue{
+		Class:   workbenchValidationClassSchema,
+		Code:    "WB-STALE-EXPECTED-REVISION-MISMATCH",
+		Path:    "$.expectedRevision",
+		Message: fmt.Sprintf("expected revision %d does not match current revision %d", expectedRevision, snapshot.Revision),
+	}
+	return errs.WithDetails(
+		errs.New(errs.CodeWorkbenchStaleRevision, "workbench apply blocked by stale revision"),
+		map[string]any{
+			"project":           strings.TrimSpace(snapshot.ProjectName),
+			"composePath":       strings.TrimSpace(snapshot.ComposePath),
+			"sourceFingerprint": strings.TrimSpace(snapshot.SourceFingerprint),
+			"revision":          snapshot.Revision,
+			"expectedRevision":  expectedRevision,
+			"issueCount":        1,
+			"issues":            []WorkbenchValidationIssue{issue},
+		},
+	)
+}
+
+func workbenchApplyDriftCheck(
+	snapshot WorkbenchStackSnapshot,
+	currentSource WorkbenchComposeSource,
+	expectedSourceFingerprint string,
+) error {
+	issues := make([]WorkbenchValidationIssue, 0, 2)
+	storedFingerprint := strings.TrimSpace(snapshot.SourceFingerprint)
+	currentFingerprint := strings.TrimSpace(currentSource.Fingerprint)
+	expectedFingerprint := strings.TrimSpace(expectedSourceFingerprint)
+
+	if storedFingerprint != expectedFingerprint {
+		issues = append(issues, WorkbenchValidationIssue{
+			Class:   workbenchValidationClassSchema,
+			Code:    "WB-DRIFT-EXPECTED-SOURCE-FINGERPRINT-MISMATCH",
+			Path:    "$.expectedSourceFingerprint",
+			Message: fmt.Sprintf("expected source fingerprint %q does not match current workbench fingerprint %q", expectedFingerprint, storedFingerprint),
+		})
+	}
+	if storedFingerprint != currentFingerprint {
+		issues = append(issues, WorkbenchValidationIssue{
+			Class:   workbenchValidationClassSchema,
+			Code:    "WB-DRIFT-COMPOSE-SOURCE-MISMATCH",
+			Path:    "$.composeSource",
+			Message: fmt.Sprintf("compose source fingerprint %q does not match stored workbench fingerprint %q", currentFingerprint, storedFingerprint),
+		})
+	}
+	if len(issues) == 0 {
+		return nil
+	}
+
+	sort.SliceStable(issues, func(i, j int) bool {
+		return workbenchValidationIssueLess(issues[i], issues[j])
+	})
+
+	return errs.WithDetails(
+		errs.New(errs.CodeWorkbenchDriftDetected, "workbench apply blocked by compose drift"),
+		map[string]any{
+			"project":                   strings.TrimSpace(snapshot.ProjectName),
+			"composePath":               strings.TrimSpace(currentSource.ComposePath),
+			"projectPath":               strings.TrimSpace(currentSource.ProjectDir),
+			"revision":                  snapshot.Revision,
+			"expectedSourceFingerprint": expectedFingerprint,
+			"sourceFingerprint":         storedFingerprint,
+			"currentSourceFingerprint":  currentFingerprint,
+			"issueCount":                len(issues),
+			"issues":                    issues,
+		},
+	)
+}
+
+func replaceWorkbenchComposeAtomically(composePath string, content []byte) error {
+	trimmedPath := strings.TrimSpace(composePath)
+	if trimmedPath == "" {
+		return fmt.Errorf("compose path is empty")
+	}
+
+	info, err := os.Stat(trimmedPath)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("compose path points to a directory")
+	}
+
+	dir := filepath.Dir(trimmedPath)
+	tempFile, err := os.CreateTemp(dir, ".workbench-compose-*")
+	if err != nil {
+		return err
+	}
+	tempPath := tempFile.Name()
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	if err := tempFile.Chmod(info.Mode().Perm()); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if _, err := tempFile.Write(content); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Sync(); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tempPath, trimmedPath); err != nil {
+		return err
+	}
+	cleanupTemp = false
+	return nil
 }
 
 func generateWorkbenchCompose(snapshot WorkbenchStackSnapshot) (string, error) {
@@ -692,6 +1486,50 @@ func workbenchComposeGenerateError(snapshot WorkbenchStackSnapshot, message stri
 		details["cause"] = cause.Error()
 	}
 	return errs.WithDetails(errs.Wrap(errs.CodeWorkbenchGenerateFailed, message, cause), details)
+}
+
+func workbenchComposeApplySourceInvalidError(
+	snapshot WorkbenchStackSnapshot,
+	source WorkbenchComposeSource,
+	message string,
+	cause error,
+) error {
+	details := map[string]any{
+		"project":           strings.TrimSpace(snapshot.ProjectName),
+		"projectPath":       strings.TrimSpace(source.ProjectDir),
+		"composePath":       strings.TrimSpace(source.ComposePath),
+		"sourceFingerprint": strings.TrimSpace(snapshot.SourceFingerprint),
+		"revision":          snapshot.Revision,
+	}
+	if cause != nil {
+		details["cause"] = cause.Error()
+	}
+	return errs.WithDetails(errs.Wrap(errs.CodeWorkbenchSourceInvalid, message, cause), details)
+}
+
+func workbenchComposeApplyStorageError(
+	snapshot WorkbenchStackSnapshot,
+	source WorkbenchComposeSource,
+	message string,
+	cause error,
+	restoreErr error,
+) error {
+	details := map[string]any{
+		"project":                    strings.TrimSpace(snapshot.ProjectName),
+		"projectPath":                strings.TrimSpace(source.ProjectDir),
+		"composePath":                strings.TrimSpace(source.ComposePath),
+		"sourceFingerprint":          strings.TrimSpace(source.Fingerprint),
+		"attemptedSourceFingerprint": strings.TrimSpace(snapshot.SourceFingerprint),
+		"revision":                   snapshot.Revision,
+		"restoredCompose":            restoreErr == nil,
+	}
+	if cause != nil {
+		details["cause"] = cause.Error()
+	}
+	if restoreErr != nil {
+		details["restoreError"] = restoreErr.Error()
+	}
+	return errs.WithDetails(errs.Wrap(errs.CodeWorkbenchStorageFailed, message, cause), details)
 }
 
 func workbenchYAMLScalarNode(value string) *yaml.Node {

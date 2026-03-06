@@ -843,6 +843,66 @@ sudo cat "$(docker inspect -f '{{.LogPath}}' &lt;container-id&gt;)"</code></pre>
                   </div>
 
                   <div>
+                    <h3 class="text-lg font-semibold">Workbench</h3>
+                    <p class="mt-2 text-sm text-[color:var(--muted)]">
+                      These codes cover the shipped admin-only Workbench compose flow under
+                      <code>/api/v1/projects/:name/workbench/*</code>. Preview, apply, and restore also emit audit
+                      entries, and Jobs now log the underlying <code>WB-*</code> code when a Workbench-backed deploy
+                      path fails.
+                    </p>
+                    <div class="mt-3 grid gap-4">
+                      <details class="details-card" id="WB-404-SOURCE" data-doc-section data-doc-group="api-codes" data-doc-title="WB-404-SOURCE workbench compose source not found" data-doc-tags="workbench compose missing import" data-doc-code="WB-404-SOURCE">
+                        <summary><span class="error-code">WB-404-SOURCE</span>Workbench compose source or snapshot not found</summary>
+                        <p>The project has no readable compose source, or no stored Workbench snapshot exists for preview/apply/restore. Verify the project compose file exists, then run Workbench import before preview/apply.</p>
+                      </details>
+                      <details class="details-card" id="WB-404-BACKUP" data-doc-section data-doc-group="api-codes" data-doc-title="WB-404-BACKUP workbench backup not found" data-doc-tags="workbench backup restore missing" data-doc-code="WB-404-BACKUP">
+                        <summary><span class="error-code">WB-404-BACKUP</span>Workbench backup not found</summary>
+                        <p>The requested <code>backupId</code> does not exist, or its artifact file is missing. Refresh the backup list, pick a valid backup ID, and retry restore.</p>
+                      </details>
+                      <details class="details-card" id="WB-409-LOCKED" data-doc-section data-doc-group="api-codes" data-doc-title="WB-409-LOCKED workbench project lock held" data-doc-tags="workbench locked concurrency" data-doc-code="WB-409-LOCKED">
+                        <summary><span class="error-code">WB-409-LOCKED</span>Workbench project lock is busy</summary>
+                        <p>Another import, preview, apply, or restore is already running for the same project. Wait for the other operation to finish, then retry.</p>
+                      </details>
+                      <details class="details-card" id="WB-409-STALE-REVISION" data-doc-section data-doc-group="api-codes" data-doc-title="WB-409-STALE-REVISION workbench stale revision" data-doc-tags="workbench stale revision apply" data-doc-code="WB-409-STALE-REVISION">
+                        <summary><span class="error-code">WB-409-STALE-REVISION</span>Workbench apply blocked by stale revision</summary>
+                        <p>The supplied <code>expectedRevision</code> no longer matches the stored snapshot revision. Reload the snapshot, run preview again if needed, and apply with the new revision.</p>
+                      </details>
+                      <details class="details-card" id="WB-409-DRIFT-DETECTED" data-doc-section data-doc-group="api-codes" data-doc-title="WB-409-DRIFT-DETECTED workbench compose drift detected" data-doc-tags="workbench drift apply compose" data-doc-code="WB-409-DRIFT-DETECTED">
+                        <summary><span class="error-code">WB-409-DRIFT-DETECTED</span>Workbench apply blocked by compose drift</summary>
+                        <p>The live compose file fingerprint no longer matches the stored Workbench fingerprint, or the supplied fingerprint is stale. Re-import the project compose, preview again, then retry apply.</p>
+                      </details>
+                      <details class="details-card" id="WB-409-BACKUP-INTEGRITY" data-doc-section data-doc-group="api-codes" data-doc-title="WB-409-BACKUP-INTEGRITY workbench backup integrity failure" data-doc-tags="workbench backup integrity restore" data-doc-code="WB-409-BACKUP-INTEGRITY">
+                        <summary><span class="error-code">WB-409-BACKUP-INTEGRITY</span>Workbench backup integrity failed</summary>
+                        <p>The backup metadata and artifact content no longer agree. Inspect <code>.gungnr/workbench/compose-backups</code>, choose another backup if available, or re-import the current compose instead of restoring.</p>
+                      </details>
+                      <details class="details-card" id="WB-422-VALIDATION" data-doc-section data-doc-group="api-codes" data-doc-title="WB-422-VALIDATION workbench validation failed" data-doc-tags="workbench validation preview apply ports dependencies" data-doc-code="WB-422-VALIDATION">
+                        <summary><span class="error-code">WB-422-VALIDATION</span>Workbench validation failed</summary>
+                        <p>The snapshot failed deterministic validation. Inspect the returned <code>issues</code> list for service, dependency, or port-specific diagnostics, correct the snapshot state, then preview or apply again.</p>
+                      </details>
+                      <details class="details-card" id="WB-500-STORAGE" data-doc-section data-doc-group="api-codes" data-doc-title="WB-500-STORAGE workbench storage failure" data-doc-tags="workbench storage settings" data-doc-code="WB-500-STORAGE">
+                        <summary><span class="error-code">WB-500-STORAGE</span>Workbench storage failure</summary>
+                        <p>The encrypted settings-backed Workbench snapshot payload could not be read or written. Check API logs and settings storage health before retrying import or apply.</p>
+                      </details>
+                      <details class="details-card" id="WB-500-GENERATE" data-doc-section data-doc-group="api-codes" data-doc-title="WB-500-GENERATE workbench compose generation failed" data-doc-tags="workbench compose generation" data-doc-code="WB-500-GENERATE">
+                        <summary><span class="error-code">WB-500-GENERATE</span>Workbench compose generation failed</summary>
+                        <p>The backend could not encode a compose document from the stored snapshot. Check API logs for the generation failure and re-import if the snapshot is suspect.</p>
+                      </details>
+                      <details class="details-card" id="WB-500-BACKUP-WRITE" data-doc-section data-doc-group="api-codes" data-doc-title="WB-500-BACKUP-WRITE workbench backup write failed" data-doc-tags="workbench backup write apply" data-doc-code="WB-500-BACKUP-WRITE">
+                        <summary><span class="error-code">WB-500-BACKUP-WRITE</span>Workbench backup write failed</summary>
+                        <p>Apply could not persist the pre-write backup artifact or index. Check filesystem permissions under the project directory and retry apply after the backup path is healthy.</p>
+                      </details>
+                      <details class="details-card" id="WB-500-BACKUP-RETENTION" data-doc-section data-doc-group="api-codes" data-doc-title="WB-500-BACKUP-RETENTION workbench backup retention failed" data-doc-tags="workbench backup retention prune" data-doc-code="WB-500-BACKUP-RETENTION">
+                        <summary><span class="error-code">WB-500-BACKUP-RETENTION</span>Workbench backup retention failed</summary>
+                        <p>The new backup was created, but pruning older retained backups failed. Check filesystem access under the backup directory before retrying another apply.</p>
+                      </details>
+                      <details class="details-card" id="WB-500-RESTORE" data-doc-section data-doc-group="api-codes" data-doc-title="WB-500-RESTORE workbench restore failed" data-doc-tags="workbench restore backup" data-doc-code="WB-500-RESTORE">
+                        <summary><span class="error-code">WB-500-RESTORE</span>Workbench restore failed</summary>
+                        <p>The backup artifact could not be written back to the compose path atomically. Check filesystem health and compose path permissions, then retry restore or recover from a different backup.</p>
+                      </details>
+                    </div>
+                  </div>
+
+                  <div>
                     <h3 class="text-lg font-semibold">Audit &amp; RBAC</h3>
                     <div class="mt-3 grid gap-4">
                       <details class="details-card" id="AUDIT-500-LIST" data-doc-section data-doc-group="api-codes" data-doc-title="AUDIT-500-LIST failed to list audit logs" data-doc-tags="audit logs" data-doc-code="AUDIT-500-LIST">

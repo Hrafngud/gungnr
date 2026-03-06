@@ -176,6 +176,7 @@
                 <div class="sidebar-sub">
                   <a data-nav-link href="#usage-first-login">First login</a>
                   <a data-nav-link href="#usage-deploy">Deploy flows</a>
+                  <a data-nav-link href="#usage-workbench">Workbench</a>
                   <a data-nav-link href="#usage-ops">Operations</a>
                 </div>
               </div>
@@ -765,6 +766,76 @@
                   <li>Use the Jobs page to monitor deployments and tunnel changes.</li>
                   <li>Container logs stream under Host Settings.</li>
                   <li>Audit log records each system action.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div
+              id="usage-workbench"
+              class="mt-6 card p-6"
+              data-doc-section
+              data-doc-title="Workbench operator flow"
+              data-doc-group="usage"
+              data-doc-tags="workbench compose import preview apply restore jobs"
+            >
+              <h3 class="text-xl font-semibold">Workbench compose workflow</h3>
+              <p class="mt-2 text-sm text-[color:var(--muted)]">
+                The shipped Workbench backend is the compose authority for projects. The UI rollout is still pending,
+                but operators can already use the admin-only Workbench endpoints and rely on Jobs to consume
+                Workbench-generated compose artifacts.
+              </p>
+              <div class="mt-4 rounded-xl bg-[color:var(--surface-2)] p-5 text-sm text-[color:var(--muted)]">
+                <p class="font-semibold text-[color:var(--text)]">API surface</p>
+                <p class="mt-2">
+                  <code>POST /api/v1/projects/:name/workbench/import</code>,
+                  <code>POST /api/v1/projects/:name/workbench/compose/preview</code>,
+                  <code>POST /api/v1/projects/:name/workbench/compose/apply</code>, and
+                  <code>POST /api/v1/projects/:name/workbench/compose/restore</code>.
+                </p>
+              </div>
+              <ol class="mt-6 flex flex-col gap-4 text-sm text-[color:var(--muted)] list-decimal pl-4">
+                <li>
+                  Import the current project compose with <code>reason=manual</code>. The import is idempotent when
+                  the compose fingerprint is unchanged, and it emits audit event
+                  <code>project.workbench.import</code>.
+                </li>
+                <li>
+                  Preview with <code>expectedRevision</code> before any write. Preview is read-only, returns the
+                  current revision and source fingerprint, and records
+                  <code>project.workbench.compose.preview</code>.
+                </li>
+                <li>
+                  Apply with both <code>expectedRevision</code> and
+                  <code>expectedSourceFingerprint</code>. Apply validates the stored snapshot, blocks stale revision
+                  and compose drift, writes the compose atomically, creates a backup, and records
+                  <code>project.workbench.compose.apply</code>.
+                </li>
+                <li>
+                  Restore with <code>backupId</code> when you need to roll back a generated compose. Backups are stored
+                  under <code>.gungnr/workbench/compose-backups</code> with deterministic IDs like
+                  <code>wbk-000001</code>, and retention keeps at most 10 backups or 30 days by default.
+                </li>
+                <li>
+                  After restore, check <code>requiresImport</code>. When it is <code>true</code>, the restored compose
+                  fingerprint no longer matches the stored snapshot, so the next safe path is
+                  <code>import -&gt; preview -&gt; apply</code>.
+                </li>
+              </ol>
+              <div class="mt-6 rounded-xl bg-[color:var(--surface-2)] p-5 text-sm text-[color:var(--muted)]">
+                <p class="font-semibold text-[color:var(--text)]">Jobs integration</p>
+                <ul class="mt-3 flex flex-col gap-2 list-disc pl-4">
+                  <li>
+                    Create-from-template now runs Workbench import, requested port sync, and compose apply before the
+                    stack deploy path continues.
+                  </li>
+                  <li>
+                    Deploy-existing now performs implicit Workbench bootstrap with <code>reason=auto_redeploy</code>
+                    whenever the stored snapshot is missing.
+                  </li>
+                  <li>
+                    Job logs preserve the underlying <code>WB-*</code> code for Workbench failures, and the older direct
+                    compose mutation fallback has been removed from Workbench-managed job paths.
+                  </li>
                 </ul>
               </div>
             </div>

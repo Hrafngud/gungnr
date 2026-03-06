@@ -73,6 +73,7 @@ func TestUpsertNetBirdModeConfig_PartialUpdatePreservesExistingFields(t *testing
 
 type fakeSettingsRepo struct {
 	settings *models.Settings
+	saveErr  error
 }
 
 func (f *fakeSettingsRepo) Get(context.Context) (*models.Settings, error) {
@@ -84,6 +85,9 @@ func (f *fakeSettingsRepo) Get(context.Context) (*models.Settings, error) {
 }
 
 func (f *fakeSettingsRepo) Save(_ context.Context, settings *models.Settings) error {
+	if f.saveErr != nil {
+		return f.saveErr
+	}
 	if settings == nil {
 		f.settings = nil
 		return nil

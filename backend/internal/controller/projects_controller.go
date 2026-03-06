@@ -66,6 +66,19 @@ type projectWorkbenchImportRequest struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+type projectWorkbenchComposePreviewRequest struct {
+	ExpectedRevision *int `json:"expectedRevision,omitempty"`
+}
+
+type projectWorkbenchComposeApplyRequest struct {
+	ExpectedRevision          *int   `json:"expectedRevision,omitempty"`
+	ExpectedSourceFingerprint string `json:"expectedSourceFingerprint,omitempty"`
+}
+
+type projectWorkbenchComposeRestoreRequest struct {
+	BackupID string `json:"backupId"`
+}
+
 func NewProjectsController(
 	service *service.ProjectService,
 	archive *service.ProjectArchiveService,
@@ -344,6 +357,127 @@ func (c *ProjectsController) WorkbenchImport(ctx *gin.Context) {
 		"changed":    changed,
 		"idempotent": !changed,
 	})
+}
+
+func (c *ProjectsController) WorkbenchComposePreview(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		return
+	}
+
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.workbench == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeWorkbenchStorageFailed, "workbench service unavailable", nil)
+		return
+	}
+
+	req := projectWorkbenchComposePreviewRequest{}
+	if err := ctx.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "invalid request body", nil)
+		return
+	}
+
+	preview, err := c.workbench.PreviewComposeFromStoredSnapshot(
+		ctx.Request.Context(),
+		project,
+		service.WorkbenchComposePreviewRequest{
+			ExpectedRevision: req.ExpectedRevision,
+		},
+	)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		c.logAudit(ctx, "project.workbench.compose.preview", project, workbenchComposePreviewAuditMetadata(project, req.ExpectedRevision, nil, err))
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectWorkbenchPreviewFailed, "failed to preview workbench compose")
+		return
+	}
+
+	c.logAudit(ctx, "project.workbench.compose.preview", project, workbenchComposePreviewAuditMetadata(project, req.ExpectedRevision, &preview, nil))
+	ctx.JSON(http.StatusOK, gin.H{"preview": preview})
+}
+
+func (c *ProjectsController) WorkbenchComposeApply(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		return
+	}
+
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.workbench == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeWorkbenchStorageFailed, "workbench service unavailable", nil)
+		return
+	}
+
+	req := projectWorkbenchComposeApplyRequest{}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "invalid request body", nil)
+		return
+	}
+
+	result, err := c.workbench.ApplyComposeFromStoredSnapshot(
+		ctx.Request.Context(),
+		project,
+		service.WorkbenchComposeApplyRequest{
+			ExpectedRevision:          req.ExpectedRevision,
+			ExpectedSourceFingerprint: req.ExpectedSourceFingerprint,
+		},
+	)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		c.logAudit(ctx, "project.workbench.compose.apply", project, workbenchComposeApplyAuditMetadata(project, req, nil, err))
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectWorkbenchApplyFailed, "failed to apply workbench compose")
+		return
+	}
+
+	c.logAudit(ctx, "project.workbench.compose.apply", project, workbenchComposeApplyAuditMetadata(project, req, &result, nil))
+	ctx.JSON(http.StatusOK, gin.H{"apply": result})
+}
+
+func (c *ProjectsController) WorkbenchComposeRestore(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		return
+	}
+
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.workbench == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeWorkbenchStorageFailed, "workbench service unavailable", nil)
+		return
+	}
+
+	req := projectWorkbenchComposeRestoreRequest{}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "invalid request body", nil)
+		return
+	}
+
+	result, err := c.workbench.RestoreComposeFromBackup(
+		ctx.Request.Context(),
+		project,
+		service.WorkbenchComposeRestoreRequest{
+			BackupID: req.BackupID,
+		},
+	)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		c.logAudit(ctx, "project.workbench.compose.restore", project, workbenchComposeRestoreAuditMetadata(project, req, nil, err))
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectWorkbenchRestoreFailed, "failed to restore workbench compose")
+		return
+	}
+
+	c.logAudit(ctx, "project.workbench.compose.restore", project, workbenchComposeRestoreAuditMetadata(project, req, &result, nil))
+	ctx.JSON(http.StatusOK, gin.H{"restore": result})
 }
 
 func (c *ProjectsController) RestartStack(ctx *gin.Context) {
@@ -829,13 +963,195 @@ func projectHTTPStatus(err error, fallback int) int {
 		return http.StatusBadRequest
 	case errs.CodeProjectNotFound, errs.CodeProjectContainerNotFound, errs.CodeWorkbenchSourceNotFound:
 		return http.StatusNotFound
+	case errs.CodeWorkbenchBackupNotFound:
+		return http.StatusNotFound
 	case errs.CodeWorkbenchLocked:
 		return http.StatusConflict
+	case errs.CodeWorkbenchStaleRevision, errs.CodeWorkbenchDriftDetected, errs.CodeWorkbenchBackupIntegrity:
+		return http.StatusConflict
+	case errs.CodeWorkbenchValidationFailed:
+		return http.StatusUnprocessableEntity
 	case errs.CodeProjectAdminRequired:
 		return http.StatusForbidden
 	default:
 		return fallback
 	}
+}
+
+func workbenchComposeApplyAuditMetadata(
+	project string,
+	req projectWorkbenchComposeApplyRequest,
+	result *service.WorkbenchComposeApplyResult,
+	opErr error,
+) map[string]any {
+	metadata := map[string]any{
+		"project":                   project,
+		"expectedRevision":          nil,
+		"expectedSourceFingerprint": strings.TrimSpace(req.ExpectedSourceFingerprint),
+		"success":                   opErr == nil,
+		"blocked":                   false,
+		"revision":                  nil,
+		"sourceFingerprint":         "",
+		"composePath":               "",
+		"composeBytes":              0,
+		"backupId":                  "",
+		"backupSequence":            0,
+		"retainedBackups":           0,
+		"prunedBackups":             0,
+		"issueCount":                0,
+		"errorCode":                 "",
+	}
+	if req.ExpectedRevision != nil {
+		metadata["expectedRevision"] = *req.ExpectedRevision
+	}
+
+	if result != nil {
+		metadata["revision"] = result.Metadata.Revision
+		metadata["sourceFingerprint"] = result.Metadata.SourceFingerprint
+		metadata["composePath"] = result.Metadata.ComposePath
+		metadata["composeBytes"] = result.ComposeBytes
+		metadata["backupId"] = result.Backup.BackupID
+		metadata["backupSequence"] = result.Backup.Sequence
+		metadata["retainedBackups"] = result.Retention.RetainedCount
+		metadata["prunedBackups"] = result.Retention.PrunedCount
+		return metadata
+	}
+
+	var typed *errs.Error
+	if !errors.As(opErr, &typed) {
+		return metadata
+	}
+
+	metadata["errorCode"] = typed.Code
+	switch typed.Code {
+	case errs.CodeWorkbenchValidationFailed, errs.CodeWorkbenchStaleRevision, errs.CodeWorkbenchDriftDetected:
+		metadata["blocked"] = true
+	}
+
+	details, ok := typed.Details.(map[string]any)
+	if !ok {
+		return metadata
+	}
+
+	if revision, ok := details["revision"]; ok {
+		metadata["revision"] = revision
+	}
+	if fingerprint, ok := details["sourceFingerprint"].(string); ok {
+		metadata["sourceFingerprint"] = fingerprint
+	}
+	if composePath, ok := details["composePath"].(string); ok {
+		metadata["composePath"] = composePath
+	}
+	if issueCount, ok := details["issueCount"].(int); ok {
+		metadata["issueCount"] = issueCount
+	}
+	return metadata
+}
+
+func workbenchComposeRestoreAuditMetadata(
+	project string,
+	req projectWorkbenchComposeRestoreRequest,
+	result *service.WorkbenchComposeRestoreResult,
+	opErr error,
+) map[string]any {
+	metadata := map[string]any{
+		"project":             project,
+		"backupId":            strings.TrimSpace(req.BackupID),
+		"success":             opErr == nil,
+		"blocked":             false,
+		"revision":            nil,
+		"sourceFingerprint":   "",
+		"restoredFingerprint": "",
+		"composePath":         "",
+		"composeBytes":        0,
+		"requiresImport":      false,
+		"errorCode":           "",
+	}
+
+	if result != nil {
+		metadata["revision"] = result.Metadata.Revision
+		metadata["sourceFingerprint"] = result.Metadata.SourceFingerprint
+		metadata["restoredFingerprint"] = result.Metadata.RestoredFingerprint
+		metadata["composePath"] = result.Metadata.ComposePath
+		metadata["composeBytes"] = result.ComposeBytes
+		metadata["requiresImport"] = result.Metadata.RequiresImport
+		return metadata
+	}
+
+	var typed *errs.Error
+	if !errors.As(opErr, &typed) {
+		return metadata
+	}
+
+	metadata["errorCode"] = typed.Code
+	metadata["blocked"] = typed.Code == errs.CodeWorkbenchBackupIntegrity
+	details, ok := typed.Details.(map[string]any)
+	if !ok {
+		return metadata
+	}
+
+	if revision, ok := details["revision"]; ok {
+		metadata["revision"] = revision
+	}
+	if fingerprint, ok := details["sourceFingerprint"].(string); ok {
+		metadata["sourceFingerprint"] = fingerprint
+	}
+	if composePath, ok := details["composePath"].(string); ok {
+		metadata["composePath"] = composePath
+	}
+	return metadata
+}
+
+func workbenchComposePreviewAuditMetadata(
+	project string,
+	expectedRevision *int,
+	preview *service.WorkbenchComposePreviewResult,
+	opErr error,
+) map[string]any {
+	metadata := map[string]any{
+		"project":           project,
+		"expectedRevision":  nil,
+		"success":           opErr == nil,
+		"blocked":           false,
+		"revision":          nil,
+		"sourceFingerprint": "",
+		"composeBytes":      0,
+		"issueCount":        0,
+		"errorCode":         "",
+	}
+	if expectedRevision != nil {
+		metadata["expectedRevision"] = *expectedRevision
+	}
+
+	if preview != nil {
+		metadata["revision"] = preview.Metadata.Revision
+		metadata["sourceFingerprint"] = preview.Metadata.SourceFingerprint
+		metadata["composeBytes"] = len(preview.Compose)
+		return metadata
+	}
+
+	var typed *errs.Error
+	if !errors.As(opErr, &typed) {
+		return metadata
+	}
+
+	metadata["errorCode"] = typed.Code
+	metadata["blocked"] = typed.Code == errs.CodeWorkbenchValidationFailed
+	details, ok := typed.Details.(map[string]any)
+	if !ok {
+		return metadata
+	}
+
+	if revision, ok := details["revision"]; ok {
+		metadata["revision"] = revision
+	}
+	if fingerprint, ok := details["sourceFingerprint"].(string); ok {
+		metadata["sourceFingerprint"] = fingerprint
+	}
+	if issueCount, ok := details["issueCount"].(int); ok {
+		metadata["issueCount"] = issueCount
+	}
+	return metadata
 }
 
 func (c *ProjectsController) logAudit(ctx *gin.Context, action, target string, metadata map[string]any) {

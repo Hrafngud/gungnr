@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"go-notes/internal/config"
+	"go-notes/internal/errs"
 	"go-notes/internal/infra/contract"
 	"go-notes/internal/integrations/cloudflare"
 	gh "go-notes/internal/integrations/github"
@@ -34,6 +35,7 @@ type ProjectWorkflows struct {
 	settings     *SettingsService
 	host         *HostService
 	audit        *AuditService
+	workbench    *WorkbenchService
 	dockerRunner *DockerRunner
 	infraClient  infraBridgeClient
 }
@@ -53,6 +55,7 @@ func NewProjectWorkflows(
 	settings *SettingsService,
 	host *HostService,
 	audit *AuditService,
+	workbench *WorkbenchService,
 	dockerRunner *DockerRunner,
 	infraClient infraBridgeClient,
 ) *ProjectWorkflows {
@@ -62,6 +65,7 @@ func NewProjectWorkflows(
 		settings:     settings,
 		host:         host,
 		audit:        audit,
+		workbench:    workbench,
 		dockerRunner: dockerRunner,
 		infraClient:  infraClient,
 	}
@@ -179,7 +183,7 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	}
 
 	logger.Log("cloning repository into templates directory")
-	composePath, err := cloneTemplateRepo(ctx, logger, authURL, projectDir)
+	_, err = cloneTemplateRepo(ctx, logger, authURL, projectDir)
 	if err != nil {
 		return err
 	}
@@ -209,11 +213,16 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	}
 	logger.Logf("using proxy port %d and db port %d", proxyPort, dbPort)
 
-	patchSummary, err := patchComposePorts(composePath, proxyPort, dbPort)
-	if err == nil || patchSummary.Proxy.Matched || patchSummary.DB.Matched || patchSummary.Proxy.Reason != "" || patchSummary.DB.Reason != "" {
-		logComposePatchSummary(logger, proxyPort, dbPort, patchSummary)
-	}
-	if err != nil {
+	if _, err := w.prepareWorkbenchManagedCompose(
+		ctx,
+		logger,
+		req.Name,
+		workbenchImportReasonAutoDeploy,
+		[]workbenchRequestedPortAssignment{
+			{Label: "proxy", ContainerPort: 80, HostPort: proxyPort, Required: true},
+			{Label: "db", ContainerPort: 5432, HostPort: dbPort, Required: false},
+		},
+	); err != nil {
 		return err
 	}
 
@@ -291,6 +300,9 @@ func (w *ProjectWorkflows) handleDeployExisting(ctx context.Context, job models.
 	if _, err := resolveComposeFile(projectDir); err != nil {
 		return fmt.Errorf("compose file missing: %w", err)
 	}
+	if _, _, err := w.ensureWorkbenchSnapshotForJob(ctx, logger, req.Name, workbenchImportReasonAutoRedeploy); err != nil {
+		return err
+	}
 
 	logger.Log("starting docker compose stack")
 	if err := w.runCompose(ctx, logger, projectDir); err != nil {
@@ -316,6 +328,208 @@ func (w *ProjectWorkflows) handleDeployExisting(ctx context.Context, job models.
 	}
 
 	return nil
+}
+
+type workbenchRequestedPortAssignment struct {
+	Label         string
+	ContainerPort int
+	HostPort      int
+	Required      bool
+}
+
+func (w *ProjectWorkflows) prepareWorkbenchManagedCompose(
+	ctx context.Context,
+	logger jobs.Logger,
+	projectName string,
+	importReason string,
+	assignments []workbenchRequestedPortAssignment,
+) (WorkbenchComposeApplyResult, error) {
+	snapshot, _, err := w.ensureWorkbenchSnapshotForJob(ctx, logger, projectName, importReason)
+	if err != nil {
+		return WorkbenchComposeApplyResult{}, err
+	}
+
+	for _, assignment := range assignments {
+		if assignment.HostPort <= 0 {
+			continue
+		}
+
+		selector, extraMatches, ok := workbenchSelectPortByContainerPort(snapshot, assignment.ContainerPort)
+		if !ok {
+			if assignment.Required {
+				return WorkbenchComposeApplyResult{}, w.workbenchJobError(
+					logger,
+					fmt.Sprintf("%s port sync", strings.TrimSpace(assignment.Label)),
+					workbenchRequestedPortMappingMissingError(snapshot, assignment),
+				)
+			}
+			logger.Logf("workbench %s port sync skipped: no container port %d mapping found in snapshot", strings.TrimSpace(assignment.Label), assignment.ContainerPort)
+			continue
+		}
+		if extraMatches > 0 {
+			logger.Logf("workbench %s port sync found %d additional container port %d mappings; only %s:%d will be updated", strings.TrimSpace(assignment.Label), extraMatches, assignment.ContainerPort, selector.ServiceName, selector.ContainerPort)
+		}
+
+		updatedSnapshot, summary, mutateErr := w.workbench.MutateStoredSnapshotPort(ctx, snapshot.ProjectName, WorkbenchPortMutationRequest{
+			Selector:       selector,
+			Action:         workbenchPortMutationActionSetManual,
+			ManualHostPort: intPtr(assignment.HostPort),
+		})
+		if mutateErr != nil {
+			return WorkbenchComposeApplyResult{}, w.workbenchJobError(logger, fmt.Sprintf("%s port sync", strings.TrimSpace(assignment.Label)), mutateErr)
+		}
+		if summary.Changed {
+			logger.Logf(
+				"workbench %s port synced: service=%s container=%d host=%d strategy=%s",
+				strings.TrimSpace(assignment.Label),
+				selector.ServiceName,
+				selector.ContainerPort,
+				assignment.HostPort,
+				summary.CurrentStrategy,
+			)
+		} else {
+			logger.Logf(
+				"workbench %s port already matched requested host port %d for service=%s container=%d",
+				strings.TrimSpace(assignment.Label),
+				assignment.HostPort,
+				selector.ServiceName,
+				selector.ContainerPort,
+			)
+		}
+		snapshot = updatedSnapshot
+	}
+
+	logger.Log("applying compose through Workbench service")
+	result, err := w.workbench.ApplyComposeFromStoredSnapshot(ctx, snapshot.ProjectName, WorkbenchComposeApplyRequest{
+		ExpectedRevision:          intPtr(snapshot.Revision),
+		ExpectedSourceFingerprint: snapshot.SourceFingerprint,
+	})
+	if err != nil {
+		return WorkbenchComposeApplyResult{}, w.workbenchJobError(logger, "workbench compose apply", err)
+	}
+	logger.Logf(
+		"workbench compose apply completed: revision=%d bytes=%d backup=%s",
+		result.Metadata.Revision,
+		result.ComposeBytes,
+		strings.TrimSpace(result.Backup.BackupID),
+	)
+	return result, nil
+}
+
+func (w *ProjectWorkflows) ensureWorkbenchSnapshotForJob(
+	ctx context.Context,
+	logger jobs.Logger,
+	projectName string,
+	importReason string,
+) (WorkbenchStackSnapshot, bool, error) {
+	if w.workbench == nil {
+		return WorkbenchStackSnapshot{}, false, fmt.Errorf("workbench service unavailable")
+	}
+
+	normalizedProject, err := normalizeWorkbenchProjectName(projectName)
+	if err != nil {
+		return WorkbenchStackSnapshot{}, false, err
+	}
+
+	snapshot, exists, err := w.workbench.loadStoredWorkbenchSnapshot(ctx, normalizedProject)
+	if err != nil {
+		return WorkbenchStackSnapshot{}, false, w.workbenchJobError(logger, "workbench snapshot lookup", err)
+	}
+	if exists {
+		logger.Logf(
+			"workbench snapshot ready for %q: revision=%d fingerprint=%s",
+			normalizedProject,
+			snapshot.Revision,
+			strings.TrimSpace(snapshot.SourceFingerprint),
+		)
+		return snapshot, false, nil
+	}
+
+	logger.Logf("workbench snapshot missing for %q; importing compose (reason=%s)", normalizedProject, importReason)
+	imported, changed, err := w.workbench.ImportComposeSnapshot(ctx, normalizedProject, importReason)
+	if err != nil {
+		return WorkbenchStackSnapshot{}, false, w.workbenchJobError(logger, "workbench import", err)
+	}
+	logger.Logf(
+		"workbench import completed for %q: revision=%d changed=%t fingerprint=%s",
+		normalizedProject,
+		imported.Revision,
+		changed,
+		strings.TrimSpace(imported.SourceFingerprint),
+	)
+	return imported, true, nil
+}
+
+func workbenchSelectPortByContainerPort(snapshot WorkbenchStackSnapshot, containerPort int) (WorkbenchPortSelector, int, bool) {
+	normalizedSnapshot := normalizeWorkbenchStackSnapshot(snapshot)
+	matches := 0
+	selector := WorkbenchPortSelector{}
+	for _, port := range normalizedSnapshot.Ports {
+		if port.ContainerPort != containerPort {
+			continue
+		}
+		matches++
+		if matches == 1 {
+			selector = WorkbenchPortSelector{
+				ServiceName:   strings.TrimSpace(port.ServiceName),
+				ContainerPort: port.ContainerPort,
+				Protocol:      strings.ToLower(strings.TrimSpace(port.Protocol)),
+				HostIP:        normalizeHostIP(strings.TrimSpace(port.HostIP)),
+			}
+		}
+	}
+	if matches == 0 {
+		return WorkbenchPortSelector{}, 0, false
+	}
+	return selector, matches - 1, true
+}
+
+func workbenchRequestedPortMappingMissingError(
+	snapshot WorkbenchStackSnapshot,
+	assignment workbenchRequestedPortAssignment,
+) error {
+	label := strings.TrimSpace(assignment.Label)
+	if label == "" {
+		label = "requested"
+	}
+	issue := WorkbenchValidationIssue{
+		Class:   workbenchValidationClassSchema,
+		Code:    "WB-JOB-PORT-MAPPING-MISSING",
+		Path:    "$.ports",
+		Message: fmt.Sprintf("workbench snapshot does not contain a %s container port %d mapping", label, assignment.ContainerPort),
+		HostPort: strconv.Itoa(assignment.ContainerPort),
+	}
+	return errs.WithDetails(
+		errs.New(errs.CodeWorkbenchValidationFailed, "invalid workbench snapshot for job compose apply"),
+		map[string]any{
+			"project":           strings.TrimSpace(snapshot.ProjectName),
+			"composePath":       strings.TrimSpace(snapshot.ComposePath),
+			"sourceFingerprint": strings.TrimSpace(snapshot.SourceFingerprint),
+			"revision":          snapshot.Revision,
+			"issueCount":        1,
+			"issues":            []WorkbenchValidationIssue{issue},
+		},
+	)
+}
+
+func (w *ProjectWorkflows) workbenchJobError(logger jobs.Logger, stage string, err error) error {
+	trimmedStage := strings.TrimSpace(stage)
+	if trimmedStage == "" {
+		trimmedStage = "workbench operation"
+	}
+
+	if typed, ok := errs.From(err); ok {
+		logger.Logf("%s failed: code=%s message=%s", trimmedStage, typed.Code, strings.TrimSpace(typed.Message))
+		if details, ok := typed.Details.(map[string]any); ok {
+			if issueCount, ok := details["issueCount"]; ok {
+				logger.Logf("%s diagnostics: issueCount=%v", trimmedStage, issueCount)
+			}
+		}
+		return fmt.Errorf("%s: %w", typed.Code, err)
+	}
+
+	logger.Logf("%s failed: %v", trimmedStage, err)
+	return err
 }
 
 func (w *ProjectWorkflows) handleForwardLocal(ctx context.Context, job models.Job, logger jobs.Logger) error {
@@ -726,158 +940,6 @@ func parsePublishedPorts(raw string) []int {
 	}
 	return ports
 }
-
-type portPatchOutcome struct {
-	Matched       bool
-	Changed       bool
-	Pattern       string
-	Matches       int
-	Reason        string
-	ExtraMappings int
-}
-
-type composePatchSummary struct {
-	Proxy portPatchOutcome
-	DB    portPatchOutcome
-}
-
-func patchComposePorts(path string, proxyPort, dbPort int) (composePatchSummary, error) {
-	var summary composePatchSummary
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return summary, fmt.Errorf("read compose file: %w", err)
-	}
-	lines := strings.Split(string(raw), "\n")
-	changed := false
-
-	if proxyPort > 0 {
-		summary.Proxy = patchComposePort(lines, 80, proxyPort)
-		if summary.Proxy.Changed {
-			changed = true
-		}
-	}
-	if dbPort > 0 {
-		summary.DB = patchComposePort(lines, 5432, dbPort)
-		if summary.DB.Changed {
-			changed = true
-		}
-	}
-
-	if proxyPort > 0 && !summary.Proxy.Matched {
-		return summary, fmt.Errorf("compose file missing host port mapping for container port 80")
-	}
-
-	if changed {
-		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
-			return summary, fmt.Errorf("write compose file: %w", err)
-		}
-	}
-
-	return summary, nil
-}
-
-func patchComposePort(lines []string, containerPort, hostPort int) portPatchOutcome {
-	outcome := portPatchOutcome{}
-	if hostPort <= 0 {
-		outcome.Reason = "host port not provided"
-		return outcome
-	}
-
-	re := regexp.MustCompile(fmt.Sprintf(`^(\s*-\s*['"]?)(.+):%d(\s*/\w+)?(['"]?)(\s+#.*)?\s*$`, containerPort))
-	for i, line := range lines {
-		matches := re.FindStringSubmatch(line)
-		if matches == nil {
-			continue
-		}
-		outcome.Matches++
-		outcome.Matched = true
-		if outcome.Pattern != "" {
-			continue
-		}
-
-		hostPart := strings.TrimSpace(matches[2])
-		newHostPart, pattern := formatHostPart(hostPart, hostPort)
-		outcome.Pattern = pattern
-		newLine := fmt.Sprintf("%s%s:%d%s%s%s", matches[1], newHostPart, containerPort, matches[3], matches[4], matches[5])
-		if newLine != line {
-			lines[i] = newLine
-			outcome.Changed = true
-		}
-	}
-
-	if outcome.Matches > 1 {
-		outcome.ExtraMappings = outcome.Matches - 1
-	}
-	if !outcome.Matched {
-		outcome.Reason = fmt.Sprintf("no host port mapping found for container port %d", containerPort)
-	} else if !outcome.Changed {
-		outcome.Reason = fmt.Sprintf("host port already set to %d for container port %d", hostPort, containerPort)
-	}
-
-	return outcome
-}
-
-func formatHostPart(hostPart string, hostPort int) (string, string) {
-	hostPart = strings.TrimSpace(hostPart)
-	portValue := strconv.Itoa(hostPort)
-
-	if envVarPattern.MatchString(hostPart) {
-		return portValue, "env host port"
-	}
-
-	if matches := ipv4HostPattern.FindStringSubmatch(hostPart); matches != nil {
-		return fmt.Sprintf("%s:%s", matches[1], portValue), "ip-bound host port"
-	}
-
-	if strings.HasPrefix(hostPart, "localhost:") {
-		return fmt.Sprintf("localhost:%s", portValue), "host-bound port"
-	}
-
-	if strings.HasPrefix(hostPart, "[") {
-		if idx := strings.LastIndex(hostPart, "]:"); idx != -1 {
-			return fmt.Sprintf("%s:%s", hostPart[:idx+1], portValue), "ip-bound host port"
-		}
-	}
-
-	if idx := strings.LastIndex(hostPart, ":"); idx != -1 {
-		return fmt.Sprintf("%s:%s", hostPart[:idx], portValue), "host-bound port"
-	}
-
-	return portValue, "explicit host port"
-}
-
-func logComposePatchSummary(logger jobs.Logger, proxyPort, dbPort int, summary composePatchSummary) {
-	if proxyPort > 0 {
-		logComposePatchOutcome(logger, "proxy", 80, proxyPort, summary.Proxy)
-	}
-	if dbPort > 0 {
-		logComposePatchOutcome(logger, "db", 5432, dbPort, summary.DB)
-	}
-}
-
-func logComposePatchOutcome(logger jobs.Logger, label string, containerPort, hostPort int, outcome portPatchOutcome) {
-	if outcome.Matched {
-		if outcome.Changed {
-			logger.Logf("patched %s port using %s mapping to %d:%d", label, outcome.Pattern, hostPort, containerPort)
-		} else {
-			logger.Logf("%s port already set to %d:%d using %s mapping", label, hostPort, containerPort, outcome.Pattern)
-		}
-		if outcome.ExtraMappings > 0 {
-			logger.Logf("found %d additional %s port mappings for container port %d (left unchanged)", outcome.ExtraMappings, label, containerPort)
-		}
-		return
-	}
-	if outcome.Reason != "" {
-		logger.Logf("no %s port update applied: %s", label, outcome.Reason)
-		return
-	}
-	logger.Logf("no %s port update applied for container port %d", label, containerPort)
-}
-
-var (
-	envVarPattern   = regexp.MustCompile(`^\$\{[^}]+\}$`)
-	ipv4HostPattern = regexp.MustCompile(`^(\d{1,3}(?:\.\d{1,3}){3}):`)
-)
 
 func buildAuthenticatedCloneURL(rawURL, token string) (string, error) {
 	if token == "" {

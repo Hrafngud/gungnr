@@ -15,6 +15,10 @@ import (
 )
 
 const defaultWorkbenchLockWaitTimeout = 15 * time.Second
+const (
+	defaultWorkbenchBackupMaxCount = 10
+	defaultWorkbenchBackupMaxAge   = 30 * 24 * time.Hour
+)
 
 type WorkbenchComposeSource struct {
 	ProjectName string `json:"projectName"`
@@ -32,6 +36,9 @@ type WorkbenchService struct {
 	sessionSecret   string
 	lockManager     *workbenchProjectLockManager
 	lockWaitTimeout time.Duration
+	backupMaxCount  int
+	backupMaxAge    time.Duration
+	nowFn           func() time.Time
 }
 
 func NewWorkbenchService(templatesDir string, projects repository.ProjectRepository) *WorkbenchService {
@@ -51,6 +58,9 @@ func NewWorkbenchServiceWithStorage(
 		sessionSecret:   strings.TrimSpace(sessionSecret),
 		lockManager:     newWorkbenchProjectLockManager(),
 		lockWaitTimeout: defaultWorkbenchLockWaitTimeout,
+		backupMaxCount:  defaultWorkbenchBackupMaxCount,
+		backupMaxAge:    defaultWorkbenchBackupMaxAge,
+		nowFn:           time.Now,
 	}
 }
 
