@@ -331,6 +331,56 @@ func TestWorkbenchResolveStoredSnapshotPortsPersistsChangesAndIsIdempotent(t *te
 	}
 }
 
+func TestResolveWorkbenchSnapshotPortsSynthesizesManagedServicePorts(t *testing.T) {
+	t.Parallel()
+
+	snapshot := WorkbenchStackSnapshot{
+		ProjectName: "demo",
+		Revision:    2,
+		Services: []WorkbenchComposeService{
+			{ServiceName: "api", Image: "nginx:stable"},
+		},
+		Ports: []WorkbenchComposePort{
+			{
+				ServiceName:   "api",
+				ContainerPort: 6379,
+				HostPort:      intPtr(6379),
+				Protocol:      "tcp",
+			},
+		},
+		ManagedServices: []WorkbenchManagedService{
+			{EntryKey: "redis", ServiceName: "redis"},
+		},
+	}
+
+	resolved, summary, err := resolveWorkbenchSnapshotPorts(snapshot)
+	if err != nil {
+		t.Fatalf("resolveWorkbenchSnapshotPorts: %v", err)
+	}
+	if !summary.Changed {
+		t.Fatal("expected managed service port synthesis to change snapshot ports")
+	}
+
+	redisPort := findWorkbenchPort(resolved.Ports, "redis")
+	if redisPort == nil {
+		t.Fatalf("expected synthesized redis port in %#v", resolved.Ports)
+	}
+	if redisPort.HostPort == nil || *redisPort.HostPort != 6380 {
+		t.Fatalf("expected redis host port fallback to 6380, got %#v", redisPort)
+	}
+
+	redisOutcome := findWorkbenchOutcome(summary.Outcomes, "redis")
+	if redisOutcome == nil {
+		t.Fatalf("expected redis outcome in %#v", summary.Outcomes)
+	}
+	if redisOutcome.AssignedHostPort == nil || *redisOutcome.AssignedHostPort != 6380 {
+		t.Fatalf("expected redis assigned host port 6380, got %#v", redisOutcome)
+	}
+	if redisOutcome.Source != workbenchPortSourceContainerPort {
+		t.Fatalf("expected redis source %q, got %#v", workbenchPortSourceContainerPort, redisOutcome)
+	}
+}
+
 func findWorkbenchPort(ports []WorkbenchComposePort, serviceName string) *WorkbenchComposePort {
 	for idx := range ports {
 		if ports[idx].ServiceName == serviceName {

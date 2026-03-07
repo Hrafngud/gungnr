@@ -86,6 +86,10 @@ type projectWorkbenchResourceMutationRequest struct {
 	ClearFields       []string `json:"clearFields,omitempty"`
 }
 
+type projectWorkbenchOptionalServiceAddRequest struct {
+	EntryKey string `json:"entryKey"`
+}
+
 type projectWorkbenchModuleMutationRequest struct {
 	Selector service.WorkbenchModuleSelector `json:"selector"`
 	Action   string                          `json:"action"`
@@ -406,6 +410,28 @@ func (c *ProjectsController) WorkbenchSnapshot(ctx *gin.Context) {
 	})
 }
 
+func (c *ProjectsController) WorkbenchCatalog(ctx *gin.Context) {
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.workbench == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeWorkbenchStorageFailed, "workbench service unavailable", nil)
+		return
+	}
+
+	catalog, err := c.workbench.GetOptionalServiceCatalog(ctx.Request.Context(), project)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectWorkbenchReadFailed, "failed to load workbench optional-service catalog")
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"catalog": catalog,
+	})
+}
+
 func (c *ProjectsController) WorkbenchResolvePorts(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
@@ -667,6 +693,131 @@ func (c *ProjectsController) WorkbenchMutateResource(ctx *gin.Context) {
 		"changed":           summary.Changed,
 		"updatedFields":     summary.UpdatedFields,
 		"clearedFields":     summary.ClearedFields,
+		"revision":          stack.Revision,
+		"sourceFingerprint": stack.SourceFingerprint,
+		"issueCount":        0,
+		"errorCode":         "",
+	})
+	ctx.JSON(http.StatusOK, gin.H{
+		"stack":    stack,
+		"mutation": summary,
+	})
+}
+
+func (c *ProjectsController) WorkbenchAddService(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		return
+	}
+
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.workbench == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeWorkbenchStorageFailed, "workbench service unavailable", nil)
+		return
+	}
+
+	req := projectWorkbenchOptionalServiceAddRequest{}
+	if err := ctx.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "invalid request body", nil)
+		return
+	}
+
+	stack, summary, err := c.workbench.AddOptionalService(
+		ctx.Request.Context(),
+		project,
+		service.WorkbenchOptionalServiceAddRequest{
+			EntryKey: req.EntryKey,
+		},
+	)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		errorCode, issueCount := workbenchErrorCodeAndIssueCount(err)
+		c.logAudit(ctx, "project.workbench.services.add", project, map[string]any{
+			"project":           project,
+			"success":           false,
+			"entryKey":          strings.ToLower(strings.TrimSpace(req.EntryKey)),
+			"serviceName":       "",
+			"changed":           false,
+			"previousCount":     0,
+			"currentCount":      0,
+			"revision":          nil,
+			"sourceFingerprint": "",
+			"issueCount":        issueCount,
+			"errorCode":         errorCode,
+		})
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectWorkbenchServiceMutateFailed, "failed to add workbench optional service")
+		return
+	}
+
+	c.logAudit(ctx, "project.workbench.services.add", project, map[string]any{
+		"project":           project,
+		"success":           true,
+		"entryKey":          summary.EntryKey,
+		"serviceName":       summary.ServiceName,
+		"changed":           summary.Changed,
+		"previousCount":     summary.PreviousCount,
+		"currentCount":      summary.CurrentCount,
+		"revision":          stack.Revision,
+		"sourceFingerprint": stack.SourceFingerprint,
+		"issueCount":        0,
+		"errorCode":         "",
+	})
+	ctx.JSON(http.StatusOK, gin.H{
+		"stack":    stack,
+		"mutation": summary,
+	})
+}
+
+func (c *ProjectsController) WorkbenchRemoveService(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		return
+	}
+
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.workbench == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeWorkbenchStorageFailed, "workbench service unavailable", nil)
+		return
+	}
+
+	serviceName := strings.TrimSpace(ctx.Param("serviceName"))
+	stack, summary, err := c.workbench.RemoveOptionalService(ctx.Request.Context(), project, serviceName)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		errorCode, issueCount := workbenchErrorCodeAndIssueCount(err)
+		c.logAudit(ctx, "project.workbench.services.remove", project, map[string]any{
+			"project":           project,
+			"success":           false,
+			"entryKey":          "",
+			"serviceName":       serviceName,
+			"changed":           false,
+			"previousCount":     0,
+			"currentCount":      0,
+			"revision":          nil,
+			"sourceFingerprint": "",
+			"issueCount":        issueCount,
+			"errorCode":         errorCode,
+		})
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectWorkbenchServiceMutateFailed, "failed to remove workbench optional service")
+		return
+	}
+
+	c.logAudit(ctx, "project.workbench.services.remove", project, map[string]any{
+		"project":           project,
+		"success":           true,
+		"entryKey":          summary.EntryKey,
+		"serviceName":       summary.ServiceName,
+		"changed":           summary.Changed,
+		"previousCount":     summary.PreviousCount,
+		"currentCount":      summary.CurrentCount,
 		"revision":          stack.Revision,
 		"sourceFingerprint": stack.SourceFingerprint,
 		"issueCount":        0,

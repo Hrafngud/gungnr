@@ -8,6 +8,7 @@ import {
   type WorkbenchComposeApplyRequest,
   type WorkbenchComposeApplyResult as WorkbenchComposeApplyApiResult,
   type WorkbenchComposeBackupMetadata,
+  type WorkbenchOptionalServiceCatalog,
   type WorkbenchComposePreviewRequest,
   type WorkbenchComposePreviewResult as WorkbenchComposePreviewApiResult,
   type WorkbenchComposeRestoreRequest,
@@ -329,6 +330,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const snapshot = ref<WorkbenchStackSnapshot | null>(null)
   const snapshotStatus = ref<WorkbenchRequestStatus>('idle')
   const snapshotError = ref<ApiError | null>(null)
+  const catalog = ref<WorkbenchOptionalServiceCatalog | null>(null)
+  const catalogStatus = ref<WorkbenchRequestStatus>('idle')
+  const catalogError = ref<ApiError | null>(null)
   const importStatus = ref<WorkbenchRequestStatus>('idle')
   const importError = ref<ApiError | null>(null)
   const lastImportResult = ref<WorkbenchImportResult | null>(null)
@@ -368,6 +372,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const ready = computed(() => snapshotStatus.value === 'ready' && snapshot.value !== null)
 
   let snapshotRequestID = 0
+  let catalogRequestID = 0
   let importRequestID = 0
   let resolveRequestID = 0
   let portMutationRequestID = 0
@@ -424,6 +429,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     snapshot.value = null
     snapshotStatus.value = 'idle'
     snapshotError.value = null
+    catalog.value = null
+    catalogStatus.value = 'idle'
+    catalogError.value = null
     importStatus.value = 'idle'
     importError.value = null
     lastImportResult.value = null
@@ -457,6 +465,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     snapshot.value = null
     snapshotStatus.value = 'idle'
     snapshotError.value = null
+    catalog.value = null
+    catalogStatus.value = 'idle'
+    catalogError.value = null
     importStatus.value = 'idle'
     importError.value = null
     lastImportResult.value = null
@@ -521,6 +532,46 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       snapshot.value = null
       snapshotStatus.value = 'error'
       snapshotError.value = parseApiError(error)
+      return null
+    }
+  }
+
+  async function loadCatalog(
+    targetProjectName: string,
+  ): Promise<WorkbenchOptionalServiceCatalog | null> {
+    const normalizedProjectName = normalizeProjectName(targetProjectName)
+    if (!normalizedProjectName) {
+      reset()
+      catalogStatus.value = 'error'
+      catalogError.value = createProjectNameError()
+      return null
+    }
+
+    syncProjectContext(normalizedProjectName)
+
+    const requestID = ++catalogRequestID
+    projectName.value = normalizedProjectName
+    catalogStatus.value = 'loading'
+    catalogError.value = null
+
+    try {
+      const { data } = await workbenchApi.getCatalog(normalizedProjectName)
+      if (requestID !== catalogRequestID || projectName.value !== normalizedProjectName) {
+        return catalog.value
+      }
+
+      catalog.value = data.catalog
+      catalogStatus.value = 'ready'
+      catalogError.value = null
+      return data.catalog
+    } catch (error: unknown) {
+      if (requestID !== catalogRequestID || projectName.value !== normalizedProjectName) {
+        return catalog.value
+      }
+
+      catalog.value = null
+      catalogStatus.value = 'error'
+      catalogError.value = parseApiError(error)
       return null
     }
   }
@@ -1190,6 +1241,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     snapshot,
     snapshotStatus,
     snapshotError,
+    catalog,
+    catalogStatus,
+    catalogError,
     importStatus,
     importError,
     lastImportResult,
@@ -1228,6 +1282,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     ready,
     reset,
     loadSnapshot,
+    loadCatalog,
     runImport,
     resolvePorts,
     mutatePort,

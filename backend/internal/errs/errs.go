@@ -188,6 +188,7 @@ const (
 	CodeProjectWorkbenchPortResolveFailed    Code = "PROJECT-500-WB-PORT-RESOLVE"
 	CodeProjectWorkbenchPortMutateFailed     Code = "PROJECT-500-WB-PORT-MUTATE"
 	CodeProjectWorkbenchPortSuggestFailed    Code = "PROJECT-500-WB-PORT-SUGGEST"
+	CodeProjectWorkbenchServiceMutateFailed  Code = "PROJECT-500-WB-SERVICE-MUTATE"
 	CodeProjectWorkbenchResourceMutateFailed Code = "PROJECT-500-WB-RESOURCE-MUTATE"
 	CodeProjectWorkbenchModuleMutateFailed   Code = "PROJECT-500-WB-MODULE-MUTATE"
 	CodeProjectWorkbenchPreviewFailed        Code = "PROJECT-500-WB-PREVIEW"

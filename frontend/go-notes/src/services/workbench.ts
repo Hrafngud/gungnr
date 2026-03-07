@@ -3,6 +3,7 @@ import type {
   WorkbenchComposeApplyRequest,
   WorkbenchComposeApplyResponse,
   WorkbenchComposeBackupsResponse,
+  WorkbenchOptionalServiceCatalogResponse,
   WorkbenchComposePreviewRequest,
   WorkbenchComposePreviewResponse,
   WorkbenchComposeRestoreRequest,
@@ -28,6 +29,8 @@ function workbenchProjectPath(projectName: string): string {
 export const workbenchApi = {
   getSnapshot: (projectName: string) =>
     api.get<WorkbenchSnapshotResponse>(workbenchProjectPath(projectName)),
+  getCatalog: (projectName: string) =>
+    api.get<WorkbenchOptionalServiceCatalogResponse>(`${workbenchProjectPath(projectName)}/catalog`),
   importSnapshot: (projectName: string, reason: WorkbenchImportReason) =>
     api.post<WorkbenchImportResponse>(`${workbenchProjectPath(projectName)}/import`, { reason }),
   resolvePorts: (projectName: string) =>

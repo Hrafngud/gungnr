@@ -78,6 +78,7 @@ type WorkbenchMutationIssue struct {
 	Code       string `json:"code"`
 	Path       string `json:"path"`
 	Message    string `json:"message"`
+	EntryKey   string `json:"entryKey,omitempty"`
 	Service    string `json:"service,omitempty"`
 	Field      string `json:"field,omitempty"`
 	ModuleType string `json:"moduleType,omitempty"`
@@ -891,6 +892,12 @@ func workbenchMutationIssueLess(left, right WorkbenchMutationIssue) bool {
 	rightService := strings.ToLower(strings.TrimSpace(right.Service))
 	if leftService != rightService {
 		return leftService < rightService
+	}
+
+	leftEntryKey := strings.ToLower(strings.TrimSpace(left.EntryKey))
+	rightEntryKey := strings.ToLower(strings.TrimSpace(right.EntryKey))
+	if leftEntryKey != rightEntryKey {
+		return leftEntryKey < rightEntryKey
 	}
 
 	leftField := strings.ToLower(strings.TrimSpace(left.Field))

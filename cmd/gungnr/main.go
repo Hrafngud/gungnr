@@ -62,12 +62,35 @@ func printUsage() {
 
 var (
 	version = "dev"
-	commit  = "none"
+	commit  = "local"
 	date    = "unknown"
 )
 
 func printVersion() {
-	fmt.Fprintf(os.Stdout, "gungnr %s (commit %s, built %s)\n", version, commit, date)
+	info := buildVersionInfo()
+	fmt.Fprintf(os.Stdout, "gungnr %s (commit %s, built %s)\n", info.Version, info.Commit, info.Date)
+}
+
+type buildInfo struct {
+	Version string
+	Commit  string
+	Date    string
+}
+
+func buildVersionInfo() buildInfo {
+	return buildInfo{
+		Version: normalizeBuildValue(version, "dev"),
+		Commit:  normalizeBuildValue(commit, "local"),
+		Date:    normalizeBuildValue(date, "unknown"),
+	}
+}
+
+func normalizeBuildValue(value, fallback string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fallback
+	}
+	return trimmed
 }
 
 func runBootstrap(args []string) {

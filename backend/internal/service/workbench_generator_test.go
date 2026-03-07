@@ -102,6 +102,45 @@ networks:
 	}
 }
 
+func TestWorkbenchGenerateComposeFromStoredSnapshotIncludesManagedServices(t *testing.T) {
+	t.Parallel()
+
+	svc := NewWorkbenchServiceWithStorage(t.TempDir(), nil, &fakeSettingsRepo{}, "test-session-secret")
+	snapshot := WorkbenchStackSnapshot{
+		ProjectName: "demo",
+		Revision:    3,
+		Services: []WorkbenchComposeService{
+			{ServiceName: "api", Image: "ghcr.io/example/api:latest"},
+		},
+		ManagedServices: []WorkbenchManagedService{
+			{EntryKey: "minio", ServiceName: "minio"},
+		},
+	}
+	if err := svc.saveWorkbenchSnapshot(context.Background(), "demo", snapshot); err != nil {
+		t.Fatalf("save snapshot: %v", err)
+	}
+
+	_, compose, err := svc.GenerateComposeFromStoredSnapshot(context.Background(), "demo")
+	if err != nil {
+		t.Fatalf("GenerateComposeFromStoredSnapshot: %v", err)
+	}
+
+	for _, want := range []string{
+		"\n  minio:\n",
+		"image: minio/minio:latest",
+		"command:",
+		"- server",
+		"MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}",
+		"MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}",
+		`- "9000"`,
+		`- "9001"`,
+	} {
+		if !strings.Contains(compose, want) {
+			t.Fatalf("expected generated compose to contain %q, got:\n%s", want, compose)
+		}
+	}
+}
+
 func TestWorkbenchGenerateComposeFromStoredSnapshotNotFound(t *testing.T) {
 	t.Parallel()
 
@@ -383,6 +422,53 @@ func TestWorkbenchValidateStoredSnapshotForComposeValidationError(t *testing.T) 
 	issues := extractWorkbenchValidationIssues(t, details)
 	if len(issues) == 0 {
 		t.Fatalf("expected validation issues, got %#v", issues)
+	}
+}
+
+func TestWorkbenchValidateStoredSnapshotForComposeManagedServiceValidationError(t *testing.T) {
+	t.Parallel()
+
+	svc := NewWorkbenchServiceWithStorage(t.TempDir(), nil, &fakeSettingsRepo{}, "test-session-secret")
+	invalid := WorkbenchStackSnapshot{
+		ProjectName: "demo",
+		ComposePath: "/tmp/demo/docker-compose.yml",
+		Services: []WorkbenchComposeService{
+			{ServiceName: "api", Image: "nginx:stable"},
+		},
+		ManagedServices: []WorkbenchManagedService{
+			{EntryKey: "unknown", ServiceName: "mystery"},
+		},
+	}
+	if err := svc.saveWorkbenchSnapshot(context.Background(), "demo", invalid); err != nil {
+		t.Fatalf("save invalid snapshot: %v", err)
+	}
+
+	_, err := svc.ValidateStoredSnapshotForCompose(context.Background(), "demo")
+	if err == nil {
+		t.Fatal("expected validation error for invalid managed service")
+	}
+
+	typed, ok := errs.From(err)
+	if !ok {
+		t.Fatalf("expected typed error, got %T", err)
+	}
+	if typed.Code != errs.CodeWorkbenchValidationFailed {
+		t.Fatalf("expected code %q, got %q", errs.CodeWorkbenchValidationFailed, typed.Code)
+	}
+	details, ok := typed.Details.(map[string]any)
+	if !ok {
+		t.Fatalf("expected details map, got %T", typed.Details)
+	}
+	issues := extractWorkbenchValidationIssues(t, details)
+	found := false
+	for _, issue := range issues {
+		if issue.Code == "WB-MANAGED-SERVICE-KEY-UNSUPPORTED" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected unsupported managed-service issue, got %#v", issues)
 	}
 }
 
@@ -941,6 +1027,82 @@ networks:
 	}
 	if !strings.Contains(updated, "networks:\n      edge:\n        aliases:") {
 		t.Fatalf("expected networks mapping to remain intact, got:\n%s", updated)
+	}
+}
+
+func TestWorkbenchApplyComposeFromStoredSnapshotAddsAndRemovesManagedService(t *testing.T) {
+	t.Parallel()
+
+	templatesDir := t.TempDir()
+	projectDir := filepath.Join(templatesDir, "demo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+
+	composePath := filepath.Join(projectDir, "docker-compose.yml")
+	original := "services:\n  api:\n    image: nginx:1.25\n"
+	if err := os.WriteFile(composePath, []byte(original), 0o644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+
+	svc := NewWorkbenchServiceWithStorage(templatesDir, nil, &fakeSettingsRepo{}, "test-session-secret")
+	imported, _, err := svc.ImportComposeSnapshot(context.Background(), "demo", "manual")
+	if err != nil {
+		t.Fatalf("import snapshot: %v", err)
+	}
+
+	withManaged, _, err := svc.AddOptionalService(context.Background(), "demo", WorkbenchOptionalServiceAddRequest{EntryKey: "redis"})
+	if err != nil {
+		t.Fatalf("AddOptionalService: %v", err)
+	}
+	resolved, _, err := svc.ResolveStoredSnapshotPorts(context.Background(), "demo")
+	if err != nil {
+		t.Fatalf("ResolveStoredSnapshotPorts: %v", err)
+	}
+
+	expectedRevision := resolved.Revision
+	firstApplyResult, err := svc.ApplyComposeFromStoredSnapshot(context.Background(), "demo", WorkbenchComposeApplyRequest{
+		ExpectedRevision:          &expectedRevision,
+		ExpectedSourceFingerprint: imported.SourceFingerprint,
+	})
+	if err != nil {
+		t.Fatalf("apply with managed service: %v", err)
+	}
+
+	updatedSource, err := os.ReadFile(composePath)
+	if err != nil {
+		t.Fatalf("read updated compose: %v", err)
+	}
+	updated := string(updatedSource)
+	if !strings.Contains(updated, "\n  redis:\n") || !strings.Contains(updated, "image: redis:7-alpine") {
+		t.Fatalf("expected managed redis service in compose, got:\n%s", updated)
+	}
+	if !strings.Contains(updated, "6379:6379") {
+		t.Fatalf("expected resolved redis port in compose, got:\n%s", updated)
+	}
+
+	removed, _, err := svc.RemoveOptionalService(context.Background(), "demo", "redis")
+	if err != nil {
+		t.Fatalf("RemoveOptionalService: %v", err)
+	}
+	expectedRemovalRevision := removed.Revision
+	if _, err := svc.ApplyComposeFromStoredSnapshot(context.Background(), "demo", WorkbenchComposeApplyRequest{
+		ExpectedRevision:          &expectedRemovalRevision,
+		ExpectedSourceFingerprint: firstApplyResult.Metadata.SourceFingerprint,
+	}); err != nil {
+		t.Fatalf("apply after managed service removal: %v", err)
+	}
+
+	finalSource, err := os.ReadFile(composePath)
+	if err != nil {
+		t.Fatalf("read final compose: %v", err)
+	}
+	if strings.Contains(string(finalSource), "\n  redis:\n") {
+		t.Fatalf("expected managed redis service to be removed from compose, got:\n%s", string(finalSource))
+	}
+
+	if withManaged.Revision >= removed.Revision {
+		t.Fatalf("expected removal revision to advance past add revision, add=%d remove=%d", withManaged.Revision, removed.Revision)
 	}
 }
 

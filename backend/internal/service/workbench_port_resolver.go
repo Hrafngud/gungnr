@@ -146,13 +146,31 @@ func resolveWorkbenchSnapshotPorts(
 		issues = append(issues, issue)
 	}
 
-	serviceSet := make(map[string]struct{}, len(normalizedSnapshot.Services))
+	managedServiceModels, managedServiceIssues := workbenchBuildManagedServiceModels(normalizedSnapshot)
+	for _, issue := range workbenchManagedServiceIssuesToPortResolution(managedServiceIssues) {
+		addIssue(issue)
+	}
+
+	serviceSet := make(map[string]struct{}, len(normalizedSnapshot.Services)+len(managedServiceModels))
 	for _, svc := range normalizedSnapshot.Services {
 		name := strings.TrimSpace(svc.ServiceName)
 		if name == "" {
 			continue
 		}
 		serviceSet[name] = struct{}{}
+	}
+	for _, managedService := range managedServiceModels {
+		name := strings.TrimSpace(managedService.ServiceName)
+		if name == "" {
+			continue
+		}
+		serviceSet[name] = struct{}{}
+		for _, port := range managedService.Ports {
+			if workbenchHasPortMapping(resolvedPorts, port.ServiceName, port.ContainerPort, port.Protocol, port.HostIP) {
+				continue
+			}
+			resolvedPorts = append(resolvedPorts, normalizeWorkbenchComposePort(port))
+		}
 	}
 
 	reservedBindings := []workbenchHostBinding{}

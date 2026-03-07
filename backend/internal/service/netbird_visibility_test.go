@@ -3,38 +3,37 @@ package service
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"go-notes/internal/config"
+	netbirdapi "go-notes/internal/integrations/netbird"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
 	"gorm.io/gorm"
 )
 
 func TestFetchNetBirdLiveStatus_PartialDecodeFailureKeepsConnectivity(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/api/peers":
-			_, _ = w.Write([]byte(`[{"id":"peer-host","name":"host","ip":"100.64.0.10","connected":true}]`))
-		case "/api/groups":
-			// Valid JSON but incompatible schema for Group decode to trigger warning path.
-			_, _ = w.Write([]byte(`[{"id":"group-1","name":"gungnr-panel","peers":123}]`))
-		case "/api/policies":
-			// Valid JSON but incompatible schema for Policy decode to trigger warning path.
-			_, _ = w.Write([]byte(`[{"id":"policy-1","name":"gungnr-test","enabled":true,"rules":"bad-type"}]`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
+	client := newTestNetBirdClient(map[string]testNetBirdHTTPResponse{
+		"/api/peers": {
+			status: http.StatusOK,
+			body:   `[{"id":"peer-host","name":"host","ip":"100.64.0.10","connected":true}]`,
+		},
+		"/api/groups": {
+			status: http.StatusOK,
+			body:   `[{"id":"group-1","name":"gungnr-panel","peers":123}]`,
+		},
+		"/api/policies": {
+			status: http.StatusOK,
+			body:   `[{"id":"policy-1","name":"gungnr-test","enabled":true,"rules":"bad-type"}]`,
+		},
+	})
 
-	status, err := fetchNetBirdLiveStatus(context.Background(), server.URL, "token", "peer-host")
+	status, err := fetchNetBirdLiveStatusWithClient(context.Background(), client, "peer-host")
 	if err != nil {
 		t.Fatalf("fetchNetBirdLiveStatus returned error: %v", err)
 	}
@@ -64,22 +63,22 @@ func TestFetchNetBirdLiveStatus_PartialDecodeFailureKeepsConnectivity(t *testing
 
 func TestFetchNetBirdLiveStatus_DisconnectedRecentHeartbeatInfersDaemonRunning(t *testing.T) {
 	now := time.Now().UTC()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/api/peers":
-			_, _ = w.Write([]byte(`[{"id":"peer-host","name":"host","ip":"100.64.0.10","connected":false,"last_seen":"` + now.Format(time.RFC3339Nano) + `"}]`))
-		case "/api/groups":
-			_, _ = w.Write([]byte(`[]`))
-		case "/api/policies":
-			_, _ = w.Write([]byte(`[]`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
+	client := newTestNetBirdClient(map[string]testNetBirdHTTPResponse{
+		"/api/peers": {
+			status: http.StatusOK,
+			body:   `[{"id":"peer-host","name":"host","ip":"100.64.0.10","connected":false,"last_seen":"` + now.Format(time.RFC3339Nano) + `"}]`,
+		},
+		"/api/groups": {
+			status: http.StatusOK,
+			body:   `[]`,
+		},
+		"/api/policies": {
+			status: http.StatusOK,
+			body:   `[]`,
+		},
+	})
 
-	status, err := fetchNetBirdLiveStatus(context.Background(), server.URL, "token", "peer-host")
+	status, err := fetchNetBirdLiveStatusWithClient(context.Background(), client, "peer-host")
 	if err != nil {
 		t.Fatalf("fetchNetBirdLiveStatus returned error: %v", err)
 	}
@@ -96,22 +95,22 @@ func TestFetchNetBirdLiveStatus_DisconnectedRecentHeartbeatInfersDaemonRunning(t
 
 func TestFetchNetBirdLiveStatus_DisconnectedStaleHeartbeatMarksDaemonOffline(t *testing.T) {
 	stale := time.Now().UTC().Add(-15 * time.Minute)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/api/peers":
-			_, _ = w.Write([]byte(`[{"id":"peer-host","name":"host","ip":"100.64.0.10","connected":false,"last_seen":"` + stale.Format(time.RFC3339Nano) + `"}]`))
-		case "/api/groups":
-			_, _ = w.Write([]byte(`[]`))
-		case "/api/policies":
-			_, _ = w.Write([]byte(`[]`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
+	client := newTestNetBirdClient(map[string]testNetBirdHTTPResponse{
+		"/api/peers": {
+			status: http.StatusOK,
+			body:   `[{"id":"peer-host","name":"host","ip":"100.64.0.10","connected":false,"last_seen":"` + stale.Format(time.RFC3339Nano) + `"}]`,
+		},
+		"/api/groups": {
+			status: http.StatusOK,
+			body:   `[]`,
+		},
+		"/api/policies": {
+			status: http.StatusOK,
+			body:   `[]`,
+		},
+	})
 
-	status, err := fetchNetBirdLiveStatus(context.Background(), server.URL, "token", "peer-host")
+	status, err := fetchNetBirdLiveStatusWithClient(context.Background(), client, "peer-host")
 	if err != nil {
 		t.Fatalf("fetchNetBirdLiveStatus returned error: %v", err)
 	}
@@ -124,25 +123,18 @@ func TestFetchNetBirdLiveStatus_DisconnectedStaleHeartbeatMarksDaemonOffline(t *
 }
 
 func TestStatus_AuthFailureUsesLastKnownSuccessfulConnectivity(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"message":"invalid token","code":404}`))
-	}))
-	defer server.Close()
-
 	now := time.Now().UTC()
 	latestFailed := models.Job{
 		Model:  gorm.Model{ID: 2, CreatedAt: now},
 		Type:   JobTypeNetBirdModeApply,
 		Status: "failed",
-		Input:  `{"targetMode":"mode_a","allowLocalhost":false,"apiBaseUrl":"` + server.URL + `","apiToken":"bad-token","hostPeerId":"peer-failed","adminPeerIds":["peer-failed"]}`,
+		Input:  `{"targetMode":"mode_a","allowLocalhost":false,"apiBaseUrl":"https://netbird.test","apiToken":"bad-token","hostPeerId":"peer-failed","adminPeerIds":["peer-failed"]}`,
 	}
 	previousSuccess := models.Job{
 		Model:  gorm.Model{ID: 1, CreatedAt: now.Add(-time.Minute)},
 		Type:   JobTypeNetBirdModeApply,
 		Status: "completed",
-		Input:  `{"targetMode":"mode_a","allowLocalhost":false,"apiBaseUrl":"` + server.URL + `","apiToken":"good-token","hostPeerId":"peer-last-good","adminPeerIds":["peer-last-good"]}`,
+		Input:  `{"targetMode":"mode_a","allowLocalhost":false,"apiBaseUrl":"https://netbird.test","apiToken":"good-token","hostPeerId":"peer-last-good","adminPeerIds":["peer-last-good"]}`,
 	}
 
 	svc := &NetBirdService{
@@ -153,6 +145,14 @@ func TestStatus_AuthFailureUsesLastKnownSuccessfulConnectivity(t *testing.T) {
 		projects: fakeNetBirdProjectRepo{},
 		jobs: &fakeNetBirdJobRepo{
 			jobs: []models.Job{latestFailed, previousSuccess},
+		},
+		liveStatusClientFactory: func(baseURL, token string) netBirdVisibilityClient {
+			return newTestNetBirdClient(map[string]testNetBirdHTTPResponse{
+				"/api/peers": {
+					status: http.StatusNotFound,
+					body:   `{"message":"invalid token","code":404}`,
+				},
+			})
 		},
 	}
 
@@ -355,6 +355,53 @@ func (*fakeNetBirdJobRepo) MarkFinished(context.Context, uint, string, time.Time
 	return nil
 }
 func (*fakeNetBirdJobRepo) AppendLog(context.Context, uint, string) error { return nil }
+
+type testNetBirdHTTPResponse struct {
+	status int
+	body   string
+	header http.Header
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func newTestNetBirdClient(responses map[string]testNetBirdHTTPResponse) netBirdVisibilityClient {
+	return netbirdapi.NewClientWithHTTP(
+		"https://netbird.test",
+		"token",
+		&http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				response, ok := responses[req.URL.Path]
+				if !ok {
+					response = testNetBirdHTTPResponse{
+						status: http.StatusNotFound,
+						body:   `{"message":"not found","code":404}`,
+					}
+				}
+				headers := response.header.Clone()
+				if headers == nil {
+					headers = make(http.Header)
+				}
+				if headers.Get("Content-Type") == "" {
+					headers.Set("Content-Type", "application/json")
+				}
+				status := response.status
+				if status == 0 {
+					status = http.StatusOK
+				}
+				return &http.Response{
+					StatusCode: status,
+					Header:     headers,
+					Body:       io.NopCloser(strings.NewReader(response.body)),
+					Request:    req,
+				}, nil
+			}),
+		},
+	)
+}
 
 func containsWarning(warnings []string, needle string) bool {
 	needle = strings.ToLower(strings.TrimSpace(needle))

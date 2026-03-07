@@ -41,6 +41,7 @@ func (s *WorkbenchService) GetSnapshot(
 		NetworkRefs:       []WorkbenchComposeNetworkRef{},
 		VolumeRefs:        []WorkbenchComposeVolumeRef{},
 		EnvRefs:           []WorkbenchComposeEnvRef{},
+		ManagedServices:   []WorkbenchManagedService{},
 		Modules:           []WorkbenchStackModule{},
 		Warnings:          []WorkbenchComposeWarning{},
 	}, nil

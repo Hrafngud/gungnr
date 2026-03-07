@@ -53,6 +53,11 @@ export interface WorkbenchStackModule {
   serviceName?: string
 }
 
+export interface WorkbenchManagedService {
+  entryKey: string
+  serviceName: string
+}
+
 export interface WorkbenchStackWarning {
   code: string
   path: string
@@ -73,12 +78,70 @@ export interface WorkbenchStackSnapshot {
   networkRefs: WorkbenchStackNetworkRef[]
   volumeRefs: WorkbenchStackVolumeRef[]
   envRefs: WorkbenchStackEnvRef[]
+  managedServices: WorkbenchManagedService[]
   modules: WorkbenchStackModule[]
   warnings: WorkbenchStackWarning[]
 }
 
 export interface WorkbenchSnapshotResponse {
   stack: WorkbenchStackSnapshot
+}
+
+export interface WorkbenchOptionalServiceComposeMatch {
+  serviceName: string
+  image?: string
+  matchReason: string
+}
+
+export interface WorkbenchOptionalServiceAvailability {
+  status: string
+  composeServices: WorkbenchOptionalServiceComposeMatch[]
+  legacyModules: WorkbenchStackModule[]
+  managedServices: WorkbenchManagedService[]
+}
+
+export interface WorkbenchOptionalServiceTransition {
+  readOnly: boolean
+  mutationReady: boolean
+  composeGenerationReady: boolean
+  currentState: string
+  targetState: string
+  legacyModuleType?: string
+  legacyMutationPath?: string
+  notes: string[]
+}
+
+export interface WorkbenchOptionalServiceCatalogEntry {
+  key: string
+  displayName: string
+  description: string
+  category: string
+  defaultServiceName: string
+  suggestedImage: string
+  defaultContainerPort: number
+  availability: WorkbenchOptionalServiceAvailability
+  transition: WorkbenchOptionalServiceTransition
+}
+
+export interface WorkbenchLegacyModuleCatalog {
+  status: string
+  supportedModuleTypes: string[]
+  mutationPath: string
+  records: WorkbenchStackModule[]
+  notes: string[]
+}
+
+export interface WorkbenchOptionalServiceCatalog {
+  projectName: string
+  snapshotImported: boolean
+  snapshotRevision: number
+  sourceFingerprint?: string
+  entries: WorkbenchOptionalServiceCatalogEntry[]
+  legacyModules: WorkbenchLegacyModuleCatalog
+}
+
+export interface WorkbenchOptionalServiceCatalogResponse {
+  catalog: WorkbenchOptionalServiceCatalog
 }
 
 export interface WorkbenchImportRequest {

@@ -21,6 +21,7 @@ type workbenchComposeGenerationModel struct {
 	ports           map[string][]WorkbenchComposePort
 	resources       map[string]WorkbenchComposeResource
 	networkRefs     map[string][]string
+	serviceExtras   map[string]workbenchComposeServiceExtras
 	topLevelNetwork []string
 }
 
@@ -275,12 +276,13 @@ func (s *WorkbenchService) ApplyComposeFromStoredSnapshot(
 }
 
 type workbenchComposePatchModel struct {
-	snapshot     WorkbenchStackSnapshot
-	services     map[string]WorkbenchComposeService
-	dependencies map[string][]string
-	networkRefs  map[string][]string
-	ports        map[string][]WorkbenchComposePort
-	resources    map[string]WorkbenchComposeResource
+	snapshot      WorkbenchStackSnapshot
+	services      map[string]WorkbenchComposeService
+	dependencies  map[string][]string
+	networkRefs   map[string][]string
+	ports         map[string][]WorkbenchComposePort
+	resources     map[string]WorkbenchComposeResource
+	serviceExtras map[string]workbenchComposeServiceExtras
 }
 
 func mergeWorkbenchSnapshotIntoComposeSource(
@@ -324,7 +326,16 @@ func mergeWorkbenchSnapshotIntoComposeSource(
 
 	for serviceName, service := range model.services {
 		serviceNode, ok := workbenchYAMLFindMapValue(servicesNode, serviceName)
+		extras := model.serviceExtras[serviceName]
 		if !ok || serviceNode == nil || serviceNode.Kind != yaml.MappingNode {
+			if extras.Managed {
+				workbenchYAMLAddMapEntry(
+					servicesNode,
+					serviceName,
+					workbenchBuildServiceNode(service, model.dependencies[serviceName], model.ports[serviceName], model.resources[serviceName], model.networkRefs[serviceName], extras),
+				)
+				continue
+			}
 			return "", workbenchComposeApplySourceInvalidError(
 				model.snapshot,
 				source,
@@ -336,7 +347,12 @@ func mergeWorkbenchSnapshotIntoComposeSource(
 		workbenchPatchServiceDefinition(serviceNode, service, model.dependencies[serviceName], model.networkRefs[serviceName])
 		workbenchPatchServicePorts(serviceNode, model.ports[serviceName])
 		workbenchPatchServiceResources(serviceNode, model.resources[serviceName])
+		if extras.Managed {
+			workbenchPatchServiceCommand(serviceNode, extras.Command)
+			workbenchPatchServiceEnvironment(serviceNode, extras.Environment)
+		}
 	}
+	workbenchPruneRemovedManagedServiceNodes(servicesNode, model.services, model.snapshot)
 
 	encoded, err := encodeWorkbenchComposeYAML(root)
 	if err != nil {
@@ -352,24 +368,27 @@ func mergeWorkbenchSnapshotIntoComposeSource(
 
 func buildWorkbenchComposePatchModel(snapshot WorkbenchStackSnapshot) (workbenchComposePatchModel, error) {
 	normalizedSnapshot := normalizeWorkbenchStackSnapshot(snapshot)
-	if _, err := buildWorkbenchComposeGenerationModel(normalizedSnapshot); err != nil {
+	genModel, err := buildWorkbenchComposeGenerationModel(normalizedSnapshot)
+	if err != nil {
 		filteredErr := workbenchFilterValidationIssues(err, func(issue WorkbenchValidationIssue) bool {
 			return strings.EqualFold(strings.TrimSpace(issue.Code), "WB-VAL-VOLUME-UNSUPPORTED")
 		})
 		if filteredErr != nil {
 			return workbenchComposePatchModel{}, filteredErr
 		}
+		genModel = workbenchBuildComposePatchFallbackGenerationModel(normalizedSnapshot)
 	}
 
 	model := workbenchComposePatchModel{
-		snapshot:     normalizedSnapshot,
-		services:     make(map[string]WorkbenchComposeService, len(normalizedSnapshot.Services)),
-		dependencies: make(map[string][]string),
-		networkRefs:  make(map[string][]string),
-		ports:        make(map[string][]WorkbenchComposePort),
-		resources:    make(map[string]WorkbenchComposeResource),
+		snapshot:      normalizedSnapshot,
+		services:      make(map[string]WorkbenchComposeService, len(genModel.services)),
+		dependencies:  make(map[string][]string),
+		networkRefs:   make(map[string][]string),
+		ports:         make(map[string][]WorkbenchComposePort),
+		resources:     make(map[string]WorkbenchComposeResource),
+		serviceExtras: make(map[string]workbenchComposeServiceExtras, len(genModel.serviceExtras)),
 	}
-	for _, service := range normalizedSnapshot.Services {
+	for _, service := range genModel.services {
 		name := strings.TrimSpace(service.ServiceName)
 		if name == "" {
 			continue
@@ -381,6 +400,67 @@ func buildWorkbenchComposePatchModel(snapshot WorkbenchStackSnapshot) (workbench
 			RestartPolicy: strings.TrimSpace(service.RestartPolicy),
 		}
 	}
+	for serviceName, dependencies := range genModel.dependencies {
+		model.dependencies[serviceName] = append([]string(nil), dependencies...)
+	}
+	for serviceName, networks := range genModel.networkRefs {
+		model.networkRefs[serviceName] = append([]string(nil), networks...)
+	}
+	for serviceName, ports := range genModel.ports {
+		model.ports[serviceName] = append([]WorkbenchComposePort(nil), ports...)
+	}
+	for serviceName, resource := range genModel.resources {
+		model.resources[serviceName] = WorkbenchComposeResource{
+			ServiceName:       serviceName,
+			LimitCPUs:         strings.TrimSpace(resource.LimitCPUs),
+			LimitMemory:       strings.TrimSpace(resource.LimitMemory),
+			ReservationCPUs:   strings.TrimSpace(resource.ReservationCPUs),
+			ReservationMemory: strings.TrimSpace(resource.ReservationMemory),
+		}
+	}
+	for serviceName, extras := range genModel.serviceExtras {
+		model.serviceExtras[serviceName] = extras
+	}
+	return model, nil
+}
+
+func workbenchBuildComposePatchFallbackGenerationModel(snapshot WorkbenchStackSnapshot) workbenchComposeGenerationModel {
+	normalizedSnapshot := normalizeWorkbenchStackSnapshot(snapshot)
+	model := workbenchComposeGenerationModel{
+		snapshot:      normalizedSnapshot,
+		services:      []WorkbenchComposeService{},
+		dependencies:  make(map[string][]string),
+		ports:         make(map[string][]WorkbenchComposePort),
+		resources:     make(map[string]WorkbenchComposeResource),
+		networkRefs:   make(map[string][]string),
+		serviceExtras: make(map[string]workbenchComposeServiceExtras),
+	}
+
+	for _, service := range normalizedSnapshot.Services {
+		name := strings.TrimSpace(service.ServiceName)
+		if name == "" {
+			continue
+		}
+		model.services = append(model.services, WorkbenchComposeService{
+			ServiceName:   name,
+			Image:         strings.TrimSpace(service.Image),
+			BuildSource:   strings.TrimSpace(service.BuildSource),
+			RestartPolicy: strings.TrimSpace(service.RestartPolicy),
+		})
+	}
+
+	for _, managedService := range func() []workbenchManagedServiceModel {
+		models, _ := workbenchBuildManagedServiceModels(normalizedSnapshot)
+		return models
+	}() {
+		name := strings.TrimSpace(managedService.ServiceName)
+		if name == "" {
+			continue
+		}
+		model.services = append(model.services, managedService.Service)
+		model.serviceExtras[name] = managedService.Extras
+	}
+
 	for _, dependency := range normalizedSnapshot.Dependencies {
 		serviceName := strings.TrimSpace(dependency.ServiceName)
 		dependsOn := strings.TrimSpace(dependency.DependsOn)
@@ -404,6 +484,15 @@ func buildWorkbenchComposePatchModel(snapshot WorkbenchStackSnapshot) (workbench
 		}
 		model.ports[serviceName] = append(model.ports[serviceName], normalizeWorkbenchComposePort(port))
 	}
+	managedServiceModels, _ := workbenchBuildManagedServiceModels(normalizedSnapshot)
+	for _, managedService := range managedServiceModels {
+		for _, port := range managedService.Ports {
+			if workbenchHasPortMapping(model.ports[managedService.ServiceName], managedService.ServiceName, port.ContainerPort, port.Protocol, port.HostIP) {
+				continue
+			}
+			model.ports[managedService.ServiceName] = append(model.ports[managedService.ServiceName], normalizeWorkbenchComposePort(port))
+		}
+	}
 	for _, resource := range normalizedSnapshot.Resources {
 		serviceName := strings.TrimSpace(resource.ServiceName)
 		if serviceName == "" {
@@ -417,7 +506,7 @@ func buildWorkbenchComposePatchModel(snapshot WorkbenchStackSnapshot) (workbench
 			ReservationMemory: strings.TrimSpace(resource.ReservationMemory),
 		}
 	}
-	return model, nil
+	return model
 }
 
 func workbenchFilterValidationIssues(err error, drop func(issue WorkbenchValidationIssue) bool) error {
@@ -639,6 +728,159 @@ func workbenchPatchServiceResources(serviceNode *yaml.Node, resource WorkbenchCo
 	}
 
 	workbenchYAMLSetMapEntry(deployNode, "resources", resourcesNode)
+}
+
+func workbenchPatchServiceCommand(serviceNode *yaml.Node, command []string) {
+	if len(command) == 0 {
+		workbenchYAMLDeleteMapEntry(serviceNode, "command")
+		return
+	}
+	workbenchYAMLSetMapEntry(serviceNode, "command", workbenchYAMLCommandNode(command))
+}
+
+func workbenchPatchServiceEnvironment(serviceNode *yaml.Node, environment []workbenchComposeEnvironmentEntry) {
+	if len(environment) == 0 {
+		workbenchYAMLDeleteMapEntry(serviceNode, "environment")
+		return
+	}
+	workbenchYAMLSetMapEntry(serviceNode, "environment", workbenchYAMLEnvironmentNode(environment))
+}
+
+func workbenchBuildServiceNode(
+	service WorkbenchComposeService,
+	dependencies []string,
+	ports []WorkbenchComposePort,
+	resource WorkbenchComposeResource,
+	networkRefs []string,
+	extras workbenchComposeServiceExtras,
+) *yaml.Node {
+	serviceNode := workbenchYAMLMappingNode()
+
+	if image := strings.TrimSpace(service.Image); image != "" {
+		workbenchYAMLAddMapEntry(serviceNode, "image", workbenchYAMLScalarNode(image))
+	}
+	if buildSource := strings.TrimSpace(service.BuildSource); buildSource != "" {
+		workbenchYAMLAddMapEntry(serviceNode, "build", workbenchYAMLScalarNode(buildSource))
+	}
+	if restartPolicy := strings.TrimSpace(service.RestartPolicy); restartPolicy != "" {
+		workbenchYAMLAddMapEntry(serviceNode, "restart", workbenchYAMLScalarNode(restartPolicy))
+	}
+	if extras.Managed {
+		workbenchAddServiceCommand(serviceNode, extras.Command)
+		workbenchAddServiceEnvironment(serviceNode, extras.Environment)
+	}
+	if len(dependencies) > 0 {
+		depSequence := workbenchYAMLSequenceNode()
+		for _, dependency := range dependencies {
+			depSequence.Content = append(depSequence.Content, workbenchYAMLScalarNode(dependency))
+		}
+		workbenchYAMLAddMapEntry(serviceNode, "depends_on", depSequence)
+	}
+	if len(ports) > 0 {
+		portSequence := workbenchYAMLSequenceNode()
+		for _, port := range ports {
+			portSequence.Content = append(portSequence.Content, workbenchYAMLScalarNode(formatWorkbenchComposePort(port)))
+		}
+		workbenchYAMLAddMapEntry(serviceNode, "ports", portSequence)
+	}
+	if !workbenchIsEmptyResource(resource) {
+		deployNode := workbenchYAMLMappingNode()
+		resourcesNode := workbenchYAMLMappingNode()
+
+		limitsNode := workbenchYAMLMappingNode()
+		if cpus := strings.TrimSpace(resource.LimitCPUs); cpus != "" {
+			workbenchYAMLAddMapEntry(limitsNode, "cpus", workbenchYAMLScalarNode(cpus))
+		}
+		if memory := strings.TrimSpace(resource.LimitMemory); memory != "" {
+			workbenchYAMLAddMapEntry(limitsNode, "memory", workbenchYAMLScalarNode(memory))
+		}
+		if len(limitsNode.Content) > 0 {
+			workbenchYAMLAddMapEntry(resourcesNode, "limits", limitsNode)
+		}
+
+		reservationsNode := workbenchYAMLMappingNode()
+		if cpus := strings.TrimSpace(resource.ReservationCPUs); cpus != "" {
+			workbenchYAMLAddMapEntry(reservationsNode, "cpus", workbenchYAMLScalarNode(cpus))
+		}
+		if memory := strings.TrimSpace(resource.ReservationMemory); memory != "" {
+			workbenchYAMLAddMapEntry(reservationsNode, "memory", workbenchYAMLScalarNode(memory))
+		}
+		if len(reservationsNode.Content) > 0 {
+			workbenchYAMLAddMapEntry(resourcesNode, "reservations", reservationsNode)
+		}
+
+		if len(resourcesNode.Content) > 0 {
+			workbenchYAMLAddMapEntry(deployNode, "resources", resourcesNode)
+		}
+		if len(deployNode.Content) > 0 {
+			workbenchYAMLAddMapEntry(serviceNode, "deploy", deployNode)
+		}
+	}
+	if len(networkRefs) > 0 {
+		networkSequence := workbenchYAMLSequenceNode()
+		for _, networkName := range networkRefs {
+			networkSequence.Content = append(networkSequence.Content, workbenchYAMLScalarNode(networkName))
+		}
+		workbenchYAMLAddMapEntry(serviceNode, "networks", networkSequence)
+	}
+	return serviceNode
+}
+
+func workbenchAddServiceCommand(serviceNode *yaml.Node, command []string) {
+	if len(command) == 0 {
+		return
+	}
+	workbenchYAMLAddMapEntry(serviceNode, "command", workbenchYAMLCommandNode(command))
+}
+
+func workbenchAddServiceEnvironment(serviceNode *yaml.Node, environment []workbenchComposeEnvironmentEntry) {
+	if len(environment) == 0 {
+		return
+	}
+	workbenchYAMLAddMapEntry(serviceNode, "environment", workbenchYAMLEnvironmentNode(environment))
+}
+
+func workbenchPruneRemovedManagedServiceNodes(
+	servicesNode *yaml.Node,
+	desiredServices map[string]WorkbenchComposeService,
+	snapshot WorkbenchStackSnapshot,
+) {
+	if servicesNode == nil || servicesNode.Kind != yaml.MappingNode {
+		return
+	}
+
+	importedServiceNames := make(map[string]struct{}, len(snapshot.Services))
+	for _, service := range snapshot.Services {
+		name := strings.ToLower(strings.TrimSpace(service.ServiceName))
+		if name == "" {
+			continue
+		}
+		importedServiceNames[name] = struct{}{}
+	}
+
+	nextContent := make([]*yaml.Node, 0, len(servicesNode.Content))
+	for idx := 0; idx+1 < len(servicesNode.Content); idx += 2 {
+		keyNode := servicesNode.Content[idx]
+		valueNode := servicesNode.Content[idx+1]
+		if keyNode == nil || keyNode.Kind != yaml.ScalarNode {
+			continue
+		}
+		serviceName := strings.TrimSpace(keyNode.Value)
+		if _, exists := desiredServices[serviceName]; exists {
+			nextContent = append(nextContent, keyNode, valueNode)
+			continue
+		}
+		normalizedServiceName := strings.ToLower(serviceName)
+		if _, exists := importedServiceNames[normalizedServiceName]; exists {
+			nextContent = append(nextContent, keyNode, valueNode)
+			continue
+		}
+		if _, exists := workbenchOptionalServiceDefinitionByServiceName(serviceName); exists {
+			continue
+		}
+		nextContent = append(nextContent, keyNode, valueNode)
+	}
+	servicesNode.Content = nextContent
 }
 
 func workbenchYAMLFindMapValue(node *yaml.Node, key string) (*yaml.Node, bool) {
@@ -920,76 +1162,14 @@ func generateWorkbenchCompose(snapshot WorkbenchStackSnapshot) (string, error) {
 	root := workbenchYAMLMappingNode()
 	servicesNode := workbenchYAMLMappingNode()
 	for _, service := range model.services {
-		serviceNode := workbenchYAMLMappingNode()
-
-		if image := strings.TrimSpace(service.Image); image != "" {
-			workbenchYAMLAddMapEntry(serviceNode, "image", workbenchYAMLScalarNode(image))
-		}
-		if buildSource := strings.TrimSpace(service.BuildSource); buildSource != "" {
-			workbenchYAMLAddMapEntry(serviceNode, "build", workbenchYAMLScalarNode(buildSource))
-		}
-		if restartPolicy := strings.TrimSpace(service.RestartPolicy); restartPolicy != "" {
-			workbenchYAMLAddMapEntry(serviceNode, "restart", workbenchYAMLScalarNode(restartPolicy))
-		}
-
-		if deps := model.dependencies[service.ServiceName]; len(deps) > 0 {
-			depSequence := workbenchYAMLSequenceNode()
-			for _, dependency := range deps {
-				depSequence.Content = append(depSequence.Content, workbenchYAMLScalarNode(dependency))
-			}
-			workbenchYAMLAddMapEntry(serviceNode, "depends_on", depSequence)
-		}
-
-		if ports := model.ports[service.ServiceName]; len(ports) > 0 {
-			portSequence := workbenchYAMLSequenceNode()
-			for _, port := range ports {
-				portSequence.Content = append(portSequence.Content, workbenchYAMLScalarNode(formatWorkbenchComposePort(port)))
-			}
-			workbenchYAMLAddMapEntry(serviceNode, "ports", portSequence)
-		}
-
-		if resource, ok := model.resources[service.ServiceName]; ok {
-			deployNode := workbenchYAMLMappingNode()
-			resourcesNode := workbenchYAMLMappingNode()
-
-			limitsNode := workbenchYAMLMappingNode()
-			if cpus := strings.TrimSpace(resource.LimitCPUs); cpus != "" {
-				workbenchYAMLAddMapEntry(limitsNode, "cpus", workbenchYAMLScalarNode(cpus))
-			}
-			if memory := strings.TrimSpace(resource.LimitMemory); memory != "" {
-				workbenchYAMLAddMapEntry(limitsNode, "memory", workbenchYAMLScalarNode(memory))
-			}
-			if len(limitsNode.Content) > 0 {
-				workbenchYAMLAddMapEntry(resourcesNode, "limits", limitsNode)
-			}
-
-			reservationsNode := workbenchYAMLMappingNode()
-			if cpus := strings.TrimSpace(resource.ReservationCPUs); cpus != "" {
-				workbenchYAMLAddMapEntry(reservationsNode, "cpus", workbenchYAMLScalarNode(cpus))
-			}
-			if memory := strings.TrimSpace(resource.ReservationMemory); memory != "" {
-				workbenchYAMLAddMapEntry(reservationsNode, "memory", workbenchYAMLScalarNode(memory))
-			}
-			if len(reservationsNode.Content) > 0 {
-				workbenchYAMLAddMapEntry(resourcesNode, "reservations", reservationsNode)
-			}
-
-			if len(resourcesNode.Content) > 0 {
-				workbenchYAMLAddMapEntry(deployNode, "resources", resourcesNode)
-			}
-			if len(deployNode.Content) > 0 {
-				workbenchYAMLAddMapEntry(serviceNode, "deploy", deployNode)
-			}
-		}
-
-		if networks := model.networkRefs[service.ServiceName]; len(networks) > 0 {
-			networkSequence := workbenchYAMLSequenceNode()
-			for _, networkName := range networks {
-				networkSequence.Content = append(networkSequence.Content, workbenchYAMLScalarNode(networkName))
-			}
-			workbenchYAMLAddMapEntry(serviceNode, "networks", networkSequence)
-		}
-
+		serviceNode := workbenchBuildServiceNode(
+			service,
+			model.dependencies[service.ServiceName],
+			model.ports[service.ServiceName],
+			model.resources[service.ServiceName],
+			model.networkRefs[service.ServiceName],
+			model.serviceExtras[service.ServiceName],
+		)
 		workbenchYAMLAddMapEntry(servicesNode, service.ServiceName, serviceNode)
 	}
 	workbenchYAMLAddMapEntry(root, "services", servicesNode)
@@ -1017,12 +1197,13 @@ func generateWorkbenchCompose(snapshot WorkbenchStackSnapshot) (string, error) {
 func buildWorkbenchComposeGenerationModel(snapshot WorkbenchStackSnapshot) (workbenchComposeGenerationModel, error) {
 	normalizedSnapshot := normalizeWorkbenchStackSnapshot(snapshot)
 	model := workbenchComposeGenerationModel{
-		snapshot:     normalizedSnapshot,
-		services:     []WorkbenchComposeService{},
-		dependencies: make(map[string][]string),
-		ports:        make(map[string][]WorkbenchComposePort),
-		resources:    make(map[string]WorkbenchComposeResource),
-		networkRefs:  make(map[string][]string),
+		snapshot:      normalizedSnapshot,
+		services:      []WorkbenchComposeService{},
+		dependencies:  make(map[string][]string),
+		ports:         make(map[string][]WorkbenchComposePort),
+		resources:     make(map[string]WorkbenchComposeResource),
+		networkRefs:   make(map[string][]string),
+		serviceExtras: make(map[string]workbenchComposeServiceExtras),
 	}
 
 	issues := []WorkbenchValidationIssue{}
@@ -1082,6 +1263,20 @@ func buildWorkbenchComposeGenerationModel(snapshot WorkbenchStackSnapshot) (work
 			})
 		}
 		model.services = append(model.services, normalizedService)
+	}
+
+	managedServiceModels, managedServiceIssues := workbenchBuildManagedServiceModels(normalizedSnapshot)
+	for _, issue := range workbenchManagedServiceIssuesToValidation(managedServiceIssues) {
+		addIssue(issue)
+	}
+	for _, managedService := range managedServiceModels {
+		serviceName := strings.TrimSpace(managedService.Service.ServiceName)
+		if serviceName == "" {
+			continue
+		}
+		serviceNames[serviceName] = struct{}{}
+		model.services = append(model.services, managedService.Service)
+		model.serviceExtras[serviceName] = managedService.Extras
 	}
 
 	dependencySet := make(map[string]struct{})
@@ -1235,6 +1430,51 @@ func buildWorkbenchComposeGenerationModel(snapshot WorkbenchStackSnapshot) (work
 		}
 
 		model.ports[serviceName] = append(model.ports[serviceName], normalizedPort)
+	}
+	for _, managedService := range managedServiceModels {
+		for _, port := range managedService.Ports {
+			serviceName := strings.TrimSpace(port.ServiceName)
+			if serviceName == "" {
+				continue
+			}
+			if workbenchHasPortMapping(model.ports[serviceName], serviceName, port.ContainerPort, port.Protocol, port.HostIP) {
+				continue
+			}
+
+			normalizedPort := normalizeWorkbenchComposePort(port)
+			hostPortValue := normalizedPort.HostPortRaw
+			if normalizedPort.HostPort != nil {
+				hostPortValue = strconv.Itoa(*normalizedPort.HostPort)
+			}
+			if hostPortValue != "" {
+				current := workbenchHostBinding{
+					serviceName: serviceName,
+					hostIP:      normalizedPort.HostIP,
+					hostPort:    hostPortValue,
+					protocol:    normalizedPort.Protocol,
+				}
+				for _, existing := range hostBindings {
+					if !workbenchHostBindingConflicts(existing, current) {
+						continue
+					}
+					addIssue(WorkbenchValidationIssue{
+						Class:      workbenchValidationClassPortConflict,
+						Code:       "WB-VAL-PORT-HOST-CONFLICT",
+						Path:       "$.managedServices",
+						Message:    fmt.Sprintf("host port conflict between services %q and %q (protocol=%s hostPort=%q hostIPs=%q/%q)", existing.serviceName, current.serviceName, current.protocol, current.hostPort, existing.hostIP, current.hostIP),
+						Service:    current.serviceName,
+						Dependency: existing.serviceName,
+						Protocol:   current.protocol,
+						HostIP:     current.hostIP,
+						HostPort:   current.hostPort,
+					})
+					break
+				}
+				hostBindings = append(hostBindings, current)
+			}
+
+			model.ports[serviceName] = append(model.ports[serviceName], normalizedPort)
+		}
 	}
 
 	for idx, resource := range normalizedSnapshot.Resources {
@@ -1552,6 +1792,22 @@ func workbenchYAMLSequenceNode() *yaml.Node {
 		Kind: yaml.SequenceNode,
 		Tag:  "!!seq",
 	}
+}
+
+func workbenchYAMLCommandNode(command []string) *yaml.Node {
+	node := workbenchYAMLSequenceNode()
+	for _, part := range command {
+		node.Content = append(node.Content, workbenchYAMLScalarNode(part))
+	}
+	return node
+}
+
+func workbenchYAMLEnvironmentNode(environment []workbenchComposeEnvironmentEntry) *yaml.Node {
+	node := workbenchYAMLMappingNode()
+	for _, entry := range environment {
+		workbenchYAMLAddMapEntry(node, entry.Key, workbenchYAMLScalarNode(entry.Value))
+	}
+	return node
 }
 
 func workbenchYAMLAddMapEntry(mapping *yaml.Node, key string, value *yaml.Node) {

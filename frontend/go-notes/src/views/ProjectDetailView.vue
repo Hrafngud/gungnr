@@ -28,16 +28,18 @@ import type {
   ProjectDetail,
 } from '@/types/projects'
 import {
-  buildWorkbenchModuleSelectorKey,
   buildWorkbenchPortSelectorKey,
   type WorkbenchComposeBackupMetadata,
+  type WorkbenchManagedService,
   type WorkbenchMutationIssue,
-  type WorkbenchModuleMutationSummary,
+  type WorkbenchOptionalServiceCatalogEntry,
+  type WorkbenchOptionalServiceComposeMatch,
   type WorkbenchPortMutationSummary,
   type WorkbenchPortSelector,
   type WorkbenchResourceField,
   type WorkbenchResourceMutationRequest,
   type WorkbenchResourceMutationSummary,
+  type WorkbenchStackModule,
 } from '@/types/workbench'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
@@ -89,13 +91,34 @@ interface WorkbenchResourceInputState {
   reservationMemory: string
 }
 
-interface WorkbenchModuleInventoryRow {
+interface WorkbenchOptionalServiceCatalogRow {
   key: string
-  serviceName: string
-  moduleType: string
-  moduleLabel: string
-  enabled: boolean
-  count: number
+  displayName: string
+  description: string
+  category: string
+  defaultServiceName: string
+  suggestedImage: string | null
+  defaultContainerPortLabel: string
+  availabilityLabel: string
+  availabilityTone: BadgeTone
+  composeServices: WorkbenchOptionalServiceComposeMatch[]
+  managedServices: WorkbenchManagedService[]
+  legacyModules: WorkbenchStackModule[]
+  currentStateLabel: string
+  currentStateTone: BadgeTone
+  targetStateLabel: string
+  mutationReady: boolean
+  composeGenerationReady: boolean
+  legacyModuleType: string | null
+  legacyMutationPath: string | null
+  notes: string[]
+}
+
+interface WorkbenchComposeContextSummary {
+  importedServices: number
+  catalogManagedServices: number
+  legacyModules: number
+  matchedCatalogEntries: number
 }
 
 interface WorkbenchTopologyInventoryRow {
@@ -208,6 +231,9 @@ const workbenchComposeSupported = computed(() => (detail.value?.runtime.composeF
 const workbenchSnapshot = computed(() => workbenchStore.snapshot)
 const workbenchStatus = computed(() => workbenchStore.snapshotStatus)
 const workbenchError = computed(() => workbenchStore.snapshotError)
+const workbenchCatalog = computed(() => workbenchStore.catalog)
+const workbenchCatalogStatus = computed(() => workbenchStore.catalogStatus)
+const workbenchCatalogError = computed(() => workbenchStore.catalogError)
 const workbenchImportStatus = computed(() => workbenchStore.importStatus)
 const workbenchImportError = computed(() => workbenchStore.importError)
 const workbenchLastImportResult = computed(() => workbenchStore.lastImportResult)
@@ -227,11 +253,6 @@ const workbenchActiveResourceMutationServiceName = computed(
 )
 const workbenchLastResourceMutationResult = computed(() => workbenchStore.lastResourceMutationResult)
 const workbenchModuleMutationStatus = computed(() => workbenchStore.moduleMutationStatus)
-const workbenchModuleMutationError = computed(() => workbenchStore.moduleMutationError)
-const workbenchActiveModuleMutationSelectorKey = computed(
-  () => workbenchStore.activeModuleMutationSelectorKey,
-)
-const workbenchLastModuleMutationResult = computed(() => workbenchStore.lastModuleMutationResult)
 const workbenchPreviewStatus = computed(() => workbenchStore.previewStatus)
 const workbenchPreviewError = computed(() => workbenchStore.previewError)
 const workbenchLastPreviewResult = computed(() => workbenchStore.lastPreviewResult)
@@ -304,6 +325,12 @@ const workbenchAccessTone = computed<BadgeTone>(() => (isAdmin.value ? 'ok' : 'n
 const workbenchErrorMessage = computed(() => {
   const parsedError = workbenchError.value
   if (!parsedError) return 'Workbench snapshot could not be loaded.'
+  if (parsedError.code) return `[${parsedError.code}] ${parsedError.message}`
+  return parsedError.message
+})
+const workbenchCatalogErrorMessage = computed(() => {
+  const parsedError = workbenchCatalogError.value
+  if (!parsedError) return 'Optional-service catalog could not be loaded.'
   if (parsedError.code) return `[${parsedError.code}] ${parsedError.message}`
   return parsedError.message
 })
@@ -874,57 +901,126 @@ const workbenchResourceBadgeTone = computed<BadgeTone>(() => {
   if (workbenchResourceSummary.value.total > 0) return 'ok'
   return 'neutral'
 })
-const workbenchModuleInventory = computed<WorkbenchModuleInventoryRow[]>(() => {
-  const snapshot = workbenchSnapshot.value
-  if (!snapshot) return []
-
-  const redisCountsByService = new Map<string, number>()
-  for (const module of snapshot.modules) {
-    const serviceName = module.serviceName?.trim()
-    const moduleType = module.moduleType?.trim().toLowerCase()
-    if (!serviceName || moduleType !== 'redis') continue
-    redisCountsByService.set(serviceName, (redisCountsByService.get(serviceName) ?? 0) + 1)
+function workbenchOptionalServiceAvailabilityTone(status: string): BadgeTone {
+  switch (status.trim().toLowerCase()) {
+    case 'catalog_managed':
+    case 'catalog_managed_with_compose':
+      return 'ok'
+    case 'catalog_managed_with_legacy_module':
+    case 'catalog_managed_with_compose_and_legacy_module':
+    case 'compose_present_with_legacy_module':
+    case 'legacy_module_only':
+      return 'warn'
+    case 'compose_present':
+      return 'neutral'
+    default:
+      return 'neutral'
   }
+}
 
-  return snapshot.services.map((service) => {
-    const selector = {
-      serviceName: service.serviceName,
-      moduleType: 'redis',
-    }
-    const count = redisCountsByService.get(service.serviceName) ?? 0
+function workbenchOptionalServiceAvailabilityLabel(status: string): string {
+  switch (status.trim().toLowerCase()) {
+    case 'catalog_managed':
+      return 'Catalog-managed'
+    case 'catalog_managed_with_compose':
+      return 'Managed + compose match'
+    case 'catalog_managed_with_legacy_module':
+      return 'Managed + legacy metadata'
+    case 'catalog_managed_with_compose_and_legacy_module':
+      return 'Managed + compose + legacy'
+    case 'compose_present':
+      return 'Detected in compose'
+    case 'compose_present_with_legacy_module':
+      return 'Compose + legacy metadata'
+    case 'legacy_module_only':
+      return 'Legacy module only'
+    default:
+      return 'Available'
+  }
+}
 
-    return {
-      key: buildWorkbenchModuleSelectorKey(selector),
-      serviceName: service.serviceName,
-      moduleType: 'redis',
-      moduleLabel: 'Redis',
-      enabled: count > 0,
-      count,
-    }
-  })
+function workbenchOptionalServiceStateLabel(state: string): string {
+  switch (state.trim().toLowerCase()) {
+    case 'catalog_managed':
+      return 'Catalog-managed'
+    case 'legacy_modules':
+      return 'Legacy module metadata'
+    default:
+      return 'Unmanaged'
+  }
+}
+
+function workbenchOptionalServiceStateTone(state: string): BadgeTone {
+  switch (state.trim().toLowerCase()) {
+    case 'catalog_managed':
+      return 'ok'
+    case 'legacy_modules':
+      return 'warn'
+    default:
+      return 'neutral'
+  }
+}
+
+function workbenchOptionalServiceTargetLabel(state: string): string {
+  if (state.trim().toLowerCase() === 'catalog_managed') return 'Catalog-managed'
+  return 'Unchanged'
+}
+
+function workbenchOptionalServicePortLabel(containerPort: number): string {
+  if (!Number.isFinite(containerPort) || containerPort <= 0) return 'Not declared'
+  return `${containerPort}/tcp baseline`
+}
+
+function workbenchOptionalServiceMatchReasonLabel(reason: string): string {
+  switch (reason.trim().toLowerCase()) {
+    case 'service_name':
+      return 'service name'
+    case 'image_repository':
+      return 'image repository'
+    default:
+      return 'catalog hint'
+  }
+}
+
+const workbenchCurrentComposeSummary = computed<WorkbenchComposeContextSummary>(() => ({
+  importedServices: workbenchSnapshot.value?.services.length ?? 0,
+  catalogManagedServices: workbenchSnapshot.value?.managedServices.length ?? 0,
+  legacyModules: workbenchCatalog.value?.legacyModules.records.length ?? 0,
+  matchedCatalogEntries:
+    workbenchCatalog.value?.entries.filter((entry) => entry.availability.composeServices.length > 0).length ?? 0,
+}))
+const workbenchOptionalServiceInventory = computed<WorkbenchOptionalServiceCatalogRow[]>(() => {
+  const catalog = workbenchCatalog.value
+  if (!catalog) return []
+
+  return catalog.entries.map((entry: WorkbenchOptionalServiceCatalogEntry) => ({
+    key: entry.key,
+    displayName: entry.displayName,
+    description: entry.description,
+    category: entry.category,
+    defaultServiceName: entry.defaultServiceName,
+    suggestedImage: entry.suggestedImage?.trim() || null,
+    defaultContainerPortLabel: workbenchOptionalServicePortLabel(entry.defaultContainerPort),
+    availabilityLabel: workbenchOptionalServiceAvailabilityLabel(entry.availability.status),
+    availabilityTone: workbenchOptionalServiceAvailabilityTone(entry.availability.status),
+    composeServices: entry.availability.composeServices,
+    managedServices: entry.availability.managedServices,
+    legacyModules: entry.availability.legacyModules,
+    currentStateLabel: workbenchOptionalServiceStateLabel(entry.transition.currentState),
+    currentStateTone: workbenchOptionalServiceStateTone(entry.transition.currentState),
+    targetStateLabel: workbenchOptionalServiceTargetLabel(entry.transition.targetState),
+    mutationReady: entry.transition.mutationReady,
+    composeGenerationReady: entry.transition.composeGenerationReady,
+    legacyModuleType: entry.transition.legacyModuleType?.trim() || null,
+    legacyMutationPath: entry.transition.legacyMutationPath?.trim() || null,
+    notes: entry.transition.notes,
+  }))
 })
-const workbenchModuleSummary = computed(() => {
-  const summary = {
-    services: workbenchModuleInventory.value.length,
-    redisEnabledServices: 0,
-    redisDisabledServices: 0,
-    redisModuleCount: 0,
-  }
-
-  for (const row of workbenchModuleInventory.value) {
-    summary.redisModuleCount += row.count
-    if (row.enabled) {
-      summary.redisEnabledServices += 1
-    } else {
-      summary.redisDisabledServices += 1
-    }
-  }
-
-  return summary
-})
-const workbenchModuleBadgeTone = computed<BadgeTone>(() => {
-  if (workbenchModuleSummary.value.redisEnabledServices > 0) return 'ok'
-  if (workbenchModuleSummary.value.services > 0) return 'neutral'
+const workbenchOptionalServiceBadgeTone = computed<BadgeTone>(() => {
+  if (workbenchCatalogStatus.value === 'error') return 'error'
+  if (workbenchCurrentComposeSummary.value.catalogManagedServices > 0) return 'ok'
+  if (workbenchCurrentComposeSummary.value.legacyModules > 0) return 'warn'
+  if (workbenchOptionalServiceInventory.value.length > 0) return 'neutral'
   return 'neutral'
 })
 const workbenchTopologyInventory = computed<WorkbenchTopologyInventoryRow[]>(() => {
@@ -1135,19 +1231,6 @@ function workbenchResourceMutationSummaryFromDetails(details: unknown): Workbenc
     return null
   }
   return summary as WorkbenchResourceMutationSummary
-}
-
-function workbenchModuleMutationSummaryFromDetails(details: unknown): WorkbenchModuleMutationSummary | null {
-  if (!details || typeof details !== 'object') return null
-  const summary = (details as Record<string, unknown>).summary
-  if (!summary || typeof summary !== 'object') return null
-  if (
-    typeof (summary as Record<string, unknown>).action !== 'string' ||
-    !('selector' in (summary as Record<string, unknown>))
-  ) {
-    return null
-  }
-  return summary as WorkbenchModuleMutationSummary
 }
 
 function isWorkbenchComposeBlockedCode(code?: string): boolean {
@@ -1505,60 +1588,6 @@ function workbenchResourceMutationFeedback(
   return workbenchMutationFeedbackFromError(parsedError, 'resource')
 }
 
-function workbenchModuleMutationBusy(row: WorkbenchModuleInventoryRow): boolean {
-  return (
-    workbenchModuleMutationStatus.value === 'loading' &&
-    workbenchActiveModuleMutationSelectorKey.value === row.key
-  )
-}
-
-function workbenchModuleActionDisabled(row: WorkbenchModuleInventoryRow): boolean {
-  return (
-    workbenchImportStatus.value === 'loading' ||
-    workbenchResolveStatus.value === 'loading' ||
-    workbenchPortMutationStatus.value === 'loading' ||
-    workbenchResourceMutationStatus.value === 'loading' ||
-    workbenchModuleMutationStatus.value === 'loading' ||
-    workbenchPreviewStatus.value === 'loading' ||
-    workbenchApplyStatus.value === 'loading' ||
-    workbenchRestoreStatus.value === 'loading' ||
-    workbenchModuleMutationBusy(row)
-  )
-}
-
-function workbenchModuleMutationFeedback(row: WorkbenchModuleInventoryRow): WorkbenchInlineFeedbackState | null {
-  const successfulResult = workbenchLastModuleMutationResult.value
-  if (successfulResult && buildWorkbenchModuleSelectorKey(successfulResult.selector) === row.key) {
-    if (!successfulResult.changed) {
-      return {
-        tone: 'warn',
-        message:
-          successfulResult.action === 'remove'
-            ? `${row.moduleLabel} was already absent for ${row.serviceName}.`
-            : 'No module changes were required.',
-      }
-    }
-
-    return {
-      tone: 'ok',
-      message:
-        successfulResult.action === 'add'
-          ? `${row.moduleLabel} enabled for ${row.serviceName} at revision ${successfulResult.revision}.`
-          : `${row.moduleLabel} removed from ${row.serviceName} at revision ${successfulResult.revision}.`,
-    }
-  }
-
-  const parsedError = workbenchModuleMutationError.value
-  if (!parsedError) return null
-
-  const summary = workbenchModuleMutationSummaryFromDetails(parsedError.details)
-  if (!summary || buildWorkbenchModuleSelectorKey(summary.selector) !== row.key) {
-    return null
-  }
-
-  return workbenchMutationFeedbackFromError(parsedError, 'module')
-}
-
 function workbenchRemediationActionLabel(action: WorkbenchRemediationAction): string {
   switch (action) {
     case 'refresh':
@@ -1649,6 +1678,7 @@ const loadWorkbench = () => {
     return
   }
   void workbenchStore.loadSnapshot(name)
+  void workbenchStore.loadCatalog(name)
   if (isAdmin.value) {
     void workbenchStore.loadComposeBackups(name)
   }
@@ -1762,7 +1792,10 @@ const refreshWorkbench = async () => {
   const name = projectName.value
   if (!name) return
   if (!workbenchComposeSupported.value) return
-  await workbenchStore.loadSnapshot(name)
+  await Promise.all([
+    workbenchStore.loadSnapshot(name),
+    workbenchStore.loadCatalog(name),
+  ])
 }
 
 const importWorkbench = async () => {
@@ -1783,6 +1816,8 @@ const importWorkbench = async () => {
     toastStore.error(parsedError?.message ?? 'Workbench import failed.', 'Workbench')
     return
   }
+
+  await workbenchStore.loadCatalog(name)
 
   if (result.changed) {
     toastStore.success(`Workbench snapshot imported (revision ${result.revision}).`, 'Workbench')
@@ -1921,64 +1956,6 @@ const saveWorkbenchResource = async (resource: WorkbenchResourceInventoryRow) =>
 
   syncWorkbenchResourceInputForService(resource.serviceName, result.currentResource)
   toastStore.success(`Stored resources updated for ${resource.serviceName}.`, 'Workbench resources')
-}
-
-const enableWorkbenchRedisModule = async (row: WorkbenchModuleInventoryRow) => {
-  const name = projectName.value
-  if (!name) return
-  if (!isAdmin.value) {
-    toastStore.error('Admin access required.', 'Workbench module blocked')
-    return
-  }
-
-  const result = await workbenchStore.mutateModule(name, {
-    selector: {
-      serviceName: row.serviceName,
-      moduleType: row.moduleType,
-    },
-    action: 'add',
-  })
-  if (!result) {
-    const parsedError = workbenchModuleMutationError.value
-    toastStore.error(parsedError?.message ?? 'Workbench module enable failed.', 'Workbench modules')
-    return
-  }
-
-  if (!result.changed) {
-    toastStore.warn(`${row.moduleLabel} was already present for ${row.serviceName}.`, 'Workbench modules')
-    return
-  }
-
-  toastStore.success(`${row.moduleLabel} enabled for ${row.serviceName}.`, 'Workbench modules')
-}
-
-const removeWorkbenchRedisModule = async (row: WorkbenchModuleInventoryRow) => {
-  const name = projectName.value
-  if (!name) return
-  if (!isAdmin.value) {
-    toastStore.error('Admin access required.', 'Workbench module blocked')
-    return
-  }
-
-  const result = await workbenchStore.mutateModule(name, {
-    selector: {
-      serviceName: row.serviceName,
-      moduleType: row.moduleType,
-    },
-    action: 'remove',
-  })
-  if (!result) {
-    const parsedError = workbenchModuleMutationError.value
-    toastStore.error(parsedError?.message ?? 'Workbench module removal failed.', 'Workbench modules')
-    return
-  }
-
-  if (!result.changed) {
-    toastStore.warn(`${row.moduleLabel} was already absent for ${row.serviceName}.`, 'Workbench modules')
-    return
-  }
-
-  toastStore.success(`${row.moduleLabel} removed from ${row.serviceName}.`, 'Workbench modules')
 }
 
 const clearWorkbenchResourceFields = async (
@@ -2544,7 +2521,7 @@ watch(
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Workbench</p>
             <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Compose authority shell</h2>
             <p class="mt-2 text-sm text-[color:var(--muted)]">
-              Read/import state for the stored Workbench model plus the shipped admin-only port, resource, Redis module, and compose preview/apply controls. Restore lands in the next Workbench slice.
+              Read/import state for the stored Workbench model plus current compose context, a read-only optional-service catalog, and the existing admin-only port, resource, and compose preview/apply controls.
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
@@ -2564,6 +2541,7 @@ watch(
               size="sm"
               :disabled="
                 workbenchStatus === 'loading' ||
+                workbenchCatalogStatus === 'loading' ||
                 workbenchImportStatus === 'loading' ||
                 workbenchResolveStatus === 'loading' ||
                 workbenchResourceMutationStatus === 'loading' ||
@@ -2586,6 +2564,7 @@ watch(
               size="sm"
               :disabled="
                 workbenchResolveStatus === 'loading' ||
+                workbenchCatalogStatus === 'loading' ||
                 workbenchPortMutationStatus === 'loading' ||
                 workbenchResourceMutationStatus === 'loading' ||
                 workbenchModuleMutationStatus === 'loading' ||
@@ -2606,6 +2585,7 @@ watch(
               size="sm"
               :disabled="
                 workbenchImportStatus === 'loading' ||
+                workbenchCatalogStatus === 'loading' ||
                 workbenchResolveStatus === 'loading' ||
                 workbenchPortMutationStatus === 'loading' ||
                 workbenchResourceMutationStatus === 'loading' ||
@@ -2646,14 +2626,6 @@ watch(
         <UiState v-else-if="!workbenchComposeSupported">
           This project does not expose any compose source files, so the Workbench shell and import flow are unavailable here.
         </UiState>
-        <UiState v-else-if="!workbenchSnapshotReady" :tone="isAdmin ? 'warn' : 'neutral'">
-          {{
-            isAdmin
-              ? 'No imported Workbench snapshot is stored for this project yet. Import the current compose to initialize the model shell.'
-              : 'No imported Workbench snapshot is stored for this project yet. An admin must import the project compose before Workbench metadata becomes visible here.'
-          }}
-        </UiState>
-
         <template v-else-if="workbenchSnapshot">
           <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
@@ -2687,8 +2659,8 @@ watch(
                   <span class="font-semibold text-[color:var(--text)]">{{ workbenchSnapshot.resources.length }}</span>
                 </div>
                 <div class="flex flex-wrap items-center justify-between gap-2">
-                  <span>Modules tracked</span>
-                  <span class="font-semibold text-[color:var(--text)]">{{ workbenchSnapshot.modules.length }}</span>
+                  <span>Managed services tracked</span>
+                  <span class="font-semibold text-[color:var(--text)]">{{ workbenchSnapshot.managedServices.length }}</span>
                 </div>
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <span>Environment refs</span>
@@ -2715,6 +2687,280 @@ watch(
               </div>
             </UiPanel>
           </div>
+
+          <UiInlineFeedback
+            v-if="!workbenchSnapshotReady"
+            :tone="isAdmin ? 'warn' : 'neutral'"
+          >
+            {{
+              isAdmin
+                ? 'No imported Workbench snapshot is stored for this project yet. Import the current compose to initialize the model shell. The catalog below still reflects the shipped optional-service contract.'
+                : 'No imported Workbench snapshot is stored for this project yet. An admin must import the project compose before current-compose inventory becomes visible here. The catalog below remains read-only.'
+            }}
+          </UiInlineFeedback>
+
+          <div class="grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
+            <UiPanel variant="soft" class="space-y-4 p-4">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Optional services</p>
+                  <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Catalog shell</h3>
+                </div>
+                <UiBadge :tone="workbenchOptionalServiceBadgeTone">
+                  {{ workbenchOptionalServiceInventory.length }} entries
+                </UiBadge>
+              </div>
+
+              <p class="text-sm text-[color:var(--muted)]">
+                Backend ordering is preserved here: the current compose context comes from the stored Workbench snapshot, and each catalog card shows compose matches, catalog-managed state, and legacy transition metadata without enabling mutations yet.
+              </p>
+
+              <UiState v-if="workbenchCatalogStatus === 'loading'" loading>
+                Loading optional-service catalog...
+              </UiState>
+              <UiState v-else-if="workbenchCatalogStatus === 'error'" tone="error">
+                {{ workbenchCatalogErrorMessage }}
+              </UiState>
+              <UiState v-else-if="workbenchOptionalServiceInventory.length === 0">
+                No optional-service catalog entries are available for this project yet.
+              </UiState>
+              <div v-else class="grid gap-3 md:grid-cols-2">
+                <UiPanel
+                  v-for="entry in workbenchOptionalServiceInventory"
+                  :key="entry.key"
+                  variant="raise"
+                  class="space-y-4 p-4"
+                >
+                  <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">{{ entry.category }}</p>
+                      <h4 class="mt-2 text-base font-semibold text-[color:var(--text)]">{{ entry.displayName }}</h4>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <UiBadge :tone="entry.availabilityTone">
+                        {{ entry.availabilityLabel }}
+                      </UiBadge>
+                      <UiBadge :tone="entry.currentStateTone">
+                        {{ entry.currentStateLabel }}
+                      </UiBadge>
+                    </div>
+                  </div>
+
+                  <p class="text-sm text-[color:var(--muted)]">{{ entry.description }}</p>
+
+                  <div class="grid gap-3 text-xs text-[color:var(--muted)] sm:grid-cols-2">
+                    <UiPanel variant="soft" class="space-y-2 p-3">
+                      <div class="flex flex-wrap items-start justify-between gap-2">
+                        <span>Default service</span>
+                        <span class="font-semibold text-[color:var(--text)]">{{ entry.defaultServiceName }}</span>
+                      </div>
+                      <div class="flex flex-wrap items-start justify-between gap-2">
+                        <span>Suggested image</span>
+                        <span class="max-w-full break-all text-right text-[color:var(--text)]">
+                          {{ entry.suggestedImage || 'Not declared' }}
+                        </span>
+                      </div>
+                      <div class="flex flex-wrap items-start justify-between gap-2">
+                        <span>Baseline port</span>
+                        <span class="font-mono text-[color:var(--text)]">{{ entry.defaultContainerPortLabel }}</span>
+                      </div>
+                    </UiPanel>
+
+                    <UiPanel variant="soft" class="space-y-2 p-3">
+                      <div class="flex flex-wrap items-start justify-between gap-2">
+                        <span>Target state</span>
+                        <span class="font-semibold text-[color:var(--text)]">{{ entry.targetStateLabel }}</span>
+                      </div>
+                      <div class="flex flex-wrap items-start justify-between gap-2">
+                        <span>Mutation path</span>
+                        <span class="font-semibold text-[color:var(--text)]">
+                          {{ entry.mutationReady ? 'Catalog-backed next slice' : 'Read-only' }}
+                        </span>
+                      </div>
+                      <div class="flex flex-wrap items-start justify-between gap-2">
+                        <span>Compose generation</span>
+                        <span class="font-semibold text-[color:var(--text)]">
+                          {{ entry.composeGenerationReady ? 'Ready' : 'Not ready' }}
+                        </span>
+                      </div>
+                    </UiPanel>
+                  </div>
+
+                  <div class="grid gap-3 text-xs text-[color:var(--muted)] xl:grid-cols-3">
+                    <UiPanel variant="soft" class="space-y-2 p-3">
+                      <div class="flex flex-wrap items-center justify-between gap-2">
+                        <span class="uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Compose matches</span>
+                        <UiBadge :tone="entry.composeServices.length > 0 ? 'neutral' : 'neutral'">
+                          {{ entry.composeServices.length }}
+                        </UiBadge>
+                      </div>
+                      <div v-if="entry.composeServices.length > 0" class="space-y-2">
+                        <div
+                          v-for="composeService in entry.composeServices"
+                          :key="`${entry.key}-${composeService.serviceName}-${composeService.matchReason}`"
+                          class="rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-2"
+                        >
+                          <p class="font-semibold text-[color:var(--text)]">{{ composeService.serviceName }}</p>
+                          <p class="mt-1 break-all">{{ composeService.image || 'Image not declared' }}</p>
+                          <p class="mt-1 text-[color:var(--muted-2)]">
+                            Matched by {{ workbenchOptionalServiceMatchReasonLabel(composeService.matchReason) }}.
+                          </p>
+                        </div>
+                      </div>
+                      <p v-else>No imported compose match is currently visible.</p>
+                    </UiPanel>
+
+                    <UiPanel variant="soft" class="space-y-2 p-3">
+                      <div class="flex flex-wrap items-center justify-between gap-2">
+                        <span class="uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Managed services</span>
+                        <UiBadge :tone="entry.managedServices.length > 0 ? 'ok' : 'neutral'">
+                          {{ entry.managedServices.length }}
+                        </UiBadge>
+                      </div>
+                      <div v-if="entry.managedServices.length > 0" class="space-y-2">
+                        <div
+                          v-for="managedService in entry.managedServices"
+                          :key="`${entry.key}-managed-${managedService.serviceName}`"
+                          class="rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-2"
+                        >
+                          <p class="font-semibold text-[color:var(--text)]">{{ managedService.serviceName }}</p>
+                          <p class="mt-1 text-[color:var(--muted-2)]">Tracked as {{ managedService.entryKey }}.</p>
+                        </div>
+                      </div>
+                      <p v-else>No catalog-managed service is stored for this entry yet.</p>
+                    </UiPanel>
+
+                    <UiPanel variant="soft" class="space-y-2 p-3">
+                      <div class="flex flex-wrap items-center justify-between gap-2">
+                        <span class="uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Legacy metadata</span>
+                        <UiBadge :tone="entry.legacyModules.length > 0 ? 'warn' : 'neutral'">
+                          {{ entry.legacyModules.length }}
+                        </UiBadge>
+                      </div>
+                      <div v-if="entry.legacyModules.length > 0" class="space-y-2">
+                        <div
+                          v-for="legacyModule in entry.legacyModules"
+                          :key="`${entry.key}-legacy-${legacyModule.serviceName}-${legacyModule.moduleType}`"
+                          class="rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-2"
+                        >
+                          <p class="font-semibold text-[color:var(--text)]">{{ legacyModule.serviceName || 'Unknown service' }}</p>
+                          <p class="mt-1 text-[color:var(--muted-2)]">
+                            Legacy {{ legacyModule.moduleType }} metadata remains separate from catalog-managed records.
+                          </p>
+                        </div>
+                      </div>
+                      <p v-else>No legacy module metadata is attached to this entry.</p>
+                    </UiPanel>
+                  </div>
+
+                  <div class="space-y-2">
+                    <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Transition notes</p>
+                    <div class="space-y-2">
+                      <UiPanel
+                        v-for="note in entry.notes"
+                        :key="`${entry.key}-${note}`"
+                        variant="soft"
+                        class="p-3 text-xs text-[color:var(--muted)]"
+                      >
+                        {{ note }}
+                      </UiPanel>
+                    </div>
+                    <p
+                      v-if="entry.legacyModuleType && entry.legacyMutationPath"
+                      class="text-xs text-[color:var(--muted)]"
+                    >
+                      Legacy transition path: <span class="font-mono text-[color:var(--text)]">{{ entry.legacyMutationPath }}</span>
+                      still reports <span class="font-semibold text-[color:var(--text)]">{{ entry.legacyModuleType }}</span> metadata separately.
+                    </p>
+                  </div>
+                </UiPanel>
+              </div>
+            </UiPanel>
+
+            <UiPanel variant="raise" class="space-y-4 p-4 text-sm text-[color:var(--muted)]">
+              <div>
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Current compose context</p>
+                <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Snapshot-backed summary</h3>
+              </div>
+              <p>
+                This panel stays read-only for every role in this slice. Admin-only add/remove controls are intentionally deferred so the shipped preview/apply/restore shell stays low-risk while the catalog model settles.
+              </p>
+
+              <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Imported services</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchCurrentComposeSummary.importedServices }}</p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Catalog-managed</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchCurrentComposeSummary.catalogManagedServices }}</p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Catalog matches</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchCurrentComposeSummary.matchedCatalogEntries }}</p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Legacy modules</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchCurrentComposeSummary.legacyModules }}</p>
+                </UiPanel>
+              </div>
+
+              <div class="space-y-2">
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Imported compose services</p>
+                <div v-if="workbenchSnapshot.services.length > 0" class="flex flex-wrap gap-2">
+                  <UiBadge
+                    v-for="service in workbenchSnapshot.services"
+                    :key="`compose-context-${service.serviceName}`"
+                    tone="neutral"
+                  >
+                    {{ service.serviceName }}
+                  </UiBadge>
+                </div>
+                <p v-else class="text-xs">Import the current compose to populate tracked service names here.</p>
+              </div>
+
+              <div class="space-y-2">
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Managed service records</p>
+                <div v-if="workbenchSnapshot.managedServices.length > 0" class="space-y-2">
+                  <UiPanel
+                    v-for="managedService in workbenchSnapshot.managedServices"
+                    :key="`managed-context-${managedService.serviceName}`"
+                    variant="soft"
+                    class="space-y-1 p-3 text-xs"
+                  >
+                    <p class="font-semibold text-[color:var(--text)]">{{ managedService.serviceName }}</p>
+                    <p class="text-[color:var(--muted-2)]">Entry key: {{ managedService.entryKey }}</p>
+                  </UiPanel>
+                </div>
+                <p v-else class="text-xs">No catalog-managed service records are stored in this snapshot yet.</p>
+              </div>
+
+              <div class="space-y-2">
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Legacy transition records</p>
+                <div
+                  v-if="workbenchCatalog?.legacyModules.records.length"
+                  class="space-y-2"
+                >
+                  <UiPanel
+                    v-for="legacyModule in workbenchCatalog.legacyModules.records"
+                    :key="`legacy-context-${legacyModule.serviceName}-${legacyModule.moduleType}`"
+                    variant="soft"
+                    class="space-y-1 p-3 text-xs"
+                  >
+                    <p class="font-semibold text-[color:var(--text)]">{{ legacyModule.serviceName || 'Unknown service' }}</p>
+                    <p class="text-[color:var(--muted-2)]">Legacy module type: {{ legacyModule.moduleType }}</p>
+                  </UiPanel>
+                </div>
+                <p v-else class="text-xs">No legacy module records are currently attached to this project.</p>
+              </div>
+
+              <p v-if="!isAdmin" class="text-xs text-[color:var(--muted)]">
+                Read-only access: non-admin users can inspect current compose context and transition metadata, but snapshot mutations remain restricted to admin workflows.
+              </p>
+            </UiPanel>
+          </div>
+
+          <template v-if="workbenchSnapshotReady">
 
           <div class="grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
             <UiPanel variant="soft" class="space-y-4 p-4">
@@ -3600,158 +3846,6 @@ watch(
             <UiPanel variant="soft" class="space-y-4 p-4">
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Modules</p>
-                  <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Redis injection controls</h3>
-                </div>
-                <UiBadge :tone="workbenchModuleBadgeTone">
-                  {{ workbenchModuleSummary.redisEnabledServices }} enabled / {{ workbenchModuleSummary.services }} services
-                </UiBadge>
-              </div>
-
-              <UiState v-if="workbenchModuleInventory.length === 0">
-                No Workbench services are stored for module injection yet.
-              </UiState>
-              <div v-else class="grid gap-3 md:grid-cols-2">
-                <UiPanel
-                  v-for="row in workbenchModuleInventory"
-                  :key="row.key"
-                  variant="raise"
-                  class="space-y-4 p-4"
-                >
-                  <div class="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Service</p>
-                      <h4 class="mt-2 text-base font-semibold text-[color:var(--text)]">{{ row.serviceName }}</h4>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-2">
-                      <UiBadge :tone="row.enabled ? 'ok' : 'neutral'">
-                        {{ row.enabled ? `${row.moduleLabel} enabled` : `${row.moduleLabel} available` }}
-                      </UiBadge>
-                      <UiBadge :tone="row.count > 0 ? 'ok' : 'neutral'">
-                        {{ row.count }} tracked
-                      </UiBadge>
-                    </div>
-                  </div>
-
-                  <UiPanel variant="soft" class="space-y-2 p-3 text-xs text-[color:var(--muted)]">
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                      <span class="uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Baseline module</span>
-                      <span class="font-semibold text-[color:var(--text)]">{{ row.moduleLabel }}</span>
-                    </div>
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                      <span>Resolver default port</span>
-                      <span class="font-mono text-[color:var(--text)]">6379/tcp</span>
-                    </div>
-                    <p>
-                      {{
-                        row.enabled
-                          ? 'This service already carries Redis module metadata in the stored Workbench snapshot.'
-                          : 'Enable Redis to attach the first supported module baseline to this stored service.'
-                      }}
-                    </p>
-                  </UiPanel>
-
-                  <div
-                    v-if="isAdmin"
-                    class="space-y-3 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/45 p-3"
-                  >
-                    <div class="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-                          Stored module mutation
-                        </p>
-                        <p class="mt-1 text-xs text-[color:var(--muted)]">
-                          Mutations only update the stored Workbench snapshot. Successful changes immediately refresh the visible module inventory and topology badges.
-                        </p>
-                      </div>
-                      <UiBadge :tone="row.enabled ? 'ok' : 'neutral'">
-                        {{ row.enabled ? 'Ready to remove' : 'Ready to enable' }}
-                      </UiBadge>
-                    </div>
-
-                    <div class="flex flex-wrap gap-2">
-                      <UiButton
-                        variant="primary"
-                        size="sm"
-                        :disabled="row.enabled || workbenchModuleActionDisabled(row)"
-                        @click="enableWorkbenchRedisModule(row)"
-                      >
-                        <span class="inline-flex items-center gap-2">
-                          <UiInlineSpinner v-if="workbenchModuleMutationBusy(row)" />
-                          Enable Redis
-                        </span>
-                      </UiButton>
-                      <UiButton
-                        variant="ghost"
-                        size="sm"
-                        :disabled="!row.enabled || workbenchModuleActionDisabled(row)"
-                        @click="removeWorkbenchRedisModule(row)"
-                      >
-                        <span class="inline-flex items-center gap-2">
-                          <UiInlineSpinner v-if="workbenchModuleMutationBusy(row)" />
-                          Remove Redis
-                        </span>
-                      </UiButton>
-                    </div>
-
-                    <UiInlineFeedback
-                      v-if="workbenchModuleMutationFeedback(row)"
-                      :tone="workbenchModuleMutationFeedback(row)?.tone || 'neutral'"
-                    >
-                      {{ workbenchModuleMutationFeedback(row)?.message }}
-                    </UiInlineFeedback>
-                  </div>
-                  <p v-else class="text-xs text-[color:var(--muted)]">
-                    Read-only access: admin permissions are required to enable or remove Redis module metadata for a stored service.
-                  </p>
-                </UiPanel>
-              </div>
-            </UiPanel>
-
-            <UiPanel variant="raise" class="space-y-4 p-4 text-sm text-[color:var(--muted)]">
-              <div>
-                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Module posture</p>
-                <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Redis baseline summary</h3>
-              </div>
-              <p>
-                `WB-FE-09` keeps module scope narrow: Redis is the only exposed injection baseline, and edits stay limited to the stored Workbench model.
-              </p>
-
-              <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                <UiPanel variant="soft" class="space-y-1 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Services</p>
-                  <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchModuleSummary.services }}</p>
-                </UiPanel>
-                <UiPanel variant="soft" class="space-y-1 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Redis enabled</p>
-                  <p class="text-lg font-semibold text-[color:var(--text)]">
-                    {{ workbenchModuleSummary.redisEnabledServices }}
-                  </p>
-                </UiPanel>
-                <UiPanel variant="soft" class="space-y-1 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Still available</p>
-                  <p class="text-lg font-semibold text-[color:var(--text)]">
-                    {{ workbenchModuleSummary.redisDisabledServices }}
-                  </p>
-                </UiPanel>
-                <UiPanel variant="soft" class="space-y-1 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Tracked Redis rows</p>
-                  <p class="text-lg font-semibold text-[color:var(--text)]">
-                    {{ workbenchModuleSummary.redisModuleCount }}
-                  </p>
-                </UiPanel>
-              </div>
-
-              <p class="text-xs text-[color:var(--muted)]">
-                Duplicate-module, unsupported-target, lock, and storage failures surface through the same inline API error feedback used by the existing Workbench mutation cards. Compose preview/apply and restore each keep their own guardrails below.
-              </p>
-            </UiPanel>
-          </div>
-
-          <div class="grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
-            <UiPanel variant="soft" class="space-y-4 p-4">
-              <div class="flex flex-wrap items-start justify-between gap-3">
-                <div>
                   <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Compose preview</p>
                   <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Generate and apply</h3>
                 </div>
@@ -4018,7 +4112,7 @@ watch(
                 <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Revision and diagnostics</h3>
               </div>
               <p>
-                Port, resource, and module edits change the stored Workbench model first. Any model change, stale revision, or external compose drift invalidates the previous preview until a new preview is generated.
+                Port, resource, and future catalog-service edits all change the stored Workbench model first. Any model change, stale revision, or external compose drift invalidates the previous preview until a new preview is generated.
               </p>
 
               <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
@@ -4289,6 +4383,7 @@ watch(
               </p>
             </UiPanel>
           </div>
+          </template>
         </template>
       </UiPanel>
 

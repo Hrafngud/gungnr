@@ -20,10 +20,11 @@ const (
 )
 
 type NetBirdService struct {
-	cfg      config.Config
-	settings *SettingsService
-	projects repository.ProjectRepository
-	jobs     repository.JobRepository
+	cfg                     config.Config
+	settings                *SettingsService
+	projects                repository.ProjectRepository
+	jobs                    repository.JobRepository
+	liveStatusClientFactory func(baseURL, token string) netBirdVisibilityClient
 }
 
 type NetBirdModePlan struct {

@@ -25,6 +25,11 @@ type WorkbenchStackModule struct {
 	ServiceName string `json:"serviceName,omitempty"`
 }
 
+type WorkbenchManagedService struct {
+	EntryKey    string `json:"entryKey"`
+	ServiceName string `json:"serviceName"`
+}
+
 type WorkbenchStackSnapshot struct {
 	ProjectName       string                       `json:"projectName"`
 	ProjectDir        string                       `json:"projectDir"`
@@ -39,6 +44,7 @@ type WorkbenchStackSnapshot struct {
 	NetworkRefs       []WorkbenchComposeNetworkRef `json:"networkRefs"`
 	VolumeRefs        []WorkbenchComposeVolumeRef  `json:"volumeRefs"`
 	EnvRefs           []WorkbenchComposeEnvRef     `json:"envRefs"`
+	ManagedServices   []WorkbenchManagedService    `json:"managedServices"`
 	Modules           []WorkbenchStackModule       `json:"modules"`
 	Warnings          []WorkbenchComposeWarning    `json:"warnings"`
 }
@@ -116,6 +122,7 @@ func snapshotFromParsedCompose(parsed WorkbenchComposeParseResult) WorkbenchStac
 		NetworkRefs:       append([]WorkbenchComposeNetworkRef{}, parsed.NetworkRefs...),
 		VolumeRefs:        append([]WorkbenchComposeVolumeRef{}, parsed.VolumeRefs...),
 		EnvRefs:           append([]WorkbenchComposeEnvRef{}, parsed.EnvRefs...),
+		ManagedServices:   []WorkbenchManagedService{},
 		Modules:           []WorkbenchStackModule{},
 		Warnings:          append([]WorkbenchComposeWarning{}, parsed.Warnings...),
 	})
@@ -155,6 +162,9 @@ func normalizeWorkbenchStackSnapshot(snapshot WorkbenchStackSnapshot) WorkbenchS
 	if normalized.EnvRefs == nil {
 		normalized.EnvRefs = []WorkbenchComposeEnvRef{}
 	}
+	if normalized.ManagedServices == nil {
+		normalized.ManagedServices = []WorkbenchManagedService{}
+	}
 	if normalized.Modules == nil {
 		normalized.Modules = []WorkbenchStackModule{}
 	}
@@ -164,6 +174,21 @@ func normalizeWorkbenchStackSnapshot(snapshot WorkbenchStackSnapshot) WorkbenchS
 
 	for idx := range normalized.Ports {
 		normalized.Ports[idx] = normalizeWorkbenchComposePort(normalized.Ports[idx])
+	}
+	if len(normalized.ManagedServices) > 0 {
+		cleaned := make([]WorkbenchManagedService, 0, len(normalized.ManagedServices))
+		for _, managedService := range normalized.ManagedServices {
+			entryKey := strings.ToLower(strings.TrimSpace(managedService.EntryKey))
+			serviceName := strings.TrimSpace(managedService.ServiceName)
+			if entryKey == "" || serviceName == "" {
+				continue
+			}
+			cleaned = append(cleaned, WorkbenchManagedService{
+				EntryKey:    entryKey,
+				ServiceName: serviceName,
+			})
+		}
+		normalized.ManagedServices = cleaned
 	}
 
 	sort.SliceStable(normalized.Services, func(i, j int) bool {
@@ -186,6 +211,16 @@ func normalizeWorkbenchStackSnapshot(snapshot WorkbenchStackSnapshot) WorkbenchS
 	})
 	sort.SliceStable(normalized.EnvRefs, func(i, j int) bool {
 		return workbenchComposeEnvRefLess(normalized.EnvRefs[i], normalized.EnvRefs[j])
+	})
+	sort.SliceStable(normalized.ManagedServices, func(i, j int) bool {
+		leftService := strings.ToLower(strings.TrimSpace(normalized.ManagedServices[i].ServiceName))
+		rightService := strings.ToLower(strings.TrimSpace(normalized.ManagedServices[j].ServiceName))
+		if leftService != rightService {
+			return leftService < rightService
+		}
+		leftEntry := strings.ToLower(strings.TrimSpace(normalized.ManagedServices[i].EntryKey))
+		rightEntry := strings.ToLower(strings.TrimSpace(normalized.ManagedServices[j].EntryKey))
+		return leftEntry < rightEntry
 	})
 	sort.SliceStable(normalized.Modules, func(i, j int) bool {
 		leftType := strings.ToLower(strings.TrimSpace(normalized.Modules[i].ModuleType))

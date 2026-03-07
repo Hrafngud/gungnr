@@ -38,6 +38,12 @@ const (
 const netBirdModeApplySummaryPrefix = "netbird_mode_apply_summary="
 const netBirdDaemonRecentHeartbeatWindow = 5 * time.Minute
 
+type netBirdVisibilityClient interface {
+	ListPeers(ctx context.Context) ([]netbirdapi.Peer, error)
+	ListGroups(ctx context.Context) ([]netbirdapi.Group, error)
+	ListPolicies(ctx context.Context) ([]netbirdapi.Policy, error)
+}
+
 type NetBirdStatus struct {
 	ClientInstalled           bool                   `json:"clientInstalled"`
 	DaemonRunning             bool                   `json:"daemonRunning"`
@@ -258,7 +264,7 @@ func (s *NetBirdService) Status(ctx context.Context) (NetBirdStatus, error) {
 	liveCheckedAt := time.Now().UTC()
 	status.APIReachability.Source = netBirdReachabilitySourceLive
 	status.APIReachability.CheckedAt = &liveCheckedAt
-	live, err := fetchNetBirdLiveStatus(ctx, apiBaseURL, apiToken, hostPeerID)
+	live, err := s.fetchNetBirdLiveStatus(ctx, apiBaseURL, apiToken, hostPeerID)
 	if err != nil {
 		status.APIReachability.Message = fmt.Sprintf("Live NetBird API check failed: %v", err)
 		restoredFromLastSuccess := false
@@ -302,6 +308,13 @@ func (s *NetBirdService) Status(ctx context.Context) (NetBirdStatus, error) {
 	}
 
 	return status, nil
+}
+
+func (s *NetBirdService) fetchNetBirdLiveStatus(ctx context.Context, apiBaseURL, apiToken, hostPeerID string) (netBirdLiveStatus, error) {
+	if s != nil && s.liveStatusClientFactory != nil {
+		return fetchNetBirdLiveStatusWithClient(ctx, s.liveStatusClientFactory(apiBaseURL, apiToken), hostPeerID)
+	}
+	return fetchNetBirdLiveStatus(ctx, apiBaseURL, apiToken, hostPeerID)
 }
 
 func (s *NetBirdService) ACLGraph(ctx context.Context) (NetBirdACLGraph, error) {
@@ -488,6 +501,14 @@ func parseNetBirdModeApplySummary(logLines string) (*NetBirdModeApplySummary, er
 
 func fetchNetBirdLiveStatus(ctx context.Context, apiBaseURL, apiToken, hostPeerID string) (netBirdLiveStatus, error) {
 	client := netbirdapi.NewClient(apiBaseURL, apiToken)
+	return fetchNetBirdLiveStatusWithClient(ctx, client, hostPeerID)
+}
+
+func fetchNetBirdLiveStatusWithClient(ctx context.Context, client netBirdVisibilityClient, hostPeerID string) (netBirdLiveStatus, error) {
+	if client == nil {
+		return netBirdLiveStatus{}, errors.New("netbird live status client is nil")
+	}
+
 	peers, err := client.ListPeers(ctx)
 	if err != nil {
 		return netBirdLiveStatus{}, err

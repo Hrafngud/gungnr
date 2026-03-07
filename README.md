@@ -168,9 +168,33 @@ Use the returned token as `Authorization: Bearer <token>` for `/api/v1/*` routes
 ## Common commands
 - `make up` (foreground)
 - `make up-d` (detached)
+- `make build-cli`
 - `make logs`
 - `make down`
 - `make down-v`
+
+## CLI build metadata
+Build the CLI through the shared helper so `gungnr version` reports consistent
+ldflags-backed provenance:
+
+```bash
+make build-cli
+./dist/gungnr_$(go env GOOS)_$(go env GOARCH) version
+```
+
+The shared contract is:
+- `GUNGNR_VERSION`: defaults to the exact tag at `HEAD`, otherwise `dev`
+- `GUNGNR_COMMIT`: defaults to `git rev-parse HEAD`
+- `GUNGNR_BUILD_DATE`: defaults to `git log -1 --format=%cI HEAD`
+
+`release_local.sh` reuses the same contract for release artifacts and only
+overrides `GUNGNR_VERSION` explicitly.
+
+Pushing a SemVer tag like `v1.2.3` triggers
+`.github/workflows/release-cli.yml`, which rebuilds `gungnr` for
+`linux/amd64`, `linux/arm64`, `darwin/amd64`, and `darwin/arm64` through the
+same helper and uploads those binaries plus `checksums.txt` to the matching
+GitHub Release.
 
 ## Release compose (GHCR images)
 Use `docker-compose.release.yml` to run GHCR images instead of local builds.
