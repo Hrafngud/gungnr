@@ -5,6 +5,13 @@ import { workbenchApi } from '@/services/workbench'
 import {
   buildWorkbenchModuleSelectorKey,
   buildWorkbenchPortSelectorKey,
+  type WorkbenchComposeApplyRequest,
+  type WorkbenchComposeApplyResult as WorkbenchComposeApplyApiResult,
+  type WorkbenchComposeBackupMetadata,
+  type WorkbenchComposePreviewRequest,
+  type WorkbenchComposePreviewResult as WorkbenchComposePreviewApiResult,
+  type WorkbenchComposeRestoreRequest,
+  type WorkbenchComposeRestoreResult as WorkbenchComposeRestoreApiResult,
   type WorkbenchImportReason,
   type WorkbenchModuleMutationRequest,
   type WorkbenchModuleMutationSummary,
@@ -103,6 +110,40 @@ export interface WorkbenchModuleMutationResult {
   sourceFingerprint: string
 }
 
+export interface WorkbenchComposePreviewResultState {
+  projectName: string
+  compose: string
+  revision: number
+  sourceFingerprint: string
+}
+
+export interface WorkbenchComposeApplyResultState {
+  projectName: string
+  revision: number
+  sourceFingerprint: string
+  composePath: string
+  composeBytes: number
+  backupId: string
+  backupSequence: number
+  backupRevision: number
+  retainedBackups: number
+  prunedBackups: number
+}
+
+export interface WorkbenchComposeRestoreResultState {
+  projectName: string
+  revision: number
+  sourceFingerprint: string
+  restoredFingerprint: string
+  composePath: string
+  composeBytes: number
+  backupId: string
+  backupSequence: number
+  backupRevision: number
+  backupCreatedAt: string
+  requiresImport: boolean
+}
+
 function normalizeProjectName(projectName: string): string {
   return projectName.trim()
 }
@@ -113,6 +154,19 @@ function createProjectNameError(): ApiError {
 
 function createServiceNameError(): ApiError {
   return new ApiError('Service name is required.')
+}
+
+function createSnapshotRequiredError(message: string): ApiError {
+  return new ApiError(message)
+}
+
+function createBackupRequiredError(): ApiError {
+  return new ApiError('Choose a compose backup before restoring.')
+}
+
+function snapshotIdentity(value: WorkbenchStackSnapshot | null): string {
+  if (!value) return ''
+  return `${value.projectName.trim()}::${value.revision}::${value.sourceFingerprint.trim()}`
 }
 
 function applySnapshotState(
@@ -221,6 +275,55 @@ function createModuleMutationResult(
   }
 }
 
+function createComposePreviewResult(
+  projectName: string,
+  result: WorkbenchComposePreviewApiResult,
+): WorkbenchComposePreviewResultState {
+  return {
+    projectName,
+    compose: result.compose,
+    revision: result.metadata.revision,
+    sourceFingerprint: result.metadata.sourceFingerprint,
+  }
+}
+
+function createComposeApplyResult(
+  projectName: string,
+  result: WorkbenchComposeApplyApiResult,
+): WorkbenchComposeApplyResultState {
+  return {
+    projectName,
+    revision: result.metadata.revision,
+    sourceFingerprint: result.metadata.sourceFingerprint,
+    composePath: result.metadata.composePath,
+    composeBytes: result.composeBytes,
+    backupId: result.backup.backupId,
+    backupSequence: result.backup.sequence,
+    backupRevision: result.backup.revision,
+    retainedBackups: result.retention.retainedCount,
+    prunedBackups: result.retention.prunedCount,
+  }
+}
+
+function createComposeRestoreResult(
+  projectName: string,
+  result: WorkbenchComposeRestoreApiResult,
+): WorkbenchComposeRestoreResultState {
+  return {
+    projectName,
+    revision: result.metadata.revision,
+    sourceFingerprint: result.metadata.sourceFingerprint?.trim() || '',
+    restoredFingerprint: result.metadata.restoredFingerprint?.trim() || '',
+    composePath: result.metadata.composePath,
+    composeBytes: result.composeBytes,
+    backupId: result.backup.backupId,
+    backupSequence: result.backup.sequence,
+    backupRevision: result.backup.revision,
+    backupCreatedAt: result.backup.createdAt,
+    requiresImport: result.metadata.requiresImport,
+  }
+}
+
 export const useWorkbenchStore = defineStore('workbench', () => {
   const projectName = ref<string | null>(null)
   const snapshot = ref<WorkbenchStackSnapshot | null>(null)
@@ -244,6 +347,18 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const moduleMutationError = ref<ApiError | null>(null)
   const activeModuleMutationSelectorKey = ref<string | null>(null)
   const lastModuleMutationResult = ref<WorkbenchModuleMutationResult | null>(null)
+  const previewStatus = ref<WorkbenchRequestStatus>('idle')
+  const previewError = ref<ApiError | null>(null)
+  const lastPreviewResult = ref<WorkbenchComposePreviewResultState | null>(null)
+  const applyStatus = ref<WorkbenchRequestStatus>('idle')
+  const applyError = ref<ApiError | null>(null)
+  const lastApplyResult = ref<WorkbenchComposeApplyResultState | null>(null)
+  const composeBackups = ref<WorkbenchComposeBackupMetadata[]>([])
+  const backupInventoryStatus = ref<WorkbenchRequestStatus>('idle')
+  const backupInventoryError = ref<ApiError | null>(null)
+  const restoreStatus = ref<WorkbenchRequestStatus>('idle')
+  const restoreError = ref<ApiError | null>(null)
+  const lastRestoreResult = ref<WorkbenchComposeRestoreResultState | null>(null)
   const portSuggestionStatusByKey = ref<Record<string, WorkbenchRequestStatus>>({})
   const portSuggestionErrorByKey = ref<Record<string, ApiError | null>>({})
   const portSuggestionResultByKey = ref<Record<string, WorkbenchPortSuggestionResult | null>>({})
@@ -258,7 +373,44 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   let portMutationRequestID = 0
   let resourceMutationRequestID = 0
   let moduleMutationRequestID = 0
+  let previewRequestID = 0
+  let applyRequestID = 0
+  let backupInventoryRequestID = 0
+  let restoreRequestID = 0
   const portSuggestionRequestIDs = new Map<string, number>()
+
+  const resetComposePreviewState = () => {
+    previewStatus.value = 'idle'
+    previewError.value = null
+    lastPreviewResult.value = null
+  }
+
+  const resetComposeApplyState = () => {
+    applyStatus.value = 'idle'
+    applyError.value = null
+    lastApplyResult.value = null
+  }
+
+  const resetComposeRestoreState = () => {
+    restoreStatus.value = 'idle'
+    restoreError.value = null
+    lastRestoreResult.value = null
+  }
+
+  const clearRestoreRequirementIfResolved = (nextSnapshot: WorkbenchStackSnapshot) => {
+    const restoreResult = lastRestoreResult.value
+    if (!restoreResult?.requiresImport) return
+    if (nextSnapshot.sourceFingerprint.trim() !== restoreResult.restoredFingerprint.trim()) return
+
+    restoreStatus.value = 'idle'
+    restoreError.value = null
+    lastRestoreResult.value = null
+  }
+
+  const resetComposeExecutionState = () => {
+    resetComposePreviewState()
+    resetComposeApplyState()
+  }
 
   const resetPortSuggestions = () => {
     portSuggestionStatusByKey.value = {}
@@ -290,6 +442,11 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     moduleMutationError.value = null
     activeModuleMutationSelectorKey.value = null
     lastModuleMutationResult.value = null
+    composeBackups.value = []
+    backupInventoryStatus.value = 'idle'
+    backupInventoryError.value = null
+    resetComposeRestoreState()
+    resetComposeExecutionState()
     resetPortSuggestions()
   }
 
@@ -318,6 +475,11 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     moduleMutationError.value = null
     activeModuleMutationSelectorKey.value = null
     lastModuleMutationResult.value = null
+    composeBackups.value = []
+    backupInventoryStatus.value = 'idle'
+    backupInventoryError.value = null
+    resetComposeRestoreState()
+    resetComposeExecutionState()
     resetPortSuggestions()
   }
 
@@ -338,12 +500,17 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     snapshotError.value = null
 
     try {
+      const previousSnapshotIdentity = snapshotIdentity(snapshot.value)
       const { data } = await workbenchApi.getSnapshot(normalizedProjectName)
       if (requestID !== snapshotRequestID || projectName.value !== normalizedProjectName) {
         return snapshot.value
       }
 
       applySnapshotState(data.stack, snapshot, snapshotStatus, snapshotError)
+      clearRestoreRequirementIfResolved(data.stack)
+      if (previousSnapshotIdentity !== snapshotIdentity(data.stack)) {
+        resetComposeExecutionState()
+      }
       resetPortSuggestions()
       return data.stack
     } catch (error: unknown) {
@@ -397,7 +564,12 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         return lastImportResult.value
       }
 
+      const previousSnapshotIdentity = snapshotIdentity(snapshot.value)
       applySnapshotState(data.stack, snapshot, snapshotStatus, snapshotError)
+      clearRestoreRequirementIfResolved(data.stack)
+      if (previousSnapshotIdentity !== snapshotIdentity(data.stack)) {
+        resetComposeExecutionState()
+      }
       resetPortSuggestions()
 
       const result: WorkbenchImportResult = {
@@ -436,6 +608,45 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     }
   }
 
+  async function fetchComposeBackups(
+    normalizedProjectName: string,
+    options: { setLoading: boolean } = { setLoading: true },
+  ): Promise<WorkbenchComposeBackupMetadata[]> {
+    const requestID = ++backupInventoryRequestID
+    projectName.value = normalizedProjectName
+    if (options.setLoading) {
+      backupInventoryStatus.value = 'loading'
+      backupInventoryError.value = null
+    }
+
+    try {
+      const { data } = await workbenchApi.getComposeBackups(normalizedProjectName)
+      if (
+        requestID !== backupInventoryRequestID ||
+        projectName.value !== normalizedProjectName
+      ) {
+        return composeBackups.value
+      }
+
+      composeBackups.value = data.backups
+      backupInventoryStatus.value = 'ready'
+      backupInventoryError.value = null
+      return data.backups
+    } catch (error: unknown) {
+      if (
+        requestID !== backupInventoryRequestID ||
+        projectName.value !== normalizedProjectName
+      ) {
+        return composeBackups.value
+      }
+
+      composeBackups.value = []
+      backupInventoryStatus.value = 'error'
+      backupInventoryError.value = parseApiError(error)
+      return []
+    }
+  }
+
   async function resolvePorts(targetProjectName: string): Promise<WorkbenchPortResolveResult | null> {
     const normalizedProjectName = normalizeProjectName(targetProjectName)
     if (!normalizedProjectName) {
@@ -453,12 +664,17 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     resolveError.value = null
 
     try {
+      const previousSnapshotIdentity = snapshotIdentity(snapshot.value)
       const { data } = await workbenchApi.resolvePorts(normalizedProjectName)
       if (requestID !== resolveRequestID || projectName.value !== normalizedProjectName) {
         return lastResolveResult.value
       }
 
       applySnapshotState(data.stack, snapshot, snapshotStatus, snapshotError)
+      clearRestoreRequirementIfResolved(data.stack)
+      if (previousSnapshotIdentity !== snapshotIdentity(data.stack)) {
+        resetComposeExecutionState()
+      }
       resetPortSuggestions()
       const result = createPortResolveResult(data.stack, data.resolve)
       lastResolveResult.value = result
@@ -497,12 +713,17 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     activePortMutationSelectorKey.value = selectorKey
 
     try {
+      const previousSnapshotIdentity = snapshotIdentity(snapshot.value)
       const { data } = await workbenchApi.mutatePort(normalizedProjectName, payload)
       if (requestID !== portMutationRequestID || projectName.value !== normalizedProjectName) {
         return lastPortMutationResult.value
       }
 
       applySnapshotState(data.stack, snapshot, snapshotStatus, snapshotError)
+      clearRestoreRequirementIfResolved(data.stack)
+      if (previousSnapshotIdentity !== snapshotIdentity(data.stack)) {
+        resetComposeExecutionState()
+      }
       resetPortSuggestions()
       const result = createPortMutationResult(data.stack, data.mutation)
       lastPortMutationResult.value = result
@@ -552,6 +773,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     activeResourceMutationServiceName.value = normalizedServiceName
 
     try {
+      const previousSnapshotIdentity = snapshotIdentity(snapshot.value)
       const { data } = await workbenchApi.mutateResource(
         normalizedProjectName,
         normalizedServiceName,
@@ -565,6 +787,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       }
 
       applySnapshotState(data.stack, snapshot, snapshotStatus, snapshotError)
+      clearRestoreRequirementIfResolved(data.stack)
+      if (previousSnapshotIdentity !== snapshotIdentity(data.stack)) {
+        resetComposeExecutionState()
+      }
       resetPortSuggestions()
       const result = createResourceMutationResult(data.stack, data.mutation)
       lastResourceMutationResult.value = result
@@ -624,6 +850,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       }
 
       applySnapshotState(data.stack, snapshot, snapshotStatus, snapshotError)
+      clearRestoreRequirementIfResolved(data.stack)
       const result = createPortSuggestionResult(data.stack, data.suggestions)
       portSuggestionResultByKey.value = {
         ...portSuggestionResultByKey.value,
@@ -687,6 +914,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     activeModuleMutationSelectorKey.value = selectorKey
 
     try {
+      const previousSnapshotIdentity = snapshotIdentity(snapshot.value)
       const { data } = await workbenchApi.mutateModule(normalizedProjectName, {
         ...payload,
         selector,
@@ -696,6 +924,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       }
 
       applySnapshotState(data.stack, snapshot, snapshotStatus, snapshotError)
+      clearRestoreRequirementIfResolved(data.stack)
+      if (previousSnapshotIdentity !== snapshotIdentity(data.stack)) {
+        resetComposeExecutionState()
+      }
       resetPortSuggestions()
       const result = createModuleMutationResult(data.stack, data.mutation)
       lastModuleMutationResult.value = result
@@ -713,6 +945,224 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       if (requestID === moduleMutationRequestID) {
         activeModuleMutationSelectorKey.value = null
       }
+    }
+  }
+
+  async function previewCompose(
+    targetProjectName: string,
+    payload: WorkbenchComposePreviewRequest = {},
+  ): Promise<WorkbenchComposePreviewResultState | null> {
+    const normalizedProjectName = normalizeProjectName(targetProjectName)
+    if (!normalizedProjectName) {
+      reset()
+      previewStatus.value = 'error'
+      previewError.value = createProjectNameError()
+      return null
+    }
+
+    syncProjectContext(normalizedProjectName)
+
+    const currentSnapshot = snapshot.value
+    if (!currentSnapshot) {
+      previewStatus.value = 'error'
+      previewError.value = createSnapshotRequiredError(
+        'Import a Workbench snapshot before generating a compose preview.',
+      )
+      lastPreviewResult.value = null
+      return null
+    }
+
+    const requestID = ++previewRequestID
+    projectName.value = normalizedProjectName
+    previewStatus.value = 'loading'
+    previewError.value = null
+
+    try {
+      const expectedRevision = payload.expectedRevision ?? currentSnapshot.revision
+      const { data } = await workbenchApi.previewCompose(normalizedProjectName, {
+        expectedRevision,
+      })
+      if (requestID !== previewRequestID || projectName.value !== normalizedProjectName) {
+        return lastPreviewResult.value
+      }
+
+      const result = createComposePreviewResult(currentSnapshot.projectName, data.preview)
+      lastPreviewResult.value = result
+      previewStatus.value = 'ready'
+      return result
+    } catch (error: unknown) {
+      if (requestID !== previewRequestID || projectName.value !== normalizedProjectName) {
+        return lastPreviewResult.value
+      }
+
+      previewStatus.value = 'error'
+      previewError.value = parseApiError(error)
+      lastPreviewResult.value = null
+      return null
+    }
+  }
+
+  async function applyCompose(
+    targetProjectName: string,
+    payload: WorkbenchComposeApplyRequest = {},
+  ): Promise<WorkbenchComposeApplyResultState | null> {
+    const normalizedProjectName = normalizeProjectName(targetProjectName)
+    if (!normalizedProjectName) {
+      reset()
+      applyStatus.value = 'error'
+      applyError.value = createProjectNameError()
+      return null
+    }
+
+    syncProjectContext(normalizedProjectName)
+
+    const currentSnapshot = snapshot.value
+    if (!currentSnapshot) {
+      applyStatus.value = 'error'
+      applyError.value = createSnapshotRequiredError(
+        'Import a Workbench snapshot before applying compose changes.',
+      )
+      return null
+    }
+
+    const requestID = ++applyRequestID
+    projectName.value = normalizedProjectName
+    applyStatus.value = 'loading'
+    applyError.value = null
+
+    try {
+      const expectedRevision = payload.expectedRevision ?? currentSnapshot.revision
+      const expectedSourceFingerprint =
+        payload.expectedSourceFingerprint?.trim() || currentSnapshot.sourceFingerprint
+      const { data } = await workbenchApi.applyCompose(normalizedProjectName, {
+        expectedRevision,
+        expectedSourceFingerprint,
+      })
+      if (requestID !== applyRequestID || projectName.value !== normalizedProjectName) {
+        return lastApplyResult.value
+      }
+
+      if (snapshot.value) {
+        applySnapshotState(
+          {
+            ...snapshot.value,
+            revision: data.apply.metadata.revision,
+            sourceFingerprint: data.apply.metadata.sourceFingerprint,
+            composePath: data.apply.metadata.composePath,
+          },
+          snapshot,
+          snapshotStatus,
+          snapshotError,
+        )
+        clearRestoreRequirementIfResolved(snapshot.value)
+      }
+      await fetchComposeBackups(normalizedProjectName, { setLoading: false })
+
+      resetComposePreviewState()
+      const result = createComposeApplyResult(currentSnapshot.projectName, data.apply)
+      lastApplyResult.value = result
+      applyStatus.value = 'ready'
+      return result
+    } catch (error: unknown) {
+      if (requestID !== applyRequestID || projectName.value !== normalizedProjectName) {
+        return lastApplyResult.value
+      }
+
+      const parsedError = parseApiError(error)
+      applyStatus.value = 'error'
+      applyError.value = parsedError
+      if (
+        parsedError.code === 'WB-409-STALE-REVISION' ||
+        parsedError.code === 'WB-409-DRIFT-DETECTED' ||
+        parsedError.code === 'WB-422-VALIDATION'
+      ) {
+        resetComposePreviewState()
+      }
+      return null
+    }
+  }
+
+  async function loadComposeBackups(
+    targetProjectName: string,
+  ): Promise<WorkbenchComposeBackupMetadata[]> {
+    const normalizedProjectName = normalizeProjectName(targetProjectName)
+    if (!normalizedProjectName) {
+      reset()
+      backupInventoryStatus.value = 'error'
+      backupInventoryError.value = createProjectNameError()
+      return []
+    }
+
+    syncProjectContext(normalizedProjectName)
+    return fetchComposeBackups(normalizedProjectName)
+  }
+
+  async function restoreCompose(
+    targetProjectName: string,
+    payload: WorkbenchComposeRestoreRequest,
+  ): Promise<WorkbenchComposeRestoreResultState | null> {
+    const normalizedProjectName = normalizeProjectName(targetProjectName)
+    if (!normalizedProjectName) {
+      reset()
+      restoreStatus.value = 'error'
+      restoreError.value = createProjectNameError()
+      return null
+    }
+
+    syncProjectContext(normalizedProjectName)
+
+    const currentSnapshot = snapshot.value
+    if (!currentSnapshot) {
+      restoreStatus.value = 'error'
+      restoreError.value = createSnapshotRequiredError(
+        'Import a Workbench snapshot before restoring compose backups.',
+      )
+      return null
+    }
+
+    const backupId = payload.backupId.trim()
+    if (!backupId) {
+      restoreStatus.value = 'error'
+      restoreError.value = createBackupRequiredError()
+      return null
+    }
+
+    const requestID = ++restoreRequestID
+    projectName.value = normalizedProjectName
+    restoreStatus.value = 'loading'
+    restoreError.value = null
+
+    try {
+      const { data } = await workbenchApi.restoreCompose(normalizedProjectName, { backupId })
+      if (requestID !== restoreRequestID || projectName.value !== normalizedProjectName) {
+        return lastRestoreResult.value
+      }
+
+      if (snapshot.value) {
+        applySnapshotState(
+          {
+            ...snapshot.value,
+            composePath: data.restore.metadata.composePath,
+          },
+          snapshot,
+          snapshotStatus,
+          snapshotError,
+        )
+      }
+
+      resetComposeExecutionState()
+      const result = createComposeRestoreResult(currentSnapshot.projectName, data.restore)
+      lastRestoreResult.value = result
+      restoreStatus.value = 'ready'
+      return result
+    } catch (error: unknown) {
+      if (requestID !== restoreRequestID || projectName.value !== normalizedProjectName) {
+        return lastRestoreResult.value
+      }
+
+      restoreStatus.value = 'error'
+      restoreError.value = parseApiError(error)
+      return null
     }
   }
 
@@ -758,6 +1208,18 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     moduleMutationError,
     activeModuleMutationSelectorKey,
     lastModuleMutationResult,
+    previewStatus,
+    previewError,
+    lastPreviewResult,
+    applyStatus,
+    applyError,
+    lastApplyResult,
+    composeBackups,
+    backupInventoryStatus,
+    backupInventoryError,
+    restoreStatus,
+    restoreError,
+    lastRestoreResult,
     portSuggestionStatusByKey,
     portSuggestionErrorByKey,
     portSuggestionResultByKey,
@@ -771,6 +1233,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     mutatePort,
     mutateResource,
     mutateModule,
+    previewCompose,
+    applyCompose,
+    loadComposeBackups,
+    restoreCompose,
     loadPortSuggestions,
     clearPortSuggestion,
   }

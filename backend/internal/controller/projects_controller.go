@@ -828,6 +828,32 @@ func (c *ProjectsController) WorkbenchComposeApply(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"apply": result})
 }
 
+func (c *ProjectsController) WorkbenchComposeBackups(ctx *gin.Context) {
+	session, ok := middleware.SessionFromContext(ctx)
+	if !ok || !isAdminRole(session.Role) {
+		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		return
+	}
+
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.workbench == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeWorkbenchStorageFailed, "workbench service unavailable", nil)
+		return
+	}
+
+	backups, err := c.workbench.ListComposeBackups(ctx.Request.Context(), project)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectWorkbenchReadFailed, "failed to load workbench compose backups")
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"backups": backups})
+}
+
 func (c *ProjectsController) WorkbenchComposeRestore(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {

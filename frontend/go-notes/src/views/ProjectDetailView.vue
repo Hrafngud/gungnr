@@ -30,6 +30,7 @@ import type {
 import {
   buildWorkbenchModuleSelectorKey,
   buildWorkbenchPortSelectorKey,
+  type WorkbenchComposeBackupMetadata,
   type WorkbenchMutationIssue,
   type WorkbenchModuleMutationSummary,
   type WorkbenchPortMutationSummary,
@@ -111,6 +112,34 @@ interface WorkbenchInlineFeedbackState {
   message: string
 }
 
+interface WorkbenchComposeIssueInventoryRow {
+  key: string
+  source: 'preview' | 'apply'
+  sourceLabel: string
+  issue: WorkbenchMutationIssue
+}
+
+type WorkbenchRemediationAction = 'refresh' | 'import' | 'refresh_backups'
+
+interface WorkbenchStructuredErrorDetails {
+  revision?: number
+  expectedRevision?: number
+  sourceFingerprint?: string
+  expectedSourceFingerprint?: string
+  currentSourceFingerprint?: string
+  composePath?: string
+}
+
+interface WorkbenchRemediationState {
+  tone: BadgeTone
+  sourceLabel: string
+  title: string
+  message: string
+  primaryAction?: WorkbenchRemediationAction
+  secondaryAction?: WorkbenchRemediationAction
+  details?: WorkbenchStructuredErrorDetails
+}
+
 const route = useRoute()
 const authStore = useAuthStore()
 const toastStore = useToastStore()
@@ -134,6 +163,8 @@ const archiveOptions = ref<ProjectArchiveOptions>({
   removeDns: true,
 })
 const archiveConfirmInput = ref('')
+const workbenchRestoreSelectedBackupId = ref('')
+const workbenchRestoreConfirmInput = ref('')
 const workbenchPortManualInputs = ref<Record<string, string>>({})
 const workbenchResourceInputs = ref<Record<string, WorkbenchResourceInputState>>({})
 const isAdmin = computed(() => authStore.isAdmin)
@@ -201,6 +232,18 @@ const workbenchActiveModuleMutationSelectorKey = computed(
   () => workbenchStore.activeModuleMutationSelectorKey,
 )
 const workbenchLastModuleMutationResult = computed(() => workbenchStore.lastModuleMutationResult)
+const workbenchPreviewStatus = computed(() => workbenchStore.previewStatus)
+const workbenchPreviewError = computed(() => workbenchStore.previewError)
+const workbenchLastPreviewResult = computed(() => workbenchStore.lastPreviewResult)
+const workbenchApplyStatus = computed(() => workbenchStore.applyStatus)
+const workbenchApplyError = computed(() => workbenchStore.applyError)
+const workbenchLastApplyResult = computed(() => workbenchStore.lastApplyResult)
+const workbenchComposeBackups = computed(() => workbenchStore.composeBackups)
+const workbenchBackupInventoryStatus = computed(() => workbenchStore.backupInventoryStatus)
+const workbenchBackupInventoryError = computed(() => workbenchStore.backupInventoryError)
+const workbenchRestoreStatus = computed(() => workbenchStore.restoreStatus)
+const workbenchRestoreError = computed(() => workbenchStore.restoreError)
+const workbenchLastRestoreResult = computed(() => workbenchStore.lastRestoreResult)
 const workbenchPortSuggestionStatusByKey = computed(() => workbenchStore.portSuggestionStatusByKey)
 const workbenchPortSuggestionErrorByKey = computed(() => workbenchStore.portSuggestionErrorByKey)
 const workbenchPortSuggestionResultByKey = computed(() => workbenchStore.portSuggestionResultByKey)
@@ -269,6 +312,19 @@ const workbenchImportFeedbackTone = computed<'ok' | 'warn'>(() => {
   if (!result) return 'ok'
   return result.changed ? 'ok' : 'warn'
 })
+const workbenchImportFeedbackState = computed<WorkbenchInlineFeedbackState | null>(() => {
+  if (workbenchImportError.value) {
+    return workbenchMutationFeedbackFromError(workbenchImportError.value, 'import')
+  }
+
+  const result = workbenchLastImportResult.value
+  if (!result) return null
+
+  return {
+    tone: workbenchImportFeedbackTone.value,
+    message: workbenchImportFeedback.value,
+  }
+})
 const workbenchImportFeedback = computed(() => {
   const result = workbenchLastImportResult.value
   if (!result) return ''
@@ -280,16 +336,7 @@ const workbenchImportFeedback = computed(() => {
 const workbenchResolveFeedback = computed<WorkbenchInlineFeedbackState | null>(() => {
   const parsedError = workbenchResolveError.value
   if (parsedError) {
-    const issues = workbenchIssueListFromDetails(parsedError.details)
-    const issueMessage = issues[0]?.message?.trim()
-    return {
-      tone: parsedError.code === 'WB-422-VALIDATION' ? 'warn' : 'error',
-      message: parsedError.code
-        ? issueMessage
-          ? `[${parsedError.code}] ${parsedError.message} ${issueMessage}`
-          : `[${parsedError.code}] ${parsedError.message}`
-        : parsedError.message,
-    }
+    return workbenchMutationFeedbackFromError(parsedError, 'port resolution')
   }
 
   const result = workbenchLastResolveResult.value
@@ -306,6 +353,255 @@ const workbenchResolveFeedback = computed<WorkbenchInlineFeedbackState | null>((
     tone: result.conflict > 0 || result.unavailable > 0 ? 'warn' : 'ok',
     message: `Resolver saved revision ${result.revision}. Assigned ${result.assigned}, conflicts ${result.conflict}, unavailable ${result.unavailable}.`,
   }
+})
+const workbenchPreviewFeedback = computed<WorkbenchInlineFeedbackState | null>(() => {
+  if (workbenchComposeImportRequired.value) {
+    return {
+      tone: 'warn',
+      message:
+        'A restore changed the compose file on disk, so the stored Workbench snapshot is now stale. Re-import the restored compose before preview/apply.',
+    }
+  }
+
+  if (workbenchPreviewError.value) {
+    return workbenchComposeFeedbackFromError(workbenchPreviewError.value, 'preview')
+  }
+
+  const preview = workbenchLastPreviewResult.value
+  if (!preview) return null
+
+  if (!workbenchPreviewMatchesSnapshot.value) {
+    return {
+      tone: 'warn',
+      message:
+        'The last generated preview no longer matches the visible snapshot revision or source fingerprint. Generate a fresh preview before apply.',
+    }
+  }
+
+  return {
+    tone: 'ok',
+    message: `Generated compose preview from revision ${preview.revision}. Apply remains enabled while the stored snapshot revision and fingerprint stay unchanged.`,
+  }
+})
+const workbenchApplyFeedback = computed<WorkbenchInlineFeedbackState | null>(() => {
+  if (workbenchApplyError.value) {
+    return workbenchComposeFeedbackFromError(workbenchApplyError.value, 'apply')
+  }
+
+  const result = workbenchLastApplyResult.value
+  if (!result) return null
+
+  return {
+    tone: 'ok',
+    message: `Applied ${result.composeBytes}-byte compose to ${result.composePath}. Backup ${result.backupId} is retained (${result.retainedBackups} total, ${result.prunedBackups} pruned).`,
+  }
+})
+const workbenchLatestComposeBackup = computed<WorkbenchComposeBackupMetadata | null>(() => {
+  const backups = workbenchComposeBackups.value
+  const latestBackup = backups.length > 0 ? backups[backups.length - 1] : null
+  return latestBackup ?? null
+})
+const workbenchSelectedComposeBackup = computed<WorkbenchComposeBackupMetadata | null>(() => {
+  const selectedBackupId = workbenchRestoreSelectedBackupId.value.trim().toLowerCase()
+  if (!selectedBackupId) return null
+
+  return (
+    workbenchComposeBackups.value.find((backup) => backup.backupId === selectedBackupId) ?? null
+  )
+})
+const workbenchComposeImportRequired = computed(() => {
+  const restore = workbenchLastRestoreResult.value
+  if (!restore?.requiresImport) return false
+
+  const snapshotFingerprint = workbenchSnapshot.value?.sourceFingerprint?.trim() || ''
+  return snapshotFingerprint !== restore.restoredFingerprint.trim()
+})
+const workbenchBackupInventoryErrorMessage = computed(() => {
+  const parsedError = workbenchBackupInventoryError.value
+  if (!parsedError) return ''
+  return parsedError.code ? `[${parsedError.code}] ${parsedError.message}` : parsedError.message
+})
+const workbenchRestoreConfirmationPhrase = computed(() => {
+  const selectedBackup = workbenchSelectedComposeBackup.value
+  return selectedBackup ? `RESTORE ${selectedBackup.backupId}` : 'RESTORE BACKUP'
+})
+const workbenchRestoreLabel = computed(() => {
+  if (workbenchRestoreStatus.value === 'loading') return 'Restoring compose...'
+  return 'Restore selected backup'
+})
+const workbenchRestoreActionDisabled = computed(() => {
+  if (!isAdmin.value) return true
+  return (
+    workbenchStatus.value === 'loading' ||
+    workbenchImportStatus.value === 'loading' ||
+    workbenchResolveStatus.value === 'loading' ||
+    workbenchPortMutationStatus.value === 'loading' ||
+    workbenchResourceMutationStatus.value === 'loading' ||
+    workbenchModuleMutationStatus.value === 'loading' ||
+    workbenchPreviewStatus.value === 'loading' ||
+    workbenchApplyStatus.value === 'loading' ||
+    workbenchRestoreStatus.value === 'loading' ||
+    workbenchBackupInventoryStatus.value === 'loading' ||
+    !workbenchSnapshotReady.value ||
+    !workbenchSelectedComposeBackup.value
+  )
+})
+const canRestoreWorkbenchCompose = computed(() => {
+  if (workbenchRestoreActionDisabled.value) return false
+  return workbenchRestoreConfirmInput.value.trim() === workbenchRestoreConfirmationPhrase.value
+})
+const workbenchRestoreFeedback = computed<WorkbenchInlineFeedbackState | null>(() => {
+  if (workbenchRestoreError.value) {
+    return workbenchRestoreFeedbackFromError(workbenchRestoreError.value)
+  }
+
+  const result = workbenchLastRestoreResult.value
+  if (!result) return null
+
+  if (result.requiresImport) {
+    return {
+      tone: 'warn',
+      message: `Restored backup ${result.backupId} (${result.composeBytes} bytes). The compose file now differs from the stored Workbench snapshot, so re-import before preview/apply.`,
+    }
+  }
+
+  return {
+    tone: 'ok',
+    message: `Restored backup ${result.backupId} to ${result.composePath}. Preview/apply state was reset to avoid using stale compose output.`,
+  }
+})
+const workbenchComposeRemediationState = computed<WorkbenchRemediationState | null>(() => {
+  if (workbenchComposeImportRequired.value) {
+    return {
+      tone: 'warn',
+      sourceLabel: 'Restore follow-up',
+      title: 'Re-import restored compose',
+      message:
+        'The last restore changed the on-disk compose artifact. Preview and apply remain blocked until the stored Workbench snapshot is imported from that restored file.',
+      primaryAction: 'import',
+      details: {
+        sourceFingerprint: workbenchSnapshot.value?.sourceFingerprint?.trim() || undefined,
+        currentSourceFingerprint:
+          workbenchLastRestoreResult.value?.restoredFingerprint?.trim() || undefined,
+      },
+    }
+  }
+
+  const applyError = workbenchApplyError.value
+  if (applyError?.code === 'WB-409-DRIFT-DETECTED') {
+    return {
+      tone: 'warn',
+      sourceLabel: 'Apply guard',
+      title: 'Compose drift detected',
+      message:
+        'The compose file on disk no longer matches the stored Workbench snapshot. Import the current compose source, then generate a fresh preview before applying again.',
+      primaryAction: 'import',
+      secondaryAction: 'refresh',
+      details: workbenchStructuredErrorDetailsFromUnknown(applyError.details),
+    }
+  }
+
+  if (applyError?.code === 'WB-409-STALE-REVISION') {
+    return {
+      tone: 'warn',
+      sourceLabel: 'Apply guard',
+      title: 'Snapshot revision changed',
+      message:
+        'Apply was submitted against an older Workbench revision. Refresh the shell to load the current snapshot, then generate a fresh preview before retrying apply.',
+      primaryAction: 'refresh',
+      details: workbenchStructuredErrorDetailsFromUnknown(applyError.details),
+    }
+  }
+
+  const previewError = workbenchPreviewError.value
+  if (
+    previewError?.code === 'WB-422-VALIDATION' &&
+    workbenchIssueHasCode(previewError.details, 'WB-VAL-EXPECTED-REVISION-MISMATCH')
+  ) {
+    return {
+      tone: 'warn',
+      sourceLabel: 'Preview guard',
+      title: 'Preview requested from a stale revision',
+      message:
+        'The preview request used a revision that no longer matches the stored Workbench snapshot. Refresh the shell first so preview runs against the latest revision.',
+      primaryAction: 'refresh',
+      details: workbenchStructuredErrorDetailsFromUnknown(previewError.details),
+    }
+  }
+
+  if (previewError?.code === 'WB-409-LOCKED' || applyError?.code === 'WB-409-LOCKED') {
+    return {
+      tone: 'warn',
+      sourceLabel: previewError?.code === 'WB-409-LOCKED' ? 'Preview guard' : 'Apply guard',
+      title: 'Workbench is busy',
+      message:
+        'Another Workbench operation still holds the project lock. Wait for it to finish, then retry the blocked action from this shell.',
+      primaryAction: 'refresh',
+    }
+  }
+
+  if (
+    (previewError?.code === 'WB-422-VALIDATION' &&
+      !workbenchIssueHasCode(previewError.details, 'WB-VAL-EXPECTED-REVISION-MISMATCH')) ||
+    applyError?.code === 'WB-422-VALIDATION'
+  ) {
+    return {
+      tone: 'warn',
+      sourceLabel: applyError?.code === 'WB-422-VALIDATION' ? 'Apply guard' : 'Preview guard',
+      title: 'Validation blockers are active',
+      message:
+        'The stored Workbench model still has validation issues. Resolve the listed blockers below, then generate a fresh preview before applying again.',
+    }
+  }
+
+  return null
+})
+const workbenchRestoreRemediationState = computed<WorkbenchRemediationState | null>(() => {
+  if (workbenchComposeImportRequired.value) {
+    return {
+      tone: 'warn',
+      sourceLabel: 'Restore follow-up',
+      title: 'Import is still required',
+      message:
+        'This restored backup left the Workbench snapshot out of sync with the compose file on disk. Import the restored compose before preview/apply resumes.',
+      primaryAction: 'import',
+      details: {
+        sourceFingerprint: workbenchSnapshot.value?.sourceFingerprint?.trim() || undefined,
+        currentSourceFingerprint:
+          workbenchLastRestoreResult.value?.restoredFingerprint?.trim() || undefined,
+      },
+    }
+  }
+
+  const parsedError = workbenchRestoreError.value
+  if (!parsedError) return null
+
+  if (
+    parsedError.code === 'WB-404-BACKUP' ||
+    parsedError.code === 'WB-409-BACKUP-INTEGRITY'
+  ) {
+    return {
+      tone: 'warn',
+      sourceLabel: 'Restore guard',
+      title: 'Backup target needs refresh',
+      message:
+        'The selected restore target could not be used safely. Refresh the retained backup inventory before choosing another restore target.',
+      primaryAction: 'refresh_backups',
+    }
+  }
+
+  if (parsedError.code === 'WB-409-LOCKED') {
+    return {
+      tone: 'warn',
+      sourceLabel: 'Restore guard',
+      title: 'Restore is waiting on another operation',
+      message:
+        'Another Workbench mutation still owns the project lock. Wait for it to finish, then retry the restore from this panel.',
+      primaryAction: 'refresh_backups',
+    }
+  }
+
+  return null
 })
 const workbenchFingerprintLabel = computed(() => {
   const fingerprint = workbenchSnapshot.value?.sourceFingerprint?.trim()
@@ -334,6 +630,96 @@ const workbenchServiceInventory = computed<WorkbenchServiceInventoryRow[]>(() =>
   }))
 })
 const workbenchWarningsList = computed(() => workbenchSnapshot.value?.warnings ?? [])
+const workbenchPreviewIssues = computed(() =>
+  workbenchPreviewError.value ? workbenchIssueListFromDetails(workbenchPreviewError.value.details) : [],
+)
+const workbenchApplyIssues = computed(() =>
+  workbenchApplyError.value ? workbenchIssueListFromDetails(workbenchApplyError.value.details) : [],
+)
+const workbenchComposeIssueInventory = computed<WorkbenchComposeIssueInventoryRow[]>(() => [
+  ...workbenchPreviewIssues.value.map((issue, index) => ({
+    key: `preview-${issue.code}-${issue.path}-${index}`,
+    source: 'preview' as const,
+    sourceLabel: 'Preview',
+    issue,
+  })),
+  ...workbenchApplyIssues.value.map((issue, index) => ({
+    key: `apply-${issue.code}-${issue.path}-${index}`,
+    source: 'apply' as const,
+    sourceLabel: 'Apply',
+    issue,
+  })),
+])
+const workbenchPreviewMatchesSnapshot = computed(() => {
+  const preview = workbenchLastPreviewResult.value
+  const snapshot = workbenchSnapshot.value
+  if (!preview || !snapshot) return false
+  return (
+    preview.revision === snapshot.revision &&
+    preview.sourceFingerprint.trim() === snapshot.sourceFingerprint.trim()
+  )
+})
+const workbenchHasCleanPreview = computed(() => {
+  const preview = workbenchLastPreviewResult.value
+  return (
+    Boolean(preview?.compose) &&
+    !workbenchPreviewError.value &&
+    !workbenchComposeImportRequired.value &&
+    workbenchPreviewMatchesSnapshot.value
+  )
+})
+const workbenchPreviewLabel = computed(() => {
+  if (workbenchComposeImportRequired.value) return 'Import required before preview'
+  if (workbenchPreviewStatus.value === 'loading') return 'Generating preview...'
+  return 'Generate preview'
+})
+const workbenchApplyLabel = computed(() => {
+  if (workbenchApplyStatus.value === 'loading') return 'Applying compose...'
+  return 'Apply compose'
+})
+const workbenchPreviewStatusLabel = computed(() => {
+  if (workbenchComposeImportRequired.value) return 'Import required'
+  if (workbenchPreviewStatus.value === 'loading') return 'Generating'
+  if (workbenchHasCleanPreview.value) return 'Clean preview'
+  if (workbenchPreviewError.value) return 'Preview blocked'
+  if (workbenchLastPreviewResult.value) return 'Preview stale'
+  return 'Preview required'
+})
+const workbenchPreviewStatusTone = computed<BadgeTone>(() => {
+  if (workbenchComposeImportRequired.value) return 'warn'
+  if (workbenchPreviewStatus.value === 'loading') return 'warn'
+  if (workbenchHasCleanPreview.value) return 'ok'
+  if (workbenchPreviewError.value) {
+    return isWorkbenchComposeBlockedError(workbenchPreviewError.value, 'preview') ? 'warn' : 'error'
+  }
+  if (workbenchLastPreviewResult.value) return 'warn'
+  return 'neutral'
+})
+const workbenchPreviewComposeLineCount = computed(
+  () => workbenchLastPreviewResult.value?.compose.split('\n').length ?? 0,
+)
+const workbenchPreviewFingerprintLabel = computed(() => {
+  const fingerprint = workbenchLastPreviewResult.value?.sourceFingerprint?.trim()
+  return fingerprint || 'No preview generated'
+})
+const workbenchComposeActionBusy = computed(() =>
+  workbenchPreviewStatus.value === 'loading' ||
+  workbenchApplyStatus.value === 'loading' ||
+  workbenchRestoreStatus.value === 'loading',
+)
+const workbenchApplyActionDisabled = computed(() => {
+  if (!isAdmin.value) return true
+  return (
+    workbenchComposeActionBusy.value ||
+    workbenchComposeImportRequired.value ||
+    workbenchImportStatus.value === 'loading' ||
+    workbenchResolveStatus.value === 'loading' ||
+    workbenchPortMutationStatus.value === 'loading' ||
+    workbenchResourceMutationStatus.value === 'loading' ||
+    workbenchModuleMutationStatus.value === 'loading' ||
+    !workbenchHasCleanPreview.value
+  )
+})
 const workbenchPortInventory = computed<WorkbenchPortInventoryRow[]>(() => {
   const snapshot = workbenchSnapshot.value
   if (!snapshot) return []
@@ -686,6 +1072,45 @@ function workbenchIssueListFromDetails(details: unknown): WorkbenchMutationIssue
   )
 }
 
+function workbenchIssueHasCode(details: unknown, code: string): boolean {
+  return workbenchIssueListFromDetails(details).some((issue) => issue.code === code)
+}
+
+function workbenchStructuredErrorDetailsFromUnknown(
+  details: unknown,
+): WorkbenchStructuredErrorDetails | undefined {
+  if (!details || typeof details !== 'object') return undefined
+  const record = details as Record<string, unknown>
+  const result: WorkbenchStructuredErrorDetails = {}
+
+  if (typeof record.revision === 'number' && Number.isFinite(record.revision)) {
+    result.revision = record.revision
+  }
+  if (typeof record.expectedRevision === 'number' && Number.isFinite(record.expectedRevision)) {
+    result.expectedRevision = record.expectedRevision
+  }
+  if (typeof record.sourceFingerprint === 'string' && record.sourceFingerprint.trim()) {
+    result.sourceFingerprint = record.sourceFingerprint.trim()
+  }
+  if (
+    typeof record.expectedSourceFingerprint === 'string' &&
+    record.expectedSourceFingerprint.trim()
+  ) {
+    result.expectedSourceFingerprint = record.expectedSourceFingerprint.trim()
+  }
+  if (
+    typeof record.currentSourceFingerprint === 'string' &&
+    record.currentSourceFingerprint.trim()
+  ) {
+    result.currentSourceFingerprint = record.currentSourceFingerprint.trim()
+  }
+  if (typeof record.composePath === 'string' && record.composePath.trim()) {
+    result.composePath = record.composePath.trim()
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined
+}
+
 function workbenchMutationSummaryFromDetails(details: unknown): WorkbenchPortMutationSummary | null {
   if (!details || typeof details !== 'object') return null
   const summary = (details as Record<string, unknown>).summary
@@ -723,6 +1148,158 @@ function workbenchModuleMutationSummaryFromDetails(details: unknown): WorkbenchM
     return null
   }
   return summary as WorkbenchModuleMutationSummary
+}
+
+function isWorkbenchComposeBlockedCode(code?: string): boolean {
+  return (
+    code === 'WB-409-LOCKED' ||
+    code === 'WB-409-STALE-REVISION' ||
+    code === 'WB-409-DRIFT-DETECTED' ||
+    code === 'WB-422-VALIDATION'
+  )
+}
+
+function isWorkbenchComposeBlockedError(
+  parsedError: { code?: string; details?: unknown } | null | undefined,
+  operation: 'preview' | 'apply',
+): boolean {
+  if (!parsedError?.code) return false
+  if (
+    operation === 'preview' &&
+    parsedError.code === 'WB-422-VALIDATION' &&
+    workbenchIssueHasCode(parsedError.details, 'WB-VAL-EXPECTED-REVISION-MISMATCH')
+  ) {
+    return true
+  }
+  return isWorkbenchComposeBlockedCode(parsedError.code)
+}
+
+function workbenchComposeErrorGuidance(
+  parsedError: { code?: string; details?: unknown } | null,
+  operation: 'preview' | 'apply',
+): string {
+  const code = parsedError?.code
+  switch (code) {
+    case 'WB-409-LOCKED':
+      return 'Another Workbench operation is already active for this project. Wait for it to finish, then retry.'
+    case 'WB-409-STALE-REVISION':
+      return operation === 'preview'
+        ? 'Refresh the Workbench shell to load the latest revision, then generate a new preview.'
+        : 'Refresh the Workbench shell to load the latest revision, then preview again before apply.'
+    case 'WB-409-DRIFT-DETECTED':
+      return 'Re-import the current compose source, then generate a fresh preview before retrying apply.'
+    case 'WB-422-VALIDATION':
+      if (
+        operation === 'preview' &&
+        workbenchIssueHasCode(parsedError?.details, 'WB-VAL-EXPECTED-REVISION-MISMATCH')
+      ) {
+        return 'Refresh the Workbench shell to load the latest revision before generating another preview.'
+      }
+      return 'Resolve the listed Workbench validation issues in the stored model before retrying.'
+    case 'WB-500-STORAGE':
+      return 'Retry the operation. If it persists, inspect backend diagnostics because the stored snapshot could not be updated safely.'
+    default:
+      return ''
+  }
+}
+
+function workbenchComposeFeedbackFromError(
+  parsedError: { code?: string; message: string; details?: unknown } | null,
+  operation: 'preview' | 'apply',
+): WorkbenchInlineFeedbackState | null {
+  if (!parsedError) return null
+
+  const issues = workbenchIssueListFromDetails(parsedError.details)
+  const issueMessage = issues[0]?.message?.trim()
+  const message = parsedError.code
+    ? issueMessage
+      ? `[${parsedError.code}] ${parsedError.message} ${issueMessage}`
+      : `[${parsedError.code}] ${parsedError.message}`
+    : parsedError.message
+  const guidance = workbenchComposeErrorGuidance(parsedError, operation)
+
+  return {
+    tone: isWorkbenchComposeBlockedError(parsedError, operation) ? 'warn' : 'error',
+    message: guidance ? `${message} ${guidance}` : message,
+  }
+}
+
+function isWorkbenchMutationWarnCode(code?: string): boolean {
+  return code === 'WB-409-LOCKED' || code === 'WB-422-VALIDATION'
+}
+
+function workbenchMutationErrorGuidance(context: string, code?: string): string {
+  switch (code) {
+    case 'WB-409-LOCKED':
+      return 'Another Workbench operation is already active for this project. Wait for it to finish, then retry.'
+    case 'WB-422-VALIDATION':
+      return `Update the stored Workbench model to resolve the listed ${context} validation issue, then retry.`
+    case 'WB-500-STORAGE':
+      return 'Retry the operation. If it persists, inspect backend diagnostics because the Workbench snapshot could not be updated safely.'
+    default:
+      return ''
+  }
+}
+
+function workbenchMutationFeedbackFromError(
+  parsedError: { code?: string; message: string; details?: unknown } | null,
+  context: string,
+): WorkbenchInlineFeedbackState | null {
+  if (!parsedError) return null
+
+  const issues = workbenchIssueListFromDetails(parsedError.details)
+  const issueMessage = issues[0]?.message?.trim()
+  const message = parsedError.code
+    ? issueMessage
+      ? `[${parsedError.code}] ${parsedError.message} ${issueMessage}`
+      : `[${parsedError.code}] ${parsedError.message}`
+    : parsedError.message
+  const guidance = workbenchMutationErrorGuidance(context, parsedError.code)
+
+  return {
+    tone: isWorkbenchMutationWarnCode(parsedError.code) ? 'warn' : 'error',
+    message: guidance ? `${message} ${guidance}` : message,
+  }
+}
+
+function isWorkbenchRestoreBlockedCode(code?: string): boolean {
+  return (
+    code === 'WB-404-BACKUP' ||
+    code === 'WB-409-LOCKED' ||
+    code === 'WB-409-BACKUP-INTEGRITY'
+  )
+}
+
+function workbenchRestoreErrorGuidance(code?: string): string {
+  switch (code) {
+    case 'WB-404-BACKUP':
+      return 'Refresh the backup inventory and choose a retained backup target before retrying.'
+    case 'WB-409-LOCKED':
+      return 'Another Workbench operation is already active for this project. Wait for it to finish, then retry.'
+    case 'WB-409-BACKUP-INTEGRITY':
+      return 'The selected backup could not be trusted. Inspect the stored backup history on disk before attempting another restore.'
+    case 'WB-500-RESTORE':
+    case 'WB-500-STORAGE':
+      return 'Retry the restore. If it persists, inspect backend diagnostics because the compose artifact could not be replaced safely.'
+    default:
+      return ''
+  }
+}
+
+function workbenchRestoreFeedbackFromError(
+  parsedError: { code?: string; message: string; details?: unknown } | null,
+): WorkbenchInlineFeedbackState | null {
+  if (!parsedError) return null
+
+  const message = parsedError.code
+    ? `[${parsedError.code}] ${parsedError.message}`
+    : parsedError.message
+  const guidance = workbenchRestoreErrorGuidance(parsedError.code)
+
+  return {
+    tone: isWorkbenchRestoreBlockedCode(parsedError.code) ? 'warn' : 'error',
+    message: guidance ? `${message} ${guidance}` : message,
+  }
 }
 
 function workbenchPortInputValue(port: WorkbenchPortInventoryRow): string {
@@ -809,19 +1386,6 @@ function workbenchPortSuggestionStatus(port: WorkbenchPortInventoryRow): Workben
   return workbenchPortSuggestionStatusByKey.value[port.key] ?? 'idle'
 }
 
-function workbenchPortSuggestionErrorMessage(port: WorkbenchPortInventoryRow): string {
-  const parsedError = workbenchPortSuggestionErrorByKey.value[port.key]
-  if (!parsedError) return ''
-  const issues = workbenchIssueListFromDetails(parsedError.details)
-  const issueMessage = issues[0]?.message?.trim()
-  if (parsedError.code) {
-    return issueMessage
-      ? `[${parsedError.code}] ${parsedError.message} ${issueMessage}`
-      : `[${parsedError.code}] ${parsedError.message}`
-  }
-  return parsedError.message
-}
-
 function workbenchPortMutationFeedback(port: WorkbenchPortInventoryRow): WorkbenchInlineFeedbackState | null {
   const successfulResult = workbenchLastPortMutationResult.value
   if (
@@ -856,25 +1420,14 @@ function workbenchPortMutationFeedback(port: WorkbenchPortInventoryRow): Workben
     return null
   }
 
-  const issues = workbenchIssueListFromDetails(parsedError.details)
-  const issueMessage = issues[0]?.message?.trim()
-  return {
-    tone: parsedError.code === 'WB-422-VALIDATION' ? 'warn' : 'error',
-    message: parsedError.code
-      ? issueMessage
-        ? `[${parsedError.code}] ${parsedError.message} ${issueMessage}`
-        : `[${parsedError.code}] ${parsedError.message}`
-      : parsedError.message,
-  }
+  return workbenchMutationFeedbackFromError(parsedError, 'port')
 }
 
 function workbenchPortSuggestionFeedback(port: WorkbenchPortInventoryRow): WorkbenchInlineFeedbackState | null {
   const parsedError = workbenchPortSuggestionErrorByKey.value[port.key]
   if (parsedError) {
-    return {
-      tone: parsedError.code === 'WB-422-VALIDATION' ? 'warn' : 'error',
-      message: workbenchPortSuggestionErrorMessage(port),
-    }
+    const feedback = workbenchMutationFeedbackFromError(parsedError, 'suggestion')
+    if (feedback) return feedback
   }
 
   const result = workbenchPortSuggestionResultByKey.value[port.key]
@@ -907,6 +1460,9 @@ function workbenchResourceActionDisabled(resource: WorkbenchResourceInventoryRow
     workbenchPortMutationStatus.value === 'loading' ||
     workbenchResourceMutationStatus.value === 'loading' ||
     workbenchModuleMutationStatus.value === 'loading' ||
+    workbenchPreviewStatus.value === 'loading' ||
+    workbenchApplyStatus.value === 'loading' ||
+    workbenchRestoreStatus.value === 'loading' ||
     workbenchResourceMutationBusy(resource)
   )
 }
@@ -946,16 +1502,7 @@ function workbenchResourceMutationFeedback(
     return null
   }
 
-  const issues = workbenchIssueListFromDetails(parsedError.details)
-  const issueMessage = issues[0]?.message?.trim()
-  return {
-    tone: parsedError.code === 'WB-422-VALIDATION' ? 'warn' : 'error',
-    message: parsedError.code
-      ? issueMessage
-        ? `[${parsedError.code}] ${parsedError.message} ${issueMessage}`
-        : `[${parsedError.code}] ${parsedError.message}`
-      : parsedError.message,
-  }
+  return workbenchMutationFeedbackFromError(parsedError, 'resource')
 }
 
 function workbenchModuleMutationBusy(row: WorkbenchModuleInventoryRow): boolean {
@@ -972,6 +1519,9 @@ function workbenchModuleActionDisabled(row: WorkbenchModuleInventoryRow): boolea
     workbenchPortMutationStatus.value === 'loading' ||
     workbenchResourceMutationStatus.value === 'loading' ||
     workbenchModuleMutationStatus.value === 'loading' ||
+    workbenchPreviewStatus.value === 'loading' ||
+    workbenchApplyStatus.value === 'loading' ||
+    workbenchRestoreStatus.value === 'loading' ||
     workbenchModuleMutationBusy(row)
   )
 }
@@ -1006,15 +1556,42 @@ function workbenchModuleMutationFeedback(row: WorkbenchModuleInventoryRow): Work
     return null
   }
 
-  const issues = workbenchIssueListFromDetails(parsedError.details)
-  const issueMessage = issues[0]?.message?.trim()
-  return {
-    tone: parsedError.code === 'WB-422-VALIDATION' ? 'warn' : 'error',
-    message: parsedError.code
-      ? issueMessage
-        ? `[${parsedError.code}] ${parsedError.message} ${issueMessage}`
-        : `[${parsedError.code}] ${parsedError.message}`
-      : parsedError.message,
+  return workbenchMutationFeedbackFromError(parsedError, 'module')
+}
+
+function workbenchRemediationActionLabel(action: WorkbenchRemediationAction): string {
+  switch (action) {
+    case 'refresh':
+      return 'Refresh shell'
+    case 'import':
+      return 'Re-import compose'
+    case 'refresh_backups':
+      return 'Refresh backups'
+  }
+}
+
+function workbenchRemediationActionDisabled(action: WorkbenchRemediationAction): boolean {
+  switch (action) {
+    case 'refresh':
+      return workbenchStatus.value === 'loading'
+    case 'import':
+      return (
+        !isAdmin.value ||
+        workbenchImportStatus.value === 'loading' ||
+        workbenchResolveStatus.value === 'loading' ||
+        workbenchPortMutationStatus.value === 'loading' ||
+        workbenchResourceMutationStatus.value === 'loading' ||
+        workbenchModuleMutationStatus.value === 'loading' ||
+        workbenchPreviewStatus.value === 'loading' ||
+        workbenchApplyStatus.value === 'loading' ||
+        workbenchRestoreStatus.value === 'loading'
+      )
+    case 'refresh_backups':
+      return (
+        !isAdmin.value ||
+        workbenchBackupInventoryStatus.value === 'loading' ||
+        workbenchRestoreStatus.value === 'loading'
+      )
   }
 }
 
@@ -1072,6 +1649,9 @@ const loadWorkbench = () => {
     return
   }
   void workbenchStore.loadSnapshot(name)
+  if (isAdmin.value) {
+    void workbenchStore.loadComposeBackups(name)
+  }
 }
 
 const applyProjectJobsResponse = (data: JobListResponse) => {
@@ -1432,6 +2012,181 @@ const clearWorkbenchResourceFields = async (
   toastStore.success(`Stored resources cleared for ${resource.serviceName}.`, 'Workbench resources')
 }
 
+const previewWorkbenchCompose = async () => {
+  const name = projectName.value
+  if (!name) return
+  if (!workbenchComposeSupported.value || !workbenchSnapshotReady.value) {
+    toastStore.warn('Import a Workbench snapshot before generating a compose preview.', 'Workbench preview')
+    return
+  }
+  if (!isAdmin.value) {
+    toastStore.error('Admin access required.', 'Workbench preview blocked')
+    return
+  }
+  if (workbenchComposeImportRequired.value) {
+    toastStore.warn(
+      'Re-import the restored compose before generating a new preview.',
+      'Workbench preview',
+    )
+    return
+  }
+
+  const result = await workbenchStore.previewCompose(name)
+  if (!result) {
+    const parsedError = workbenchPreviewError.value
+    if (isWorkbenchComposeBlockedError(parsedError, 'preview')) {
+      toastStore.warn(parsedError?.message ?? 'Workbench compose preview was blocked.', 'Workbench preview')
+    } else {
+      toastStore.error(parsedError?.message ?? 'Workbench compose preview failed.', 'Workbench preview')
+    }
+    return
+  }
+
+  toastStore.success(`Compose preview generated from revision ${result.revision}.`, 'Workbench preview')
+}
+
+const applyWorkbenchCompose = async () => {
+  const name = projectName.value
+  if (!name) return
+  if (!workbenchComposeSupported.value || !workbenchSnapshotReady.value) {
+    toastStore.warn('Import a Workbench snapshot before applying compose changes.', 'Workbench apply')
+    return
+  }
+  if (!isAdmin.value) {
+    toastStore.error('Admin access required.', 'Workbench apply blocked')
+    return
+  }
+  if (workbenchComposeImportRequired.value) {
+    toastStore.warn(
+      'Re-import the restored compose before preview/apply.',
+      'Workbench apply',
+    )
+    return
+  }
+  if (!workbenchHasCleanPreview.value) {
+    toastStore.warn(
+      'Generate a clean compose preview from the current snapshot before apply.',
+      'Workbench apply',
+    )
+    return
+  }
+
+  const result = await workbenchStore.applyCompose(name)
+  if (!result) {
+    const parsedError = workbenchApplyError.value
+    if (isWorkbenchComposeBlockedError(parsedError, 'apply')) {
+      toastStore.warn(parsedError?.message ?? 'Workbench compose apply was blocked.', 'Workbench apply')
+    } else {
+      toastStore.error(parsedError?.message ?? 'Workbench compose apply failed.', 'Workbench apply')
+    }
+    return
+  }
+
+  toastStore.success(`Compose applied. Backup ${result.backupId} was recorded.`, 'Workbench apply')
+}
+
+const refreshWorkbenchComposeBackups = async () => {
+  const name = projectName.value
+  if (!name || !isAdmin.value || !workbenchComposeSupported.value) return
+  await workbenchStore.loadComposeBackups(name)
+}
+
+const restoreWorkbenchCompose = async () => {
+  const name = projectName.value
+  if (!name) return
+  if (!workbenchComposeSupported.value || !workbenchSnapshotReady.value) {
+    toastStore.warn('Import a Workbench snapshot before restoring compose backups.', 'Workbench restore')
+    return
+  }
+  if (!isAdmin.value) {
+    toastStore.error('Admin access required.', 'Workbench restore blocked')
+    return
+  }
+
+  const selectedBackup = workbenchSelectedComposeBackup.value
+  if (!selectedBackup) {
+    toastStore.warn('Choose a retained compose backup before restoring.', 'Workbench restore')
+    return
+  }
+  if (workbenchRestoreConfirmInput.value.trim() !== workbenchRestoreConfirmationPhrase.value) {
+    toastStore.warn('Type the restore confirmation phrase exactly before continuing.', 'Workbench restore')
+    return
+  }
+
+  const result = await workbenchStore.restoreCompose(name, {
+    backupId: selectedBackup.backupId,
+  })
+  if (!result) {
+    const parsedError = workbenchRestoreError.value
+    if (isWorkbenchRestoreBlockedCode(parsedError?.code)) {
+      toastStore.warn(parsedError?.message ?? 'Workbench compose restore was blocked.', 'Workbench restore')
+    } else {
+      toastStore.error(parsedError?.message ?? 'Workbench compose restore failed.', 'Workbench restore')
+    }
+    return
+  }
+
+  workbenchRestoreConfirmInput.value = ''
+  if (result.requiresImport) {
+    toastStore.warn(
+      `Backup ${result.backupId} restored. Re-import the restored compose before preview/apply.`,
+      'Workbench restore',
+    )
+    return
+  }
+
+  toastStore.success(`Backup ${result.backupId} restored to ${result.composePath}.`, 'Workbench restore')
+}
+
+const runWorkbenchRemediationAction = async (action?: WorkbenchRemediationAction) => {
+  if (!action) return
+
+  switch (action) {
+    case 'refresh':
+      await refreshWorkbench()
+      return
+    case 'import':
+      await importWorkbench()
+      return
+    case 'refresh_backups':
+      await refreshWorkbenchComposeBackups()
+      return
+  }
+}
+
+const copyTextToClipboard = async (payload: string) => {
+  if (navigator?.clipboard?.writeText) {
+    await navigator.clipboard.writeText(payload)
+    return
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = payload
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.focus()
+  textarea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textarea)
+}
+
+const copyWorkbenchPreviewCompose = async () => {
+  const compose = workbenchLastPreviewResult.value?.compose ?? ''
+  if (!compose) {
+    toastStore.warn('Generate a compose preview before copying it.', 'Workbench preview')
+    return
+  }
+
+  try {
+    await copyTextToClipboard(compose)
+    toastStore.success('Compose preview copied to clipboard.', 'Workbench preview')
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Clipboard copy failed.'
+    toastStore.error(message, 'Copy failed')
+  }
+}
+
 const restartStack = async () => {
   const name = projectName.value
   if (!name) return
@@ -1529,19 +2284,7 @@ const copySelectedJobLogs = async () => {
   }
 
   try {
-    if (navigator?.clipboard?.writeText) {
-      await navigator.clipboard.writeText(output)
-    } else {
-      const textarea = document.createElement('textarea')
-      textarea.value = output
-      textarea.style.position = 'fixed'
-      textarea.style.opacity = '0'
-      document.body.appendChild(textarea)
-      textarea.focus()
-      textarea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textarea)
-    }
+    await copyTextToClipboard(output)
     toastStore.success('Logs copied to clipboard.', 'Copied')
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Clipboard copy failed.'
@@ -1569,6 +2312,21 @@ watch(workbenchResourceInventory, (resources) => {
   syncWorkbenchResourceInputs(resources)
 }, { immediate: true })
 
+watch(workbenchComposeBackups, (backups) => {
+  const selectedBackupId = workbenchRestoreSelectedBackupId.value.trim().toLowerCase()
+  if (selectedBackupId && backups.some((backup) => backup.backupId === selectedBackupId)) {
+    return
+  }
+
+  const latestBackup = backups.length > 0 ? backups[backups.length - 1] : null
+  workbenchRestoreSelectedBackupId.value = latestBackup?.backupId ?? ''
+  workbenchRestoreConfirmInput.value = ''
+}, { immediate: true })
+
+watch(workbenchRestoreSelectedBackupId, () => {
+  workbenchRestoreConfirmInput.value = ''
+})
+
 onMounted(load)
 watch(projectName, () => {
   stackRestartError.value = null
@@ -1579,6 +2337,8 @@ watch(projectName, () => {
   archiveExecutedWithWarnings.value = false
   archiveConfirmInput.value = ''
   jobLogsPanelOpen.value = false
+  workbenchRestoreSelectedBackupId.value = ''
+  workbenchRestoreConfirmInput.value = ''
   workbenchPortManualInputs.value = {}
   workbenchResourceInputs.value = {}
   workbenchStore.reset()
@@ -1784,7 +2544,7 @@ watch(
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Workbench</p>
             <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Compose authority shell</h2>
             <p class="mt-2 text-sm text-[color:var(--muted)]">
-              Read/import state for the stored Workbench model plus the shipped admin-only port, resource, and Redis module mutation controls. Preview/apply and restore edits remain out of scope here.
+              Read/import state for the stored Workbench model plus the shipped admin-only port, resource, Redis module, and compose preview/apply controls. Restore lands in the next Workbench slice.
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
@@ -1807,7 +2567,10 @@ watch(
                 workbenchImportStatus === 'loading' ||
                 workbenchResolveStatus === 'loading' ||
                 workbenchResourceMutationStatus === 'loading' ||
-                workbenchModuleMutationStatus === 'loading'
+                workbenchModuleMutationStatus === 'loading' ||
+                workbenchPreviewStatus === 'loading' ||
+                workbenchApplyStatus === 'loading' ||
+                workbenchRestoreStatus === 'loading'
               "
               @click="refreshWorkbench"
             >
@@ -1825,7 +2588,10 @@ watch(
                 workbenchResolveStatus === 'loading' ||
                 workbenchPortMutationStatus === 'loading' ||
                 workbenchResourceMutationStatus === 'loading' ||
-                workbenchModuleMutationStatus === 'loading'
+                workbenchModuleMutationStatus === 'loading' ||
+                workbenchPreviewStatus === 'loading' ||
+                workbenchApplyStatus === 'loading' ||
+                workbenchRestoreStatus === 'loading'
               "
               @click="resolveWorkbenchPorts"
             >
@@ -1843,7 +2609,10 @@ watch(
                 workbenchResolveStatus === 'loading' ||
                 workbenchPortMutationStatus === 'loading' ||
                 workbenchResourceMutationStatus === 'loading' ||
-                workbenchModuleMutationStatus === 'loading'
+                workbenchModuleMutationStatus === 'loading' ||
+                workbenchPreviewStatus === 'loading' ||
+                workbenchApplyStatus === 'loading' ||
+                workbenchRestoreStatus === 'loading'
               "
               @click="importWorkbench"
             >
@@ -1855,11 +2624,11 @@ watch(
           </template>
         </div>
 
-        <UiInlineFeedback v-if="workbenchImportError" tone="error">
-          {{ workbenchImportError.code ? `[${workbenchImportError.code}] ${workbenchImportError.message}` : workbenchImportError.message }}
-        </UiInlineFeedback>
-        <UiInlineFeedback v-else-if="workbenchLastImportResult" :tone="workbenchImportFeedbackTone">
-          {{ workbenchImportFeedback }}
+        <UiInlineFeedback
+          v-if="workbenchImportFeedbackState"
+          :tone="workbenchImportFeedbackState.tone"
+        >
+          {{ workbenchImportFeedbackState.message }}
         </UiInlineFeedback>
         <UiInlineFeedback
           v-if="workbenchResolveFeedback"
@@ -2054,6 +2823,245 @@ watch(
             <UiPanel variant="soft" class="space-y-4 p-4">
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <div>
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Compose restore</p>
+                  <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Retained backups</h3>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <UiBadge :tone="workbenchComposeBackups.length > 0 ? 'ok' : 'neutral'">
+                    {{ workbenchComposeBackups.length }} retained
+                  </UiBadge>
+                  <UiBadge :tone="workbenchComposeImportRequired ? 'warn' : 'neutral'">
+                    {{ workbenchComposeImportRequired ? 'Import required' : 'Model unchanged' }}
+                  </UiBadge>
+                </div>
+              </div>
+
+              <p class="text-sm text-[color:var(--muted)]">
+                Restore replaces the on-disk compose artifact from a retained backup. The stored Workbench model does not change automatically, so older backups can require an import before preview/apply resumes.
+              </p>
+
+              <UiInlineFeedback
+                v-if="workbenchRestoreFeedback"
+                :tone="workbenchRestoreFeedback.tone"
+              >
+                {{ workbenchRestoreFeedback.message }}
+              </UiInlineFeedback>
+              <UiInlineFeedback
+                v-else-if="workbenchBackupInventoryError"
+                :tone="workbenchBackupInventoryError.code === 'WB-409-BACKUP-INTEGRITY' ? 'warn' : 'error'"
+              >
+                {{ workbenchBackupInventoryErrorMessage }}
+              </UiInlineFeedback>
+              <UiPanel
+                v-if="workbenchRestoreRemediationState"
+                variant="soft"
+                class="space-y-3 border border-[color:var(--line)] p-3 text-sm text-[color:var(--muted)]"
+              >
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                      {{ workbenchRestoreRemediationState.sourceLabel }}
+                    </p>
+                    <h4 class="mt-1 font-semibold text-[color:var(--text)]">
+                      {{ workbenchRestoreRemediationState.title }}
+                    </h4>
+                  </div>
+                  <UiBadge :tone="workbenchRestoreRemediationState.tone">
+                    Follow-up required
+                  </UiBadge>
+                </div>
+                <p>{{ workbenchRestoreRemediationState.message }}</p>
+
+                <div
+                  v-if="
+                    workbenchRestoreRemediationState.details?.sourceFingerprint ||
+                    workbenchRestoreRemediationState.details?.currentSourceFingerprint
+                  "
+                  class="grid gap-2 sm:grid-cols-2"
+                >
+                  <UiPanel
+                    v-if="workbenchRestoreRemediationState.details?.sourceFingerprint"
+                    variant="raise"
+                    class="space-y-1 p-3"
+                  >
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                      Stored fingerprint
+                    </p>
+                    <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
+                      {{ workbenchRestoreRemediationState.details?.sourceFingerprint }}
+                    </p>
+                  </UiPanel>
+                  <UiPanel
+                    v-if="workbenchRestoreRemediationState.details?.currentSourceFingerprint"
+                    variant="raise"
+                    class="space-y-1 p-3"
+                  >
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                      Restored fingerprint
+                    </p>
+                    <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
+                      {{ workbenchRestoreRemediationState.details?.currentSourceFingerprint }}
+                    </p>
+                  </UiPanel>
+                </div>
+
+                <div
+                  v-if="isAdmin && workbenchRestoreRemediationState.primaryAction"
+                  class="flex flex-wrap gap-2"
+                >
+                  <UiButton
+                    variant="ghost"
+                    size="sm"
+                    :disabled="
+                      workbenchRemediationActionDisabled(
+                        workbenchRestoreRemediationState.primaryAction,
+                      )
+                    "
+                    @click="
+                      runWorkbenchRemediationAction(workbenchRestoreRemediationState.primaryAction)
+                    "
+                  >
+                    {{
+                      workbenchRemediationActionLabel(
+                        workbenchRestoreRemediationState.primaryAction,
+                      )
+                    }}
+                  </UiButton>
+                </div>
+              </UiPanel>
+
+              <UiState v-if="!isAdmin" tone="warn">
+                Read-only access: admin permissions are required to inspect retained compose backups and trigger restore.
+              </UiState>
+              <UiState v-else-if="workbenchBackupInventoryStatus === 'loading'" loading>
+                Loading retained compose backups...
+              </UiState>
+              <UiState v-else-if="workbenchComposeBackups.length === 0">
+                No retained compose backups are available yet. The first successful compose apply creates the initial restore target.
+              </UiState>
+              <div v-else class="space-y-3">
+                <button
+                  v-for="backup in workbenchComposeBackups"
+                  :key="backup.backupId"
+                  type="button"
+                  class="w-full rounded-2xl border px-4 py-3 text-left transition"
+                  :class="
+                    backup.backupId === workbenchSelectedComposeBackup?.backupId
+                      ? 'border-[color:var(--accent)] bg-[color:var(--panel)]'
+                      : 'border-[color:var(--line)] bg-[color:var(--panel-soft)] hover:border-[color:var(--accent)]/60'
+                  "
+                  :disabled="workbenchRestoreStatus === 'loading'"
+                  @click="workbenchRestoreSelectedBackupId = backup.backupId"
+                >
+                  <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Backup</p>
+                      <p class="mt-2 font-mono text-sm text-[color:var(--text)]">{{ backup.backupId }}</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <UiBadge :tone="backup.backupId === workbenchLatestComposeBackup?.backupId ? 'ok' : 'neutral'">
+                        {{ backup.backupId === workbenchLatestComposeBackup?.backupId ? 'Newest' : `Rev ${backup.revision}` }}
+                      </UiBadge>
+                      <UiBadge :tone="backup.backupId === workbenchSelectedComposeBackup?.backupId ? 'ok' : 'neutral'">
+                        {{ backup.backupId === workbenchSelectedComposeBackup?.backupId ? 'Selected' : 'Available' }}
+                      </UiBadge>
+                    </div>
+                  </div>
+                  <div class="mt-3 grid gap-2 text-xs text-[color:var(--muted)] sm:grid-cols-3">
+                    <p><span class="text-[color:var(--muted-2)]">Created</span> {{ fmtDate(backup.createdAt) }}</p>
+                    <p><span class="text-[color:var(--muted-2)]">Bytes</span> {{ backup.composeBytes }}</p>
+                    <p class="truncate"><span class="text-[color:var(--muted-2)]">Fingerprint</span> {{ backup.sourceFingerprint || '—' }}</p>
+                  </div>
+                </button>
+              </div>
+            </UiPanel>
+
+            <UiPanel variant="raise" class="space-y-4 p-4 text-sm text-[color:var(--muted)]">
+              <div>
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Restore execution</p>
+                <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Target and confirmation</h3>
+              </div>
+              <p>
+                Confirmation phrase:
+                <span class="font-mono text-[color:var(--text)]">{{ workbenchRestoreConfirmationPhrase }}</span>
+              </p>
+
+              <UiState v-if="!workbenchSelectedComposeBackup" tone="neutral">
+                Select a retained backup to inspect its metadata and enable restore.
+              </UiState>
+              <template v-else>
+                <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                  <UiPanel variant="soft" class="space-y-1 p-3">
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Selected backup</p>
+                    <p class="font-mono text-sm text-[color:var(--text)]">{{ workbenchSelectedComposeBackup.backupId }}</p>
+                  </UiPanel>
+                  <UiPanel variant="soft" class="space-y-1 p-3">
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Stored revision</p>
+                    <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchSelectedComposeBackup.revision }}</p>
+                  </UiPanel>
+                  <UiPanel variant="soft" class="space-y-1 p-3">
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Created</p>
+                    <p class="text-sm font-semibold text-[color:var(--text)]">{{ fmtDate(workbenchSelectedComposeBackup.createdAt) }}</p>
+                  </UiPanel>
+                  <UiPanel variant="soft" class="space-y-2 p-3">
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Backup fingerprint</p>
+                    <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
+                      {{ workbenchSelectedComposeBackup.sourceFingerprint || 'No fingerprint recorded' }}
+                    </p>
+                  </UiPanel>
+                </div>
+
+                <UiState
+                  v-if="workbenchLastRestoreResult?.requiresImport"
+                  tone="warn"
+                >
+                  The last restore left compose drift against the stored Workbench snapshot. Safe recovery path: import, preview, then apply.
+                </UiState>
+              </template>
+
+              <label class="block text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                Confirmation phrase
+              </label>
+              <UiInput
+                v-model="workbenchRestoreConfirmInput"
+                :disabled="!isAdmin || workbenchRestoreActionDisabled"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="Type the phrase exactly"
+              />
+
+              <div class="flex flex-wrap items-center gap-3">
+                <UiButton
+                  variant="danger"
+                  size="sm"
+                  :disabled="!canRestoreWorkbenchCompose"
+                  @click="restoreWorkbenchCompose"
+                >
+                  <span class="inline-flex items-center gap-2">
+                    <UiInlineSpinner v-if="workbenchRestoreStatus === 'loading'" />
+                    {{ workbenchRestoreLabel }}
+                  </span>
+                </UiButton>
+                <UiButton
+                  v-if="isAdmin"
+                  variant="ghost"
+                  size="sm"
+                  :disabled="workbenchRestoreStatus === 'loading' || workbenchBackupInventoryStatus === 'loading'"
+                  @click="refreshWorkbenchComposeBackups"
+                >
+                  Refresh backups
+                </UiButton>
+                <p v-if="!isAdmin" class="text-xs text-[color:var(--muted)]">
+                  Read-only access: admin permissions are required to restore compose from retained backups.
+                </p>
+              </div>
+            </UiPanel>
+          </div>
+
+          <div class="grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
+            <UiPanel variant="soft" class="space-y-4 p-4">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
                   <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Ports</p>
                   <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Stored mappings</h3>
                 </div>
@@ -2162,7 +3170,13 @@ watch(
                           max="65535"
                           step="1"
                           placeholder="8080"
-                          :disabled="workbenchPortMutationBusy(port) || workbenchModuleMutationStatus === 'loading'"
+                          :disabled="
+                            workbenchPortMutationBusy(port) ||
+                            workbenchModuleMutationStatus === 'loading' ||
+                            workbenchPreviewStatus === 'loading' ||
+                            workbenchApplyStatus === 'loading' ||
+                            workbenchRestoreStatus === 'loading'
+                          "
                           @update:model-value="setWorkbenchPortInputValue(port.key, $event)"
                         />
                       </label>
@@ -2172,7 +3186,10 @@ watch(
                         :disabled="
                           workbenchPortMutationBusy(port) ||
                           workbenchResolveStatus === 'loading' ||
-                          workbenchModuleMutationStatus === 'loading'
+                          workbenchModuleMutationStatus === 'loading' ||
+                          workbenchPreviewStatus === 'loading' ||
+                          workbenchApplyStatus === 'loading' ||
+                          workbenchRestoreStatus === 'loading'
                         "
                         @click="setManualWorkbenchPort(port)"
                       >
@@ -2187,7 +3204,10 @@ watch(
                         :disabled="
                           workbenchPortMutationBusy(port) ||
                           workbenchResolveStatus === 'loading' ||
-                          workbenchModuleMutationStatus === 'loading'
+                          workbenchModuleMutationStatus === 'loading' ||
+                          workbenchPreviewStatus === 'loading' ||
+                          workbenchApplyStatus === 'loading' ||
+                          workbenchRestoreStatus === 'loading'
                         "
                         @click="resetWorkbenchPortToAuto(port)"
                       >
@@ -2199,7 +3219,10 @@ watch(
                         :disabled="
                           workbenchPortSuggestionStatus(port) === 'loading' ||
                           workbenchPortMutationBusy(port) ||
-                          workbenchModuleMutationStatus === 'loading'
+                          workbenchModuleMutationStatus === 'loading' ||
+                          workbenchPreviewStatus === 'loading' ||
+                          workbenchApplyStatus === 'loading' ||
+                          workbenchRestoreStatus === 'loading'
                         "
                         @click="loadWorkbenchPortSuggestions(port)"
                       >
@@ -2236,7 +3259,13 @@ watch(
                           :key="`${port.key}-suggestion-${suggestion.rank}-${suggestion.hostPort}`"
                           variant="ghost"
                           size="sm"
-                          :disabled="workbenchPortMutationBusy(port) || workbenchModuleMutationStatus === 'loading'"
+                          :disabled="
+                            workbenchPortMutationBusy(port) ||
+                            workbenchModuleMutationStatus === 'loading' ||
+                            workbenchPreviewStatus === 'loading' ||
+                            workbenchApplyStatus === 'loading' ||
+                            workbenchRestoreStatus === 'loading'
+                          "
                           @click="setWorkbenchPortInputValue(port.key, String(suggestion.hostPort))"
                         >
                           #{{ suggestion.rank }} · {{ suggestion.hostPort }}
@@ -2562,7 +3591,7 @@ watch(
               </div>
 
               <p class="text-xs text-[color:var(--muted)]">
-                Values round-trip against the stored snapshot immediately after each successful edit. Preview/apply and restore controls remain out of scope here.
+                Values round-trip against the stored snapshot immediately after each successful edit. Generate a compose preview below to inspect the resulting YAML before apply.
               </p>
             </UiPanel>
           </div>
@@ -2714,8 +3743,382 @@ watch(
               </div>
 
               <p class="text-xs text-[color:var(--muted)]">
-                Duplicate-module, unsupported-target, lock, and storage failures surface through the same inline API error feedback used by the existing Workbench mutation cards. Preview/apply and restore still land in later slices.
+                Duplicate-module, unsupported-target, lock, and storage failures surface through the same inline API error feedback used by the existing Workbench mutation cards. Compose preview/apply and restore each keep their own guardrails below.
               </p>
+            </UiPanel>
+          </div>
+
+          <div class="grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
+            <UiPanel variant="soft" class="space-y-4 p-4">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Compose preview</p>
+                  <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Generate and apply</h3>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <UiBadge :tone="workbenchPreviewStatusTone">
+                    {{ workbenchPreviewStatusLabel }}
+                  </UiBadge>
+                  <UiBadge :tone="workbenchHasCleanPreview ? 'ok' : workbenchComposeImportRequired ? 'warn' : 'neutral'">
+                    {{
+                      workbenchHasCleanPreview
+                        ? 'Apply ready'
+                        : workbenchComposeImportRequired
+                          ? 'Import required'
+                          : 'Preview required'
+                    }}
+                  </UiBadge>
+                </div>
+              </div>
+
+              <p class="text-sm text-[color:var(--muted)]">
+                Preview is mandatory before apply. Workbench writes only the generated compose artifact here; stack restart and job handoff remain on the existing project controls.
+              </p>
+
+              <div v-if="isAdmin" class="flex flex-wrap gap-2">
+                <UiButton
+                  variant="ghost"
+                  size="sm"
+                  :disabled="
+                    workbenchComposeActionBusy ||
+                    workbenchComposeImportRequired ||
+                    workbenchImportStatus === 'loading' ||
+                    workbenchResolveStatus === 'loading' ||
+                    workbenchPortMutationStatus === 'loading' ||
+                    workbenchResourceMutationStatus === 'loading' ||
+                    workbenchModuleMutationStatus === 'loading'
+                  "
+                  @click="previewWorkbenchCompose"
+                >
+                  <span class="inline-flex items-center gap-2">
+                    <UiInlineSpinner v-if="workbenchPreviewStatus === 'loading'" />
+                    {{ workbenchPreviewLabel }}
+                  </span>
+                </UiButton>
+                <UiButton
+                  variant="ghost"
+                  size="sm"
+                  :disabled="!workbenchLastPreviewResult?.compose || workbenchComposeActionBusy"
+                  @click="copyWorkbenchPreviewCompose"
+                >
+                  Copy preview
+                </UiButton>
+                <UiButton
+                  variant="primary"
+                  size="sm"
+                  :disabled="workbenchApplyActionDisabled"
+                  @click="applyWorkbenchCompose"
+                >
+                  <span class="inline-flex items-center gap-2">
+                    <UiInlineSpinner v-if="workbenchApplyStatus === 'loading'" />
+                    {{ workbenchApplyLabel }}
+                  </span>
+                </UiButton>
+              </div>
+              <p v-else class="text-xs text-[color:var(--muted)]">
+                Read-only access: admin permissions are required to generate compose preview output and apply stored Workbench changes.
+              </p>
+
+              <UiInlineFeedback
+                v-if="workbenchPreviewFeedback"
+                :tone="workbenchPreviewFeedback.tone"
+              >
+                {{ workbenchPreviewFeedback.message }}
+              </UiInlineFeedback>
+              <UiInlineFeedback
+                v-if="workbenchApplyFeedback"
+                :tone="workbenchApplyFeedback.tone"
+              >
+                {{ workbenchApplyFeedback.message }}
+              </UiInlineFeedback>
+              <UiPanel
+                v-if="workbenchComposeRemediationState"
+                variant="soft"
+                class="space-y-3 border border-[color:var(--line)] p-3 text-sm text-[color:var(--muted)]"
+              >
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                      {{ workbenchComposeRemediationState.sourceLabel }}
+                    </p>
+                    <h4 class="mt-1 font-semibold text-[color:var(--text)]">
+                      {{ workbenchComposeRemediationState.title }}
+                    </h4>
+                  </div>
+                  <UiBadge :tone="workbenchComposeRemediationState.tone">
+                    Needs attention
+                  </UiBadge>
+                </div>
+                <p>{{ workbenchComposeRemediationState.message }}</p>
+
+                <div
+                  v-if="
+                    workbenchComposeRemediationState.details?.expectedRevision != null ||
+                    workbenchComposeRemediationState.details?.revision != null ||
+                    workbenchComposeRemediationState.details?.sourceFingerprint ||
+                    workbenchComposeRemediationState.details?.currentSourceFingerprint
+                  "
+                  class="grid gap-2 sm:grid-cols-2"
+                >
+                  <UiPanel
+                    v-if="workbenchComposeRemediationState.details?.expectedRevision != null"
+                    variant="raise"
+                    class="space-y-1 p-3"
+                  >
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                      Expected revision
+                    </p>
+                    <p class="text-sm font-semibold text-[color:var(--text)]">
+                      {{ workbenchComposeRemediationState.details?.expectedRevision }}
+                    </p>
+                  </UiPanel>
+                  <UiPanel
+                    v-if="workbenchComposeRemediationState.details?.revision != null"
+                    variant="raise"
+                    class="space-y-1 p-3"
+                  >
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                      Current revision
+                    </p>
+                    <p class="text-sm font-semibold text-[color:var(--text)]">
+                      {{ workbenchComposeRemediationState.details?.revision }}
+                    </p>
+                  </UiPanel>
+                  <UiPanel
+                    v-if="workbenchComposeRemediationState.details?.sourceFingerprint"
+                    variant="raise"
+                    class="space-y-1 p-3"
+                  >
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                      Stored fingerprint
+                    </p>
+                    <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
+                      {{ workbenchComposeRemediationState.details?.sourceFingerprint }}
+                    </p>
+                  </UiPanel>
+                  <UiPanel
+                    v-if="workbenchComposeRemediationState.details?.currentSourceFingerprint"
+                    variant="raise"
+                    class="space-y-1 p-3"
+                  >
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                      On-disk fingerprint
+                    </p>
+                    <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
+                      {{ workbenchComposeRemediationState.details?.currentSourceFingerprint }}
+                    </p>
+                  </UiPanel>
+                </div>
+
+                <div
+                  v-if="
+                    isAdmin &&
+                    (workbenchComposeRemediationState.primaryAction ||
+                      workbenchComposeRemediationState.secondaryAction)
+                  "
+                  class="flex flex-wrap gap-2"
+                >
+                  <UiButton
+                    v-if="workbenchComposeRemediationState.primaryAction"
+                    variant="primary"
+                    size="sm"
+                    :disabled="
+                      workbenchRemediationActionDisabled(
+                        workbenchComposeRemediationState.primaryAction,
+                      )
+                    "
+                    @click="
+                      runWorkbenchRemediationAction(workbenchComposeRemediationState.primaryAction)
+                    "
+                  >
+                    {{
+                      workbenchRemediationActionLabel(
+                        workbenchComposeRemediationState.primaryAction,
+                      )
+                    }}
+                  </UiButton>
+                  <UiButton
+                    v-if="workbenchComposeRemediationState.secondaryAction"
+                    variant="ghost"
+                    size="sm"
+                    :disabled="
+                      workbenchRemediationActionDisabled(
+                        workbenchComposeRemediationState.secondaryAction,
+                      )
+                    "
+                    @click="
+                      runWorkbenchRemediationAction(workbenchComposeRemediationState.secondaryAction)
+                    "
+                  >
+                    {{
+                      workbenchRemediationActionLabel(
+                        workbenchComposeRemediationState.secondaryAction,
+                      )
+                    }}
+                  </UiButton>
+                </div>
+              </UiPanel>
+
+              <UiState
+                v-if="!workbenchLastPreviewResult && !workbenchPreviewError"
+                :tone="isAdmin ? 'neutral' : 'warn'"
+              >
+                {{
+                  workbenchComposeImportRequired
+                    ? 'Re-import the restored compose before generating another preview or applying stored Workbench changes.'
+                    : isAdmin
+                      ? 'Generate a compose preview to inspect the exact YAML output before apply.'
+                      : 'An admin must generate a compose preview before compose apply becomes available.'
+                }}
+              </UiState>
+              <template v-else-if="workbenchLastPreviewResult">
+                <div class="grid gap-3 sm:grid-cols-3">
+                  <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Preview revision</p>
+                    <p class="text-lg font-semibold text-[color:var(--text)]">
+                      {{ workbenchLastPreviewResult.revision }}
+                    </p>
+                  </UiPanel>
+                  <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Compose lines</p>
+                    <p class="text-lg font-semibold text-[color:var(--text)]">
+                      {{ workbenchPreviewComposeLineCount }}
+                    </p>
+                  </UiPanel>
+                  <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
+                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Snapshot match</p>
+                    <p class="text-lg font-semibold text-[color:var(--text)]">
+                      {{ workbenchPreviewMatchesSnapshot ? 'Yes' : 'No' }}
+                    </p>
+                  </UiPanel>
+                </div>
+
+                <UiPanel variant="raise" class="overflow-hidden p-0">
+                  <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-xs text-[color:var(--muted)]">
+                    <div>
+                      <p class="uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Generated compose</p>
+                      <p class="mt-1 font-mono text-[11px] text-[color:var(--text)] break-all">
+                        {{ workbenchPreviewFingerprintLabel }}
+                      </p>
+                    </div>
+                    <UiBadge :tone="workbenchPreviewMatchesSnapshot ? 'ok' : 'warn'">
+                      {{ workbenchPreviewMatchesSnapshot ? 'Current snapshot' : 'Needs refresh' }}
+                    </UiBadge>
+                  </div>
+                  <pre
+                    class="max-h-[32rem] overflow-auto border-t border-[color:var(--line)] px-4 py-3 font-mono text-[12px] leading-5 text-[color:var(--text)] whitespace-pre"
+                  ><code>{{ workbenchLastPreviewResult.compose }}</code></pre>
+                </UiPanel>
+              </template>
+            </UiPanel>
+
+            <UiPanel variant="raise" class="space-y-4 p-4 text-sm text-[color:var(--muted)]">
+              <div>
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Apply gate</p>
+                <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Revision and diagnostics</h3>
+              </div>
+              <p>
+                Port, resource, and module edits change the stored Workbench model first. Any model change, stale revision, or external compose drift invalidates the previous preview until a new preview is generated.
+              </p>
+
+              <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Current revision</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchSnapshot.revision }}</p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Preview revision</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">
+                    {{ workbenchLastPreviewResult?.revision ?? '—' }}
+                  </p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-2 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Current fingerprint</p>
+                  <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
+                    {{ workbenchFingerprintLabel }}
+                  </p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-2 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Preview fingerprint</p>
+                  <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
+                    {{ workbenchPreviewFingerprintLabel }}
+                  </p>
+                </UiPanel>
+              </div>
+
+              <UiState v-if="isAdmin && workbenchComposeImportRequired" tone="warn">
+                Restore changed the compose file on disk. Re-import the restored compose before preview/apply so the stored Workbench snapshot matches the file again.
+              </UiState>
+              <UiState v-else-if="isAdmin && !workbenchHasCleanPreview" tone="warn">
+                Run a clean preview from the current snapshot before apply. Validation blockers, stale revisions, compose drift, or any stored model change will keep apply disabled.
+              </UiState>
+              <UiState v-else-if="isAdmin" tone="ok">
+                The latest preview matches the visible snapshot revision and fingerprint, so apply is enabled.
+              </UiState>
+              <p v-else class="text-xs text-[color:var(--muted)]">
+                Non-admin users can inspect stored warnings and diagnostics, but preview/apply stays admin-only.
+              </p>
+
+              <div class="space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Blocking diagnostics</p>
+                  <UiBadge :tone="workbenchComposeIssueInventory.length > 0 ? 'warn' : 'ok'">
+                    {{ workbenchComposeIssueInventory.length }}
+                  </UiBadge>
+                </div>
+                <UiState v-if="workbenchComposeIssueInventory.length === 0" tone="ok">
+                  No preview/apply blockers are active right now.
+                </UiState>
+                <div v-else class="space-y-2">
+                  <UiPanel
+                    v-for="row in workbenchComposeIssueInventory"
+                    :key="row.key"
+                    variant="soft"
+                    class="space-y-2 p-3"
+                  >
+                    <div class="flex flex-wrap items-start justify-between gap-2">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <UiBadge :tone="row.source === 'preview' ? 'warn' : 'error'">
+                          {{ row.sourceLabel }}
+                        </UiBadge>
+                        <UiBadge tone="warn">{{ row.issue.code }}</UiBadge>
+                      </div>
+                      <span class="font-mono text-[11px] text-[color:var(--muted-2)] break-all">
+                        {{ row.issue.path || 'compose' }}
+                      </span>
+                    </div>
+                    <p class="text-xs text-[color:var(--text)]">{{ row.issue.message }}</p>
+                  </UiPanel>
+                </div>
+              </div>
+
+              <div class="space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Snapshot warnings</p>
+                  <UiBadge :tone="workbenchWarningsList.length > 0 ? 'warn' : 'ok'">
+                    {{ workbenchWarningsList.length }}
+                  </UiBadge>
+                </div>
+                <UiState v-if="workbenchWarningsList.length === 0" tone="ok">
+                  No non-blocking import or pass-through warnings are recorded.
+                </UiState>
+                <div v-else class="max-h-[16rem] space-y-2 overflow-auto pr-1">
+                  <UiPanel
+                    v-for="warning in workbenchWarningsList"
+                    :key="`compose-warning-${warning.code}-${warning.path}-${warning.message}`"
+                    variant="soft"
+                    class="space-y-2 p-3"
+                  >
+                    <div class="flex flex-wrap items-start justify-between gap-2">
+                      <UiBadge tone="warn">{{ warning.code }}</UiBadge>
+                      <span class="font-mono text-[11px] text-[color:var(--muted-2)] break-all">
+                        {{ warning.path || 'compose' }}
+                      </span>
+                    </div>
+                    <p class="text-xs text-[color:var(--text)]">{{ warning.message }}</p>
+                  </UiPanel>
+                </div>
+              </div>
             </UiPanel>
           </div>
 
@@ -2882,7 +4285,7 @@ watch(
               </div>
 
               <p class="text-xs text-[color:var(--muted)]">
-                Preview/apply and restore remain scheduled for later Workbench slices while the current shell now supports stored port, resource, and Redis module mutations.
+                Topology remains read-only. Use the preview/apply and restore surfaces above to move between generated compose output and retained backups without leaving Project Detail.
               </p>
             </UiPanel>
           </div>

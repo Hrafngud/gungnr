@@ -1,5 +1,12 @@
 import { api } from '@/services/api'
 import type {
+  WorkbenchComposeApplyRequest,
+  WorkbenchComposeApplyResponse,
+  WorkbenchComposeBackupsResponse,
+  WorkbenchComposePreviewRequest,
+  WorkbenchComposePreviewResponse,
+  WorkbenchComposeRestoreRequest,
+  WorkbenchComposeRestoreResponse,
   WorkbenchImportReason,
   WorkbenchImportResponse,
   WorkbenchModuleMutationRequest,
@@ -40,4 +47,15 @@ export const workbenchApi = {
     api.post<WorkbenchModuleMutationResponse>(`${workbenchProjectPath(projectName)}/modules`, payload),
   suggestPorts: (projectName: string, payload: WorkbenchPortSuggestionRequest) =>
     api.post<WorkbenchPortSuggestionResponse>(`${workbenchProjectPath(projectName)}/ports/suggest`, payload),
+  previewCompose: (projectName: string, payload: WorkbenchComposePreviewRequest) =>
+    api.post<WorkbenchComposePreviewResponse>(
+      `${workbenchProjectPath(projectName)}/compose/preview`,
+      payload,
+    ),
+  applyCompose: (projectName: string, payload: WorkbenchComposeApplyRequest) =>
+    api.post<WorkbenchComposeApplyResponse>(`${workbenchProjectPath(projectName)}/compose/apply`, payload),
+  getComposeBackups: (projectName: string) =>
+    api.get<WorkbenchComposeBackupsResponse>(`${workbenchProjectPath(projectName)}/compose/backups`),
+  restoreCompose: (projectName: string, payload: WorkbenchComposeRestoreRequest) =>
+    api.post<WorkbenchComposeRestoreResponse>(`${workbenchProjectPath(projectName)}/compose/restore`, payload),
 }

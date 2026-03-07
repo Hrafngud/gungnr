@@ -67,6 +67,38 @@ type workbenchStoredComposeBackup struct {
 	ComposeBytes      int       `json:"composeBytes"`
 }
 
+func (s *WorkbenchService) ListComposeBackups(
+	ctx context.Context,
+	projectName string,
+) ([]WorkbenchComposeBackupMetadata, error) {
+	normalizedProject, err := normalizeWorkbenchProjectName(projectName)
+	if err != nil {
+		return nil, err
+	}
+
+	resolution, err := resolveProjectPath(ctx, s.projects, s.templatesDir, normalizedProject)
+	if err != nil {
+		return nil, err
+	}
+
+	backups, err := loadWorkbenchComposeBackupIndex(resolution.ProjectDir)
+	if err != nil {
+		return nil, errs.WithDetails(
+			errs.Wrap(errs.CodeWorkbenchBackupIntegrity, "failed to load workbench compose backup history", err),
+			map[string]any{
+				"project":     resolution.NormalizedName,
+				"projectPath": resolution.ProjectDir,
+			},
+		)
+	}
+
+	metadata := make([]WorkbenchComposeBackupMetadata, 0, len(backups))
+	for _, backup := range backups {
+		metadata = append(metadata, workbenchComposeBackupMetadataFromStored(backup))
+	}
+	return metadata, nil
+}
+
 func (s *WorkbenchService) RestoreComposeFromBackup(
 	ctx context.Context,
 	projectName string,

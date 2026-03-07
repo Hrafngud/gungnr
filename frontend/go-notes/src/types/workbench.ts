@@ -260,6 +260,86 @@ export interface WorkbenchModuleMutationResponse {
   mutation: WorkbenchModuleMutationSummary
 }
 
+export interface WorkbenchComposePreviewRequest {
+  expectedRevision?: number
+}
+
+export interface WorkbenchComposePreviewMetadata {
+  revision: number
+  sourceFingerprint: string
+}
+
+export interface WorkbenchComposePreviewResult {
+  compose: string
+  metadata: WorkbenchComposePreviewMetadata
+}
+
+export interface WorkbenchComposePreviewResponse {
+  preview: WorkbenchComposePreviewResult
+}
+
+export interface WorkbenchComposeApplyRequest {
+  expectedRevision?: number
+  expectedSourceFingerprint?: string
+}
+
+export interface WorkbenchComposeBackupMetadata {
+  backupId: string
+  sequence: number
+  revision: number
+  sourceFingerprint?: string
+  createdAt: string
+  composeBytes: number
+}
+
+export interface WorkbenchComposeBackupRetentionInfo {
+  retainedCount: number
+  prunedCount: number
+}
+
+export interface WorkbenchComposeApplyMetadata {
+  revision: number
+  sourceFingerprint: string
+  composePath: string
+}
+
+export interface WorkbenchComposeApplyResult {
+  metadata: WorkbenchComposeApplyMetadata
+  composeBytes: number
+  backup: WorkbenchComposeBackupMetadata
+  retention: WorkbenchComposeBackupRetentionInfo
+}
+
+export interface WorkbenchComposeApplyResponse {
+  apply: WorkbenchComposeApplyResult
+}
+
+export interface WorkbenchComposeBackupsResponse {
+  backups: WorkbenchComposeBackupMetadata[]
+}
+
+export interface WorkbenchComposeRestoreRequest {
+  backupId: string
+}
+
+export interface WorkbenchComposeRestoreMetadata {
+  revision: number
+  sourceFingerprint?: string
+  restoredFingerprint?: string
+  composePath: string
+  requiresImport: boolean
+}
+
+export interface WorkbenchComposeRestoreResult {
+  metadata: WorkbenchComposeRestoreMetadata
+  composeBytes: number
+  backup: WorkbenchComposeBackupMetadata
+}
+
+export interface WorkbenchComposeRestoreResponse {
+  restore: WorkbenchComposeRestoreResult
+}
+
 export function buildWorkbenchPortSelectorKey(selector: WorkbenchPortSelector): string {
   const protocol = selector.protocol?.trim().toLowerCase() || 'tcp'
   const hostIp = selector.hostIp?.trim() || '0.0.0.0'

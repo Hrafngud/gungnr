@@ -23,6 +23,7 @@ func RegisterProjects(r gin.IRoutes, c *controller.ProjectsController) {
 	r.POST("/projects/:name/workbench/modules", c.WorkbenchMutateModule)
 	r.POST("/projects/:name/workbench/compose/preview", c.WorkbenchComposePreview)
 	r.POST("/projects/:name/workbench/compose/apply", c.WorkbenchComposeApply)
+	r.GET("/projects/:name/workbench/compose/backups", c.WorkbenchComposeBackups)
 	r.POST("/projects/:name/workbench/compose/restore", c.WorkbenchComposeRestore)
 	r.GET("/projects/:name/archive/plan", c.ArchivePlan)
 	r.POST("/projects/:name/archive", c.Archive)
