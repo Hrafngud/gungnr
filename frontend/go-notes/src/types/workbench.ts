@@ -144,6 +144,28 @@ export interface WorkbenchOptionalServiceCatalogResponse {
   catalog: WorkbenchOptionalServiceCatalog
 }
 
+export type WorkbenchOptionalServiceMutationAction = 'add' | 'remove'
+
+export interface WorkbenchOptionalServiceAddRequest {
+  entryKey: string
+}
+
+export interface WorkbenchOptionalServiceMutationSummary {
+  changed: boolean
+  action: WorkbenchOptionalServiceMutationAction
+  entryKey?: string
+  serviceName?: string
+  previousCount: number
+  currentCount: number
+  composeGenerationReady: boolean
+  notes: string[]
+}
+
+export interface WorkbenchOptionalServiceMutationResponse {
+  stack: WorkbenchStackSnapshot
+  mutation: WorkbenchOptionalServiceMutationSummary
+}
+
 export interface WorkbenchImportRequest {
   reason?: WorkbenchImportReason
 }

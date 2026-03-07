@@ -193,11 +193,17 @@ overrides `GUNGNR_VERSION` explicitly.
 Pushing a SemVer tag like `v1.2.3` triggers
 `.github/workflows/release-cli.yml`, which rebuilds `gungnr` for
 `linux/amd64`, `linux/arm64`, `darwin/amd64`, and `darwin/arm64` through the
-same helper and uploads those binaries plus `checksums.txt` to the matching
-GitHub Release.
+same helper, uploads those binaries plus `checksums.txt` to the matching
+GitHub Release, and publishes the multi-arch container images
+`ghcr.io/hrafngud/gungnr-api` and `ghcr.io/hrafngud/gungnr-web` with tags
+`vX.Y.Z` and `latest`.
 
 ## Release compose (GHCR images)
 Use `docker-compose.release.yml` to run GHCR images instead of local builds.
+
+Published image names:
+- `ghcr.io/hrafngud/gungnr-api`
+- `ghcr.io/hrafngud/gungnr-web`
 
 Default image tag is `latest` (set by `GUNGNR_VERSION`). Pin a specific release
 by exporting `GUNGNR_VERSION=vX.Y.Z` or editing the compose file directly.

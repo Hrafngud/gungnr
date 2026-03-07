@@ -34,6 +34,8 @@ import {
   type WorkbenchMutationIssue,
   type WorkbenchOptionalServiceCatalogEntry,
   type WorkbenchOptionalServiceComposeMatch,
+  type WorkbenchOptionalServiceMutationAction,
+  type WorkbenchOptionalServiceMutationSummary,
   type WorkbenchPortMutationSummary,
   type WorkbenchPortSelector,
   type WorkbenchResourceField,
@@ -135,6 +137,13 @@ interface WorkbenchInlineFeedbackState {
   message: string
 }
 
+interface WorkbenchPendingOptionalServiceMutation {
+  entryKey: string
+  action: WorkbenchOptionalServiceMutationAction
+  serviceName: string
+  displayName: string
+}
+
 interface WorkbenchComposeIssueInventoryRow {
   key: string
   source: 'preview' | 'apply'
@@ -188,6 +197,7 @@ const archiveOptions = ref<ProjectArchiveOptions>({
 const archiveConfirmInput = ref('')
 const workbenchRestoreSelectedBackupId = ref('')
 const workbenchRestoreConfirmInput = ref('')
+const workbenchPendingOptionalServiceMutation = ref<WorkbenchPendingOptionalServiceMutation | null>(null)
 const workbenchPortManualInputs = ref<Record<string, string>>({})
 const workbenchResourceInputs = ref<Record<string, WorkbenchResourceInputState>>({})
 const isAdmin = computed(() => authStore.isAdmin)
@@ -234,6 +244,18 @@ const workbenchError = computed(() => workbenchStore.snapshotError)
 const workbenchCatalog = computed(() => workbenchStore.catalog)
 const workbenchCatalogStatus = computed(() => workbenchStore.catalogStatus)
 const workbenchCatalogError = computed(() => workbenchStore.catalogError)
+const workbenchOptionalServiceMutationStatus = computed(
+  () => workbenchStore.optionalServiceMutationStatus,
+)
+const workbenchOptionalServiceMutationError = computed(
+  () => workbenchStore.optionalServiceMutationError,
+)
+const workbenchActiveOptionalServiceMutationEntryKey = computed(
+  () => workbenchStore.activeOptionalServiceMutationEntryKey,
+)
+const workbenchLastOptionalServiceMutationResult = computed(
+  () => workbenchStore.lastOptionalServiceMutationResult,
+)
 const workbenchImportStatus = computed(() => workbenchStore.importStatus)
 const workbenchImportError = computed(() => workbenchStore.importError)
 const workbenchLastImportResult = computed(() => workbenchStore.lastImportResult)
@@ -252,7 +274,6 @@ const workbenchActiveResourceMutationServiceName = computed(
   () => workbenchStore.activeResourceMutationServiceName,
 )
 const workbenchLastResourceMutationResult = computed(() => workbenchStore.lastResourceMutationResult)
-const workbenchModuleMutationStatus = computed(() => workbenchStore.moduleMutationStatus)
 const workbenchPreviewStatus = computed(() => workbenchStore.previewStatus)
 const workbenchPreviewError = computed(() => workbenchStore.previewError)
 const workbenchLastPreviewResult = computed(() => workbenchStore.lastPreviewResult)
@@ -464,7 +485,7 @@ const workbenchRestoreActionDisabled = computed(() => {
     workbenchResolveStatus.value === 'loading' ||
     workbenchPortMutationStatus.value === 'loading' ||
     workbenchResourceMutationStatus.value === 'loading' ||
-    workbenchModuleMutationStatus.value === 'loading' ||
+    workbenchOptionalServiceMutationStatus.value === 'loading' ||
     workbenchPreviewStatus.value === 'loading' ||
     workbenchApplyStatus.value === 'loading' ||
     workbenchRestoreStatus.value === 'loading' ||
@@ -743,7 +764,7 @@ const workbenchApplyActionDisabled = computed(() => {
     workbenchResolveStatus.value === 'loading' ||
     workbenchPortMutationStatus.value === 'loading' ||
     workbenchResourceMutationStatus.value === 'loading' ||
-    workbenchModuleMutationStatus.value === 'loading' ||
+    workbenchOptionalServiceMutationStatus.value === 'loading' ||
     !workbenchHasCleanPreview.value
   )
 })
@@ -933,7 +954,7 @@ function workbenchOptionalServiceAvailabilityLabel(status: string): string {
     case 'compose_present_with_legacy_module':
       return 'Compose + legacy metadata'
     case 'legacy_module_only':
-      return 'Legacy module only'
+      return 'Legacy metadata only'
     default:
       return 'Available'
   }
@@ -944,7 +965,7 @@ function workbenchOptionalServiceStateLabel(state: string): string {
     case 'catalog_managed':
       return 'Catalog-managed'
     case 'legacy_modules':
-      return 'Legacy module metadata'
+      return 'Legacy transition metadata'
     default:
       return 'Unmanaged'
   }
@@ -1016,6 +1037,96 @@ const workbenchOptionalServiceInventory = computed<WorkbenchOptionalServiceCatal
     notes: entry.transition.notes,
   }))
 })
+
+function workbenchOptionalServiceManagedServiceName(
+  entry: WorkbenchOptionalServiceCatalogRow,
+): string | null {
+  return entry.managedServices[0]?.serviceName?.trim() || null
+}
+
+function workbenchOptionalServicePendingAction(
+  entry: WorkbenchOptionalServiceCatalogRow,
+): WorkbenchOptionalServiceMutationAction {
+  return entry.managedServices.length > 0 ? 'remove' : 'add'
+}
+
+function workbenchOptionalServicePendingLabel(entry: WorkbenchOptionalServiceCatalogRow): string {
+  return workbenchOptionalServicePendingAction(entry) === 'remove' ? 'Remove service' : 'Add service'
+}
+
+function workbenchOptionalServiceBusy(entry: WorkbenchOptionalServiceCatalogRow): boolean {
+  return (
+    workbenchOptionalServiceMutationStatus.value === 'loading' &&
+    workbenchActiveOptionalServiceMutationEntryKey.value === entry.key
+  )
+}
+
+function workbenchOptionalServiceActionDisabled(entry: WorkbenchOptionalServiceCatalogRow): boolean {
+  return (
+    workbenchCatalogStatus.value === 'loading' ||
+    workbenchOptionalServiceMutationStatus.value === 'loading' ||
+    workbenchImportStatus.value === 'loading' ||
+    workbenchResolveStatus.value === 'loading' ||
+    workbenchPortMutationStatus.value === 'loading' ||
+    workbenchResourceMutationStatus.value === 'loading' ||
+    workbenchPreviewStatus.value === 'loading' ||
+    workbenchApplyStatus.value === 'loading' ||
+    workbenchRestoreStatus.value === 'loading' ||
+    !entry.mutationReady
+  )
+}
+
+function workbenchOptionalServicePendingConfirmation(
+  entry: WorkbenchOptionalServiceCatalogRow,
+): boolean {
+  return workbenchPendingOptionalServiceMutation.value?.entryKey === entry.key
+}
+
+function workbenchOptionalServiceFeedback(
+  entry: WorkbenchOptionalServiceCatalogRow,
+): WorkbenchInlineFeedbackState | null {
+  const successfulResult = workbenchLastOptionalServiceMutationResult.value
+  if (successfulResult?.entryKey === entry.key) {
+    if (!successfulResult.changed) {
+      return {
+        tone: 'warn',
+        message: 'No optional-service mutation changes were required.',
+      }
+    }
+
+    const actionLabel =
+      successfulResult.action === 'remove'
+        ? `Removed ${successfulResult.serviceName || entry.displayName} at revision ${successfulResult.revision}.`
+        : `Added ${successfulResult.serviceName || entry.defaultServiceName} at revision ${successfulResult.revision}.`
+    const notes = successfulResult.notes.filter((note) => note.trim())
+    return {
+      tone: successfulResult.composeGenerationReady ? 'ok' : 'warn',
+      message: notes.length > 0 ? `${actionLabel} ${notes[0]}` : actionLabel,
+    }
+  }
+
+  const parsedError = workbenchOptionalServiceMutationError.value
+  if (!parsedError) return null
+
+  const summary = workbenchOptionalServiceMutationSummaryFromDetails(parsedError.details)
+  if (!summary) return null
+
+  const normalizedEntryKey = summary.entryKey?.trim().toLowerCase() || ''
+  const normalizedServiceName = summary.serviceName?.trim().toLowerCase() || ''
+  const rowManagedServiceName = workbenchOptionalServiceManagedServiceName(entry)?.toLowerCase() || ''
+  const rowDefaultServiceName = entry.defaultServiceName.trim().toLowerCase()
+
+  if (
+    normalizedEntryKey !== entry.key &&
+    normalizedServiceName !== rowManagedServiceName &&
+    normalizedServiceName !== rowDefaultServiceName
+  ) {
+    return null
+  }
+
+  return workbenchMutationFeedbackFromError(parsedError, 'optional-service')
+}
+
 const workbenchOptionalServiceBadgeTone = computed<BadgeTone>(() => {
   if (workbenchCatalogStatus.value === 'error') return 'error'
   if (workbenchCurrentComposeSummary.value.catalogManagedServices > 0) return 'ok'
@@ -1231,6 +1342,18 @@ function workbenchResourceMutationSummaryFromDetails(details: unknown): Workbenc
     return null
   }
   return summary as WorkbenchResourceMutationSummary
+}
+
+function workbenchOptionalServiceMutationSummaryFromDetails(
+  details: unknown,
+): WorkbenchOptionalServiceMutationSummary | null {
+  if (!details || typeof details !== 'object') return null
+  const summary = (details as Record<string, unknown>).summary
+  if (!summary || typeof summary !== 'object') return null
+  if (typeof (summary as Record<string, unknown>).action !== 'string') {
+    return null
+  }
+  return summary as WorkbenchOptionalServiceMutationSummary
 }
 
 function isWorkbenchComposeBlockedCode(code?: string): boolean {
@@ -1542,7 +1665,7 @@ function workbenchResourceActionDisabled(resource: WorkbenchResourceInventoryRow
     workbenchResolveStatus.value === 'loading' ||
     workbenchPortMutationStatus.value === 'loading' ||
     workbenchResourceMutationStatus.value === 'loading' ||
-    workbenchModuleMutationStatus.value === 'loading' ||
+    workbenchOptionalServiceMutationStatus.value === 'loading' ||
     workbenchPreviewStatus.value === 'loading' ||
     workbenchApplyStatus.value === 'loading' ||
     workbenchRestoreStatus.value === 'loading' ||
@@ -1610,7 +1733,7 @@ function workbenchRemediationActionDisabled(action: WorkbenchRemediationAction):
         workbenchResolveStatus.value === 'loading' ||
         workbenchPortMutationStatus.value === 'loading' ||
         workbenchResourceMutationStatus.value === 'loading' ||
-        workbenchModuleMutationStatus.value === 'loading' ||
+        workbenchOptionalServiceMutationStatus.value === 'loading' ||
         workbenchPreviewStatus.value === 'loading' ||
         workbenchApplyStatus.value === 'loading' ||
         workbenchRestoreStatus.value === 'loading'
@@ -1669,6 +1792,7 @@ const fmtDate = (value?: string | null) => {
 
 const loadWorkbench = () => {
   const name = projectName.value
+  workbenchPendingOptionalServiceMutation.value = null
   if (!name) {
     workbenchStore.reset()
     return
@@ -1792,6 +1916,7 @@ const refreshWorkbench = async () => {
   const name = projectName.value
   if (!name) return
   if (!workbenchComposeSupported.value) return
+  workbenchPendingOptionalServiceMutation.value = null
   await Promise.all([
     workbenchStore.loadSnapshot(name),
     workbenchStore.loadCatalog(name),
@@ -1827,6 +1952,79 @@ const importWorkbench = async () => {
       'Workbench',
     )
   }
+}
+
+const queueWorkbenchOptionalServiceMutation = (
+  entry: WorkbenchOptionalServiceCatalogRow,
+  action: WorkbenchOptionalServiceMutationAction = workbenchOptionalServicePendingAction(entry),
+) => {
+  if (!isAdmin.value) {
+    toastStore.error('Admin access required.', 'Workbench optional services')
+    return
+  }
+  if (workbenchOptionalServiceActionDisabled(entry)) return
+
+  const serviceName = workbenchOptionalServiceManagedServiceName(entry) ?? entry.defaultServiceName
+  if (action === 'remove' && !serviceName.trim()) {
+    toastStore.error('No catalog-managed service is available to remove for this entry.', 'Workbench optional services')
+    return
+  }
+
+  workbenchPendingOptionalServiceMutation.value = {
+    entryKey: entry.key,
+    action,
+    serviceName,
+    displayName: entry.displayName,
+  }
+}
+
+const cancelWorkbenchOptionalServiceMutation = (entryKey?: string) => {
+  if (!entryKey || workbenchPendingOptionalServiceMutation.value?.entryKey === entryKey) {
+    workbenchPendingOptionalServiceMutation.value = null
+  }
+}
+
+const confirmWorkbenchOptionalServiceMutation = async (entry: WorkbenchOptionalServiceCatalogRow) => {
+  const name = projectName.value
+  if (!name) return
+  if (!isAdmin.value) {
+    toastStore.error('Admin access required.', 'Workbench optional services')
+    return
+  }
+
+  const pendingMutation = workbenchPendingOptionalServiceMutation.value
+  if (!pendingMutation || pendingMutation.entryKey !== entry.key) return
+
+  const actionLabel = pendingMutation.action === 'remove' ? 'remove' : 'add'
+  workbenchPendingOptionalServiceMutation.value = null
+
+  const result =
+    pendingMutation.action === 'remove'
+      ? await workbenchStore.removeOptionalService(name, entry.key, pendingMutation.serviceName)
+      : await workbenchStore.addOptionalService(name, entry.key)
+
+  if (!result) {
+    const parsedError = workbenchOptionalServiceMutationError.value
+    if (parsedError?.code === 'WB-409-LOCKED' || parsedError?.code === 'WB-422-VALIDATION') {
+      toastStore.warn(
+        parsedError?.message ?? `Workbench optional-service ${actionLabel} was blocked.`,
+        'Workbench optional services',
+      )
+    } else {
+      toastStore.error(
+        parsedError?.message ?? `Workbench optional-service ${actionLabel} failed.`,
+        'Workbench optional services',
+      )
+    }
+    return
+  }
+
+  toastStore.success(
+    pendingMutation.action === 'remove'
+      ? `Removed ${result.serviceName || pendingMutation.displayName} from the stored Workbench snapshot.`
+      : `Added ${result.serviceName || pendingMutation.displayName} to the stored Workbench snapshot.`,
+    'Workbench optional services',
+  )
 }
 
 const resolveWorkbenchPorts = async () => {
@@ -2521,7 +2719,7 @@ watch(
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Workbench</p>
             <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Compose authority shell</h2>
             <p class="mt-2 text-sm text-[color:var(--muted)]">
-              Read/import state for the stored Workbench model plus current compose context, a read-only optional-service catalog, and the existing admin-only port, resource, and compose preview/apply controls.
+              Read/import state for the stored Workbench model plus current compose context, admin-only optional-service add/remove controls, and the existing port, resource, and compose preview/apply surfaces.
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
@@ -2545,7 +2743,7 @@ watch(
                 workbenchImportStatus === 'loading' ||
                 workbenchResolveStatus === 'loading' ||
                 workbenchResourceMutationStatus === 'loading' ||
-                workbenchModuleMutationStatus === 'loading' ||
+                workbenchOptionalServiceMutationStatus === 'loading' ||
                 workbenchPreviewStatus === 'loading' ||
                 workbenchApplyStatus === 'loading' ||
                 workbenchRestoreStatus === 'loading'
@@ -2567,7 +2765,7 @@ watch(
                 workbenchCatalogStatus === 'loading' ||
                 workbenchPortMutationStatus === 'loading' ||
                 workbenchResourceMutationStatus === 'loading' ||
-                workbenchModuleMutationStatus === 'loading' ||
+                workbenchOptionalServiceMutationStatus === 'loading' ||
                 workbenchPreviewStatus === 'loading' ||
                 workbenchApplyStatus === 'loading' ||
                 workbenchRestoreStatus === 'loading'
@@ -2589,7 +2787,7 @@ watch(
                 workbenchResolveStatus === 'loading' ||
                 workbenchPortMutationStatus === 'loading' ||
                 workbenchResourceMutationStatus === 'loading' ||
-                workbenchModuleMutationStatus === 'loading' ||
+                workbenchOptionalServiceMutationStatus === 'loading' ||
                 workbenchPreviewStatus === 'loading' ||
                 workbenchApplyStatus === 'loading' ||
                 workbenchRestoreStatus === 'loading'
@@ -2694,8 +2892,8 @@ watch(
           >
             {{
               isAdmin
-                ? 'No imported Workbench snapshot is stored for this project yet. Import the current compose to initialize the model shell. The catalog below still reflects the shipped optional-service contract.'
-                : 'No imported Workbench snapshot is stored for this project yet. An admin must import the project compose before current-compose inventory becomes visible here. The catalog below remains read-only.'
+                ? 'No imported Workbench snapshot is stored for this project yet. Import the current compose to initialize the model shell. The catalog below still shows available catalog-managed services and any legacy transition metadata.'
+                : 'No imported Workbench snapshot is stored for this project yet. An admin must import the project compose before current-compose inventory becomes visible here. The catalog below stays read-only while still showing available services and legacy transition metadata.'
             }}
           </UiInlineFeedback>
 
@@ -2704,7 +2902,7 @@ watch(
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Optional services</p>
-                  <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Catalog shell</h3>
+                  <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Catalog controls</h3>
                 </div>
                 <UiBadge :tone="workbenchOptionalServiceBadgeTone">
                   {{ workbenchOptionalServiceInventory.length }} entries
@@ -2712,7 +2910,7 @@ watch(
               </div>
 
               <p class="text-sm text-[color:var(--muted)]">
-                Backend ordering is preserved here: the current compose context comes from the stored Workbench snapshot, and each catalog card shows compose matches, catalog-managed state, and legacy transition metadata without enabling mutations yet.
+                Backend ordering is preserved here: the current compose context comes from the stored Workbench snapshot, and each catalog card shows compose matches, catalog-managed state, and legacy transition metadata alongside the live add/remove path.
               </p>
 
               <UiState v-if="workbenchCatalogStatus === 'loading'" loading>
@@ -2774,11 +2972,11 @@ watch(
                       <div class="flex flex-wrap items-start justify-between gap-2">
                         <span>Mutation path</span>
                         <span class="font-semibold text-[color:var(--text)]">
-                          {{ entry.mutationReady ? 'Catalog-backed next slice' : 'Read-only' }}
+                          {{ entry.mutationReady ? 'Catalog-managed' : 'Read-only' }}
                         </span>
                       </div>
                       <div class="flex flex-wrap items-start justify-between gap-2">
-                        <span>Compose generation</span>
+                        <span>Preview/apply path</span>
                         <span class="font-semibold text-[color:var(--text)]">
                           {{ entry.composeGenerationReady ? 'Ready' : 'Not ready' }}
                         </span>
@@ -2849,7 +3047,7 @@ watch(
                           </p>
                         </div>
                       </div>
-                      <p v-else>No legacy module metadata is attached to this entry.</p>
+                      <p v-else>No legacy transition metadata is attached to this entry.</p>
                     </UiPanel>
                   </div>
 
@@ -2873,6 +3071,86 @@ watch(
                       still reports <span class="font-semibold text-[color:var(--text)]">{{ entry.legacyModuleType }}</span> metadata separately.
                     </p>
                   </div>
+
+                  <UiPanel variant="soft" class="space-y-3 p-3 text-xs text-[color:var(--muted)]">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Catalog mutation</p>
+                        <p class="mt-1">
+                          {{
+                            workbenchOptionalServicePendingAction(entry) === 'remove'
+                              ? 'Remove the stored catalog-managed service record. Imported compose matches and legacy metadata stay visible separately.'
+                              : 'Add the catalog-managed service to the stored Workbench snapshot. Preview/apply is still required before compose changes hit disk.'
+                          }}
+                        </p>
+                      </div>
+                      <UiBadge :tone="entry.mutationReady ? 'ok' : 'neutral'">
+                        {{ entry.mutationReady ? 'Mutation ready' : 'Read-only' }}
+                      </UiBadge>
+                    </div>
+
+                    <div v-if="isAdmin" class="space-y-3">
+                      <UiInlineFeedback
+                        v-if="workbenchOptionalServiceFeedback(entry)"
+                        :tone="workbenchOptionalServiceFeedback(entry)?.tone || 'neutral'"
+                      >
+                        {{ workbenchOptionalServiceFeedback(entry)?.message }}
+                      </UiInlineFeedback>
+
+                      <div v-if="workbenchOptionalServicePendingConfirmation(entry)" class="space-y-3 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
+                        <p class="text-[color:var(--text)]">
+                          {{
+                            workbenchPendingOptionalServiceMutation?.action === 'remove'
+                              ? `Remove ${workbenchPendingOptionalServiceMutation.serviceName} from the stored Workbench snapshot?`
+                              : `Add ${entry.displayName} to the stored Workbench snapshot as ${entry.defaultServiceName}?`
+                          }}
+                        </p>
+                        <p>
+                          {{
+                            workbenchPendingOptionalServiceMutation?.action === 'remove'
+                              ? 'This only removes the catalog-managed record. Existing compose-owned services and legacy transition metadata remain visible after the shell refresh.'
+                              : 'This only updates the stored Workbench model. Run preview/apply later if you want the generated compose artifact to change on disk.'
+                          }}
+                        </p>
+                        <div class="flex flex-wrap gap-2">
+                          <UiButton
+                            variant="primary"
+                            size="sm"
+                            :disabled="workbenchOptionalServiceActionDisabled(entry)"
+                            @click="confirmWorkbenchOptionalServiceMutation(entry)"
+                          >
+                            <span class="inline-flex items-center gap-2">
+                              <UiInlineSpinner v-if="workbenchOptionalServiceBusy(entry)" />
+                              {{ workbenchPendingOptionalServiceMutation?.action === 'remove' ? 'Confirm remove' : 'Confirm add' }}
+                            </span>
+                          </UiButton>
+                          <UiButton
+                            variant="ghost"
+                            size="sm"
+                            :disabled="workbenchOptionalServiceBusy(entry)"
+                            @click="cancelWorkbenchOptionalServiceMutation(entry.key)"
+                          >
+                            Cancel
+                          </UiButton>
+                        </div>
+                      </div>
+                      <UiButton
+                        v-else
+                        :variant="workbenchOptionalServicePendingAction(entry) === 'remove' ? 'ghost' : 'primary'"
+                        size="sm"
+                        :disabled="workbenchOptionalServiceActionDisabled(entry)"
+                        @click="queueWorkbenchOptionalServiceMutation(entry)"
+                      >
+                        <span class="inline-flex items-center gap-2">
+                          <UiInlineSpinner v-if="workbenchOptionalServiceBusy(entry)" />
+                          {{ workbenchOptionalServicePendingLabel(entry) }}
+                        </span>
+                      </UiButton>
+                    </div>
+                    <p v-else>
+                      Read-only access: admin permissions are required to add or remove catalog-managed services from the stored Workbench snapshot.
+                    </p>
+                  </UiPanel>
                 </UiPanel>
               </div>
             </UiPanel>
@@ -2883,7 +3161,7 @@ watch(
                 <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Snapshot-backed summary</h3>
               </div>
               <p>
-                This panel stays read-only for every role in this slice. Admin-only add/remove controls are intentionally deferred so the shipped preview/apply/restore shell stays low-risk while the catalog model settles.
+                Current compose visibility stays read-only here. Admins can add or remove catalog-managed services from the cards on the left, then use preview/apply or restore without leaving Project Detail. Non-admin users keep the same snapshot-backed visibility with explicit read-only rationale.
               </p>
 
               <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
@@ -2900,7 +3178,7 @@ watch(
                   <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchCurrentComposeSummary.matchedCatalogEntries }}</p>
                 </UiPanel>
                 <UiPanel variant="soft" class="space-y-1 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Legacy modules</p>
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Legacy transition records</p>
                   <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchCurrentComposeSummary.legacyModules }}</p>
                 </UiPanel>
               </div>
@@ -2948,10 +3226,10 @@ watch(
                     class="space-y-1 p-3 text-xs"
                   >
                     <p class="font-semibold text-[color:var(--text)]">{{ legacyModule.serviceName || 'Unknown service' }}</p>
-                    <p class="text-[color:var(--muted-2)]">Legacy module type: {{ legacyModule.moduleType }}</p>
+                    <p class="text-[color:var(--muted-2)]">Legacy metadata type: {{ legacyModule.moduleType }}</p>
                   </UiPanel>
                 </div>
-                <p v-else class="text-xs">No legacy module records are currently attached to this project.</p>
+                <p v-else class="text-xs">No legacy transition records are currently attached to this project.</p>
               </div>
 
               <p v-if="!isAdmin" class="text-xs text-[color:var(--muted)]">
@@ -3083,7 +3361,7 @@ watch(
               </div>
 
               <p class="text-sm text-[color:var(--muted)]">
-                Restore replaces the on-disk compose artifact from a retained backup. The stored Workbench model does not change automatically, so older backups can require an import before preview/apply resumes.
+                Restore replaces the on-disk compose artifact from a retained backup. The stored Workbench model, including catalog-managed service selections, does not change automatically, so older backups can require an import before preview/apply resumes.
               </p>
 
               <UiInlineFeedback
@@ -3261,7 +3539,7 @@ watch(
                   v-if="workbenchLastRestoreResult?.requiresImport"
                   tone="warn"
                 >
-                  The last restore left compose drift against the stored Workbench snapshot. Safe recovery path: import, preview, then apply.
+                  The last restore left compose drift against the stored Workbench snapshot. Safe recovery path: import, preview, then apply the desired catalog-managed state.
                 </UiState>
               </template>
 
@@ -3418,7 +3696,7 @@ watch(
                           placeholder="8080"
                           :disabled="
                             workbenchPortMutationBusy(port) ||
-                            workbenchModuleMutationStatus === 'loading' ||
+                            workbenchOptionalServiceMutationStatus === 'loading' ||
                             workbenchPreviewStatus === 'loading' ||
                             workbenchApplyStatus === 'loading' ||
                             workbenchRestoreStatus === 'loading'
@@ -3432,7 +3710,7 @@ watch(
                         :disabled="
                           workbenchPortMutationBusy(port) ||
                           workbenchResolveStatus === 'loading' ||
-                          workbenchModuleMutationStatus === 'loading' ||
+                          workbenchOptionalServiceMutationStatus === 'loading' ||
                           workbenchPreviewStatus === 'loading' ||
                           workbenchApplyStatus === 'loading' ||
                           workbenchRestoreStatus === 'loading'
@@ -3450,7 +3728,7 @@ watch(
                         :disabled="
                           workbenchPortMutationBusy(port) ||
                           workbenchResolveStatus === 'loading' ||
-                          workbenchModuleMutationStatus === 'loading' ||
+                          workbenchOptionalServiceMutationStatus === 'loading' ||
                           workbenchPreviewStatus === 'loading' ||
                           workbenchApplyStatus === 'loading' ||
                           workbenchRestoreStatus === 'loading'
@@ -3465,7 +3743,7 @@ watch(
                         :disabled="
                           workbenchPortSuggestionStatus(port) === 'loading' ||
                           workbenchPortMutationBusy(port) ||
-                          workbenchModuleMutationStatus === 'loading' ||
+                          workbenchOptionalServiceMutationStatus === 'loading' ||
                           workbenchPreviewStatus === 'loading' ||
                           workbenchApplyStatus === 'loading' ||
                           workbenchRestoreStatus === 'loading'
@@ -3507,7 +3785,7 @@ watch(
                           size="sm"
                           :disabled="
                             workbenchPortMutationBusy(port) ||
-                            workbenchModuleMutationStatus === 'loading' ||
+                            workbenchOptionalServiceMutationStatus === 'loading' ||
                             workbenchPreviewStatus === 'loading' ||
                             workbenchApplyStatus === 'loading' ||
                             workbenchRestoreStatus === 'loading'
@@ -3866,7 +4144,7 @@ watch(
               </div>
 
               <p class="text-sm text-[color:var(--muted)]">
-                Preview is mandatory before apply. Workbench writes only the generated compose artifact here; stack restart and job handoff remain on the existing project controls.
+                Preview is mandatory before apply. This is where catalog-managed service changes, port edits, and resource edits turn into generated compose output; stack restart and job handoff remain on the existing project controls.
               </p>
 
               <div v-if="isAdmin" class="flex flex-wrap gap-2">
@@ -3880,7 +4158,7 @@ watch(
                     workbenchResolveStatus === 'loading' ||
                     workbenchPortMutationStatus === 'loading' ||
                     workbenchResourceMutationStatus === 'loading' ||
-                    workbenchModuleMutationStatus === 'loading'
+                    workbenchOptionalServiceMutationStatus === 'loading'
                   "
                   @click="previewWorkbenchCompose"
                 >
@@ -4061,7 +4339,7 @@ watch(
                   workbenchComposeImportRequired
                     ? 'Re-import the restored compose before generating another preview or applying stored Workbench changes.'
                     : isAdmin
-                      ? 'Generate a compose preview to inspect the exact YAML output before apply.'
+                      ? 'Generate a compose preview to inspect the exact YAML output for the current catalog-managed service mix before apply.'
                       : 'An admin must generate a compose preview before compose apply becomes available.'
                 }}
               </UiState>
@@ -4112,7 +4390,7 @@ watch(
                 <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Revision and diagnostics</h3>
               </div>
               <p>
-                Port, resource, and future catalog-service edits all change the stored Workbench model first. Any model change, stale revision, or external compose drift invalidates the previous preview until a new preview is generated.
+                Port, resource, and catalog-managed service edits all change the stored Workbench model first. Any model change, stale revision, or external compose drift invalidates the previous preview until a new preview is generated.
               </p>
 
               <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
@@ -4297,7 +4575,7 @@ watch(
                     </div>
 
                     <div class="space-y-2">
-                      <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Modules</p>
+                      <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Legacy metadata</p>
                       <div v-if="row.moduleTypes.length > 0" class="flex flex-wrap gap-2">
                         <UiBadge
                           v-for="moduleType in row.moduleTypes"
@@ -4307,7 +4585,7 @@ watch(
                           {{ moduleType }}
                         </UiBadge>
                       </div>
-                      <p v-else>No module metadata recorded.</p>
+                      <p v-else>No legacy transition metadata recorded.</p>
                     </div>
                   </div>
                 </UiListRow>
@@ -4320,7 +4598,7 @@ watch(
                 <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Dependency footprint</h3>
               </div>
               <p>
-                This view mirrors the stored dependency graph only. It exposes imported service edges plus any stored network and module annotations without widening into edit controls.
+                This view mirrors the stored dependency graph only. It exposes imported service edges plus stored network attachments and legacy transition annotations without widening into edit controls.
               </p>
 
               <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
@@ -4364,7 +4642,7 @@ watch(
                 </div>
 
                 <div class="space-y-2">
-                  <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Module types</p>
+                  <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Legacy metadata types</p>
                   <div v-if="workbenchTopologySummary.moduleTypes.length > 0" class="flex flex-wrap gap-2">
                     <UiBadge
                       v-for="moduleType in workbenchTopologySummary.moduleTypes"
@@ -4374,7 +4652,7 @@ watch(
                       {{ moduleType }}
                     </UiBadge>
                   </div>
-                  <p v-else class="text-xs">No stored module summary is available in this snapshot.</p>
+                  <p v-else class="text-xs">No legacy transition summary is available in this snapshot.</p>
                 </div>
               </div>
 

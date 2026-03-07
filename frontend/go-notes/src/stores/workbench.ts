@@ -9,6 +9,7 @@ import {
   type WorkbenchComposeApplyResult as WorkbenchComposeApplyApiResult,
   type WorkbenchComposeBackupMetadata,
   type WorkbenchOptionalServiceCatalog,
+  type WorkbenchOptionalServiceMutationSummary,
   type WorkbenchComposePreviewRequest,
   type WorkbenchComposePreviewResult as WorkbenchComposePreviewApiResult,
   type WorkbenchComposeRestoreRequest,
@@ -37,6 +38,20 @@ export interface WorkbenchImportResult {
   reason: WorkbenchImportReason
   changed: boolean
   idempotent: boolean
+  revision: number
+  sourceFingerprint: string
+}
+
+export interface WorkbenchOptionalServiceMutationResult {
+  projectName: string
+  changed: boolean
+  action: WorkbenchOptionalServiceMutationSummary['action']
+  entryKey?: string
+  serviceName?: string
+  previousCount: number
+  currentCount: number
+  composeGenerationReady: boolean
+  notes: string[]
   revision: number
   sourceFingerprint: string
 }
@@ -197,6 +212,25 @@ function createPortResolveResult(
   }
 }
 
+function createOptionalServiceMutationResult(
+  snapshotValue: WorkbenchStackSnapshot,
+  summary: WorkbenchOptionalServiceMutationSummary,
+): WorkbenchOptionalServiceMutationResult {
+  return {
+    projectName: snapshotValue.projectName,
+    changed: summary.changed,
+    action: summary.action,
+    entryKey: summary.entryKey,
+    serviceName: summary.serviceName,
+    previousCount: summary.previousCount,
+    currentCount: summary.currentCount,
+    composeGenerationReady: summary.composeGenerationReady,
+    notes: Array.isArray(summary.notes) ? summary.notes : [],
+    revision: snapshotValue.revision,
+    sourceFingerprint: snapshotValue.sourceFingerprint,
+  }
+}
+
 function createPortMutationResult(
   snapshotValue: WorkbenchStackSnapshot,
   summary: WorkbenchPortMutationSummary,
@@ -333,6 +367,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const catalog = ref<WorkbenchOptionalServiceCatalog | null>(null)
   const catalogStatus = ref<WorkbenchRequestStatus>('idle')
   const catalogError = ref<ApiError | null>(null)
+  const optionalServiceMutationStatus = ref<WorkbenchRequestStatus>('idle')
+  const optionalServiceMutationError = ref<ApiError | null>(null)
+  const activeOptionalServiceMutationEntryKey = ref<string | null>(null)
+  const lastOptionalServiceMutationResult = ref<WorkbenchOptionalServiceMutationResult | null>(null)
   const importStatus = ref<WorkbenchRequestStatus>('idle')
   const importError = ref<ApiError | null>(null)
   const lastImportResult = ref<WorkbenchImportResult | null>(null)
@@ -373,6 +411,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 
   let snapshotRequestID = 0
   let catalogRequestID = 0
+  let optionalServiceMutationRequestID = 0
   let importRequestID = 0
   let resolveRequestID = 0
   let portMutationRequestID = 0
@@ -432,6 +471,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     catalog.value = null
     catalogStatus.value = 'idle'
     catalogError.value = null
+    optionalServiceMutationStatus.value = 'idle'
+    optionalServiceMutationError.value = null
+    activeOptionalServiceMutationEntryKey.value = null
+    lastOptionalServiceMutationResult.value = null
     importStatus.value = 'idle'
     importError.value = null
     lastImportResult.value = null
@@ -468,6 +511,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     catalog.value = null
     catalogStatus.value = 'idle'
     catalogError.value = null
+    optionalServiceMutationStatus.value = 'idle'
+    optionalServiceMutationError.value = null
+    activeOptionalServiceMutationEntryKey.value = null
+    lastOptionalServiceMutationResult.value = null
     importStatus.value = 'idle'
     importError.value = null
     lastImportResult.value = null
@@ -656,6 +703,145 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         snapshotError.value = parsedError
       }
       return null
+    }
+  }
+
+  async function addOptionalService(
+    targetProjectName: string,
+    entryKey: string,
+  ): Promise<WorkbenchOptionalServiceMutationResult | null> {
+    const normalizedProjectName = normalizeProjectName(targetProjectName)
+    if (!normalizedProjectName) {
+      reset()
+      optionalServiceMutationStatus.value = 'error'
+      optionalServiceMutationError.value = createProjectNameError()
+      return null
+    }
+
+    const normalizedEntryKey = entryKey.trim().toLowerCase()
+    if (!normalizedEntryKey) {
+      optionalServiceMutationStatus.value = 'error'
+      optionalServiceMutationError.value = new ApiError('Optional-service entry key is required.')
+      return null
+    }
+
+    syncProjectContext(normalizedProjectName)
+
+    const requestID = ++optionalServiceMutationRequestID
+    projectName.value = normalizedProjectName
+    optionalServiceMutationStatus.value = 'loading'
+    optionalServiceMutationError.value = null
+    activeOptionalServiceMutationEntryKey.value = normalizedEntryKey
+
+    try {
+      const previousSnapshotIdentity = snapshotIdentity(snapshot.value)
+      const { data } = await workbenchApi.addOptionalService(normalizedProjectName, {
+        entryKey: normalizedEntryKey,
+      })
+      if (
+        requestID !== optionalServiceMutationRequestID ||
+        projectName.value !== normalizedProjectName
+      ) {
+        return lastOptionalServiceMutationResult.value
+      }
+
+      applySnapshotState(data.stack, snapshot, snapshotStatus, snapshotError)
+      clearRestoreRequirementIfResolved(data.stack)
+      if (previousSnapshotIdentity !== snapshotIdentity(data.stack)) {
+        resetComposeExecutionState()
+      }
+      resetPortSuggestions()
+      const result = createOptionalServiceMutationResult(data.stack, data.mutation)
+      await loadCatalog(normalizedProjectName)
+      lastOptionalServiceMutationResult.value = result
+      optionalServiceMutationStatus.value = 'ready'
+      return result
+    } catch (error: unknown) {
+      if (
+        requestID !== optionalServiceMutationRequestID ||
+        projectName.value !== normalizedProjectName
+      ) {
+        return lastOptionalServiceMutationResult.value
+      }
+
+      optionalServiceMutationStatus.value = 'error'
+      optionalServiceMutationError.value = parseApiError(error)
+      return null
+    } finally {
+      if (requestID === optionalServiceMutationRequestID) {
+        activeOptionalServiceMutationEntryKey.value = null
+      }
+    }
+  }
+
+  async function removeOptionalService(
+    targetProjectName: string,
+    entryKey: string,
+    serviceName: string,
+  ): Promise<WorkbenchOptionalServiceMutationResult | null> {
+    const normalizedProjectName = normalizeProjectName(targetProjectName)
+    if (!normalizedProjectName) {
+      reset()
+      optionalServiceMutationStatus.value = 'error'
+      optionalServiceMutationError.value = createProjectNameError()
+      return null
+    }
+
+    const normalizedEntryKey = entryKey.trim().toLowerCase()
+    const normalizedServiceName = serviceName.trim()
+    if (!normalizedServiceName) {
+      optionalServiceMutationStatus.value = 'error'
+      optionalServiceMutationError.value = createServiceNameError()
+      return null
+    }
+
+    syncProjectContext(normalizedProjectName)
+
+    const requestID = ++optionalServiceMutationRequestID
+    projectName.value = normalizedProjectName
+    optionalServiceMutationStatus.value = 'loading'
+    optionalServiceMutationError.value = null
+    activeOptionalServiceMutationEntryKey.value = normalizedEntryKey || normalizedServiceName
+
+    try {
+      const previousSnapshotIdentity = snapshotIdentity(snapshot.value)
+      const { data } = await workbenchApi.removeOptionalService(
+        normalizedProjectName,
+        normalizedServiceName,
+      )
+      if (
+        requestID !== optionalServiceMutationRequestID ||
+        projectName.value !== normalizedProjectName
+      ) {
+        return lastOptionalServiceMutationResult.value
+      }
+
+      applySnapshotState(data.stack, snapshot, snapshotStatus, snapshotError)
+      clearRestoreRequirementIfResolved(data.stack)
+      if (previousSnapshotIdentity !== snapshotIdentity(data.stack)) {
+        resetComposeExecutionState()
+      }
+      resetPortSuggestions()
+      const result = createOptionalServiceMutationResult(data.stack, data.mutation)
+      await loadCatalog(normalizedProjectName)
+      lastOptionalServiceMutationResult.value = result
+      optionalServiceMutationStatus.value = 'ready'
+      return result
+    } catch (error: unknown) {
+      if (
+        requestID !== optionalServiceMutationRequestID ||
+        projectName.value !== normalizedProjectName
+      ) {
+        return lastOptionalServiceMutationResult.value
+      }
+
+      optionalServiceMutationStatus.value = 'error'
+      optionalServiceMutationError.value = parseApiError(error)
+      return null
+    } finally {
+      if (requestID === optionalServiceMutationRequestID) {
+        activeOptionalServiceMutationEntryKey.value = null
+      }
     }
   }
 
@@ -1244,6 +1430,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     catalog,
     catalogStatus,
     catalogError,
+    optionalServiceMutationStatus,
+    optionalServiceMutationError,
+    activeOptionalServiceMutationEntryKey,
+    lastOptionalServiceMutationResult,
     importStatus,
     importError,
     lastImportResult,
@@ -1283,6 +1473,8 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     reset,
     loadSnapshot,
     loadCatalog,
+    addOptionalService,
+    removeOptionalService,
     runImport,
     resolvePorts,
     mutatePort,

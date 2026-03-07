@@ -3,7 +3,9 @@ import type {
   WorkbenchComposeApplyRequest,
   WorkbenchComposeApplyResponse,
   WorkbenchComposeBackupsResponse,
+  WorkbenchOptionalServiceAddRequest,
   WorkbenchOptionalServiceCatalogResponse,
+  WorkbenchOptionalServiceMutationResponse,
   WorkbenchComposePreviewRequest,
   WorkbenchComposePreviewResponse,
   WorkbenchComposeRestoreRequest,
@@ -31,6 +33,15 @@ export const workbenchApi = {
     api.get<WorkbenchSnapshotResponse>(workbenchProjectPath(projectName)),
   getCatalog: (projectName: string) =>
     api.get<WorkbenchOptionalServiceCatalogResponse>(`${workbenchProjectPath(projectName)}/catalog`),
+  addOptionalService: (projectName: string, payload: WorkbenchOptionalServiceAddRequest) =>
+    api.post<WorkbenchOptionalServiceMutationResponse>(
+      `${workbenchProjectPath(projectName)}/services`,
+      payload,
+    ),
+  removeOptionalService: (projectName: string, serviceName: string) =>
+    api.delete<WorkbenchOptionalServiceMutationResponse>(
+      `${workbenchProjectPath(projectName)}/services/${encodeURIComponent(serviceName)}`,
+    ),
   importSnapshot: (projectName: string, reason: WorkbenchImportReason) =>
     api.post<WorkbenchImportResponse>(`${workbenchProjectPath(projectName)}/import`, { reason }),
   resolvePorts: (projectName: string) =>
