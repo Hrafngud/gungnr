@@ -10,7 +10,7 @@
   "GET /health/docker": {
     "status": "ok",
     "detail": "Docker connected",
-    "containers": 3
+    "containers": 6
   },
   "GET /health/tunnel": {
     "status": "ok",
@@ -35,7 +35,10 @@
   "GET /api/v1/settings": {
     "settings": {
       "baseDomain": "mock.example.com",
-      "additionalDomains": ["mock-secondary.example.com"],
+      "additionalDomains": [
+        "mock-secondary.example.com",
+        "preview.mock.example.com"
+      ],
       "githubAppId": "123456",
       "githubAppClientId": "mock-client-id",
       "githubAppClientSecret": "mock-client-secret",
@@ -59,7 +62,7 @@
   "GET /api/v1/settings/cloudflared/preview": {
     "preview": {
       "path": "/home/mock/.cloudflared/config.yml",
-      "contents": "tunnel: mock-tunnel\ncredentials-file: /home/mock/.cloudflared/mock.json\ningress:\n  - hostname: app.mock.example.com\n    service: http://localhost:3000\n  - service: http_status:404\n"
+      "contents": "tunnel: mock-tunnel\ncredentials-file: /home/mock/.cloudflared/mock.json\ningress:\n  - hostname: app.mock.example.com\n    service: http://localhost:3000\n  - hostname: api.mock.example.com\n    service: http://localhost:8080\n  - service: http_status:404\n"
     }
   },
   "GET /api/v1/github/catalog": {
@@ -107,19 +110,19 @@
         "proxyPort": 3000,
         "dbPort": 5432,
         "status": "running",
-        "createdAt": "2026-01-01T10:00:00Z",
-        "updatedAt": "2026-01-02T10:00:00Z"
+        "createdAt": "2026-03-01T10:00:00Z",
+        "updatedAt": "2026-03-07T19:40:00Z"
       },
-            {
-        "id": 1,
-        "name": "mock-service",
-        "repoUrl": "https://github.com/acme/mock-service",
-        "path": "/templates/mock-service",
-        "proxyPort": 3000,
-        "dbPort": 5432,
-        "status": "running",
-        "createdAt": "2026-01-01T10:00:00Z",
-        "updatedAt": "2026-01-02T10:00:00Z"
+      {
+        "id": 2,
+        "name": "edge-proxy",
+        "repoUrl": "https://github.com/acme/edge-proxy",
+        "path": "/templates/edge-proxy",
+        "proxyPort": 3100,
+        "dbPort": 0,
+        "status": "degraded",
+        "createdAt": "2026-02-19T08:30:00Z",
+        "updatedAt": "2026-03-07T18:15:00Z"
       }
     ]
   },
@@ -128,63 +131,85 @@
       {
         "name": "mock-service",
         "path": "/templates/mock-service"
-      }
-    ]
-  },
-  "GET /api/v1/jobs": {
-    "jobs": [
+      },
       {
-        "id": 1,
-        "type": "deploy",
-        "status": "success",
-        "startedAt": "2026-01-02T12:00:00Z",
-        "finishedAt": "2026-01-02T12:02:00Z",
-        "error": null,
-        "createdAt": "2026-01-02T11:59:00Z"
-      }
-    ],
-    "page": 1,
-    "pageSize": 20,
-    "total": 1,
-    "totalPages": 1
-  },
-  "GET /api/v1/jobs/1": {
-    "id": 1,
-    "type": "deploy",
-    "status": "success",
-    "startedAt": "2026-01-02T12:00:00Z",
-    "finishedAt": "2026-01-02T12:02:00Z",
-    "error": null,
-    "createdAt": "2026-01-02T11:59:00Z",
-    "logLines": [
-      "Cloning repo...",
-      "Building containers...",
-      "Deployment complete."
-    ]
-  },
-  "GET /api/v1/audit-logs": {
-    "logs": [
-      {
-        "id": 1,
-        "userId": 1,
-        "userLogin": "mock-admin",
-        "action": "deploy",
-        "target": "mock-service",
-        "metadata": "{\"subdomain\":\"app\"}",
-        "createdAt": "2026-01-02T12:03:00Z"
+        "name": "edge-proxy",
+        "path": "/templates/edge-proxy"
       }
     ]
   },
-  "GET /api/v1/host/docker": {
+  "GET /api/v1/projects/mock-service": {
+    "project": {
+      "name": "mock-service",
+      "normalizedName": "mock-service",
+      "record": {
+        "id": 1,
+        "name": "mock-service",
+        "repoUrl": "https://github.com/acme/mock-service",
+        "path": "/templates/mock-service",
+        "proxyPort": 3000,
+        "dbPort": 5432,
+        "status": "running",
+        "createdAt": "2026-03-01T10:00:00Z",
+        "updatedAt": "2026-03-07T19:40:00Z"
+      }
+    },
+    "runtime": {
+      "path": "/templates/mock-service",
+      "source": "/templates/mock-service/docker-compose.yml",
+      "composeFiles": [
+        "/templates/mock-service/docker-compose.yml"
+      ],
+      "envPath": "/templates/mock-service/.env",
+      "envExists": true
+    },
+    "network": {
+      "proxyPort": 3000,
+      "dbPort": 5432,
+      "publishedPorts": [
+        {
+          "container": "mock-service-web-1",
+          "service": "web",
+          "hostIp": "0.0.0.0",
+          "hostPort": 3000,
+          "containerPort": 3000,
+          "proto": "tcp"
+        },
+        {
+          "container": "mock-service-api-1",
+          "service": "api",
+          "hostIp": "127.0.0.1",
+          "hostPort": 8080,
+          "containerPort": 8080,
+          "proto": "tcp"
+        },
+        {
+          "container": "mock-service-db-1",
+          "service": "db",
+          "hostIp": "127.0.0.1",
+          "hostPort": 5432,
+          "containerPort": 5432,
+          "proto": "tcp"
+        },
+        {
+          "container": "mock-service-redis-1",
+          "service": "redis",
+          "hostIp": "127.0.0.1",
+          "hostPort": 6380,
+          "containerPort": 6379,
+          "proto": "tcp"
+        }
+      ]
+    },
     "containers": [
       {
-        "id": "abc123",
-        "name": "mock-service",
-        "image": "acme/mock-service:latest",
-        "status": "running",
-        "ports": "3000/tcp",
-        "createdAt": "2026-01-02T11:58:00Z",
-        "runningFor": "3 minutes",
+        "id": "2f6f9a1c9d6b",
+        "name": "mock-service-web-1",
+        "image": "ghcr.io/acme/mock-service-web:v1.8.2",
+        "status": "Up 16 hours",
+        "ports": "0.0.0.0:3000->3000/tcp",
+        "createdAt": "2026-03-07T04:05:00Z",
+        "runningFor": "16 hours",
         "service": "web",
         "project": "mock-service",
         "portBindings": [
@@ -196,33 +221,801 @@
             "published": true
           }
         ]
+      },
+      {
+        "id": "5b9e402bc441",
+        "name": "mock-service-api-1",
+        "image": "ghcr.io/acme/mock-service-api:v1.8.2",
+        "status": "Up 16 hours",
+        "ports": "127.0.0.1:8080->8080/tcp",
+        "createdAt": "2026-03-07T04:05:02Z",
+        "runningFor": "16 hours",
+        "service": "api",
+        "project": "mock-service",
+        "portBindings": [
+          {
+            "hostIp": "127.0.0.1",
+            "hostPort": 8080,
+            "containerPort": 8080,
+            "proto": "tcp",
+            "published": true
+          }
+        ]
+      },
+      {
+        "id": "c4fe91812aa8",
+        "name": "mock-service-db-1",
+        "image": "postgres:16-alpine",
+        "status": "Up 16 hours",
+        "ports": "127.0.0.1:5432->5432/tcp",
+        "createdAt": "2026-03-07T04:05:01Z",
+        "runningFor": "16 hours",
+        "service": "db",
+        "project": "mock-service",
+        "portBindings": [
+          {
+            "hostIp": "127.0.0.1",
+            "hostPort": 5432,
+            "containerPort": 5432,
+            "proto": "tcp",
+            "published": true
+          }
+        ]
+      },
+      {
+        "id": "e92bb1fd3383",
+        "name": "mock-service-redis-1",
+        "image": "redis:7-alpine",
+        "status": "Up 16 hours",
+        "ports": "127.0.0.1:6380->6379/tcp",
+        "createdAt": "2026-03-07T04:05:03Z",
+        "runningFor": "16 hours",
+        "service": "redis",
+        "project": "mock-service",
+        "portBindings": [
+          {
+            "hostIp": "127.0.0.1",
+            "hostPort": 6380,
+            "containerPort": 6379,
+            "proto": "tcp",
+            "published": true
+          }
+        ]
+      }
+    ]
+  },
+  "GET /api/v1/projects/mock-service/jobs": {
+    "jobs": [
+      {
+        "id": 13,
+        "type": "stack_restart",
+        "status": "running",
+        "startedAt": "2026-03-07T19:21:00Z",
+        "finishedAt": null,
+        "error": null,
+        "createdAt": "2026-03-07T19:20:30Z"
+      },
+      {
+        "id": 12,
+        "type": "workbench_compose_apply",
+        "status": "completed",
+        "startedAt": "2026-03-07T18:12:00Z",
+        "finishedAt": "2026-03-07T18:13:11Z",
+        "error": null,
+        "createdAt": "2026-03-07T18:11:30Z"
+      },
+      {
+        "id": 11,
+        "type": "deploy_existing",
+        "status": "completed",
+        "startedAt": "2026-03-07T17:42:00Z",
+        "finishedAt": "2026-03-07T17:45:26Z",
+        "error": null,
+        "createdAt": "2026-03-07T17:41:18Z"
+      }
+    ],
+    "page": 1,
+    "pageSize": 8,
+    "total": 3,
+    "totalPages": 1
+  },
+  "GET /api/v1/projects/mock-service/archive/plan": {
+    "plan": {
+      "project": {
+        "name": "mock-service",
+        "normalizedName": "mock-service",
+        "path": "/templates/mock-service",
+        "status": "running"
+      },
+      "defaults": {
+        "removeContainers": true,
+        "removeVolumes": false,
+        "removeIngress": true,
+        "removeDns": true
+      },
+      "hostnames": [
+        "mock.example.com",
+        "api.mock.example.com",
+        "metrics.mock.example.com"
+      ],
+      "containers": [
+        {
+          "id": "2f6f9a1c9d6b",
+          "name": "mock-service-web-1",
+          "image": "ghcr.io/acme/mock-service-web:v1.8.2",
+          "status": "Up 16 hours",
+          "service": "web"
+        },
+        {
+          "id": "5b9e402bc441",
+          "name": "mock-service-api-1",
+          "image": "ghcr.io/acme/mock-service-api:v1.8.2",
+          "status": "Up 16 hours",
+          "service": "api"
+        },
+        {
+          "id": "c4fe91812aa8",
+          "name": "mock-service-db-1",
+          "image": "postgres:16-alpine",
+          "status": "Up 16 hours",
+          "service": "db"
+        },
+        {
+          "id": "e92bb1fd3383",
+          "name": "mock-service-redis-1",
+          "image": "redis:7-alpine",
+          "status": "Up 16 hours",
+          "service": "redis"
+        }
+      ],
+      "ingressRules": [
+        {
+          "hostname": "mock.example.com",
+          "service": "http://web:3000",
+          "source": "local"
+        },
+        {
+          "hostname": "api.mock.example.com",
+          "service": "http://api:8080",
+          "source": "local"
+        },
+        {
+          "hostname": "metrics.mock.example.com",
+          "service": "http://prometheus:9090",
+          "source": "remote"
+        }
+      ],
+      "dnsRecords": [
+        {
+          "id": "dns-001",
+          "zoneId": "mock-zone",
+          "name": "mock.example.com",
+          "type": "CNAME",
+          "content": "mock-tunnel.cfargotunnel.com",
+          "proxied": true,
+          "deleteEligible": true
+        },
+        {
+          "id": "dns-002",
+          "zoneId": "mock-zone",
+          "name": "api.mock.example.com",
+          "type": "CNAME",
+          "content": "mock-tunnel.cfargotunnel.com",
+          "proxied": true,
+          "deleteEligible": true
+        },
+        {
+          "id": "dns-003",
+          "zoneId": "mock-zone",
+          "name": "metrics.mock.example.com",
+          "type": "TXT",
+          "content": "\"managed externally\"",
+          "proxied": false,
+          "deleteEligible": false,
+          "skipReason": "Only CNAME records targeting the managed tunnel are eligible."
+        }
+      ],
+      "warnings": [
+        "Mock archive preview includes a remote metrics hostname to demonstrate partial cleanup handling."
+      ]
+    }
+  },
+  "GET /api/v1/projects/mock-service/workbench": {
+    "stack": {
+      "projectName": "mock-service",
+      "projectDir": "/templates/mock-service",
+      "composePath": "/templates/mock-service/docker-compose.yml",
+      "modelVersion": 1,
+      "revision": 7,
+      "sourceFingerprint": "sha256:mock-workbench-rev7",
+      "services": [
+        {
+          "serviceName": "api",
+          "image": "ghcr.io/acme/mock-service-api:v1.8.2",
+          "restartPolicy": "unless-stopped"
+        },
+        {
+          "serviceName": "db",
+          "image": "postgres:16-alpine",
+          "restartPolicy": "unless-stopped"
+        },
+        {
+          "serviceName": "redis",
+          "image": "redis:7-alpine",
+          "restartPolicy": "unless-stopped"
+        },
+        {
+          "serviceName": "web",
+          "image": "ghcr.io/acme/mock-service-web:v1.8.2",
+          "restartPolicy": "unless-stopped"
+        }
+      ],
+      "dependencies": [
+        {
+          "serviceName": "api",
+          "dependsOn": "db"
+        },
+        {
+          "serviceName": "api",
+          "dependsOn": "redis"
+        },
+        {
+          "serviceName": "web",
+          "dependsOn": "api"
+        }
+      ],
+      "ports": [
+        {
+          "serviceName": "api",
+          "containerPort": 8080,
+          "hostPortRaw": "${API_PORT}",
+          "protocol": "tcp",
+          "hostIp": "127.0.0.1",
+          "assignmentStrategy": "auto",
+          "allocationStatus": "unresolved"
+        },
+        {
+          "serviceName": "db",
+          "containerPort": 5432,
+          "hostPort": 5432,
+          "protocol": "tcp",
+          "hostIp": "127.0.0.1",
+          "assignmentStrategy": "auto",
+          "allocationStatus": "assigned"
+        },
+        {
+          "serviceName": "redis",
+          "containerPort": 6379,
+          "hostPort": 6380,
+          "protocol": "tcp",
+          "hostIp": "127.0.0.1",
+          "assignmentStrategy": "auto",
+          "allocationStatus": "assigned"
+        },
+        {
+          "serviceName": "web",
+          "containerPort": 3000,
+          "hostPort": 3000,
+          "protocol": "tcp",
+          "hostIp": "0.0.0.0",
+          "assignmentStrategy": "manual",
+          "allocationStatus": "assigned"
+        }
+      ],
+      "resources": [
+        {
+          "serviceName": "api",
+          "limitCpus": "1.0",
+          "limitMemory": "768M",
+          "reservationCpus": "0.50",
+          "reservationMemory": "512M"
+        },
+        {
+          "serviceName": "db",
+          "limitMemory": "1G",
+          "reservationMemory": "512M"
+        },
+        {
+          "serviceName": "redis",
+          "limitMemory": "256M"
+        },
+        {
+          "serviceName": "web",
+          "limitCpus": "0.50",
+          "limitMemory": "256M"
+        }
+      ],
+      "networkRefs": [
+        {
+          "serviceName": "api",
+          "networkName": "internal"
+        },
+        {
+          "serviceName": "api",
+          "networkName": "panel"
+        },
+        {
+          "serviceName": "db",
+          "networkName": "internal"
+        },
+        {
+          "serviceName": "redis",
+          "networkName": "internal"
+        },
+        {
+          "serviceName": "web",
+          "networkName": "panel"
+        }
+      ],
+      "volumeRefs": [
+        {
+          "serviceName": "db",
+          "volumeName": "pgdata"
+        },
+        {
+          "serviceName": "redis",
+          "volumeName": "redis-data"
+        }
+      ],
+      "envRefs": [
+        {
+          "serviceName": "api",
+          "path": "services.api.environment.DATABASE_URL",
+          "expression": "${DATABASE_URL}",
+          "variable": "DATABASE_URL"
+        },
+        {
+          "serviceName": "api",
+          "path": "services.api.ports[0]",
+          "expression": "${API_PORT}:8080",
+          "variable": "API_PORT"
+        },
+        {
+          "serviceName": "web",
+          "path": "services.web.environment.VITE_API_BASE_URL",
+          "expression": "${VITE_API_BASE_URL}",
+          "variable": "VITE_API_BASE_URL"
+        }
+      ],
+      "managedServices": [
+        {
+          "entryKey": "redis",
+          "serviceName": "redis"
+        }
+      ],
+      "modules": [
+        {
+          "moduleType": "redis",
+          "serviceName": "api"
+        }
+      ],
+      "warnings": [
+        {
+          "code": "WB-PARSE-PASSTHROUGH",
+          "path": "services.api.profiles",
+          "message": "Profiles remain pass-through metadata in generated preview output."
+        }
+      ]
+    }
+  },
+  "GET /api/v1/projects/mock-service/workbench/catalog": {
+    "catalog": {
+      "projectName": "mock-service",
+      "snapshotImported": true,
+      "snapshotRevision": 7,
+      "sourceFingerprint": "sha256:mock-workbench-rev7",
+      "entries": [
+        {
+          "key": "redis",
+          "displayName": "Redis",
+          "description": "Low-latency cache and queue companion for the application tier.",
+          "category": "data",
+          "defaultServiceName": "redis",
+          "suggestedImage": "redis:7-alpine",
+          "defaultContainerPort": 6379,
+          "availability": {
+            "status": "catalog_managed_with_compose_and_legacy_module",
+            "composeServices": [
+              {
+                "serviceName": "redis",
+                "image": "redis:7-alpine",
+                "matchReason": "service_name"
+              }
+            ],
+            "legacyModules": [
+              {
+                "moduleType": "redis",
+                "serviceName": "api"
+              }
+            ],
+            "managedServices": [
+              {
+                "entryKey": "redis",
+                "serviceName": "redis"
+              }
+            ]
+          },
+          "transition": {
+            "readOnly": false,
+            "mutationReady": true,
+            "composeGenerationReady": true,
+            "currentState": "catalog_managed",
+            "targetState": "catalog_managed",
+            "legacyModuleType": "redis",
+            "legacyMutationPath": "/api/v1/projects/mock-service/workbench/modules",
+            "notes": [
+              "Legacy Redis metadata is still present from the superseded module flow."
+            ]
+          }
+        },
+        {
+          "key": "nginx",
+          "displayName": "Nginx",
+          "description": "Adds a dedicated edge or reverse-proxy service in front of the stack.",
+          "category": "edge",
+          "defaultServiceName": "nginx",
+          "suggestedImage": "nginx:1.27-alpine",
+          "defaultContainerPort": 80,
+          "availability": {
+            "status": "available",
+            "composeServices": [],
+            "legacyModules": [],
+            "managedServices": []
+          },
+          "transition": {
+            "readOnly": false,
+            "mutationReady": true,
+            "composeGenerationReady": true,
+            "currentState": "unmanaged",
+            "targetState": "catalog_managed",
+            "notes": [
+              "Adds a lightweight reverse-proxy surface with Workbench-managed defaults."
+            ]
+          }
+        },
+        {
+          "key": "prometheus",
+          "displayName": "Prometheus",
+          "description": "Collects metrics from the stack for quick local observability.",
+          "category": "observability",
+          "defaultServiceName": "prometheus",
+          "suggestedImage": "prom/prometheus:v2.55.0",
+          "defaultContainerPort": 9090,
+          "availability": {
+            "status": "available",
+            "composeServices": [],
+            "legacyModules": [],
+            "managedServices": []
+          },
+          "transition": {
+            "readOnly": false,
+            "mutationReady": true,
+            "composeGenerationReady": true,
+            "currentState": "unmanaged",
+            "targetState": "catalog_managed",
+            "notes": [
+              "Catalog defaults include a single scrape target for the application API."
+            ]
+          }
+        },
+        {
+          "key": "minio",
+          "displayName": "MinIO",
+          "description": "Provides S3-compatible object storage for local stack experiments.",
+          "category": "storage",
+          "defaultServiceName": "minio",
+          "suggestedImage": "quay.io/minio/minio:RELEASE.2026-02-23T23-11-13Z",
+          "defaultContainerPort": 9000,
+          "availability": {
+            "status": "available",
+            "composeServices": [],
+            "legacyModules": [],
+            "managedServices": []
+          },
+          "transition": {
+            "readOnly": false,
+            "mutationReady": true,
+            "composeGenerationReady": true,
+            "currentState": "unmanaged",
+            "targetState": "catalog_managed",
+            "notes": [
+              "Uses Workbench-managed command and console-port defaults in preview/apply."
+            ]
+          }
+        }
+      ],
+      "legacyModules": {
+        "status": "visible",
+        "supportedModuleTypes": [
+          "redis"
+        ],
+        "mutationPath": "/api/v1/projects/mock-service/workbench/modules",
+        "records": [
+          {
+            "moduleType": "redis",
+            "serviceName": "api"
+          }
+        ],
+        "notes": [
+          "Legacy module records remain visible during the optional-service catalog transition."
+        ]
+      }
+    }
+  },
+  "GET /api/v1/projects/mock-service/workbench/compose/backups": {
+    "backups": [
+      {
+        "backupId": "wbk-000121",
+        "sequence": 121,
+        "revision": 6,
+        "sourceFingerprint": "sha256:mock-workbench-rev6",
+        "createdAt": "2026-03-07T17:58:32Z",
+        "composeBytes": 1842
+      },
+      {
+        "backupId": "wbk-000122",
+        "sequence": 122,
+        "revision": 7,
+        "sourceFingerprint": "sha256:mock-workbench-rev7",
+        "createdAt": "2026-03-07T18:12:44Z",
+        "composeBytes": 1926
+      }
+    ]
+  },
+  "GET /api/v1/jobs": {
+    "jobs": [
+      {
+        "id": 42,
+        "type": "netbird_mode_apply",
+        "status": "completed",
+        "startedAt": "2026-03-07T19:02:00Z",
+        "finishedAt": "2026-03-07T19:03:14Z",
+        "error": null,
+        "createdAt": "2026-03-07T19:01:48Z"
+      },
+      {
+        "id": 13,
+        "type": "stack_restart",
+        "status": "running",
+        "startedAt": "2026-03-07T19:21:00Z",
+        "finishedAt": null,
+        "error": null,
+        "createdAt": "2026-03-07T19:20:30Z"
+      },
+      {
+        "id": 12,
+        "type": "workbench_compose_apply",
+        "status": "completed",
+        "startedAt": "2026-03-07T18:12:00Z",
+        "finishedAt": "2026-03-07T18:13:11Z",
+        "error": null,
+        "createdAt": "2026-03-07T18:11:30Z"
+      },
+      {
+        "id": 11,
+        "type": "deploy_existing",
+        "status": "completed",
+        "startedAt": "2026-03-07T17:42:00Z",
+        "finishedAt": "2026-03-07T17:45:26Z",
+        "error": null,
+        "createdAt": "2026-03-07T17:41:18Z"
+      },
+      {
+        "id": 1,
+        "type": "create_template",
+        "status": "completed",
+        "startedAt": "2026-03-07T15:00:00Z",
+        "finishedAt": "2026-03-07T15:02:00Z",
+        "error": null,
+        "createdAt": "2026-03-07T14:59:30Z"
+      }
+    ],
+    "page": 1,
+    "pageSize": 20,
+    "total": 5,
+    "totalPages": 1
+  },
+  "GET /api/v1/jobs/1": {
+    "id": 1,
+    "type": "create_template",
+    "status": "completed",
+    "startedAt": "2026-03-07T15:00:00Z",
+    "finishedAt": "2026-03-07T15:02:00Z",
+    "error": null,
+    "createdAt": "2026-03-07T14:59:30Z",
+    "logLines": [
+      "Cloning starter template...",
+      "Configuring environment...",
+      "Project bootstrap completed."
+    ]
+  },
+  "GET /api/v1/jobs/11": {
+    "id": 11,
+    "type": "deploy_existing",
+    "status": "completed",
+    "startedAt": "2026-03-07T17:42:00Z",
+    "finishedAt": "2026-03-07T17:45:26Z",
+    "error": null,
+    "createdAt": "2026-03-07T17:41:18Z",
+    "logLines": [
+      "Detected project runtime at /templates/mock-service.",
+      "Validated ingress and tunnel ownership for mock.example.com.",
+      "Redeploy finished without warnings."
+    ]
+  },
+  "GET /api/v1/jobs/12": {
+    "id": 12,
+    "type": "workbench_compose_apply",
+    "status": "completed",
+    "startedAt": "2026-03-07T18:12:00Z",
+    "finishedAt": "2026-03-07T18:13:11Z",
+    "error": null,
+    "createdAt": "2026-03-07T18:11:30Z",
+    "logLines": [
+      "Loaded stored Workbench snapshot revision 7.",
+      "Generated 1926-byte compose preview.",
+      "Applied compose and retained backup wbk-000122."
+    ]
+  },
+  "GET /api/v1/jobs/13": {
+    "id": 13,
+    "type": "stack_restart",
+    "status": "running",
+    "startedAt": "2026-03-07T19:21:00Z",
+    "finishedAt": null,
+    "error": null,
+    "createdAt": "2026-03-07T19:20:30Z",
+    "logLines": [
+      "Stopping stack containers...",
+      "Restarting web, api, db, redis...",
+      "Waiting for health checks..."
+    ]
+  },
+  "GET /api/v1/jobs/42": {
+    "id": 42,
+    "type": "netbird_mode_apply",
+    "status": "completed",
+    "startedAt": "2026-03-07T19:02:00Z",
+    "finishedAt": "2026-03-07T19:03:14Z",
+    "error": null,
+    "createdAt": "2026-03-07T19:01:48Z",
+    "logLines": [
+      "Running NetBird mode planner for mode_b...",
+      "Reconciling managed groups and policies...",
+      "Rebinding project listeners and validating health...",
+      "netbird_mode_apply_summary={\"warnings\":[\"One legacy peer remains outside the managed admins group.\"],\"rebindingExecution\":{\"counts\":{\"succeeded\":2,\"failed\":0,\"skipped\":0}},\"redeployExecution\":{\"counts\":{\"succeeded\":1,\"failed\":0,\"skipped\":0}}}"
+    ]
+  },
+  "GET /api/v1/audit-logs": {
+    "logs": [
+      {
+        "id": 1,
+        "userId": 1,
+        "userLogin": "mock-admin",
+        "action": "project.workbench.compose.apply",
+        "target": "mock-service",
+        "metadata": "{\"revision\":7,\"backupId\":\"wbk-000122\"}",
+        "createdAt": "2026-03-07T18:13:12Z"
+      },
+      {
+        "id": 2,
+        "userId": 1,
+        "userLogin": "mock-admin",
+        "action": "netbird.mode.apply.completed",
+        "target": "mode_b",
+        "metadata": "{\"jobId\":42,\"warnings\":1}",
+        "createdAt": "2026-03-07T19:03:15Z"
+      }
+    ]
+  },
+  "GET /api/v1/host/docker": {
+    "containers": [
+      {
+        "id": "2f6f9a1c9d6b",
+        "name": "mock-service-web-1",
+        "image": "ghcr.io/acme/mock-service-web:v1.8.2",
+        "status": "running",
+        "ports": "3000/tcp",
+        "createdAt": "2026-03-07T04:05:00Z",
+        "runningFor": "16 hours",
+        "service": "web",
+        "project": "mock-service",
+        "portBindings": [
+          {
+            "hostIp": "0.0.0.0",
+            "hostPort": 3000,
+            "containerPort": 3000,
+            "proto": "tcp",
+            "published": true
+          }
+        ]
+      },
+      {
+        "id": "5b9e402bc441",
+        "name": "mock-service-api-1",
+        "image": "ghcr.io/acme/mock-service-api:v1.8.2",
+        "status": "running",
+        "ports": "8080/tcp",
+        "createdAt": "2026-03-07T04:05:02Z",
+        "runningFor": "16 hours",
+        "service": "api",
+        "project": "mock-service",
+        "portBindings": [
+          {
+            "hostIp": "127.0.0.1",
+            "hostPort": 8080,
+            "containerPort": 8080,
+            "proto": "tcp",
+            "published": true
+          }
+        ]
+      },
+      {
+        "id": "c4fe91812aa8",
+        "name": "mock-service-db-1",
+        "image": "postgres:16-alpine",
+        "status": "running",
+        "ports": "5432/tcp",
+        "createdAt": "2026-03-07T04:05:01Z",
+        "runningFor": "16 hours",
+        "service": "db",
+        "project": "mock-service",
+        "portBindings": [
+          {
+            "hostIp": "127.0.0.1",
+            "hostPort": 5432,
+            "containerPort": 5432,
+            "proto": "tcp",
+            "published": true
+          }
+        ]
+      },
+      {
+        "id": "e92bb1fd3383",
+        "name": "mock-service-redis-1",
+        "image": "redis:7-alpine",
+        "status": "running",
+        "ports": "6379/tcp",
+        "createdAt": "2026-03-07T04:05:03Z",
+        "runningFor": "16 hours",
+        "service": "redis",
+        "project": "mock-service",
+        "portBindings": [
+          {
+            "hostIp": "127.0.0.1",
+            "hostPort": 6380,
+            "containerPort": 6379,
+            "proto": "tcp",
+            "published": true
+          }
+        ]
       }
     ]
   },
   "GET /api/v1/host/docker/usage": {
     "summary": {
-      "totalSize": "1.2GB",
+      "totalSize": "2.6GB",
       "images": {
-        "count": 6,
-        "size": "700MB"
+        "count": 11,
+        "size": "1.4GB"
       },
       "containers": {
-        "count": 3,
-        "size": "180MB"
+        "count": 6,
+        "size": "420MB"
       },
       "volumes": {
-        "count": 4,
-        "size": "320MB"
+        "count": 7,
+        "size": "780MB"
       },
       "buildCache": {
-        "count": 2,
-        "size": "24MB"
+        "count": 4,
+        "size": "64MB"
       },
       "project": "mock-service",
       "projectCounts": {
-        "containers": 2,
-        "images": 3,
-        "volumes": 1
+        "containers": 4,
+        "images": 4,
+        "volumes": 2
       }
     }
   },
@@ -232,7 +1025,13 @@
         "id": 1,
         "login": "mock-admin",
         "role": "superuser",
-        "lastLoginAt": "2026-01-02T12:05:00Z"
+        "lastLoginAt": "2026-03-07T19:30:00Z"
+      },
+      {
+        "id": 2,
+        "login": "ops-reviewer",
+        "role": "admin",
+        "lastLoginAt": "2026-03-07T18:54:00Z"
       }
     ]
   },
@@ -252,49 +1051,415 @@
     "tunnelRef": "mock-tunnel",
     "tunnelRefType": "name"
   },
+  "GET /api/v1/netbird/status": {
+    "status": {
+      "clientInstalled": true,
+      "daemonRunning": true,
+      "connected": true,
+      "peerId": "nb-peer-host-01",
+      "peerName": "mock-host",
+      "wg0Ip": "100.96.0.12",
+      "currentMode": "mode_b",
+      "configuredMode": "mode_b",
+      "effectiveModeBProjectIds": [
+        1
+      ],
+      "configuredModeBProjectIds": [
+        1
+      ],
+      "modeSource": "latest successful apply job",
+      "modeSourceJobId": 42,
+      "modeDrift": false,
+      "lastPolicySyncAt": "2026-03-07T19:03:14Z",
+      "lastPolicySyncStatus": "completed",
+      "lastPolicySyncJobId": 42,
+      "lastPolicySyncWarnings": 1,
+      "lastGroupResults": {
+        "created": 0,
+        "updated": 2,
+        "deleted": 0,
+        "unchanged": 1
+      },
+      "lastPolicyResults": {
+        "created": 0,
+        "updated": 2,
+        "deleted": 0,
+        "unchanged": 1
+      },
+      "apiReachable": true,
+      "apiReachability": {
+        "source": "configured api token",
+        "checkedAt": "2026-03-07T19:03:12Z",
+        "message": "NetBird API responded in 182ms."
+      },
+      "managedGroups": 3,
+      "managedPolicies": 2,
+      "managedCountSource": "reconcile snapshot",
+      "warnings": [
+        "One legacy peer remains outside the managed admins group."
+      ]
+    }
+  },
+  "GET /api/v1/netbird/acl/graph": {
+    "graph": {
+      "currentMode": "mode_b",
+      "configuredMode": "mode_b",
+      "effectiveModeBProjectIds": [
+        1
+      ],
+      "configuredModeBProjectIds": [
+        1
+      ],
+      "modeSource": "latest successful apply job",
+      "modeSourceJobId": 42,
+      "modeDrift": false,
+      "defaultAction": "deny-by-default",
+      "nodes": [
+        {
+          "id": "group:gungnr-admins",
+          "label": "gungnr-admins",
+          "kind": "group",
+          "groupName": "gungnr-admins"
+        },
+        {
+          "id": "service:panel",
+          "label": "Panel",
+          "kind": "service"
+        },
+        {
+          "id": "project:1",
+          "label": "mock-service",
+          "kind": "project",
+          "projectId": 1,
+          "projectName": "mock-service"
+        }
+      ],
+      "edges": [
+        {
+          "id": "edge-admins-panel",
+          "from": "group:gungnr-admins",
+          "to": "service:panel",
+          "policy": "gungnr-mode-b-admins-to-panel",
+          "rule": "allow-admins-to-panel",
+          "action": "accept",
+          "protocol": "tcp",
+          "ports": [
+            "80"
+          ],
+          "bidirectional": false
+        },
+        {
+          "id": "edge-admins-project-1",
+          "from": "group:gungnr-admins",
+          "to": "project:1",
+          "policy": "gungnr-mode-b-admins-to-project-1",
+          "rule": "allow-admins-to-project-1",
+          "action": "accept",
+          "protocol": "tcp",
+          "ports": [
+            "3000"
+          ],
+          "bidirectional": false
+        }
+      ],
+      "notes": [
+        "Default policy is disabled so only managed allow rules remain active.",
+        "Mode B currently exposes one project ingress to the admins group."
+      ]
+    }
+  },
+  "GET /api/v1/netbird/config": {
+    "config": {
+      "apiBaseUrl": "https://api.netbird.mock",
+      "apiTokenSet": true,
+      "hostPeerId": "nb-peer-host-01",
+      "adminPeerIds": [
+        "nb-admin-1",
+        "nb-admin-2"
+      ],
+      "modeBProjectIds": [
+        1
+      ]
+    }
+  },
   "POST /api/v1/projects/template": {
     "job": {
-      "id": 2,
-      "type": "template",
-      "status": "queued",
+      "id": 101,
+      "type": "create_template",
+      "status": "pending",
       "startedAt": null,
       "finishedAt": null,
       "error": null,
-      "createdAt": "2026-01-02T12:10:00Z"
+      "createdAt": "2026-03-07T20:10:00Z"
     }
   },
   "POST /api/v1/projects/existing": {
     "job": {
-      "id": 3,
-      "type": "existing",
-      "status": "queued",
+      "id": 102,
+      "type": "deploy_existing",
+      "status": "pending",
       "startedAt": null,
       "finishedAt": null,
       "error": null,
-      "createdAt": "2026-01-02T12:11:00Z"
+      "createdAt": "2026-03-07T20:11:00Z"
     }
   },
   "POST /api/v1/projects/forward": {
     "job": {
-      "id": 4,
-      "type": "forward",
-      "status": "queued",
+      "id": 103,
+      "type": "forward_local",
+      "status": "pending",
       "startedAt": null,
       "finishedAt": null,
       "error": null,
-      "createdAt": "2026-01-02T12:12:00Z"
+      "createdAt": "2026-03-07T20:12:00Z"
     }
   },
   "POST /api/v1/projects/quick": {
-    "hostPort": 80,
+    "hostPort": 8088,
     "job": {
-      "id": 5,
-      "type": "quick",
-      "status": "queued",
+      "id": 104,
+      "type": "quick_service",
+      "status": "pending",
       "startedAt": null,
       "finishedAt": null,
       "error": null,
-      "createdAt": "2026-01-02T12:13:00Z"
+      "createdAt": "2026-03-07T20:13:00Z"
+    }
+  },
+  "POST /api/v1/netbird/policies/reapply": {
+    "summary": {
+      "currentMode": "mode_b",
+      "defaultPolicy": {
+        "action": "disable-default",
+        "result": {
+          "name": "Default",
+          "resourceId": "policy-default",
+          "result": "updated"
+        }
+      },
+      "groupResultCounts": {
+        "created": 0,
+        "updated": 2,
+        "deleted": 0,
+        "unchanged": 1
+      },
+      "policyResultCounts": {
+        "created": 0,
+        "updated": 2,
+        "deleted": 0,
+        "unchanged": 1
+      },
+      "groupOperations": [
+        {
+          "name": "gungnr-admins",
+          "resourceId": "grp-admins",
+          "result": "updated"
+        },
+        {
+          "name": "gungnr-panel",
+          "resourceId": "grp-panel",
+          "result": "updated"
+        }
+      ],
+      "policyOperations": [
+        {
+          "name": "gungnr-mode-b-admins-to-panel",
+          "resourceId": "pol-panel",
+          "result": "updated"
+        },
+        {
+          "name": "gungnr-mode-b-admins-to-project-1",
+          "resourceId": "pol-project-1",
+          "result": "updated"
+        }
+      ],
+      "warnings": [
+        "One legacy peer remains outside the managed admins group."
+      ]
+    }
+  },
+  "POST /api/v1/netbird/mode/plan": {
+    "plan": {
+      "currentMode": "mode_b",
+      "targetMode": "mode_b",
+      "allowLocalhost": false,
+      "currentModeBProjectIds": [
+        1
+      ],
+      "targetModeBProjectIds": [
+        1
+      ],
+      "catalog": {
+        "groups": [
+          {
+            "name": "gungnr-panel",
+            "peers": [
+              "nb-peer-host-01"
+            ]
+          },
+          {
+            "name": "gungnr-admins",
+            "peers": [
+              "nb-admin-1",
+              "nb-admin-2"
+            ]
+          },
+          {
+            "name": "gungnr-project-1",
+            "peers": [
+              "nb-peer-host-01"
+            ]
+          }
+        ],
+        "policies": [
+          {
+            "name": "gungnr-mode-b-admins-to-panel",
+            "description": "Admins can reach the panel listener only.",
+            "enabled": true,
+            "rules": [
+              {
+                "name": "allow-admins-to-panel",
+                "enabled": true,
+                "action": "accept",
+                "bidirectional": false,
+                "protocol": "tcp",
+                "ports": [
+                  "80"
+                ],
+                "sources": [
+                  "gungnr-admins"
+                ],
+                "destinations": [
+                  "gungnr-panel"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "gungnr-mode-b-admins-to-project-1",
+            "description": "Admins can reach mock-service ingress only.",
+            "enabled": true,
+            "rules": [
+              {
+                "name": "allow-admins-to-project-1",
+                "enabled": true,
+                "action": "accept",
+                "bidirectional": false,
+                "protocol": "tcp",
+                "ports": [
+                  "3000"
+                ],
+                "sources": [
+                  "gungnr-admins"
+                ],
+                "destinations": [
+                  "gungnr-project-1"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "groupOperations": [
+        {
+          "operation": "update",
+          "name": "gungnr-panel",
+          "match": "grp-panel",
+          "reason": "Ensure host peer membership remains current."
+        },
+        {
+          "operation": "update",
+          "name": "gungnr-admins",
+          "match": "grp-admins",
+          "reason": "Preserve configured admin-peer membership."
+        },
+        {
+          "operation": "update",
+          "name": "gungnr-project-1",
+          "match": "grp-project-1",
+          "reason": "Keep mock-service ingress isolated to managed admins."
+        }
+      ],
+      "policyOperations": [
+        {
+          "operation": "update",
+          "name": "gungnr-mode-b-admins-to-panel",
+          "match": "pol-panel",
+          "reason": "Refresh managed panel access rule."
+        },
+        {
+          "operation": "update",
+          "name": "gungnr-mode-b-admins-to-project-1",
+          "match": "pol-project-1",
+          "reason": "Refresh project ingress access rule."
+        }
+      ],
+      "serviceRebindingOperations": [
+        {
+          "service": "panel",
+          "port": 80,
+          "fromListeners": [
+            "0.0.0.0:80"
+          ],
+          "toListeners": [
+            "wg0:80"
+          ],
+          "reason": "Panel listener stays on the NetBird interface for admin access."
+        },
+        {
+          "service": "web",
+          "projectId": 1,
+          "projectName": "mock-service",
+          "port": 3000,
+          "fromListeners": [
+            "0.0.0.0:3000"
+          ],
+          "toListeners": [
+            "wg0:3000"
+          ],
+          "reason": "Project ingress is isolated to Mode B admin access."
+        }
+      ],
+      "redeployTargets": {
+        "panel": true,
+        "projects": [
+          {
+            "projectId": 1,
+            "projectName": "mock-service",
+            "port": 3000,
+            "reason": "Listener rebind requires a project redeploy."
+          }
+        ]
+      },
+      "warnings": [
+        "Mode B keeps mock-service reachable only to peers inside the managed admins group."
+      ]
+    }
+  },
+  "POST /api/v1/netbird/mode/apply": {
+    "job": {
+      "id": 42,
+      "type": "netbird_mode_apply",
+      "status": "pending",
+      "startedAt": null,
+      "finishedAt": null,
+      "error": null,
+      "createdAt": "2026-03-07T20:14:00Z"
+    }
+  },
+  "PUT /api/v1/netbird/config": {
+    "config": {
+      "apiBaseUrl": "https://api.netbird.mock",
+      "apiTokenSet": true,
+      "hostPeerId": "nb-peer-host-01",
+      "adminPeerIds": [
+        "nb-admin-1",
+        "nb-admin-2"
+      ],
+      "modeBProjectIds": [
+        1
+      ]
     }
   }
 }
