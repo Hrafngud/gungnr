@@ -3,37 +3,54 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
-import UiFormSidePanel from '@/components/ui/UiFormSidePanel.vue'
 import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiInput from '@/components/ui/UiInput.vue'
-import UiListRow from '@/components/ui/UiListRow.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
-import UiToggle from '@/components/ui/UiToggle.vue'
 import NavIcon from '@/components/NavIcon.vue'
-import { jobsApi } from '@/services/jobs'
+import ProjectActivityTimelineSection from '@/components/projectDetail/ProjectActivityTimelineSection.vue'
+import ProjectArchiveExecutionSection from '@/components/projectDetail/ProjectArchiveExecutionSection.vue'
+import ProjectRuntimeUnitsSection from '@/components/projectDetail/ProjectRuntimeUnitsSection.vue'
+import ProjectSectionTabs from '@/components/projectDetail/ProjectSectionTabs.vue'
+import WorkbenchServiceInspectorPanel from '@/components/workbench/WorkbenchServiceInspectorPanel.vue'
+import WorkbenchCatalogControlsPanel from '@/components/workbench/WorkbenchCatalogControlsPanel.vue'
+import type { ProjectDetailSectionTab } from '@/composables/projectDetail/useProjectDetailTabs'
+import {
+  useWorkbenchCatalogQuery,
+  useWorkbenchComposeBackupsQuery,
+  useWorkbenchSnapshotQuery,
+} from '@/composables/workbench/useWorkbenchQueries'
+import type {
+  BadgeTone,
+  WorkbenchComposeContextSummary,
+  WorkbenchComposeIssueInventoryRow,
+  WorkbenchInlineFeedbackState,
+  WorkbenchOptionalServiceCatalogRow,
+  WorkbenchPendingOptionalServiceMutation,
+  WorkbenchPortInventoryRow,
+  WorkbenchResourceEditorField,
+  WorkbenchResourceInputState,
+  WorkbenchResourceInventoryRow,
+  WorkbenchServiceInventoryRow,
+  WorkbenchTopologyInventoryRow,
+} from '@/components/workbench/projectDetailWorkbenchTypes'
 import { projectsApi } from '@/services/projects'
-import { apiErrorMessage } from '@/services/api'
+import { ApiError, apiErrorMessage, parseApiError } from '@/services/api'
+import { queryClient } from '@/services/queryClient'
+import { refetchWorkbenchReadQueries } from '@/services/workbenchQueries'
 import { useAuthStore } from '@/stores/auth'
 import { usePageLoadingStore } from '@/stores/pageLoading'
 import { useToastStore } from '@/stores/toasts'
 import { useWorkbenchStore, type WorkbenchRequestStatus } from '@/stores/workbench'
-import { jobStatusLabel, jobStatusTone } from '@/utils/jobStatus'
-import type { Job, JobDetail, JobListResponse } from '@/types/jobs'
 import type {
-  ProjectArchiveOptions,
-  ProjectArchivePlan,
-  ProjectContainer,
   ProjectDetail,
 } from '@/types/projects'
 import {
   buildWorkbenchPortSelectorKey,
   type WorkbenchComposeBackupMetadata,
-  type WorkbenchManagedService,
   type WorkbenchMutationIssue,
   type WorkbenchOptionalServiceCatalogEntry,
-  type WorkbenchOptionalServiceComposeMatch,
   type WorkbenchOptionalServiceMutationAction,
   type WorkbenchOptionalServiceMutationSummary,
   type WorkbenchPortMutationSummary,
@@ -41,147 +58,7 @@ import {
   type WorkbenchResourceField,
   type WorkbenchResourceMutationRequest,
   type WorkbenchResourceMutationSummary,
-  type WorkbenchStackModule,
 } from '@/types/workbench'
-
-type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
-
-function workbenchCompactToneClass(tone: BadgeTone): string {
-  switch (tone) {
-    case 'ok':
-      return 'workbench-compact-status-ok'
-    case 'warn':
-      return 'workbench-compact-status-warn'
-    case 'error':
-      return 'workbench-compact-status-error'
-    default:
-      return 'workbench-compact-status-neutral'
-  }
-}
-
-function workbenchGuidanceToneClass(status: string): string {
-  if (status === 'unavailable') return 'text-[color:var(--danger)]'
-  if (status === 'conflict') return 'text-[color:var(--warn)]'
-  return 'text-[color:var(--muted)]'
-}
-
-interface WorkbenchServiceInventoryRow {
-  serviceName: string
-  image: string | null
-  buildSource: string | null
-  restartPolicy: string | null
-  dependencies: string[]
-  portCount: number
-  networkCount: number
-  managedEntryKeys: string[]
-  legacyModuleTypes: string[]
-  originLabel: string
-  originTone: BadgeTone
-}
-
-interface WorkbenchPortInventoryRow {
-  key: string
-  selector: WorkbenchPortSelector
-  serviceName: string
-  containerPort: number
-  protocol: string
-  hostIp: string
-  assignmentStrategy: string
-  assignmentStrategyLabel: string
-  assignmentStrategyTone: BadgeTone
-  allocationStatus: string
-  allocationStatusLabel: string
-  allocationStatusTone: BadgeTone
-  requestedHostPort: string | null
-  effectiveHostPort: string | null
-  effectiveHostPortLabel: string
-  mappingLabel: string
-  guidance: string
-}
-
-interface WorkbenchResourceInventoryRow {
-  key: string
-  serviceName: string
-  tracked: boolean
-  limitCpus: string | null
-  limitMemory: string | null
-  reservationCpus: string | null
-  reservationMemory: string | null
-  hasLimits: boolean
-  hasReservations: boolean
-}
-
-interface WorkbenchResourceInputState {
-  limitCpus: string
-  limitMemory: string
-  reservationCpus: string
-  reservationMemory: string
-}
-
-interface WorkbenchResourceEditorField {
-  key: WorkbenchResourceField
-  label: string
-  placeholder: string
-  section: 'limits' | 'reservations'
-}
-
-interface WorkbenchOptionalServiceCatalogRow {
-  key: string
-  displayName: string
-  description: string
-  category: string
-  defaultServiceName: string
-  suggestedImage: string | null
-  defaultContainerPortLabel: string
-  availabilityLabel: string
-  availabilityTone: BadgeTone
-  composeServices: WorkbenchOptionalServiceComposeMatch[]
-  managedServices: WorkbenchManagedService[]
-  legacyModules: WorkbenchStackModule[]
-  currentStateLabel: string
-  currentStateTone: BadgeTone
-  targetStateLabel: string
-  mutationReady: boolean
-  composeGenerationReady: boolean
-  legacyModuleType: string | null
-  legacyMutationPath: string | null
-  notes: string[]
-}
-
-interface WorkbenchComposeContextSummary {
-  importedServices: number
-  catalogManagedServices: number
-  legacyModules: number
-  matchedCatalogEntries: number
-}
-
-interface WorkbenchTopologyInventoryRow {
-  key: string
-  serviceName: string
-  dependsOn: string[]
-  dependedBy: string[]
-  networkNames: string[]
-  moduleTypes: string[]
-}
-
-interface WorkbenchInlineFeedbackState {
-  tone: BadgeTone
-  message: string
-}
-
-interface WorkbenchPendingOptionalServiceMutation {
-  entryKey: string
-  action: WorkbenchOptionalServiceMutationAction
-  serviceName: string
-  displayName: string
-}
-
-interface WorkbenchComposeIssueInventoryRow {
-  key: string
-  source: 'preview' | 'apply'
-  sourceLabel: string
-  issue: WorkbenchMutationIssue
-}
 
 type WorkbenchRemediationAction = 'refresh' | 'import' | 'refresh_backups'
 
@@ -214,42 +91,14 @@ const error = ref<string | null>(null)
 const detail = ref<ProjectDetail | null>(null)
 const stackRestarting = ref(false)
 const stackRestartError = ref<string | null>(null)
-const archivePlan = ref<ProjectArchivePlan | null>(null)
-const archivePlanLoading = ref(false)
-const archivePlanError = ref<string | null>(null)
-const archiveExecuting = ref(false)
-const archiveExecuteError = ref<string | null>(null)
-const archiveExecutedWithWarnings = ref(false)
-const archiveOptions = ref<ProjectArchiveOptions>({
-  removeContainers: true,
-  removeVolumes: false,
-  removeIngress: true,
-  removeDns: true,
-})
-const archiveConfirmInput = ref('')
 const workbenchRestoreSelectedBackupId = ref('')
 const workbenchRestoreConfirmInput = ref('')
 const workbenchPendingOptionalServiceMutation = ref<WorkbenchPendingOptionalServiceMutation | null>(null)
 const workbenchPortManualInputs = ref<Record<string, string>>({})
 const workbenchResourceInputs = ref<Record<string, WorkbenchResourceInputState>>({})
 const workbenchSelectedServiceName = ref('')
+const activeSectionTab = ref<ProjectDetailSectionTab>('workbench')
 const isAdmin = computed(() => authStore.isAdmin)
-
-const projectJobs = ref<Job[]>([])
-const jobsLoading = ref(false)
-const jobsError = ref<string | null>(null)
-const jobsPage = ref(1)
-const jobsTotal = ref(0)
-const jobsTotalPages = ref(0)
-const jobsPageSize = 8
-
-const jobLogsPanelOpen = ref(false)
-const selectedJobId = ref<number | null>(null)
-const selectedJob = ref<JobDetail | null>(null)
-const selectedJobLoading = ref(false)
-const selectedJobError = ref<string | null>(null)
-const projectLogFontSizes = [11, 12, 13, 14] as const
-const projectJobLogFontSize = ref<number>(12)
 
 const projectName = computed(() => {
   const raw = route.params.name
@@ -257,26 +106,59 @@ const projectName = computed(() => {
   return decodeURIComponent(raw).trim()
 })
 
-const canGoJobsBack = computed(() => jobsPage.value > 1)
-const canGoJobsForward = computed(() => jobsTotalPages.value > 0 && jobsPage.value < jobsTotalPages.value)
-const selectedJobLogOutput = computed(() => selectedJob.value?.logLines?.join('\n') ?? '')
-const archiveConfirmationPhrase = computed(() => {
-  const normalized = (detail.value?.project.normalizedName || projectName.value || '').toLowerCase().trim()
-  if (!normalized) return 'ARCHIVE PROJECT'
-  return `ARCHIVE ${normalized}`
-})
-const canSubmitArchive = computed(() => {
-  if (!isAdmin.value || archiveExecuting.value) return false
-  if (archiveOptions.value.removeVolumes && !archiveOptions.value.removeContainers) return false
-  return archiveConfirmInput.value.trim() === archiveConfirmationPhrase.value
-})
 const workbenchComposeSupported = computed(() => (detail.value?.runtime.composeFiles?.length ?? 0) > 0)
-const workbenchSnapshot = computed(() => workbenchStore.snapshot)
-const workbenchStatus = computed(() => workbenchStore.snapshotStatus)
-const workbenchError = computed(() => workbenchStore.snapshotError)
-const workbenchCatalog = computed(() => workbenchStore.catalog)
-const workbenchCatalogStatus = computed(() => workbenchStore.catalogStatus)
-const workbenchCatalogError = computed(() => workbenchStore.catalogError)
+const workbenchQueryEnabled = computed(
+  () =>
+    Boolean(projectName.value) &&
+    Boolean(detail.value) &&
+    workbenchComposeSupported.value,
+)
+const workbenchBackupsQueryEnabled = computed(() => workbenchQueryEnabled.value && isAdmin.value)
+const workbenchSnapshotQuery = useWorkbenchSnapshotQuery(projectName, {
+  enabled: workbenchQueryEnabled,
+})
+const workbenchCatalogQuery = useWorkbenchCatalogQuery(projectName, {
+  enabled: workbenchQueryEnabled,
+})
+const workbenchComposeBackupsQuery = useWorkbenchComposeBackupsQuery(projectName, {
+  enabled: workbenchBackupsQueryEnabled,
+})
+
+const workbenchQueryStatus = (
+  enabled: boolean,
+  pending: boolean,
+  hasError: boolean,
+): WorkbenchRequestStatus => {
+  if (!enabled) return 'idle'
+  if (pending) return 'loading'
+  if (hasError) return 'error'
+  return 'ready'
+}
+
+const workbenchSnapshot = computed(() => workbenchSnapshotQuery.data.value ?? null)
+const workbenchStatus = computed<WorkbenchRequestStatus>(() =>
+  workbenchQueryStatus(
+    workbenchQueryEnabled.value,
+    workbenchSnapshotQuery.isPending.value,
+    workbenchSnapshotQuery.isError.value,
+  ),
+)
+const workbenchError = computed<ApiError | null>(() => {
+  if (workbenchStatus.value !== 'error') return null
+  return parseApiError(workbenchSnapshotQuery.error.value)
+})
+const workbenchCatalog = computed(() => workbenchCatalogQuery.data.value ?? null)
+const workbenchCatalogStatus = computed<WorkbenchRequestStatus>(() =>
+  workbenchQueryStatus(
+    workbenchQueryEnabled.value,
+    workbenchCatalogQuery.isPending.value,
+    workbenchCatalogQuery.isError.value,
+  ),
+)
+const workbenchCatalogError = computed<ApiError | null>(() => {
+  if (workbenchCatalogStatus.value !== 'error') return null
+  return parseApiError(workbenchCatalogQuery.error.value)
+})
 const workbenchOptionalServiceMutationStatus = computed(
   () => workbenchStore.optionalServiceMutationStatus,
 )
@@ -313,9 +195,18 @@ const workbenchLastPreviewResult = computed(() => workbenchStore.lastPreviewResu
 const workbenchApplyStatus = computed(() => workbenchStore.applyStatus)
 const workbenchApplyError = computed(() => workbenchStore.applyError)
 const workbenchLastApplyResult = computed(() => workbenchStore.lastApplyResult)
-const workbenchComposeBackups = computed(() => workbenchStore.composeBackups)
-const workbenchBackupInventoryStatus = computed(() => workbenchStore.backupInventoryStatus)
-const workbenchBackupInventoryError = computed(() => workbenchStore.backupInventoryError)
+const workbenchComposeBackups = computed(() => workbenchComposeBackupsQuery.data.value ?? [])
+const workbenchBackupInventoryStatus = computed<WorkbenchRequestStatus>(() =>
+  workbenchQueryStatus(
+    workbenchBackupsQueryEnabled.value,
+    workbenchComposeBackupsQuery.isPending.value,
+    workbenchComposeBackupsQuery.isError.value,
+  ),
+)
+const workbenchBackupInventoryError = computed<ApiError | null>(() => {
+  if (workbenchBackupInventoryStatus.value !== 'error') return null
+  return parseApiError(workbenchComposeBackupsQuery.error.value)
+})
 const workbenchRestoreStatus = computed(() => workbenchStore.restoreStatus)
 const workbenchRestoreError = computed(() => workbenchStore.restoreError)
 const workbenchLastRestoreResult = computed(() => workbenchStore.lastRestoreResult)
@@ -956,33 +847,6 @@ const workbenchPortInventory = computed<WorkbenchPortInventoryRow[]>(() => {
     }
   })
 })
-const workbenchPortSummary = computed(() => {
-  const summary = {
-    total: workbenchPortInventory.value.length,
-    assigned: 0,
-    conflict: 0,
-    unresolved: 0,
-    unavailable: 0,
-  }
-
-  for (const port of workbenchPortInventory.value) {
-    if (port.allocationStatus === 'conflict') {
-      summary.conflict += 1
-      continue
-    }
-    if (port.allocationStatus === 'unresolved') {
-      summary.unresolved += 1
-      continue
-    }
-    if (port.allocationStatus === 'unavailable') {
-      summary.unavailable += 1
-      continue
-    }
-    summary.assigned += 1
-  }
-
-  return summary
-})
 const workbenchResourceInventory = computed<WorkbenchResourceInventoryRow[]>(() => {
   const snapshot = workbenchSnapshot.value
   if (!snapshot) return []
@@ -1082,9 +946,6 @@ function workbenchOptionalServicePortLabel(containerPort: number): string {
 const workbenchCurrentComposeSummary = computed<WorkbenchComposeContextSummary>(() => ({
   importedServices: workbenchSnapshot.value?.services.length ?? 0,
   catalogManagedServices: workbenchSnapshot.value?.managedServices.length ?? 0,
-  legacyModules: workbenchCatalog.value?.legacyModules.records.length ?? 0,
-  matchedCatalogEntries:
-    workbenchCatalog.value?.entries.filter((entry) => entry.availability.composeServices.length > 0).length ?? 0,
 }))
 const workbenchOptionalServiceInventory = computed<WorkbenchOptionalServiceCatalogRow[]>(() => {
   const catalog = workbenchCatalog.value
@@ -1266,41 +1127,6 @@ const workbenchTopologyInventory = computed<WorkbenchTopologyInventoryRow[]>(() 
     networkNames: networkNamesByService.get(serviceName) ?? [],
     moduleTypes: moduleTypesByService.get(serviceName) ?? [],
   }))
-})
-const workbenchTopologySummary = computed(() => {
-  const summary = {
-    services: workbenchTopologyInventory.value.length,
-    dependencyEdges: workbenchSnapshot.value?.dependencies.length ?? 0,
-    connectedServices: 0,
-    isolatedServices: 0,
-    networks: [] as string[],
-    moduleTypes: [] as string[],
-  }
-
-  const seenNetworks = new Set<string>()
-  const seenModuleTypes = new Set<string>()
-
-  for (const row of workbenchTopologyInventory.value) {
-    if (row.dependsOn.length > 0 || row.dependedBy.length > 0) {
-      summary.connectedServices += 1
-    } else {
-      summary.isolatedServices += 1
-    }
-
-    for (const networkName of row.networkNames) {
-      if (seenNetworks.has(networkName)) continue
-      seenNetworks.add(networkName)
-      summary.networks.push(networkName)
-    }
-
-    for (const moduleType of row.moduleTypes) {
-      if (seenModuleTypes.has(moduleType)) continue
-      seenModuleTypes.add(moduleType)
-      summary.moduleTypes.push(moduleType)
-    }
-  }
-
-  return summary
 })
 const workbenchResourceFieldOrder: WorkbenchResourceField[] = [
   'limitCpus',
@@ -1866,14 +1692,6 @@ const statusTone = (status: string): BadgeTone => {
   return 'neutral'
 }
 
-const containerTone = (container: ProjectContainer): BadgeTone => {
-  const normalized = container.status.trim().toLowerCase()
-  if (normalized.startsWith('up') || normalized.includes('running')) return 'ok'
-  if (normalized.startsWith('exited') || normalized.includes('dead')) return 'error'
-  if (normalized.includes('paused') || normalized.includes('restarting')) return 'warn'
-  return 'neutral'
-}
-
 const fmtDate = (value?: string | null) => {
   if (!value) return '—'
   const parsed = new Date(value)
@@ -1881,92 +1699,14 @@ const fmtDate = (value?: string | null) => {
   return parsed.toLocaleString()
 }
 
-const loadWorkbench = () => {
+const refreshWorkbenchReadState = async (selection: {
+  snapshot?: boolean
+  catalog?: boolean
+  backups?: boolean
+} = {}) => {
   const name = projectName.value
-  workbenchPendingOptionalServiceMutation.value = null
-  if (!name) {
-    workbenchStore.reset()
-    return
-  }
-  if (!workbenchComposeSupported.value) {
-    workbenchStore.reset()
-    return
-  }
-  void workbenchStore.loadSnapshot(name)
-  void workbenchStore.loadCatalog(name)
-  if (isAdmin.value) {
-    void workbenchStore.loadComposeBackups(name)
-  }
-}
-
-const applyProjectJobsResponse = (data: JobListResponse) => {
-  projectJobs.value = data.jobs ?? []
-  jobsPage.value = data.page ?? 1
-  jobsTotal.value = data.total ?? 0
-  jobsTotalPages.value = data.totalPages ?? 0
-}
-
-const loadProjectJobs = async (page = 1) => {
-  const name = projectName.value
-  if (!name) {
-    projectJobs.value = []
-    jobsTotal.value = 0
-    jobsTotalPages.value = 0
-    jobsPage.value = 1
-    jobsError.value = 'Invalid project name.'
-    return
-  }
-
-  jobsLoading.value = true
-  jobsError.value = null
-  try {
-    const { data } = await projectsApi.listJobs(name, { page, limit: jobsPageSize })
-    applyProjectJobsResponse(data)
-  } catch (err) {
-    jobsError.value = apiErrorMessage(err)
-    projectJobs.value = []
-    jobsTotal.value = 0
-    jobsTotalPages.value = 0
-    jobsPage.value = page
-  } finally {
-    jobsLoading.value = false
-  }
-}
-
-const applyArchiveDefaults = (plan: ProjectArchivePlan) => {
-  archiveOptions.value = {
-    removeContainers: plan.defaults.removeContainers,
-    removeVolumes: plan.defaults.removeVolumes,
-    removeIngress: plan.defaults.removeIngress,
-    removeDns: plan.defaults.removeDns,
-  }
-}
-
-const loadArchivePlan = async () => {
-  const name = projectName.value
-  if (!name) {
-    archivePlan.value = null
-    archivePlanError.value = 'Invalid project name.'
-    return
-  }
-  if (!isAdmin.value) {
-    archivePlan.value = null
-    archivePlanError.value = null
-    return
-  }
-
-  archivePlanLoading.value = true
-  archivePlanError.value = null
-  try {
-    const { data } = await projectsApi.getArchivePlan(name)
-    archivePlan.value = data.plan
-    applyArchiveDefaults(data.plan)
-  } catch (err) {
-    archivePlan.value = null
-    archivePlanError.value = apiErrorMessage(err)
-  } finally {
-    archivePlanLoading.value = false
-  }
+  if (!name || !workbenchComposeSupported.value) return
+  await refetchWorkbenchReadQueries(queryClient, name, selection)
 }
 
 const load = async () => {
@@ -1984,19 +1724,19 @@ const load = async () => {
   try {
     const { data } = await projectsApi.getDetail(name)
     detail.value = data
-    loadWorkbench()
-    await loadProjectJobs(1)
-    await loadArchivePlan()
+    if (!workbenchComposeSupported.value) {
+      workbenchStore.reset()
+    } else {
+      void refreshWorkbenchReadState({
+        snapshot: true,
+        catalog: true,
+        backups: isAdmin.value,
+      })
+    }
   } catch (err) {
     detail.value = null
     error.value = apiErrorMessage(err)
     workbenchStore.reset()
-    projectJobs.value = []
-    jobsTotal.value = 0
-    jobsTotalPages.value = 0
-    jobsPage.value = 1
-    archivePlan.value = null
-    archivePlanError.value = null
   } finally {
     loading.value = false
     pageLoading.stop()
@@ -2008,10 +1748,11 @@ const refreshWorkbench = async () => {
   if (!name) return
   if (!workbenchComposeSupported.value) return
   workbenchPendingOptionalServiceMutation.value = null
-  await Promise.all([
-    workbenchStore.loadSnapshot(name),
-    workbenchStore.loadCatalog(name),
-  ])
+  await refreshWorkbenchReadState({
+    snapshot: true,
+    catalog: true,
+    backups: isAdmin.value,
+  })
 }
 
 const importWorkbench = async () => {
@@ -2032,8 +1773,6 @@ const importWorkbench = async () => {
     toastStore.error(parsedError?.message ?? 'Workbench import failed.', 'Workbench')
     return
   }
-
-  await workbenchStore.loadCatalog(name)
 
   if (result.changed) {
     toastStore.success(`Workbench snapshot imported (revision ${result.revision}).`, 'Workbench')
@@ -2297,7 +2036,9 @@ const previewWorkbenchCompose = async () => {
     return
   }
 
-  const result = await workbenchStore.previewCompose(name)
+  const result = await workbenchStore.previewCompose(name, {
+    expectedRevision: workbenchSnapshot.value?.revision,
+  })
   if (!result) {
     const parsedError = workbenchPreviewError.value
     if (isWorkbenchComposeBlockedError(parsedError, 'preview')) {
@@ -2337,7 +2078,10 @@ const applyWorkbenchCompose = async () => {
     return
   }
 
-  const result = await workbenchStore.applyCompose(name)
+  const result = await workbenchStore.applyCompose(name, {
+    expectedRevision: workbenchSnapshot.value?.revision,
+    expectedSourceFingerprint: workbenchSnapshot.value?.sourceFingerprint || undefined,
+  })
   if (!result) {
     const parsedError = workbenchApplyError.value
     if (isWorkbenchComposeBlockedError(parsedError, 'apply')) {
@@ -2352,9 +2096,12 @@ const applyWorkbenchCompose = async () => {
 }
 
 const refreshWorkbenchComposeBackups = async () => {
-  const name = projectName.value
-  if (!name || !isAdmin.value || !workbenchComposeSupported.value) return
-  await workbenchStore.loadComposeBackups(name)
+  if (!isAdmin.value) return
+  await refreshWorkbenchReadState({
+    snapshot: false,
+    catalog: false,
+    backups: true,
+  })
 }
 
 const restoreWorkbenchCompose = async () => {
@@ -2467,7 +2214,6 @@ const restartStack = async () => {
   try {
     const { data } = await projectsApi.restartStack(name)
     toastStore.success(`Project "${name}" restart queued (job #${data.job.id}).`, 'Docker compose')
-    await loadProjectJobs(1)
   } catch (err) {
     const message = apiErrorMessage(err)
     stackRestartError.value = message
@@ -2475,99 +2221,6 @@ const restartStack = async () => {
   } finally {
     stackRestarting.value = false
   }
-}
-
-const queueArchive = async () => {
-  const name = projectName.value
-  if (!name) return
-  if (!isAdmin.value) {
-    toastStore.error('Admin access required.', 'Archive blocked')
-    return
-  }
-  if (!canSubmitArchive.value) return
-
-  archiveExecuteError.value = null
-  archiveExecuting.value = true
-  try {
-    const payload = {
-      removeContainers: archiveOptions.value.removeContainers,
-      removeVolumes: archiveOptions.value.removeVolumes,
-      removeIngress: archiveOptions.value.removeIngress,
-      removeDns: archiveOptions.value.removeDns,
-    }
-    const { data } = await projectsApi.archiveProject(name, payload)
-    archivePlan.value = data.plan
-    archiveExecutedWithWarnings.value = (data.plan.warnings?.length ?? 0) > 0
-    archiveConfirmInput.value = ''
-
-    if (archiveExecutedWithWarnings.value) {
-      toastStore.warn(
-        `Archive queued (job #${data.job.id}) with ${data.plan.warnings.length} warning(s) in plan preview.`,
-        'Archive queued',
-      )
-    } else {
-      toastStore.success(`Archive queued (job #${data.job.id}).`, 'Project cleanup')
-    }
-    await load()
-  } catch (err) {
-    const message = apiErrorMessage(err)
-    archiveExecuteError.value = message
-    toastStore.error(message, 'Archive queue failed')
-  } finally {
-    archiveExecuting.value = false
-  }
-}
-
-const openJobLogs = async (jobId: number) => {
-  selectedJobId.value = jobId
-  selectedJob.value = null
-  selectedJobError.value = null
-  jobLogsPanelOpen.value = true
-  await refreshSelectedJobLogs()
-}
-
-const refreshSelectedJobLogs = async () => {
-  if (!selectedJobId.value) return
-
-  selectedJobLoading.value = true
-  selectedJobError.value = null
-  try {
-    const { data } = await jobsApi.get(selectedJobId.value)
-    selectedJob.value = data
-  } catch (err) {
-    selectedJobError.value = apiErrorMessage(err)
-    selectedJob.value = null
-  } finally {
-    selectedJobLoading.value = false
-  }
-}
-
-const copySelectedJobLogs = async () => {
-  const output = selectedJobLogOutput.value
-  if (!output) {
-    toastStore.warn('No logs to copy yet.', 'Nothing to copy')
-    return
-  }
-
-  try {
-    await copyTextToClipboard(output)
-    toastStore.success('Logs copied to clipboard.', 'Copied')
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Clipboard copy failed.'
-    toastStore.error(message, 'Copy failed')
-  }
-}
-
-const cycleProjectJobLogFontSize = () => {
-  const currentIndex = projectLogFontSizes.findIndex((size) => size === projectJobLogFontSize.value)
-  const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % projectLogFontSizes.length
-  projectJobLogFontSize.value = projectLogFontSizes[nextIndex] ?? projectLogFontSizes[0]
-}
-
-const goToJobsPage = async (nextPage: number) => {
-  if (nextPage < 1) return
-  if (jobsTotalPages.value > 0 && nextPage > jobsTotalPages.value) return
-  await loadProjectJobs(nextPage)
 }
 
 watch(workbenchPortInventory, (ports) => {
@@ -2612,14 +2265,8 @@ watch(workbenchRestoreSelectedBackupId, () => {
 
 onMounted(load)
 watch(projectName, () => {
+  activeSectionTab.value = 'workbench'
   stackRestartError.value = null
-  archivePlan.value = null
-  archivePlanError.value = null
-  archiveExecuteError.value = null
-  archiveExecuting.value = false
-  archiveExecutedWithWarnings.value = false
-  archiveConfirmInput.value = ''
-  jobLogsPanelOpen.value = false
   workbenchRestoreSelectedBackupId.value = ''
   workbenchRestoreConfirmInput.value = ''
   workbenchPortManualInputs.value = {}
@@ -2628,33 +2275,14 @@ watch(projectName, () => {
   workbenchStore.reset()
   void load()
 })
-
-watch(jobLogsPanelOpen, (open) => {
-  if (open) return
-  selectedJobId.value = null
-  selectedJob.value = null
-  selectedJobError.value = null
-  selectedJobLoading.value = false
-})
-
-watch(
-  () => archiveOptions.value.removeContainers,
-  (enabled) => {
-    if (enabled) return
-    archiveOptions.value.removeVolumes = false
-  },
-)
 </script>
 
 <template>
-  <section class="page space-y-8">
+  <section class="page">
     <header class="flex flex-wrap items-center justify-between gap-4">
-      <div>
+      <div class="mb-4">
         <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Project workspace</p>
         <h1 class="mt-2 text-3xl font-semibold text-[color:var(--text)]">{{ projectName || 'Project detail' }}</h1>
-        <p class="mt-2 text-sm text-[color:var(--muted)]">
-          Runtime metadata, containers, and job history for this deployment.
-        </p>
       </div>
       <div class="flex items-center gap-2">
         <RouterLink to="/projects" class="btn btn-ghost px-3 py-2 text-xs font-semibold">
@@ -2678,7 +2306,7 @@ watch(
     <template v-else-if="detail">
       <UiPanel
         variant="soft"
-        class="flex flex-wrap items-center justify-between gap-3 p-4 text-xs text-[color:var(--muted)]"
+        class="flex flex-row justify-between items-start gap-4 p-4 mb-4 flex-wrap"
       >
         <div>
           <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Workspace guidance</p>
@@ -2686,68 +2314,8 @@ watch(
             Read access is available to all authenticated users. Restart actions require admin permissions.
           </p>
         </div>
-        <UiBadge :tone="statusTone(detail.project.record?.status || '')">
-          {{ detail.project.record?.status || 'unknown' }}
-        </UiBadge>
-      </UiPanel>
-
-      <hr />
-
-      <div class="grid gap-5 xl:grid-cols-3">
-        <UiPanel class="space-y-5 p-6 xl:col-span-2">
-          <div>
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Project profile</p>
-            <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">General</h2>
-          </div>
-          <div class="grid gap-4 sm:grid-cols-2">
-            <div class="space-y-1">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Project</p>
-              <p class="text-base font-semibold text-[color:var(--text)]">{{ detail.project.name }}</p>
-            </div>
-            <div class="space-y-1">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Normalized</p>
-              <p class="font-mono text-sm text-[color:var(--text)]">{{ detail.project.normalizedName }}</p>
-            </div>
-            <div class="space-y-1">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Last updated</p>
-              <p class="text-sm text-[color:var(--muted)]">{{ fmtDate(detail.project.record?.updatedAt) }}</p>
-            </div>
-            <div class="space-y-1">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Source</p>
-              <p class="text-sm text-[color:var(--text)]">{{ detail.runtime.source || 'unknown' }}</p>
-            </div>
-            <div class="space-y-1 sm:col-span-2">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Path</p>
-              <p class="font-mono text-xs text-[color:var(--muted)] break-all">{{ detail.runtime.path }}</p>
-            </div>
-            <div class="space-y-1 sm:col-span-2">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Repository</p>
-              <p class="text-sm text-[color:var(--muted)] break-all">
-                {{ detail.project.record?.repoUrl || 'No repository URL recorded' }}
-              </p>
-            </div>
-          </div>
-        </UiPanel>
-
-        <UiPanel variant="soft" class="space-y-4 p-5">
-          <div>
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Runtime</p>
-            <h2 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Compose and env</h2>
-          </div>
-          <div class="space-y-2 text-sm text-[color:var(--muted)]">
-            <div class="flex items-center justify-between gap-2">
-              <span>Compose files</span>
-              <span class="font-semibold text-[color:var(--text)]">{{ detail.runtime.composeFiles.length }}</span>
-            </div>
-            <div class="flex items-center justify-between gap-2">
-              <span>.env</span>
-              <span class="font-semibold text-[color:var(--text)]">{{ detail.runtime.envExists ? 'present' : 'missing' }}</span>
-            </div>
-            <p class="break-all font-mono text-xs text-[color:var(--muted-2)]">{{ detail.runtime.envPath }}</p>
-          </div>
-          <UiPanel variant="raise" class="space-y-3 p-4">
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Stack action</p>
-            <UiButton
+        <div class="flex flex-row gap-2 items-center">
+        <UiButton
               variant="ghost"
               size="sm"
               :disabled="stackRestarting || !isAdmin"
@@ -2759,74 +2327,60 @@ watch(
                 {{ stackRestarting ? 'Restarting stack...' : 'Restart stack' }}
               </span>
             </UiButton>
-            <p v-if="!isAdmin" class="text-xs text-[color:var(--muted)]">
-              Read-only access: admin permissions are required to restart this project stack.
-            </p>
-            <UiInlineFeedback v-if="stackRestartError" tone="error">
-              {{ stackRestartError }}
-            </UiInlineFeedback>
-          </UiPanel>
-        </UiPanel>
-      </div>
+        <UiBadge :tone="statusTone(detail.project.record?.status || '')">
+          {{ detail.project.record?.status || 'unknown' }}
+        </UiBadge>
 
-      <div class="grid gap-5 xl:grid-cols-2">
-        <UiPanel class="space-y-5 p-6">
-          <div>
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Network</p>
-            <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Published ports</h2>
-          </div>
-          <div class="grid gap-3 sm:grid-cols-2">
-            <UiPanel variant="soft" class="space-y-2 p-3">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Proxy</p>
-              <p class="text-lg font-semibold text-[color:var(--text)]">{{ detail.network.proxyPort || '—' }}</p>
-            </UiPanel>
-            <UiPanel variant="soft" class="space-y-2 p-3">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Database</p>
-              <p class="text-lg font-semibold text-[color:var(--text)]">{{ detail.network.dbPort || '—' }}</p>
-            </UiPanel>
-          </div>
-          <div v-if="detail.network.publishedPorts.length === 0" class="text-sm text-[color:var(--muted)]">
-            No published container ports detected.
-          </div>
-          <div v-else class="space-y-2">
-            <UiPanel
-              v-for="binding in detail.network.publishedPorts"
-              :key="`${binding.container}-${binding.hostPort}-${binding.containerPort}-${binding.proto}`"
-              variant="soft"
-              class="space-y-1 p-3 text-sm text-[color:var(--muted)]"
-            >
-              <p class="font-semibold text-[color:var(--text)]">{{ binding.container }}</p>
-              <p class="font-mono text-xs text-[color:var(--muted-2)]">
-                {{ binding.hostIp || '0.0.0.0' }}:{{ binding.hostPort }} -> {{ binding.containerPort }}/{{ binding.proto || 'tcp' }}
+        </div>
+      </UiPanel>
+      <UiInlineFeedback v-if="stackRestartError" tone="error">
+        {{ stackRestartError }}
+      </UiInlineFeedback>
+
+      <hr />
+
+      <div class="flex flex-col gap-2">
+        <UiPanel class="flex p-2 mb-2">
+          <div class="flex flex-row flex-wrap items-start gap-4 sm:gap-6">
+            <div class="p-2">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Last updated</p>
+              <p class="text-sm text-[color:var(--muted)]">{{ fmtDate(detail.project.record?.updatedAt) }}</p>
+            </div>
+            <div class="p-2">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Source</p>
+              <p class="text-sm text-[color:var(--text)]">{{ detail.runtime.source || 'unknown' }}</p>
+            </div>
+            <div class="p-2 sm:col-span-2">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Path</p>
+              <p class="font-mono text-xs text-[color:var(--muted)] break-all">{{ detail.runtime.path }}</p>
+            </div>
+            <div class="p-2 sm:col-span-2">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">.env File</p>
+              <p class="font-mono text-xs text-[color:var(--muted)] break-all">{{ detail.runtime.envPath }}</p>
+            </div>
+            <div class="p-2 sm:col-span-2">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Repository</p>
+              <p class="text-sm text-[color:var(--muted)] break-all">
+                {{ detail.project.record?.repoUrl || 'No repository URL recorded' }}
               </p>
-            </UiPanel>
-          </div>
-        </UiPanel>
+            </div>
 
-        <UiPanel class="space-y-5 p-6">
-          <div>
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Compose</p>
-            <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Detected files</h2>
           </div>
-          <div v-if="detail.runtime.composeFiles.length > 0" class="space-y-2">
-            <UiPanel
-              v-for="file in detail.runtime.composeFiles"
-              :key="file"
-              variant="soft"
-              class="p-3 font-mono text-xs text-[color:var(--muted)] break-all"
-            >
-              {{ file }}
-            </UiPanel>
-          </div>
-          <p v-else class="text-sm text-[color:var(--muted)]">No compose files discovered in the project directory.</p>
         </UiPanel>
       </div>
 
-      <UiPanel class="space-y-5 p-6">
+      <ProjectSectionTabs
+        v-model="activeSectionTab"
+        class="mb-4"
+      />
+
+      <UiPanel
+        v-if="activeSectionTab === 'workbench'"
+        class="space-y-5 p-6"
+      >
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Workbench</p>
-            <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Compose authority shell</h2>
+            <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Workbench</h2>
             <p class="mt-2 text-sm text-[color:var(--muted)]">
               Read/import state for the stored Workbench model plus admin-only optional-service controls, a service-first inspector, and the existing compose preview/apply workflow.
             </p>
@@ -2934,67 +2488,6 @@ watch(
           This project does not expose any compose source files, so the Workbench shell and import flow are unavailable here.
         </UiState>
         <template v-else-if="workbenchSnapshot">
-          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Revision</p>
-              <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchSnapshot.revision }}</p>
-            </UiPanel>
-            <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Model version</p>
-              <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchSnapshot.modelVersion }}</p>
-            </UiPanel>
-            <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Services</p>
-              <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchSnapshot.services.length }}</p>
-            </UiPanel>
-            <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Warnings</p>
-              <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchSnapshot.warnings.length }}</p>
-            </UiPanel>
-          </div>
-
-          <div class="grid gap-4 xl:grid-cols-2">
-            <UiPanel variant="soft" class="space-y-3 p-4">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Stored metadata</p>
-              <div class="space-y-2 text-xs text-[color:var(--muted)]">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <span>Ports tracked</span>
-                  <span class="font-semibold text-[color:var(--text)]">{{ workbenchSnapshot.ports.length }}</span>
-                </div>
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <span>Resources tracked</span>
-                  <span class="font-semibold text-[color:var(--text)]">{{ workbenchSnapshot.resources.length }}</span>
-                </div>
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <span>Managed services tracked</span>
-                  <span class="font-semibold text-[color:var(--text)]">{{ workbenchSnapshot.managedServices.length }}</span>
-                </div>
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <span>Environment refs</span>
-                  <span class="font-semibold text-[color:var(--text)]">{{ workbenchSnapshot.envRefs.length }}</span>
-                </div>
-              </div>
-            </UiPanel>
-
-            <UiPanel variant="soft" class="space-y-3 p-4">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Source metadata</p>
-              <div class="space-y-2 text-xs text-[color:var(--muted)]">
-                <div class="space-y-1">
-                  <span class="text-[color:var(--muted-2)]">Compose path</span>
-                  <p class="font-mono text-[11px] text-[color:var(--text)] break-all">{{ workbenchSnapshot.composePath }}</p>
-                </div>
-                <div class="space-y-1">
-                  <span class="text-[color:var(--muted-2)]">Project directory</span>
-                  <p class="font-mono text-[11px] text-[color:var(--text)] break-all">{{ workbenchSnapshot.projectDir }}</p>
-                </div>
-                <div class="space-y-1">
-                  <span class="text-[color:var(--muted-2)]">Source fingerprint</span>
-                  <p class="font-mono text-[11px] text-[color:var(--text)] break-all">{{ workbenchFingerprintLabel }}</p>
-                </div>
-              </div>
-            </UiPanel>
-          </div>
-
           <UiInlineFeedback
             v-if="!workbenchSnapshotReady"
             :tone="isAdmin ? 'warn' : 'neutral'"
@@ -3006,943 +2499,62 @@ watch(
             }}
           </UiInlineFeedback>
 
-          <div class="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
-            <UiPanel variant="soft" class="space-y-4 p-4">
-              <div class="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Optional services</p>
-                  <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Catalog controls</h3>
-                </div>
-                <div class="flex flex-wrap gap-2">
-                  <span class="workbench-compact-metric">
-                    <span class="workbench-compact-metric__value">{{ workbenchOptionalServiceInventory.length }}</span>
-                    <span>entries</span>
-                  </span>
-                  <span class="workbench-compact-metric">
-                    <span class="workbench-compact-metric__value">{{ workbenchCurrentComposeSummary.catalogManagedServices }}</span>
-                    <span>managed</span>
-                  </span>
-                </div>
-              </div>
-
-              <UiState v-if="workbenchCatalogStatus === 'loading'" loading>
-                Loading optional-service catalog...
-              </UiState>
-              <UiState v-else-if="workbenchCatalogStatus === 'error'" tone="error">
-                {{ workbenchCatalogErrorMessage }}
-              </UiState>
-              <UiState v-else-if="workbenchOptionalServiceInventory.length === 0">
-                No optional-service catalog entries are available for this project yet.
-              </UiState>
-              <div v-else class="grid gap-3 md:grid-cols-2">
-                <UiListRow
-                  v-for="entry in workbenchOptionalServiceInventory"
-                  :key="entry.key"
-                  as="article"
-                  class="space-y-3"
-                >
-                  <div class="flex flex-wrap items-start justify-between gap-3">
-                    <div class="min-w-0 space-y-2">
-                      <div>
-                        <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">{{ entry.category }}</p>
-                        <h4 class="mt-1 text-base font-semibold text-[color:var(--text)]">{{ entry.displayName }}</h4>
-                      </div>
-                      <div class="flex flex-wrap gap-2 text-[11px]">
-                        <span :class="['workbench-compact-status', workbenchCompactToneClass(entry.availabilityTone)]">
-                          <span class="workbench-compact-status__dot" />
-                          {{ entry.availabilityLabel }}
-                        </span>
-                        <span :class="['workbench-compact-status', workbenchCompactToneClass(entry.currentStateTone)]">
-                          <span class="workbench-compact-status__dot" />
-                          {{ entry.currentStateLabel }}
-                        </span>
-                        <span
-                          :class="[
-                            'workbench-compact-status',
-                            workbenchCompactToneClass(entry.composeGenerationReady ? 'ok' : 'neutral'),
-                          ]"
-                        >
-                          <span class="workbench-compact-status__dot" />
-                          {{ entry.composeGenerationReady ? 'Preview ready' : 'Read only' }}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div v-if="isAdmin" class="flex flex-wrap items-center gap-2">
-                      <UiButton
-                        v-if="!workbenchOptionalServicePendingConfirmation(entry)"
-                        :variant="workbenchOptionalServicePendingAction(entry) === 'remove' ? 'ghost' : 'primary'"
-                        size="sm"
-                        :disabled="workbenchOptionalServiceActionDisabled(entry)"
-                        @click="queueWorkbenchOptionalServiceMutation(entry)"
-                      >
-                        <span class="inline-flex items-center gap-2">
-                          <UiInlineSpinner v-if="workbenchOptionalServiceBusy(entry)" />
-                          {{ workbenchOptionalServicePendingLabel(entry) }}
-                        </span>
-                      </UiButton>
-                    </div>
-                  </div>
-
-                  <p class="text-sm text-[color:var(--muted)]">{{ entry.description }}</p>
-
-                  <div class="grid gap-3 text-xs text-[color:var(--muted)] sm:grid-cols-2">
-                    <div class="space-y-2">
-                      <div class="flex flex-wrap items-start justify-between gap-2">
-                        <span>Service</span>
-                        <span class="font-semibold text-[color:var(--text)]">{{ entry.defaultServiceName }}</span>
-                      </div>
-                      <div class="flex flex-wrap items-start justify-between gap-2">
-                        <span>Port</span>
-                        <span class="font-mono text-[color:var(--text)]">{{ entry.defaultContainerPortLabel }}</span>
-                      </div>
-                      <div class="flex flex-wrap items-start justify-between gap-2">
-                        <span>Image</span>
-                        <span class="max-w-full break-all text-right text-[color:var(--text)]">
-                          {{ entry.suggestedImage || 'Not declared' }}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div class="space-y-2">
-                      <div class="flex flex-wrap items-start justify-between gap-2">
-                        <span>Compose</span>
-                        <span class="text-[color:var(--text)]">
-                          {{
-                            entry.composeServices.length > 0
-                              ? entry.composeServices.map((service) => service.serviceName).join(', ')
-                              : 'None'
-                          }}
-                        </span>
-                      </div>
-                      <div class="flex flex-wrap items-start justify-between gap-2">
-                        <span>Managed</span>
-                        <span class="text-[color:var(--text)]">
-                          {{
-                            entry.managedServices.length > 0
-                              ? entry.managedServices.map((service) => service.serviceName).join(', ')
-                              : 'None'
-                          }}
-                        </span>
-                      </div>
-                      <div class="flex flex-wrap items-start justify-between gap-2">
-                        <span>Legacy</span>
-                        <span class="text-[color:var(--text)]">
-                          {{
-                            entry.legacyModules.length > 0
-                              ? entry.legacyModules
-                                  .map((module) => module.serviceName || module.moduleType)
-                                  .join(', ')
-                              : 'None'
-                          }}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <p
-                    v-if="entry.notes[0] || (entry.legacyModuleType && entry.legacyMutationPath)"
-                    class="text-xs text-[color:var(--muted)]"
-                  >
-                    {{
-                      entry.notes[0] ||
-                      `${entry.legacyModuleType} stays visible on ${entry.legacyMutationPath}.`
-                    }}
-                  </p>
-
-                  <UiInlineFeedback
-                    v-if="workbenchOptionalServiceFeedback(entry)"
-                    :tone="workbenchOptionalServiceFeedback(entry)?.tone || 'neutral'"
-                  >
-                    {{ workbenchOptionalServiceFeedback(entry)?.message }}
-                  </UiInlineFeedback>
-
-                  <div
-                    v-if="isAdmin && workbenchOptionalServicePendingConfirmation(entry)"
-                    class="rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3 text-xs text-[color:var(--muted)]"
-                  >
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                      <p class="font-medium text-[color:var(--text)]">
-                        {{
-                          workbenchPendingOptionalServiceMutation?.action === 'remove'
-                            ? `Remove ${workbenchPendingOptionalServiceMutation.serviceName}?`
-                            : `Add ${entry.defaultServiceName}?`
-                        }}
-                      </p>
-                      <div class="flex flex-wrap gap-2">
-                        <UiButton
-                          variant="primary"
-                          size="sm"
-                          :disabled="workbenchOptionalServiceActionDisabled(entry)"
-                          @click="confirmWorkbenchOptionalServiceMutation(entry)"
-                        >
-                          <span class="inline-flex items-center gap-2">
-                            <UiInlineSpinner v-if="workbenchOptionalServiceBusy(entry)" />
-                            Confirm
-                          </span>
-                        </UiButton>
-                        <UiButton
-                          variant="ghost"
-                          size="sm"
-                          :disabled="workbenchOptionalServiceBusy(entry)"
-                          @click="cancelWorkbenchOptionalServiceMutation(entry.key)"
-                        >
-                          Cancel
-                        </UiButton>
-                      </div>
-                    </div>
-                  </div>
-
-                  <p v-if="!isAdmin" class="text-xs text-[color:var(--muted)]">
-                    Read only for non-admin users.
-                  </p>
-                </UiListRow>
-              </div>
-            </UiPanel>
-
-            <UiPanel
-              variant="raise"
-              class="workbench-shell-card workbench-shell-card--right space-y-4 p-4 text-sm text-[color:var(--muted)]"
-            >
-              <div>
-                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Project context</p>
-                <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Snapshot posture</h3>
-              </div>
-
-              <div class="grid gap-2 sm:grid-cols-2">
-                <div class="workbench-summary-tile">
-                  <span class="workbench-summary-tile__label">Imported</span>
-                  <span class="workbench-summary-tile__value">{{ workbenchCurrentComposeSummary.importedServices }}</span>
-                </div>
-                <div class="workbench-summary-tile">
-                  <span class="workbench-summary-tile__label">Managed</span>
-                  <span class="workbench-summary-tile__value">{{ workbenchCurrentComposeSummary.catalogManagedServices }}</span>
-                </div>
-                <div class="workbench-summary-tile">
-                  <span class="workbench-summary-tile__label">Matches</span>
-                  <span class="workbench-summary-tile__value">{{ workbenchCurrentComposeSummary.matchedCatalogEntries }}</span>
-                </div>
-                <div class="workbench-summary-tile">
-                  <span class="workbench-summary-tile__label">Legacy</span>
-                  <span class="workbench-summary-tile__value">{{ workbenchCurrentComposeSummary.legacyModules }}</span>
-                </div>
-              </div>
-
-              <div class="grid gap-3 text-xs text-[color:var(--muted)] sm:grid-cols-2">
-                <div class="space-y-1 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
-                  <p class="uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Compose path</p>
-                  <p class="font-mono text-[11px] text-[color:var(--text)] break-all">{{ workbenchSnapshot.composePath }}</p>
-                </div>
-                <div class="space-y-1 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
-                  <p class="uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Fingerprint</p>
-                  <p class="font-mono text-[11px] text-[color:var(--text)] break-all">{{ workbenchFingerprintLabel }}</p>
-                </div>
-                <div class="space-y-1 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
-                  <p class="uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Ports tracked</p>
-                  <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchPortSummary.total }}</p>
-                </div>
-                <div class="space-y-1 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
-                  <p class="uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Retained backups</p>
-                  <p class="text-lg font-semibold text-[color:var(--text)]">
-                    {{ isAdmin ? workbenchComposeBackups.length : 'Admin only' }}
-                  </p>
-                </div>
-              </div>
-
-              <p class="text-xs text-[color:var(--muted)]">
-                Import warnings tracked:
-                <span class="font-semibold text-[color:var(--text)]">{{ workbenchWarningsList.length }}</span>.
-                Detailed warning and blocker review now lives in the compose workflow below so readiness, diagnostics, and generated output read from one place.
-              </p>
-            </UiPanel>
-          </div>
-
           <template v-if="workbenchSnapshotReady">
           <div class="workbench-shell">
 
-          <div class="workbench-shell-grid grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
-            <UiPanel
-              variant="soft"
-              class="workbench-shell-card workbench-shell-card--left space-y-4 p-4"
-            >
-              <div class="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Stored inventory</p>
-                  <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Service selector</h3>
-                </div>
-                <UiBadge :tone="workbenchServiceInventory.length > 0 ? 'ok' : 'neutral'">
-                  {{ workbenchServiceInventory.length }} tracked
-                </UiBadge>
-              </div>
+          <WorkbenchCatalogControlsPanel
+            :is-admin="isAdmin"
+            :compose-path="workbenchSnapshot?.composePath || 'No compose path recorded'"
+            :fingerprint-label="workbenchFingerprintLabel"
+            :current-compose-summary="workbenchCurrentComposeSummary"
+            :optional-service-inventory="workbenchOptionalServiceInventory"
+            :catalog-status="workbenchCatalogStatus"
+            :catalog-error-message="workbenchCatalogErrorMessage"
+            :pending-optional-service-mutation="workbenchPendingOptionalServiceMutation"
+            :optional-service-pending-confirmation="workbenchOptionalServicePendingConfirmation"
+            :optional-service-pending-action="workbenchOptionalServicePendingAction"
+            :optional-service-action-disabled="workbenchOptionalServiceActionDisabled"
+            :queue-optional-service-mutation="queueWorkbenchOptionalServiceMutation"
+            :optional-service-busy="workbenchOptionalServiceBusy"
+            :optional-service-pending-label="workbenchOptionalServicePendingLabel"
+            :optional-service-feedback="workbenchOptionalServiceFeedback"
+            :confirm-optional-service-mutation="confirmWorkbenchOptionalServiceMutation"
+            :cancel-optional-service-mutation="cancelWorkbenchOptionalServiceMutation"
+          />
 
-              <UiState v-if="workbenchServiceInventory.length === 0">
-                No Workbench service rows are stored for this snapshot yet.
-              </UiState>
-              <div v-else class="workbench-service-selector-list">
-                <button
-                  v-for="service in workbenchServiceInventory"
-                  :key="service.serviceName"
-                  type="button"
-                  class="workbench-service-selector"
-                  :aria-pressed="workbenchSelectedService?.serviceName === service.serviceName"
-                  :class="{
-                    'workbench-service-selector--active':
-                      workbenchSelectedService?.serviceName === service.serviceName,
-                  }"
-                  @click="workbenchSelectedServiceName = service.serviceName"
-                >
-                  <div class="flex flex-wrap items-start justify-between gap-3">
-                    <div class="min-w-0">
-                      <p class="workbench-service-selector__eyebrow">Service</p>
-                      <h4 class="mt-1 text-base font-semibold text-[color:var(--text)]">{{ service.serviceName }}</h4>
-                      <p class="mt-2 text-xs text-[color:var(--muted)]">
-                        {{
-                          service.image ||
-                          service.buildSource ||
-                          service.restartPolicy ||
-                          'Stored compose service'
-                        }}
-                      </p>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-2">
-                      <UiBadge
-                        :tone="workbenchSelectedService?.serviceName === service.serviceName ? 'ok' : 'neutral'"
-                      >
-                        {{
-                          workbenchSelectedService?.serviceName === service.serviceName
-                            ? 'Selected'
-                            : 'Select'
-                        }}
-                      </UiBadge>
-                      <span :class="['workbench-compact-status', workbenchCompactToneClass(service.originTone)]">
-                        <span class="workbench-compact-status__dot" />
-                        {{ service.originLabel }}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div class="flex flex-wrap gap-2 text-[11px]">
-                    <span class="workbench-compact-metric">
-                      <span class="workbench-compact-metric__value">{{ service.portCount }}</span>
-                      <span>ports</span>
-                    </span>
-                    <span class="workbench-compact-metric">
-                      <span class="workbench-compact-metric__value">{{ service.dependencies.length }}</span>
-                      <span>deps</span>
-                    </span>
-                    <span class="workbench-compact-metric">
-                      <span class="workbench-compact-metric__value">{{ service.networkCount }}</span>
-                      <span>networks</span>
-                    </span>
-                    <span
-                      v-if="service.restartPolicy"
-                      class="workbench-service-chip"
-                    >
-                      restart {{ service.restartPolicy }}
-                    </span>
-                  </div>
-
-                  <div
-                    v-if="service.dependencies.length > 0 || service.managedEntryKeys.length > 0 || service.legacyModuleTypes.length > 0"
-                    class="space-y-2"
-                  >
-                    <p class="workbench-service-selector__eyebrow">Context</p>
-                    <div v-if="service.dependencies.length > 0" class="flex flex-wrap gap-2">
-                      <UiBadge
-                        v-for="dependency in service.dependencies"
-                        :key="`${service.serviceName}-${dependency}`"
-                        tone="neutral"
-                      >
-                        {{ dependency }}
-                      </UiBadge>
-                    </div>
-                    <div v-if="service.managedEntryKeys.length > 0" class="flex flex-wrap gap-2">
-                      <UiBadge
-                        v-for="entryKey in service.managedEntryKeys"
-                        :key="`${service.serviceName}-managed-${entryKey}`"
-                        tone="ok"
-                      >
-                        {{ entryKey }}
-                      </UiBadge>
-                    </div>
-                    <div v-if="service.legacyModuleTypes.length > 0" class="flex flex-wrap gap-2">
-                      <UiBadge
-                        v-for="moduleType in service.legacyModuleTypes"
-                        :key="`${service.serviceName}-legacy-${moduleType}`"
-                        tone="warn"
-                      >
-                        legacy {{ moduleType }}
-                      </UiBadge>
-                    </div>
-                  </div>
-                </button>
-              </div>
-            </UiPanel>
-
-            <UiPanel
-              variant="soft"
-              class="workbench-shell-card workbench-shell-card--right space-y-4 p-4"
-            >
-              <div class="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Selected service</p>
-                  <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Inspector</h3>
-                </div>
-                <UiBadge :tone="workbenchSelectedService ? 'ok' : 'neutral'">
-                  {{ workbenchSelectedService ? workbenchSelectedService.serviceName : 'No selection' }}
-                </UiBadge>
-              </div>
-
-              <UiState v-if="!workbenchSelectedService">
-                Select a stored service to inspect its metadata, relationships, ports, and resources in one place.
-              </UiState>
-              <template v-else>
-                <div class="workbench-inspector-hero">
-                  <div class="min-w-0">
-                    <p class="workbench-service-selector__eyebrow">Service</p>
-                    <h4 class="mt-1 text-xl font-semibold text-[color:var(--text)]">
-                      {{ workbenchSelectedService.serviceName }}
-                    </h4>
-                    <p class="mt-2 text-sm text-[color:var(--muted)]">
-                      {{
-                        workbenchSelectedService.image ||
-                        workbenchSelectedService.buildSource ||
-                        'Compose-defined source with no explicit image or build path'
-                      }}
-                    </p>
-                  </div>
-                  <div class="flex flex-wrap gap-2">
-                    <span :class="['workbench-compact-status', workbenchCompactToneClass(workbenchSelectedService.originTone)]">
-                      <span class="workbench-compact-status__dot" />
-                      {{ workbenchSelectedService.originLabel }}
-                    </span>
-                    <span
-                      v-if="workbenchSelectedService.managedEntryKeys.length > 0"
-                      class="workbench-service-chip"
-                    >
-                      {{ workbenchSelectedService.managedEntryKeys.length }} managed
-                    </span>
-                    <span
-                      v-if="workbenchSelectedService.legacyModuleTypes.length > 0"
-                      class="workbench-service-chip"
-                    >
-                      {{ workbenchSelectedService.legacyModuleTypes.length }} legacy
-                    </span>
-                  </div>
-                </div>
-
-                <div class="grid gap-3 sm:grid-cols-2">
-                  <UiPanel variant="raise" class="space-y-1 p-3">
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Image</p>
-                    <p class="text-sm text-[color:var(--text)] break-all">
-                      {{ workbenchSelectedService.image || 'Not declared' }}
-                    </p>
-                  </UiPanel>
-                  <UiPanel variant="raise" class="space-y-1 p-3">
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Build source</p>
-                    <p class="text-sm text-[color:var(--text)] break-all">
-                      {{ workbenchSelectedService.buildSource || 'Not declared' }}
-                    </p>
-                  </UiPanel>
-                  <UiPanel variant="raise" class="space-y-1 p-3">
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Restart policy</p>
-                    <p class="text-sm text-[color:var(--text)]">
-                      {{ workbenchSelectedService.restartPolicy || 'Default compose behavior' }}
-                    </p>
-                  </UiPanel>
-                  <UiPanel variant="raise" class="space-y-1 p-3">
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Inventory</p>
-                    <div class="flex flex-wrap gap-2">
-                      <span class="workbench-compact-metric">
-                        <span class="workbench-compact-metric__value">{{ workbenchSelectedServicePorts.length }}</span>
-                        <span>ports</span>
-                      </span>
-                      <span class="workbench-compact-metric">
-                        <span class="workbench-compact-metric__value">
-                          {{ workbenchSelectedServiceTopology?.networkNames.length ?? workbenchSelectedService.networkCount }}
-                        </span>
-                        <span>networks</span>
-                      </span>
-                      <span class="workbench-compact-metric">
-                        <span class="workbench-compact-metric__value">
-                          {{
-                            (workbenchSelectedServiceTopology?.dependsOn.length ?? 0) +
-                            (workbenchSelectedServiceTopology?.dependedBy.length ?? 0)
-                          }}
-                        </span>
-                        <span>links</span>
-                      </span>
-                    </div>
-                  </UiPanel>
-                </div>
-
-                <div class="workbench-inspector-section">
-                  <div class="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Relationships</p>
-                      <h4 class="mt-1 text-base font-semibold text-[color:var(--text)]">Dependencies and placement</h4>
-                    </div>
-                    <UiBadge :tone="workbenchSelectedServiceTopology ? 'ok' : 'neutral'">
-                      {{
-                        workbenchSelectedServiceTopology &&
-                        (workbenchSelectedServiceTopology.dependsOn.length > 0 ||
-                          workbenchSelectedServiceTopology.dependedBy.length > 0)
-                          ? 'Connected'
-                          : 'Isolated'
-                      }}
-                    </UiBadge>
-                  </div>
-
-                  <UiState v-if="!workbenchSelectedServiceTopology">
-                    No Workbench topology rows are stored for this service yet.
-                  </UiState>
-                  <div v-else class="grid gap-3 text-xs text-[color:var(--muted)] sm:grid-cols-2">
-                    <div class="space-y-2 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
-                      <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Depends on</p>
-                      <div v-if="workbenchSelectedServiceTopology.dependsOn.length > 0" class="flex flex-wrap gap-2">
-                        <UiBadge
-                          v-for="dependency in workbenchSelectedServiceTopology.dependsOn"
-                          :key="`${workbenchSelectedServiceTopology.serviceName}-depends-on-${dependency}`"
-                          tone="neutral"
-                        >
-                          {{ dependency }}
-                        </UiBadge>
-                      </div>
-                      <p v-else>No upstream dependencies recorded.</p>
-                    </div>
-
-                    <div class="space-y-2 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
-                      <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Required by</p>
-                      <div v-if="workbenchSelectedServiceTopology.dependedBy.length > 0" class="flex flex-wrap gap-2">
-                        <UiBadge
-                          v-for="dependent in workbenchSelectedServiceTopology.dependedBy"
-                          :key="`${workbenchSelectedServiceTopology.serviceName}-required-by-${dependent}`"
-                          tone="neutral"
-                        >
-                          {{ dependent }}
-                        </UiBadge>
-                      </div>
-                      <p v-else>No downstream dependents recorded.</p>
-                    </div>
-
-                    <div class="space-y-2 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
-                      <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Networks</p>
-                      <div v-if="workbenchSelectedServiceTopology.networkNames.length > 0" class="flex flex-wrap gap-2">
-                        <UiBadge
-                          v-for="networkName in workbenchSelectedServiceTopology.networkNames"
-                          :key="`${workbenchSelectedServiceTopology.serviceName}-network-${networkName}`"
-                          tone="neutral"
-                        >
-                          {{ networkName }}
-                        </UiBadge>
-                      </div>
-                      <p v-else>No network attachments recorded.</p>
-                    </div>
-
-                    <div class="space-y-2 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
-                      <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Legacy metadata</p>
-                      <div v-if="workbenchSelectedServiceTopology.moduleTypes.length > 0" class="flex flex-wrap gap-2">
-                        <UiBadge
-                          v-for="moduleType in workbenchSelectedServiceTopology.moduleTypes"
-                          :key="`${workbenchSelectedServiceTopology.serviceName}-module-${moduleType}`"
-                          tone="warn"
-                        >
-                          {{ moduleType }}
-                        </UiBadge>
-                      </div>
-                      <p v-else>No legacy transition metadata recorded.</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="workbench-inspector-section workbench-inspector-section--editing">
-                  <div class="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Service controls</p>
-                      <h4 class="mt-1 text-base font-semibold text-[color:var(--text)]">Ports and budgets</h4>
-                    </div>
-                    <div class="flex flex-wrap gap-2">
-                      <span class="workbench-compact-metric">
-                        <span class="workbench-compact-metric__value">{{ workbenchSelectedServicePorts.length }}</span>
-                        <span>ports</span>
-                      </span>
-                      <span class="workbench-compact-metric">
-                        <span class="workbench-compact-metric__value">
-                          {{ workbenchSelectedServiceResource?.hasLimits ? 1 : 0 }}
-                        </span>
-                        <span>limits</span>
-                      </span>
-                      <span class="workbench-compact-metric">
-                        <span class="workbench-compact-metric__value">
-                          {{ workbenchSelectedServiceResource?.hasReservations ? 1 : 0 }}
-                        </span>
-                        <span>reservations</span>
-                      </span>
-                    </div>
-                  </div>
-
-                  <p class="text-xs text-[color:var(--muted)]">
-                    Current values and supported edits stay together here. Host-port allocation still prefers the compose-declared host port before the next free fallback.
-                  </p>
-
-                  <UiState v-if="!isAdmin" tone="neutral">
-                    Read-only visibility: admin permissions are required to change host ports or resource budgets.
-                  </UiState>
-
-                  <div class="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-                    <div class="space-y-3 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/30 p-3">
-                      <div class="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Ports</p>
-                          <h5 class="mt-1 text-base font-semibold text-[color:var(--text)]">Mappings</h5>
-                        </div>
-                        <div class="flex flex-wrap gap-2">
-                          <span class="workbench-compact-metric">
-                            <span class="workbench-compact-metric__value">
-                              {{
-                                workbenchSelectedServicePorts.filter((port) => port.allocationStatus === 'assigned').length
-                              }}
-                            </span>
-                            <span>assigned</span>
-                          </span>
-                          <span class="workbench-compact-metric">
-                            <span class="workbench-compact-metric__value">
-                              {{
-                                workbenchSelectedServicePorts.filter((port) => port.allocationStatus === 'unresolved').length
-                              }}
-                            </span>
-                            <span>unresolved</span>
-                          </span>
-                        </div>
-                      </div>
-
-                      <UiState v-if="workbenchSelectedServicePorts.length === 0">
-                        No Workbench port rows are stored for this service yet.
-                      </UiState>
-                      <div v-else class="space-y-3">
-                        <UiListRow
-                          v-for="port in workbenchSelectedServicePorts"
-                          :key="port.key"
-                          as="article"
-                          class="space-y-3"
-                        >
-                          <div class="flex flex-wrap items-start justify-between gap-3">
-                            <div class="min-w-0">
-                              <h6 class="text-base font-semibold text-[color:var(--text)]">
-                                {{ port.containerPort }}/{{ port.protocol }}
-                              </h6>
-                              <p class="mt-1 font-mono text-[11px] text-[color:var(--muted-2)]">
-                                {{ port.mappingLabel }}
-                              </p>
-                            </div>
-                            <div class="flex flex-wrap gap-2 text-[11px]">
-                              <span :class="['workbench-compact-status', workbenchCompactToneClass(port.assignmentStrategyTone)]">
-                                <span class="workbench-compact-status__dot" />
-                                {{ port.assignmentStrategyLabel }}
-                              </span>
-                              <span :class="['workbench-compact-status', workbenchCompactToneClass(port.allocationStatusTone)]">
-                                <span class="workbench-compact-status__dot" />
-                                {{ port.allocationStatusLabel }}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div class="grid gap-3 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-                            <div class="grid gap-2 text-xs text-[color:var(--muted)] sm:grid-cols-2">
-                              <div class="flex flex-wrap items-start justify-between gap-2">
-                                <span>Host IP</span>
-                                <span class="font-mono text-[color:var(--text)]">{{ port.hostIp }}</span>
-                              </div>
-                              <div class="flex flex-wrap items-start justify-between gap-2">
-                                <span>Requested</span>
-                                <span class="font-mono text-[color:var(--text)]">{{ port.requestedHostPort || 'Auto' }}</span>
-                              </div>
-                              <div class="flex flex-wrap items-start justify-between gap-2">
-                                <span>Effective</span>
-                                <span class="font-mono text-[color:var(--text)]">{{ port.effectiveHostPortLabel }}</span>
-                              </div>
-                              <div class="flex flex-wrap items-start justify-between gap-2">
-                                <span>Strategy</span>
-                                <span class="text-[color:var(--text)]">{{ port.assignmentStrategyLabel }}</span>
-                              </div>
-                            </div>
-
-                            <div class="space-y-3 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
-                              <div class="workbench-port-editor">
-                                <label class="space-y-2">
-                                  <span class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-                                    Host port
-                                  </span>
-                                  <UiInput
-                                    :model-value="workbenchPortInputValue(port)"
-                                    type="number"
-                                    min="1"
-                                    max="65535"
-                                    step="1"
-                                    placeholder="8080"
-                                    :disabled="
-                                      !isAdmin ||
-                                      workbenchPortMutationBusy(port) ||
-                                      workbenchOptionalServiceMutationStatus === 'loading' ||
-                                      workbenchPreviewStatus === 'loading' ||
-                                      workbenchApplyStatus === 'loading' ||
-                                      workbenchRestoreStatus === 'loading'
-                                    "
-                                    @update:model-value="setWorkbenchPortInputValue(port.key, $event)"
-                                  />
-                                </label>
-                                <div v-if="isAdmin" class="workbench-port-editor__actions">
-                                  <UiButton
-                                    variant="primary"
-                                    size="sm"
-                                    :disabled="
-                                      workbenchPortMutationBusy(port) ||
-                                      workbenchResolveStatus === 'loading' ||
-                                      workbenchOptionalServiceMutationStatus === 'loading' ||
-                                      workbenchPreviewStatus === 'loading' ||
-                                      workbenchApplyStatus === 'loading' ||
-                                      workbenchRestoreStatus === 'loading'
-                                    "
-                                    @click="setManualWorkbenchPort(port)"
-                                  >
-                                    <span class="inline-flex items-center gap-2">
-                                      <UiInlineSpinner v-if="workbenchPortMutationBusy(port)" />
-                                      Set manual
-                                    </span>
-                                  </UiButton>
-                                  <UiButton
-                                    variant="ghost"
-                                    size="sm"
-                                    :disabled="
-                                      workbenchPortMutationBusy(port) ||
-                                      workbenchResolveStatus === 'loading' ||
-                                      workbenchOptionalServiceMutationStatus === 'loading' ||
-                                      workbenchPreviewStatus === 'loading' ||
-                                      workbenchApplyStatus === 'loading' ||
-                                      workbenchRestoreStatus === 'loading'
-                                    "
-                                    @click="resetWorkbenchPortToAuto(port)"
-                                  >
-                                    Reset
-                                  </UiButton>
-                                  <UiButton
-                                    variant="ghost"
-                                    size="sm"
-                                    :disabled="
-                                      workbenchPortSuggestionStatus(port) === 'loading' ||
-                                      workbenchPortMutationBusy(port) ||
-                                      workbenchOptionalServiceMutationStatus === 'loading' ||
-                                      workbenchPreviewStatus === 'loading' ||
-                                      workbenchApplyStatus === 'loading' ||
-                                      workbenchRestoreStatus === 'loading'
-                                    "
-                                    @click="loadWorkbenchPortSuggestions(port)"
-                                  >
-                                    <span class="inline-flex items-center gap-2">
-                                      <UiInlineSpinner v-if="workbenchPortSuggestionStatus(port) === 'loading'" />
-                                      Suggestions
-                                    </span>
-                                  </UiButton>
-                                </div>
-                              </div>
-
-                              <UiInlineFeedback
-                                v-if="workbenchPortMutationFeedback(port)"
-                                :tone="workbenchPortMutationFeedback(port)?.tone || 'neutral'"
-                              >
-                                {{ workbenchPortMutationFeedback(port)?.message }}
-                              </UiInlineFeedback>
-                              <UiInlineFeedback
-                                v-if="workbenchPortSuggestionFeedback(port)"
-                                :tone="workbenchPortSuggestionFeedback(port)?.tone || 'neutral'"
-                              >
-                                {{ workbenchPortSuggestionFeedback(port)?.message }}
-                              </UiInlineFeedback>
-
-                              <div
-                                v-if="workbenchPortSuggestionResultByKey[port.key]?.suggestions?.length"
-                                class="flex flex-wrap gap-2"
-                              >
-                                <UiButton
-                                  v-for="suggestion in workbenchPortSuggestionResultByKey[port.key]?.suggestions || []"
-                                  :key="`${port.key}-suggestion-${suggestion.rank}-${suggestion.hostPort}`"
-                                  variant="ghost"
-                                  size="sm"
-                                  :disabled="
-                                    workbenchPortMutationBusy(port) ||
-                                    workbenchOptionalServiceMutationStatus === 'loading' ||
-                                    workbenchPreviewStatus === 'loading' ||
-                                    workbenchApplyStatus === 'loading' ||
-                                    workbenchRestoreStatus === 'loading'
-                                  "
-                                  @click="setWorkbenchPortInputValue(port.key, String(suggestion.hostPort))"
-                                >
-                                  #{{ suggestion.rank }} · {{ suggestion.hostPort }}
-                                </UiButton>
-                              </div>
-
-                              <p
-                                class="text-xs"
-                                :class="workbenchGuidanceToneClass(port.allocationStatus)"
-                              >
-                                {{ port.guidance }}
-                              </p>
-                            </div>
-                          </div>
-                        </UiListRow>
-                      </div>
-                    </div>
-
-                    <div class="space-y-3 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/30 p-3">
-                      <div class="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Resources</p>
-                          <h5 class="mt-1 text-base font-semibold text-[color:var(--text)]">Budgets</h5>
-                        </div>
-                        <div class="flex flex-wrap gap-2 text-[11px]">
-                          <span :class="['workbench-compact-status', workbenchCompactToneClass(workbenchSelectedServiceResource?.tracked ? 'ok' : 'neutral')]">
-                            <span class="workbench-compact-status__dot" />
-                            {{ workbenchSelectedServiceResource?.tracked ? 'Tracked' : 'No row' }}
-                          </span>
-                          <span :class="['workbench-compact-status', workbenchCompactToneClass(workbenchSelectedServiceResource?.hasLimits ? 'ok' : 'neutral')]">
-                            <span class="workbench-compact-status__dot" />
-                            {{ workbenchSelectedServiceResource?.hasLimits ? 'Limits set' : 'Limits empty' }}
-                          </span>
-                          <span :class="['workbench-compact-status', workbenchCompactToneClass(workbenchSelectedServiceResource?.hasReservations ? 'ok' : 'neutral')]">
-                            <span class="workbench-compact-status__dot" />
-                            {{ workbenchSelectedServiceResource?.hasReservations ? 'Reservations set' : 'Reservations empty' }}
-                          </span>
-                        </div>
-                      </div>
-
-                      <UiState v-if="!workbenchSelectedServiceResource">
-                        No Workbench resource row is stored for this service yet.
-                      </UiState>
-                      <div v-else class="space-y-3">
-                        <div class="grid gap-3 sm:grid-cols-2">
-                          <UiPanel
-                            v-for="field in workbenchResourceEditorFields"
-                            :key="`${workbenchSelectedServiceResource.key}-${field.key}`"
-                            variant="raise"
-                            class="space-y-3 p-3"
-                          >
-                            <div class="flex flex-wrap items-start justify-between gap-2">
-                              <div>
-                                <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-                                  {{ field.section === 'limits' ? 'Limits' : 'Reservations' }}
-                                </p>
-                                <h6 class="mt-1 text-sm font-semibold text-[color:var(--text)]">
-                                  {{ field.label }}
-                                </h6>
-                              </div>
-                              <span :class="['workbench-compact-status', workbenchCompactToneClass(workbenchSelectedServiceResource[field.key] ? 'ok' : 'neutral')]">
-                                <span class="workbench-compact-status__dot" />
-                                {{ workbenchSelectedServiceResource[field.key] ? 'Stored' : 'Empty' }}
-                              </span>
-                            </div>
-
-                            <div class="space-y-2 text-xs text-[color:var(--muted)]">
-                              <div class="flex flex-wrap items-center justify-between gap-2">
-                                <span>Current</span>
-                                <span class="font-mono text-[color:var(--text)]">
-                                  {{ workbenchSelectedServiceResource[field.key] || 'Not declared' }}
-                                </span>
-                              </div>
-
-                              <label class="space-y-1">
-                                <span class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-                                  New value
-                                </span>
-                                <UiInput
-                                  :model-value="workbenchResourceInputValue(workbenchSelectedServiceResource, field.key)"
-                                  type="text"
-                                  :placeholder="field.placeholder"
-                                  :disabled="!isAdmin || workbenchResourceActionDisabled(workbenchSelectedServiceResource)"
-                                  @update:model-value="
-                                    setWorkbenchResourceInputValue(
-                                      workbenchSelectedServiceResource.serviceName,
-                                      field.key,
-                                      $event,
-                                    )
-                                  "
-                                />
-                              </label>
-                            </div>
-
-                            <UiButton
-                              v-if="isAdmin"
-                              variant="ghost"
-                              size="sm"
-                              :disabled="
-                                !workbenchSelectedServiceResource[field.key] ||
-                                workbenchResourceActionDisabled(workbenchSelectedServiceResource)
-                              "
-                              @click="clearWorkbenchResourceFields(workbenchSelectedServiceResource, [field.key])"
-                            >
-                              Clear {{ field.label.toLowerCase() }}
-                            </UiButton>
-                          </UiPanel>
-                        </div>
-
-                        <div v-if="isAdmin" class="flex flex-wrap gap-2">
-                          <UiButton
-                            variant="primary"
-                            size="sm"
-                            :disabled="workbenchResourceActionDisabled(workbenchSelectedServiceResource)"
-                            @click="saveWorkbenchResource(workbenchSelectedServiceResource)"
-                          >
-                            <span class="inline-flex items-center gap-2">
-                              <UiInlineSpinner
-                                v-if="workbenchResourceMutationBusy(workbenchSelectedServiceResource)"
-                              />
-                              Save budgets
-                            </span>
-                          </UiButton>
-                          <UiButton
-                            variant="ghost"
-                            size="sm"
-                            :disabled="workbenchResourceActionDisabled(workbenchSelectedServiceResource)"
-                            @click="resetWorkbenchResourceInputs(workbenchSelectedServiceResource)"
-                          >
-                            Reset inputs
-                          </UiButton>
-                          <UiButton
-                            variant="ghost"
-                            size="sm"
-                            :disabled="
-                              workbenchResourceActionDisabled(workbenchSelectedServiceResource) ||
-                              (!workbenchSelectedServiceResource.hasLimits &&
-                                !workbenchSelectedServiceResource.hasReservations)
-                            "
-                            @click="
-                              clearWorkbenchResourceFields(workbenchSelectedServiceResource, [
-                                'limitCpus',
-                                'limitMemory',
-                                'reservationCpus',
-                                'reservationMemory',
-                              ])
-                            "
-                          >
-                            Clear all
-                          </UiButton>
-                        </div>
-
-                        <UiInlineFeedback
-                          v-if="workbenchResourceMutationFeedback(workbenchSelectedServiceResource)"
-                          :tone="
-                            workbenchResourceMutationFeedback(workbenchSelectedServiceResource)?.tone ||
-                            'neutral'
-                          "
-                        >
-                          {{ workbenchResourceMutationFeedback(workbenchSelectedServiceResource)?.message }}
-                        </UiInlineFeedback>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </template>
-            </UiPanel>
-          </div>
+          <WorkbenchServiceInspectorPanel
+            :is-admin="isAdmin"
+            :optional-service-mutation-status="workbenchOptionalServiceMutationStatus"
+            :preview-status="workbenchPreviewStatus"
+            :apply-status="workbenchApplyStatus"
+            :restore-status="workbenchRestoreStatus"
+            :resolve-status="workbenchResolveStatus"
+            :service-inventory="workbenchServiceInventory"
+            :selected-service="workbenchSelectedService"
+            :selected-service-topology="workbenchSelectedServiceTopology"
+            :selected-service-ports="workbenchSelectedServicePorts"
+            :selected-service-resource="workbenchSelectedServiceResource"
+            :resource-editor-fields="workbenchResourceEditorFields"
+            :port-suggestion-result-by-key="workbenchPortSuggestionResultByKey"
+            :select-service="(serviceName) => (workbenchSelectedServiceName = serviceName)"
+            :port-input-value="workbenchPortInputValue"
+            :set-port-input-value="setWorkbenchPortInputValue"
+            :port-mutation-busy="workbenchPortMutationBusy"
+            :set-manual-port="setManualWorkbenchPort"
+            :reset-port-to-auto="resetWorkbenchPortToAuto"
+            :port-suggestion-status="workbenchPortSuggestionStatus"
+            :load-port-suggestions="loadWorkbenchPortSuggestions"
+            :port-mutation-feedback="workbenchPortMutationFeedback"
+            :port-suggestion-feedback="workbenchPortSuggestionFeedback"
+            :resource-input-value="workbenchResourceInputValue"
+            :set-resource-input-value="setWorkbenchResourceInputValue"
+            :resource-action-disabled="workbenchResourceActionDisabled"
+            :clear-resource-fields="clearWorkbenchResourceFields"
+            :save-resource="saveWorkbenchResource"
+            :resource-mutation-busy="workbenchResourceMutationBusy"
+            :reset-resource-inputs="resetWorkbenchResourceInputs"
+            :resource-mutation-feedback="workbenchResourceMutationFeedback"
+          />
 
           <div class="workbench-shell-grid grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
             <UiPanel
@@ -4589,431 +3201,28 @@ watch(
               </div>
             </UiPanel>
           </div>
-
-          <div class="workbench-shell-grid grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
-            <UiPanel
-              variant="raise"
-              class="workbench-shell-card workbench-shell-card--secondary space-y-4 p-4 text-sm text-[color:var(--muted)]"
-            >
-              <div>
-                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Topology summary</p>
-                <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Dependency footprint</h3>
-              </div>
-              <p>
-                This view mirrors the stored dependency graph only. It exposes imported service edges plus stored network attachments and legacy transition annotations without widening into edit controls.
-              </p>
-
-              <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                <UiPanel variant="soft" class="space-y-1 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Services</p>
-                  <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchTopologySummary.services }}</p>
-                </UiPanel>
-                <UiPanel variant="soft" class="space-y-1 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Dependency edges</p>
-                  <p class="text-lg font-semibold text-[color:var(--text)]">
-                    {{ workbenchTopologySummary.dependencyEdges }}
-                  </p>
-                </UiPanel>
-                <UiPanel variant="soft" class="space-y-1 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Connected</p>
-                  <p class="text-lg font-semibold text-[color:var(--text)]">
-                    {{ workbenchTopologySummary.connectedServices }}
-                  </p>
-                </UiPanel>
-                <UiPanel variant="soft" class="space-y-1 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Isolated</p>
-                  <p class="text-lg font-semibold text-[color:var(--text)]">
-                    {{ workbenchTopologySummary.isolatedServices }}
-                  </p>
-                </UiPanel>
-              </div>
-
-              <div class="space-y-3">
-                <div class="space-y-2">
-                  <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Networks</p>
-                  <div v-if="workbenchTopologySummary.networks.length > 0" class="flex flex-wrap gap-2">
-                    <UiBadge
-                      v-for="networkName in workbenchTopologySummary.networks"
-                      :key="`topology-network-${networkName}`"
-                      tone="neutral"
-                    >
-                      {{ networkName }}
-                    </UiBadge>
-                  </div>
-                  <p v-else class="text-xs">No stored network summary is available in this snapshot.</p>
-                </div>
-
-                <div class="space-y-2">
-                  <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Legacy metadata types</p>
-                  <div v-if="workbenchTopologySummary.moduleTypes.length > 0" class="flex flex-wrap gap-2">
-                    <UiBadge
-                      v-for="moduleType in workbenchTopologySummary.moduleTypes"
-                      :key="`topology-module-${moduleType}`"
-                      tone="ok"
-                    >
-                      {{ moduleType }}
-                    </UiBadge>
-                  </div>
-                  <p v-else class="text-xs">No legacy transition summary is available in this snapshot.</p>
-                </div>
-              </div>
-
-              <p class="text-xs text-[color:var(--muted)]">
-                Topology remains read-only. Use the preview/apply and restore surfaces above to move between generated compose output and retained backups without leaving Project Detail.
-              </p>
-            </UiPanel>
-          </div>
           </div>
           </template>
         </template>
       </UiPanel>
 
-      <UiPanel class="space-y-5 p-6">
-        <div>
-          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Containers</p>
-          <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Runtime units ({{ detail.containers.length }})</h2>
-        </div>
-        <UiState v-if="detail.containers.length === 0">No containers currently match this compose project label.</UiState>
-        <div v-else class="grid gap-4 xl:grid-cols-2">
-          <UiListRow
-            v-for="container in detail.containers"
-            :key="container.id"
-            as="article"
-            class="space-y-4"
-          >
-            <div class="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                  {{ container.service || 'Container' }}
-                </p>
-                <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">{{ container.name }}</h3>
-                <p class="mt-1 font-mono text-[11px] text-[color:var(--muted-2)]">{{ container.id }}</p>
-              </div>
-              <UiBadge :tone="containerTone(container)">{{ container.status || 'unknown' }}</UiBadge>
-            </div>
-            <div class="space-y-2 text-xs text-[color:var(--muted)]">
-              <div class="flex flex-wrap items-center justify-between gap-2 break-words">
-                <span>Image</span>
-                <span class="text-[color:var(--text)] break-all">{{ container.image }}</span>
-              </div>
-              <div class="flex flex-wrap items-center justify-between gap-2 break-words">
-                <span>Ports</span>
-                <span class="text-[color:var(--text)]">{{ container.ports || '—' }}</span>
-              </div>
-              <div class="flex flex-wrap items-center justify-between gap-2 break-words">
-                <span>Service</span>
-                <span class="text-[color:var(--text)]">{{ container.service || '—' }}</span>
-              </div>
-            </div>
-          </UiListRow>
-        </div>
-      </UiPanel>
-
-      <UiPanel class="space-y-5 p-6">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Archive cleanup</p>
-            <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Plan and execute</h2>
-            <p class="mt-2 text-sm text-[color:var(--muted)]">
-              Cleanup is asynchronous and always queued as a project job.
-            </p>
-          </div>
-          <UiButton variant="ghost" size="sm" :disabled="archivePlanLoading" @click="loadArchivePlan">
-            <span class="inline-flex items-center gap-2">
-              <NavIcon name="refresh" class="h-3.5 w-3.5" />
-              <UiInlineSpinner v-if="archivePlanLoading" />
-              Refresh plan
-            </span>
-          </UiButton>
-        </div>
-
-        <UiState v-if="!isAdmin">
-          Read-only access: admin permissions are required to preview and execute archive cleanup.
-        </UiState>
-        <UiState v-else-if="archivePlanLoading" loading>Building archive cleanup plan...</UiState>
-        <UiState v-else-if="archivePlanError" tone="error">{{ archivePlanError }}</UiState>
-
-        <template v-else-if="archivePlan">
-          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Containers</p>
-              <p class="text-lg font-semibold text-[color:var(--text)]">{{ archivePlan.containers.length }}</p>
-            </UiPanel>
-            <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Hostnames</p>
-              <p class="text-lg font-semibold text-[color:var(--text)]">{{ archivePlan.hostnames.length }}</p>
-            </UiPanel>
-            <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Ingress rules</p>
-              <p class="text-lg font-semibold text-[color:var(--text)]">{{ archivePlan.ingressRules.length }}</p>
-            </UiPanel>
-            <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">DNS records</p>
-              <p class="text-lg font-semibold text-[color:var(--text)]">
-                {{ archivePlan.dnsRecords.filter((record) => record.deleteEligible).length }}/{{ archivePlan.dnsRecords.length }}
-              </p>
-            </UiPanel>
-          </div>
-
-          <UiInlineFeedback v-if="archivePlan.warnings.length > 0" tone="warn">
-            {{ archivePlan.warnings.length }} warning(s): {{ archivePlan.warnings.join(' | ') }}
-          </UiInlineFeedback>
-          <UiInlineFeedback v-if="archiveExecutedWithWarnings" tone="warn">
-            Last archive request was queued with warnings in the plan preview. Review job logs after completion.
-          </UiInlineFeedback>
-          <UiInlineFeedback v-if="archiveExecuteError" tone="error">
-            {{ archiveExecuteError }}
-          </UiInlineFeedback>
-
-          <div class="grid gap-4 xl:grid-cols-2">
-            <UiPanel variant="soft" class="space-y-3 p-4">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Hostnames</p>
-              <UiState v-if="archivePlan.hostnames.length === 0">No hostnames discovered.</UiState>
-              <ul v-else class="space-y-1 text-xs text-[color:var(--muted)]">
-                <li
-                  v-for="hostname in archivePlan.hostnames"
-                  :key="hostname"
-                  class="font-mono text-[color:var(--text)] break-all"
-                >
-                  {{ hostname }}
-                </li>
-              </ul>
-            </UiPanel>
-
-            <UiPanel variant="soft" class="space-y-3 p-4">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Container targets</p>
-              <UiState v-if="archivePlan.containers.length === 0">No project containers found.</UiState>
-              <ul v-else class="space-y-1 text-xs text-[color:var(--muted)]">
-                <li
-                  v-for="container in archivePlan.containers"
-                  :key="container.id || container.name"
-                  class="flex flex-wrap items-center justify-between gap-2"
-                >
-                  <span class="font-mono text-[color:var(--text)]">{{ container.name }}</span>
-                  <UiBadge :tone="statusTone(container.status)">
-                    {{ container.status || 'unknown' }}
-                  </UiBadge>
-                </li>
-              </ul>
-            </UiPanel>
-
-            <UiPanel variant="soft" class="space-y-3 p-4">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Ingress targets</p>
-              <UiState v-if="archivePlan.ingressRules.length === 0">No ingress rules matched.</UiState>
-              <ul v-else class="space-y-1 text-xs text-[color:var(--muted)]">
-                <li
-                  v-for="rule in archivePlan.ingressRules"
-                  :key="`${rule.source}-${rule.hostname}-${rule.service}`"
-                  class="space-y-1"
-                >
-                  <div class="flex flex-wrap items-center justify-between gap-2">
-                    <span class="font-mono text-[color:var(--text)] break-all">{{ rule.hostname }}</span>
-                    <UiBadge :tone="rule.source === 'remote' ? 'ok' : 'neutral'">
-                      {{ rule.source }}
-                    </UiBadge>
-                  </div>
-                  <p class="font-mono text-[11px] text-[color:var(--muted-2)] break-all">{{ rule.service || 'service not set' }}</p>
-                </li>
-              </ul>
-            </UiPanel>
-
-            <UiPanel variant="soft" class="space-y-3 p-4">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">DNS targets</p>
-              <UiState v-if="archivePlan.dnsRecords.length === 0">No DNS records matched.</UiState>
-              <ul v-else class="space-y-2 text-xs text-[color:var(--muted)]">
-                <li
-                  v-for="record in archivePlan.dnsRecords"
-                  :key="`${record.zoneId}-${record.id}-${record.name}`"
-                  class="space-y-1"
-                >
-                  <div class="flex flex-wrap items-center justify-between gap-2">
-                    <span class="font-mono text-[color:var(--text)] break-all">{{ record.name }}</span>
-                    <UiBadge :tone="record.deleteEligible ? 'ok' : 'warn'">
-                      {{ record.deleteEligible ? 'deletable' : 'skip' }}
-                    </UiBadge>
-                  </div>
-                  <p class="font-mono text-[11px] text-[color:var(--muted-2)] break-all">
-                    {{ record.type }} → {{ record.content }}
-                  </p>
-                  <p v-if="record.skipReason" class="text-[11px] text-[color:var(--muted)]">
-                    {{ record.skipReason }}
-                  </p>
-                </li>
-              </ul>
-            </UiPanel>
-          </div>
-
-          <UiPanel variant="raise" class="space-y-4 p-5">
-            <div>
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Execution</p>
-              <p class="mt-2 text-sm text-[color:var(--muted)]">
-                Confirmation phrase: <span class="font-mono text-[color:var(--text)]">{{ archiveConfirmationPhrase }}</span>
-              </p>
-            </div>
-
-            <div class="grid gap-3 sm:grid-cols-2">
-              <UiToggle v-model="archiveOptions.removeContainers" :disabled="!isAdmin">
-                Remove project containers
-              </UiToggle>
-              <UiToggle v-model="archiveOptions.removeVolumes" :disabled="!isAdmin || !archiveOptions.removeContainers">
-                Remove container volumes
-              </UiToggle>
-              <UiToggle v-model="archiveOptions.removeIngress" :disabled="!isAdmin">
-                Remove ingress rules
-              </UiToggle>
-              <UiToggle v-model="archiveOptions.removeDns" :disabled="!isAdmin">
-                Remove DNS records
-              </UiToggle>
-            </div>
-
-            <label class="block text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-              Confirmation phrase
-            </label>
-            <UiInput
-              v-model="archiveConfirmInput"
-              :disabled="!isAdmin || archiveExecuting"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="Type the phrase exactly"
-            />
-
-            <div class="flex flex-wrap items-center gap-3">
-              <UiButton
-                variant="danger"
-                size="sm"
-                :disabled="!canSubmitArchive"
-                @click="queueArchive"
-              >
-                <span class="inline-flex items-center gap-2">
-                  <UiInlineSpinner v-if="archiveExecuting" />
-                  {{ archiveExecuting ? 'Queueing archive...' : 'Queue archive job' }}
-                </span>
-              </UiButton>
-              <p v-if="!isAdmin" class="text-xs text-[color:var(--muted)]">
-                Read-only access: admin permissions are required to queue archive cleanup.
-              </p>
-            </div>
-          </UiPanel>
-        </template>
-      </UiPanel>
-
-      <UiPanel class="space-y-5 p-6">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Project jobs</p>
-            <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Activity timeline</h2>
-            <p class="mt-2 text-sm text-[color:var(--muted)]">
-              {{ jobsTotal }} total jobs for {{ detail.project.normalizedName }}.
-            </p>
-          </div>
-          <UiButton variant="ghost" size="sm" :disabled="jobsLoading" @click="loadProjectJobs(jobsPage)">
-            <span class="inline-flex items-center gap-2">
-              <NavIcon name="refresh" class="h-3.5 w-3.5" />
-              <UiInlineSpinner v-if="jobsLoading" />
-              Refresh jobs
-            </span>
-          </UiButton>
-        </div>
-
-        <UiState v-if="jobsError" tone="error">{{ jobsError }}</UiState>
-        <UiState v-else-if="jobsLoading" loading>Loading project jobs...</UiState>
-        <UiState v-else-if="projectJobs.length === 0">No jobs have been recorded for this project yet.</UiState>
-
-        <div v-else class="space-y-3">
-          <UiListRow
-            v-for="job in projectJobs"
-            :key="job.id"
-            as="article"
-            class="space-y-4"
-          >
-            <div class="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Job #{{ job.id }}</p>
-                <h3 class="mt-1 text-lg font-semibold text-[color:var(--text)]">{{ job.type }}</h3>
-              </div>
-              <UiBadge :tone="jobStatusTone(job.status)">
-                {{ jobStatusLabel(job.status) }}
-              </UiBadge>
-            </div>
-
-            <div class="mt-4 grid gap-2 text-xs text-[color:var(--muted)] sm:grid-cols-3">
-              <p>Created: <span class="text-[color:var(--text)]">{{ fmtDate(job.createdAt) }}</span></p>
-              <p>Started: <span class="text-[color:var(--text)]">{{ fmtDate(job.startedAt) }}</span></p>
-              <p>Finished: <span class="text-[color:var(--text)]">{{ fmtDate(job.finishedAt) }}</span></p>
-            </div>
-
-            <div class="mt-4 flex flex-wrap items-center gap-2">
-              <UiButton variant="ghost" size="sm" @click="openJobLogs(job.id)">
-                View job logs
-              </UiButton>
-              <UiButton :as="RouterLink" :to="`/jobs/${job.id}`" variant="ghost" size="sm">
-                Open job page
-              </UiButton>
-            </div>
-          </UiListRow>
-        </div>
-
-        <div
-          v-if="jobsTotalPages > 1 && !jobsLoading"
-          class="flex flex-wrap items-center justify-between gap-3 bg-[color:var(--surface-2)] px-4 py-3 text-xs text-[color:var(--muted)]"
-        >
-          <span>Page {{ jobsPage }} of {{ jobsTotalPages }}</span>
-          <div class="flex items-center gap-2">
-            <UiButton variant="ghost" size="sm" :disabled="!canGoJobsBack" @click="goToJobsPage(jobsPage - 1)">
-              Previous
-            </UiButton>
-            <UiButton variant="ghost" size="sm" :disabled="!canGoJobsForward" @click="goToJobsPage(jobsPage + 1)">
-              Next
-            </UiButton>
-          </div>
-        </div>
-      </UiPanel>
+      <ProjectRuntimeUnitsSection
+        v-else-if="activeSectionTab === 'runtime'"
+        :containers="detail.containers"
+      />
+      <ProjectArchiveExecutionSection
+        v-else-if="activeSectionTab === 'archive'"
+        :project-name="projectName"
+        :project-display-name="detail.project.normalizedName"
+        :is-admin="isAdmin"
+        @queued="load"
+      />
+      <ProjectActivityTimelineSection
+        v-else
+        :project-name="projectName"
+        :project-display-name="detail.project.normalizedName"
+      />
     </template>
-
-    <UiFormSidePanel
-      v-model="jobLogsPanelOpen"
-      eyebrow="Project jobs"
-      :title="selectedJobId ? `Job #${selectedJobId} logs` : 'Job logs'"
-    >
-      <div class="space-y-4">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Log viewer</p>
-            <p class="mt-1 text-sm text-[color:var(--muted)]">
-              {{ selectedJob ? selectedJob.type : 'Select a job entry to load logs.' }}
-            </p>
-          </div>
-          <UiBadge v-if="selectedJob" :tone="jobStatusTone(selectedJob.status)">
-            {{ jobStatusLabel(selectedJob.status) }}
-          </UiBadge>
-        </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <UiButton variant="ghost" size="sm" :disabled="selectedJobLoading" @click="refreshSelectedJobLogs">
-            <span class="inline-flex items-center gap-2">
-              <NavIcon name="refresh" class="h-3.5 w-3.5" />
-              <UiInlineSpinner v-if="selectedJobLoading" />
-              Refresh
-            </span>
-          </UiButton>
-          <UiButton variant="ghost" size="sm" :disabled="!selectedJobLogOutput" @click="copySelectedJobLogs">
-            Copy to clipboard
-          </UiButton>
-          <UiButton variant="ghost" size="sm" @click="cycleProjectJobLogFontSize">
-            Log size: {{ projectJobLogFontSize }}px
-          </UiButton>
-        </div>
-
-        <UiState v-if="selectedJobError" tone="error">{{ selectedJobError }}</UiState>
-        <UiState v-else-if="selectedJobLoading && !selectedJob" loading>Loading job logs...</UiState>
-
-        <pre
-          v-else
-          class="max-h-[70vh] overflow-auto bg-[color:var(--surface-2)] p-4 text-[color:var(--text)]"
-          :style="{ fontSize: `${projectJobLogFontSize}px`, lineHeight: '1.45' }"
-        ><code>{{ selectedJobLogOutput || 'No logs yet. Try refresh if the job is still running.' }}</code></pre>
-      </div>
-    </UiFormSidePanel>
   </section>
 </template>
 <style scoped>
@@ -5072,220 +3281,4 @@ watch(
   }
 }
 
-.workbench-service-selector-list {
-  display: grid;
-  gap: 0.625rem;
-}
-
-@media (min-width: 900px) {
-  .workbench-service-selector-list {
-    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
-  }
-}
-
-.workbench-service-selector {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  width: 100%;
-  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  border-radius: 1rem;
-  padding: 0.875rem;
-  background: color-mix(in srgb, var(--panel) 70%, transparent);
-  text-align: left;
-  transition:
-    border-color 160ms ease,
-    background-color 160ms ease,
-    transform 160ms ease;
-}
-
-.workbench-service-selector:hover {
-  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
-  background: color-mix(in srgb, var(--panel) 82%, transparent);
-}
-
-.workbench-service-selector:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 75%, white);
-  outline-offset: 2px;
-}
-
-.workbench-service-selector--active {
-  border-color: color-mix(in srgb, var(--accent) 75%, var(--line));
-  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
-}
-
-.workbench-service-selector__eyebrow {
-  font-size: 0.68rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--muted-2);
-}
-
-.workbench-compact-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  border-radius: 999px;
-  padding: 0.24rem 0.58rem;
-  background: color-mix(in srgb, var(--panel) 70%, transparent);
-  font-size: 0.74rem;
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.workbench-compact-status__dot {
-  width: 0.42rem;
-  height: 0.42rem;
-  border-radius: 999px;
-  background: currentColor;
-  opacity: 0.92;
-}
-
-.workbench-compact-status-neutral {
-  color: var(--muted);
-}
-
-.workbench-compact-status-ok {
-  color: var(--ok);
-}
-
-.workbench-compact-status-warn {
-  color: var(--warn);
-}
-
-.workbench-compact-status-error {
-  color: var(--danger);
-}
-
-.workbench-compact-metric {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.45rem;
-  padding: 0.28rem 0.62rem;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  background: color-mix(in srgb, var(--panel) 66%, transparent);
-  font-size: 0.72rem;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.workbench-compact-metric__value {
-  color: var(--text);
-  font-size: 0.88rem;
-  font-weight: 600;
-}
-
-.workbench-summary-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  min-width: 0;
-  padding: 0.75rem 0.9rem;
-  border-radius: 1rem;
-  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  background: color-mix(in srgb, var(--panel) 72%, transparent);
-}
-
-.workbench-summary-tile__label {
-  font-size: 0.68rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--muted-2);
-}
-
-.workbench-summary-tile__value {
-  font-size: 1.08rem;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.workbench-inspector-hero {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.85rem;
-  padding: 0.875rem;
-  border-radius: 1rem;
-  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  background: color-mix(in srgb, var(--panel) 76%, transparent);
-}
-
-.workbench-inspector-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  padding-top: 0.15rem;
-}
-
-.workbench-inspector-section--editing {
-  padding: 0.875rem;
-  border-radius: 1.25rem;
-  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
-  background: color-mix(in srgb, var(--panel) 62%, transparent);
-}
-
-.workbench-service-chip {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  background: color-mix(in srgb, var(--panel) 72%, transparent);
-  padding: 0.26rem 0.62rem;
-  font-size: 0.72rem;
-  color: var(--text);
-  white-space: nowrap;
-}
-
-.workbench-port-editor {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.workbench-port-editor__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-@media (min-width: 720px) {
-  .workbench-port-editor {
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: end;
-  }
-
-  .workbench-port-editor__actions {
-    justify-content: flex-end;
-  }
-}
-
-@media (max-width: 639px) {
-  .workbench-shell-card {
-    border-radius: 1rem;
-  }
-
-  .workbench-service-selector {
-    padding: 0.8rem;
-  }
-
-  .workbench-inspector-section--editing,
-  .workbench-inspector-hero {
-    padding: 0.8rem;
-  }
-
-  .workbench-compact-status,
-  .workbench-compact-metric,
-  .workbench-service-chip {
-    font-size: 0.7rem;
-  }
-
-  .workbench-summary-tile__value {
-    font-size: 1rem;
-  }
-}
 </style>

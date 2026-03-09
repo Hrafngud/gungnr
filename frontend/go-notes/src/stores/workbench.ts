@@ -1,7 +1,12 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { ApiError, parseApiError } from '@/services/api'
+import { queryClient } from '@/services/queryClient'
 import { workbenchApi } from '@/services/workbench'
+import {
+  invalidateWorkbenchReadQueries,
+  refetchWorkbenchReadQueries,
+} from '@/services/workbenchQueries'
 import {
   buildWorkbenchModuleSelectorKey,
   buildWorkbenchPortSelectorKey,
@@ -178,6 +183,14 @@ function createSnapshotRequiredError(message: string): ApiError {
 
 function createBackupRequiredError(): ApiError {
   return new ApiError('Choose a compose backup before restoring.')
+}
+
+async function refreshWorkbenchReadState(
+  projectName: string,
+  selection: { snapshot?: boolean; catalog?: boolean; backups?: boolean } = {},
+) {
+  await invalidateWorkbenchReadQueries(queryClient, projectName, selection)
+  await refetchWorkbenchReadQueries(queryClient, projectName, selection)
 }
 
 function snapshotIdentity(value: WorkbenchStackSnapshot | null): string {
@@ -681,6 +694,11 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 
       lastImportResult.value = result
       importStatus.value = 'ready'
+      await refreshWorkbenchReadState(normalizedProjectName, {
+        snapshot: true,
+        catalog: true,
+        backups: true,
+      })
       return result
     } catch (error: unknown) {
       if (requestID !== importRequestID) {
@@ -752,9 +770,12 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       }
       resetPortSuggestions()
       const result = createOptionalServiceMutationResult(data.stack, data.mutation)
-      await loadCatalog(normalizedProjectName)
       lastOptionalServiceMutationResult.value = result
       optionalServiceMutationStatus.value = 'ready'
+      await refreshWorkbenchReadState(normalizedProjectName, {
+        snapshot: true,
+        catalog: true,
+      })
       return result
     } catch (error: unknown) {
       if (
@@ -823,9 +844,12 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       }
       resetPortSuggestions()
       const result = createOptionalServiceMutationResult(data.stack, data.mutation)
-      await loadCatalog(normalizedProjectName)
       lastOptionalServiceMutationResult.value = result
       optionalServiceMutationStatus.value = 'ready'
+      await refreshWorkbenchReadState(normalizedProjectName, {
+        snapshot: true,
+        catalog: true,
+      })
       return result
     } catch (error: unknown) {
       if (
@@ -916,6 +940,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       const result = createPortResolveResult(data.stack, data.resolve)
       lastResolveResult.value = result
       resolveStatus.value = 'ready'
+      await refreshWorkbenchReadState(normalizedProjectName, {
+        snapshot: true,
+      })
       return result
     } catch (error: unknown) {
       if (requestID !== resolveRequestID || projectName.value !== normalizedProjectName) {
@@ -965,6 +992,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       const result = createPortMutationResult(data.stack, data.mutation)
       lastPortMutationResult.value = result
       portMutationStatus.value = 'ready'
+      await refreshWorkbenchReadState(normalizedProjectName, {
+        snapshot: true,
+      })
       return result
     } catch (error: unknown) {
       if (requestID !== portMutationRequestID || projectName.value !== normalizedProjectName) {
@@ -1032,6 +1062,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       const result = createResourceMutationResult(data.stack, data.mutation)
       lastResourceMutationResult.value = result
       resourceMutationStatus.value = 'ready'
+      await refreshWorkbenchReadState(normalizedProjectName, {
+        snapshot: true,
+      })
       return result
     } catch (error: unknown) {
       if (
@@ -1169,6 +1202,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       const result = createModuleMutationResult(data.stack, data.mutation)
       lastModuleMutationResult.value = result
       moduleMutationStatus.value = 'ready'
+      await refreshWorkbenchReadState(normalizedProjectName, {
+        snapshot: true,
+      })
       return result
     } catch (error: unknown) {
       if (requestID !== moduleMutationRequestID || projectName.value !== normalizedProjectName) {
@@ -1200,7 +1236,8 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     syncProjectContext(normalizedProjectName)
 
     const currentSnapshot = snapshot.value
-    if (!currentSnapshot) {
+    const expectedRevision = payload.expectedRevision ?? currentSnapshot?.revision
+    if (typeof expectedRevision !== 'number') {
       previewStatus.value = 'error'
       previewError.value = createSnapshotRequiredError(
         'Import a Workbench snapshot before generating a compose preview.',
@@ -1215,7 +1252,6 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     previewError.value = null
 
     try {
-      const expectedRevision = payload.expectedRevision ?? currentSnapshot.revision
       const { data } = await workbenchApi.previewCompose(normalizedProjectName, {
         expectedRevision,
       })
@@ -1223,9 +1259,12 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         return lastPreviewResult.value
       }
 
-      const result = createComposePreviewResult(currentSnapshot.projectName, data.preview)
+      const result = createComposePreviewResult(normalizedProjectName, data.preview)
       lastPreviewResult.value = result
       previewStatus.value = 'ready'
+      await refreshWorkbenchReadState(normalizedProjectName, {
+        snapshot: true,
+      })
       return result
     } catch (error: unknown) {
       if (requestID !== previewRequestID || projectName.value !== normalizedProjectName) {
@@ -1254,7 +1293,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     syncProjectContext(normalizedProjectName)
 
     const currentSnapshot = snapshot.value
-    if (!currentSnapshot) {
+    const expectedRevision = payload.expectedRevision ?? currentSnapshot?.revision
+    const expectedSourceFingerprint =
+      payload.expectedSourceFingerprint?.trim() || currentSnapshot?.sourceFingerprint?.trim() || ''
+    if (typeof expectedRevision !== 'number' || !expectedSourceFingerprint) {
       applyStatus.value = 'error'
       applyError.value = createSnapshotRequiredError(
         'Import a Workbench snapshot before applying compose changes.',
@@ -1268,9 +1310,6 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     applyError.value = null
 
     try {
-      const expectedRevision = payload.expectedRevision ?? currentSnapshot.revision
-      const expectedSourceFingerprint =
-        payload.expectedSourceFingerprint?.trim() || currentSnapshot.sourceFingerprint
       const { data } = await workbenchApi.applyCompose(normalizedProjectName, {
         expectedRevision,
         expectedSourceFingerprint,
@@ -1293,12 +1332,15 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         )
         clearRestoreRequirementIfResolved(snapshot.value)
       }
-      await fetchComposeBackups(normalizedProjectName, { setLoading: false })
 
       resetComposePreviewState()
-      const result = createComposeApplyResult(currentSnapshot.projectName, data.apply)
+      const result = createComposeApplyResult(normalizedProjectName, data.apply)
       lastApplyResult.value = result
       applyStatus.value = 'ready'
+      await refreshWorkbenchReadState(normalizedProjectName, {
+        snapshot: true,
+        backups: true,
+      })
       return result
     } catch (error: unknown) {
       if (requestID !== applyRequestID || projectName.value !== normalizedProjectName) {
@@ -1348,15 +1390,6 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 
     syncProjectContext(normalizedProjectName)
 
-    const currentSnapshot = snapshot.value
-    if (!currentSnapshot) {
-      restoreStatus.value = 'error'
-      restoreError.value = createSnapshotRequiredError(
-        'Import a Workbench snapshot before restoring compose backups.',
-      )
-      return null
-    }
-
     const backupId = payload.backupId.trim()
     if (!backupId) {
       restoreStatus.value = 'error'
@@ -1388,9 +1421,13 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       }
 
       resetComposeExecutionState()
-      const result = createComposeRestoreResult(currentSnapshot.projectName, data.restore)
+      const result = createComposeRestoreResult(normalizedProjectName, data.restore)
       lastRestoreResult.value = result
       restoreStatus.value = 'ready'
+      await refreshWorkbenchReadState(normalizedProjectName, {
+        snapshot: true,
+        backups: true,
+      })
       return result
     } catch (error: unknown) {
       if (requestID !== restoreRequestID || projectName.value !== normalizedProjectName) {
