@@ -51,7 +51,7 @@ function workbenchCompactToneClass(tone: BadgeTone): string {
 </script>
 
 <template>
-  <div class="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+  <div class="flex flex-col gap-4">
     <UiPanel variant="soft" class="space-y-4 p-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -79,12 +79,12 @@ function workbenchCompactToneClass(tone: BadgeTone): string {
       <UiState v-else-if="optionalServiceInventory.length === 0">
         No optional-service catalog entries are available for this project yet.
       </UiState>
-      <div v-else class="workbench-catalog-list">
+      <div v-else class="workbench-catalog-list ">
         <UiListRow
           v-for="entry in optionalServiceInventory"
           :key="entry.key"
           as="article"
-          class="workbench-catalog-row"
+          class="workbench-catalog-ro"
         >
           <div class="workbench-catalog-row__main">
             <div class="min-w-0">
@@ -181,29 +181,6 @@ function workbenchCompactToneClass(tone: BadgeTone): string {
             Read only for non-admin users.
           </p>
         </UiListRow>
-      </div>
-    </UiPanel>
-
-    <UiPanel
-      variant="raise"
-      class="workbench-shell-card workbench-shell-card--right space-y-4 p-4 text-sm text-[color:var(--muted)]"
-    >
-      <div>
-        <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Project context</p>
-      </div>
-      <div class="space-y-2 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3 text-xs">
-        <div class="flex flex-wrap items-start justify-between gap-2">
-          <span class="text-[color:var(--muted-2)]">Compose path</span>
-          <span class="font-mono text-[11px] text-[color:var(--text)] break-all text-right">
-            {{ composePath }}
-          </span>
-        </div>
-        <div class="flex flex-wrap items-start justify-between gap-2">
-          <span class="text-[color:var(--muted-2)]">Fingerprint</span>
-          <span class="font-mono text-[11px] text-[color:var(--text)] break-all text-right">
-            {{ fingerprintLabel }}
-          </span>
-        </div>
       </div>
     </UiPanel>
   </div>

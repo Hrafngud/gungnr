@@ -36,16 +36,14 @@ import type {
   WorkbenchTopologyInventoryRow,
 } from '@/components/workbench/projectDetailWorkbenchTypes'
 import { projectsApi } from '@/services/projects'
-import { ApiError, apiErrorMessage, parseApiError } from '@/services/api'
+import { apiErrorMessage, parseApiError, type ApiError } from '@/services/api'
 import { queryClient } from '@/services/queryClient'
 import { refetchWorkbenchReadQueries } from '@/services/workbenchQueries'
 import { useAuthStore } from '@/stores/auth'
 import { usePageLoadingStore } from '@/stores/pageLoading'
 import { useToastStore } from '@/stores/toasts'
 import { useWorkbenchStore, type WorkbenchRequestStatus } from '@/stores/workbench'
-import type {
-  ProjectDetail,
-} from '@/types/projects'
+import type { ProjectDetail } from '@/types/projects'
 import {
   buildWorkbenchPortSelectorKey,
   type WorkbenchComposeBackupMetadata,
@@ -96,7 +94,6 @@ const workbenchRestoreConfirmInput = ref('')
 const workbenchPendingOptionalServiceMutation = ref<WorkbenchPendingOptionalServiceMutation | null>(null)
 const workbenchPortManualInputs = ref<Record<string, string>>({})
 const workbenchResourceInputs = ref<Record<string, WorkbenchResourceInputState>>({})
-const workbenchSelectedServiceName = ref('')
 const activeSectionTab = ref<ProjectDetailSectionTab>('workbench')
 const isAdmin = computed(() => authStore.isAdmin)
 
@@ -213,9 +210,6 @@ const workbenchLastRestoreResult = computed(() => workbenchStore.lastRestoreResu
 const workbenchPortSuggestionStatusByKey = computed(() => workbenchStore.portSuggestionStatusByKey)
 const workbenchPortSuggestionErrorByKey = computed(() => workbenchStore.portSuggestionErrorByKey)
 const workbenchPortSuggestionResultByKey = computed(() => workbenchStore.portSuggestionResultByKey)
-const workbenchAccessLabel = computed(() =>
-  isAdmin.value ? 'Admin edits enabled' : 'Read-only visibility',
-)
 const workbenchSnapshotReady = computed(() => {
   const snapshot = workbenchSnapshot.value
   if (!snapshot) return false
@@ -266,7 +260,6 @@ const workbenchStatusTone = computed<BadgeTone>(() => {
       return 'neutral'
   }
 })
-const workbenchAccessTone = computed<BadgeTone>(() => (isAdmin.value ? 'ok' : 'neutral'))
 const workbenchErrorMessage = computed(() => {
   const parsedError = workbenchError.value
   if (!parsedError) return 'Workbench snapshot could not be loaded.'
@@ -654,34 +647,6 @@ const workbenchServiceInventory = computed<WorkbenchServiceInventoryRow[]>(() =>
         managedEntryKeys.length > 0 ? 'ok' : legacyModuleTypes.length > 0 ? 'warn' : 'neutral',
     }
   })
-})
-const workbenchSelectedService = computed<WorkbenchServiceInventoryRow | null>(() => {
-  const inventory = workbenchServiceInventory.value
-  if (inventory.length === 0) return null
-
-  const selectedServiceName = workbenchSelectedServiceName.value.trim().toLowerCase()
-  if (!selectedServiceName) return inventory[0] ?? null
-
-  return (
-    inventory.find((service) => service.serviceName.trim().toLowerCase() === selectedServiceName) ??
-    inventory[0] ??
-    null
-  )
-})
-const workbenchSelectedServiceTopology = computed<WorkbenchTopologyInventoryRow | null>(() => {
-  const serviceName = workbenchSelectedService.value?.serviceName
-  if (!serviceName) return null
-  return workbenchTopologyInventory.value.find((row) => row.serviceName === serviceName) ?? null
-})
-const workbenchSelectedServicePorts = computed<WorkbenchPortInventoryRow[]>(() => {
-  const serviceName = workbenchSelectedService.value?.serviceName
-  if (!serviceName) return []
-  return workbenchPortInventory.value.filter((port) => port.serviceName === serviceName)
-})
-const workbenchSelectedServiceResource = computed<WorkbenchResourceInventoryRow | null>(() => {
-  const serviceName = workbenchSelectedService.value?.serviceName
-  if (!serviceName) return null
-  return workbenchResourceInventory.value.find((resource) => resource.serviceName === serviceName) ?? null
 })
 const workbenchWarningsList = computed(() => workbenchSnapshot.value?.warnings ?? [])
 const workbenchPreviewIssues = computed(() =>
@@ -2231,23 +2196,6 @@ watch(workbenchResourceInventory, (resources) => {
   syncWorkbenchResourceInputs(resources)
 }, { immediate: true })
 
-watch(workbenchServiceInventory, (services) => {
-  const selectedServiceName = workbenchSelectedServiceName.value.trim().toLowerCase()
-  if (services.length === 0) {
-    workbenchSelectedServiceName.value = ''
-    return
-  }
-
-  if (
-    selectedServiceName &&
-    services.some((service) => service.serviceName.trim().toLowerCase() === selectedServiceName)
-  ) {
-    return
-  }
-
-  workbenchSelectedServiceName.value = services[0]?.serviceName ?? ''
-}, { immediate: true })
-
 watch(workbenchComposeBackups, (backups) => {
   const selectedBackupId = workbenchRestoreSelectedBackupId.value.trim().toLowerCase()
   if (selectedBackupId && backups.some((backup) => backup.backupId === selectedBackupId)) {
@@ -2271,7 +2219,6 @@ watch(projectName, () => {
   workbenchRestoreConfirmInput.value = ''
   workbenchPortManualInputs.value = {}
   workbenchResourceInputs.value = {}
-  workbenchSelectedServiceName.value = ''
   workbenchStore.reset()
   void load()
 })
@@ -2374,9 +2321,9 @@ watch(projectName, () => {
         class="mb-4"
       />
 
-      <UiPanel
+      <div
         v-if="activeSectionTab === 'workbench'"
-        class="space-y-5 p-6"
+        class="flex flex-col bg-transparent p-6 gap-4"
       >
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -2389,16 +2336,13 @@ watch(projectName, () => {
             <UiBadge :tone="workbenchStatusTone">
               {{ workbenchStatusLabel }}
             </UiBadge>
-            <UiBadge :tone="workbenchAccessTone">
-              {{ workbenchAccessLabel }}
-            </UiBadge>
           </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2">
+        <div class="flex flex-row flex-wrap items-center gap-4">
           <template v-if="workbenchComposeSupported">
             <UiButton
-              variant="ghost"
+              variant="primary"
               size="sm"
               :disabled="
                 workbenchStatus === 'loading' ||
@@ -2421,7 +2365,7 @@ watch(projectName, () => {
             </UiButton>
             <UiButton
               v-if="isAdmin && workbenchSnapshotReady"
-              variant="ghost"
+              variant="primary"
               size="sm"
               :disabled="
                 workbenchResolveStatus === 'loading' ||
@@ -2500,27 +2444,7 @@ watch(projectName, () => {
           </UiInlineFeedback>
 
           <template v-if="workbenchSnapshotReady">
-          <div class="workbench-shell">
-
-          <WorkbenchCatalogControlsPanel
-            :is-admin="isAdmin"
-            :compose-path="workbenchSnapshot?.composePath || 'No compose path recorded'"
-            :fingerprint-label="workbenchFingerprintLabel"
-            :current-compose-summary="workbenchCurrentComposeSummary"
-            :optional-service-inventory="workbenchOptionalServiceInventory"
-            :catalog-status="workbenchCatalogStatus"
-            :catalog-error-message="workbenchCatalogErrorMessage"
-            :pending-optional-service-mutation="workbenchPendingOptionalServiceMutation"
-            :optional-service-pending-confirmation="workbenchOptionalServicePendingConfirmation"
-            :optional-service-pending-action="workbenchOptionalServicePendingAction"
-            :optional-service-action-disabled="workbenchOptionalServiceActionDisabled"
-            :queue-optional-service-mutation="queueWorkbenchOptionalServiceMutation"
-            :optional-service-busy="workbenchOptionalServiceBusy"
-            :optional-service-pending-label="workbenchOptionalServicePendingLabel"
-            :optional-service-feedback="workbenchOptionalServiceFeedback"
-            :confirm-optional-service-mutation="confirmWorkbenchOptionalServiceMutation"
-            :cancel-optional-service-mutation="cancelWorkbenchOptionalServiceMutation"
-          />
+          <div class="w-full">
 
           <WorkbenchServiceInspectorPanel
             :is-admin="isAdmin"
@@ -2530,13 +2454,11 @@ watch(projectName, () => {
             :restore-status="workbenchRestoreStatus"
             :resolve-status="workbenchResolveStatus"
             :service-inventory="workbenchServiceInventory"
-            :selected-service="workbenchSelectedService"
-            :selected-service-topology="workbenchSelectedServiceTopology"
-            :selected-service-ports="workbenchSelectedServicePorts"
-            :selected-service-resource="workbenchSelectedServiceResource"
+            :topology-inventory="workbenchTopologyInventory"
+            :port-inventory="workbenchPortInventory"
+            :resource-inventory="workbenchResourceInventory"
             :resource-editor-fields="workbenchResourceEditorFields"
             :port-suggestion-result-by-key="workbenchPortSuggestionResultByKey"
-            :select-service="(serviceName) => (workbenchSelectedServiceName = serviceName)"
             :port-input-value="workbenchPortInputValue"
             :set-port-input-value="setWorkbenchPortInputValue"
             :port-mutation-busy="workbenchPortMutationBusy"
@@ -2555,8 +2477,7 @@ watch(projectName, () => {
             :reset-resource-inputs="resetWorkbenchResourceInputs"
             :resource-mutation-feedback="workbenchResourceMutationFeedback"
           />
-
-          <div class="workbench-shell-grid grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
+          <div class="w-full">
             <UiPanel
               variant="soft"
               class="workbench-shell-card workbench-shell-card--secondary space-y-4 p-4 text-sm text-[color:var(--muted)]"
@@ -2774,6 +2695,25 @@ watch(projectName, () => {
                   </UiButton>
                 </div>
               </UiPanel>
+          <WorkbenchCatalogControlsPanel
+            :is-admin="isAdmin"
+            :compose-path="workbenchSnapshot?.composePath || 'No compose path recorded'"
+            :fingerprint-label="workbenchFingerprintLabel"
+            :current-compose-summary="workbenchCurrentComposeSummary"
+            :optional-service-inventory="workbenchOptionalServiceInventory"
+            :catalog-status="workbenchCatalogStatus"
+            :catalog-error-message="workbenchCatalogErrorMessage"
+            :pending-optional-service-mutation="workbenchPendingOptionalServiceMutation"
+            :optional-service-pending-confirmation="workbenchOptionalServicePendingConfirmation"
+            :optional-service-pending-action="workbenchOptionalServicePendingAction"
+            :optional-service-action-disabled="workbenchOptionalServiceActionDisabled"
+            :queue-optional-service-mutation="queueWorkbenchOptionalServiceMutation"
+            :optional-service-busy="workbenchOptionalServiceBusy"
+            :optional-service-pending-label="workbenchOptionalServicePendingLabel"
+            :optional-service-feedback="workbenchOptionalServiceFeedback"
+            :confirm-optional-service-mutation="confirmWorkbenchOptionalServiceMutation"
+            :cancel-optional-service-mutation="cancelWorkbenchOptionalServiceMutation"
+          />
 
               <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <UiPanel variant="soft" class="space-y-1 p-3">
@@ -3204,7 +3144,7 @@ watch(projectName, () => {
           </div>
           </template>
         </template>
-      </UiPanel>
+      </div>
 
       <ProjectRuntimeUnitsSection
         v-else-if="activeSectionTab === 'runtime'"

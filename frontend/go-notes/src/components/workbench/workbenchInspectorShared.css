@@ -1,0 +1,193 @@
+.workbench-shell-card {
+  min-width: 0;
+  border-radius: 1.25rem;
+}
+
+.workbench-service-selector-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.workbench-service-selector {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 1rem;
+  padding: 0.875rem;
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  text-align: left;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    transform 160ms ease;
+}
+
+.workbench-service-selector:hover {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+}
+
+.workbench-service-selector:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 75%, white);
+  outline-offset: 2px;
+}
+
+.workbench-service-selector--active {
+  border-color: color-mix(in srgb, var(--accent) 75%, var(--line));
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.workbench-service-selector__eyebrow {
+  font-size: 0.68rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+
+.workbench-compact-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 999px;
+  padding: 0.24rem 0.58rem;
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  font-size: 0.74rem;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.workbench-compact-status__dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.92;
+}
+
+.workbench-compact-status-neutral {
+  color: var(--muted);
+}
+
+.workbench-compact-status-ok {
+  color: var(--ok);
+}
+
+.workbench-compact-status-warn {
+  color: var(--warn);
+}
+
+.workbench-compact-status-error {
+  color: var(--danger);
+}
+
+.workbench-compact-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  padding: 0.28rem 0.62rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  background: color-mix(in srgb, var(--panel) 66%, transparent);
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.workbench-compact-metric__value {
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.workbench-inspector-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+  padding: 0.875rem;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  background: color-mix(in srgb, var(--panel) 76%, transparent);
+}
+
+.workbench-inspector-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.15rem;
+}
+
+.workbench-inspector-section--editing {
+  padding: 0.875rem;
+  border-radius: 1.25rem;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  background: color-mix(in srgb, var(--panel) 62%, transparent);
+}
+
+.workbench-service-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  padding: 0.26rem 0.62rem;
+  font-size: 0.72rem;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.workbench-port-editor {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.workbench-port-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+@media (min-width: 900px) {
+  .workbench-service-selector-list {
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  }
+}
+
+@media (min-width: 720px) {
+  .workbench-port-editor {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+
+  .workbench-port-editor__actions {
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 639px) {
+  .workbench-shell-card {
+    border-radius: 1rem;
+  }
+
+  .workbench-service-selector {
+    padding: 0.8rem;
+  }
+
+  .workbench-inspector-section--editing,
+  .workbench-inspector-hero {
+    padding: 0.8rem;
+  }
+
+  .workbench-compact-status,
+  .workbench-compact-metric,
+  .workbench-service-chip {
+    font-size: 0.7rem;
+  }
+}
