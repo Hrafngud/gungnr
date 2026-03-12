@@ -49,7 +49,10 @@ function projectStatusTone(status: string): BadgeTone {
           Runtime units ({{ containers.length }})
         </h2>
       </div>
-      <div class="rounded-xl border border-[color:var(--line)] bg-[color:var(--panel)] p-3">
+      <UiPanel
+        variant="soft"
+        class="p-4"
+      >
         <div class="flex flex-wrap items-center gap-2">
           <UiButton
             variant="ghost"
@@ -67,7 +70,7 @@ function projectStatusTone(status: string): BadgeTone {
             {{ projectStatus || 'unknown' }}
           </UiBadge>
         </div>
-      </div>
+      </UiPanel>
     </div>
     <UiInlineFeedback v-if="props.stackRestartError" tone="error">
       {{ props.stackRestartError }}

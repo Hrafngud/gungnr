@@ -52,7 +52,7 @@ function workbenchCompactToneClass(tone: BadgeTone): string {
 
 <template>
   <div class="flex flex-col gap-4">
-    <UiPanel variant="soft" class="space-y-4 p-4">
+    <UiPanel variant="soft" class=" p-4">
       <UiState v-if="catalogStatus === 'loading'" loading>
         Loading optional-service catalog...
       </UiState>
@@ -62,7 +62,7 @@ function workbenchCompactToneClass(tone: BadgeTone): string {
       <UiState v-else-if="optionalServiceInventory.length === 0">
         No optional-service catalog entries are available for this project yet.
       </UiState>
-      <div v-else class="w-full h-[40vh] overflow-y-auto">
+      <div v-else class="w-full h-[35vh] overflow-y-auto">
         <UiListRow
           v-for="entry in optionalServiceInventory"
           :key="entry.key"

@@ -10,6 +10,11 @@ import UiInput from '@/components/ui/UiInput.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
 import NavIcon from '@/components/NavIcon.vue'
+import Calendar from 'iconoir-vue/regular/Calendar'
+import CodeBracketsSquare from 'iconoir-vue/regular/CodeBracketsSquare'
+import Folder from 'iconoir-vue/regular/Folder'
+import Page from 'iconoir-vue/regular/Page'
+import GithubCircle from 'iconoir-vue/regular/GithubCircle'
 import ProjectActivityTimelineSection from '@/components/projectDetail/ProjectActivityTimelineSection.vue'
 import ProjectArchiveExecutionSection from '@/components/projectDetail/ProjectArchiveExecutionSection.vue'
 import ProjectRuntimeUnitsSection from '@/components/projectDetail/ProjectRuntimeUnitsSection.vue'
@@ -104,6 +109,7 @@ const projectName = computed(() => {
   if (typeof raw !== 'string') return ''
   return decodeURIComponent(raw).trim()
 })
+const projectRepositoryUrl = computed(() => detail.value?.project.record?.repoUrl?.trim() ?? '')
 
 const workbenchComposeSupported = computed(() => (detail.value?.runtime.composeFiles?.length ?? 0) > 0)
 const workbenchQueryEnabled = computed(
@@ -2127,6 +2133,48 @@ const copyTextToClipboard = async (payload: string) => {
   document.body.removeChild(textarea)
 }
 
+const copyRuntimePath = async (payload: string | null | undefined, label: string) => {
+  const value = payload?.trim() ?? ''
+  if (!value || value.toLowerCase() === 'unknown') {
+    toastStore.warn(`${label} is not available for this project.`, 'Copy path')
+    return
+  }
+
+  try {
+    await copyTextToClipboard(value)
+    toastStore.success(`${label} copied to clipboard.`, 'Copy path')
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Clipboard copy failed.'
+    toastStore.error(message, 'Copy failed')
+  }
+}
+
+const openProjectRepository = () => {
+  const raw = projectRepositoryUrl.value
+  if (!raw) {
+    toastStore.warn('No repository URL is recorded for this project.', 'Repository')
+    return
+  }
+
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    toastStore.error('Repository URL is not valid.', 'Repository')
+    return
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    toastStore.error('Repository URL must use http or https.', 'Repository')
+    return
+  }
+
+  const repoWindow = window.open(parsed.toString(), '_blank', 'noopener,noreferrer')
+  if (!repoWindow) {
+    toastStore.warn('Unable to open the repository URL in a new tab.', 'Repository')
+  }
+}
+
 const copyWorkbenchPreviewCompose = async () => {
   const compose = workbenchLastPreviewResult.value?.compose ?? ''
   if (!compose) {
@@ -2236,41 +2284,86 @@ watch(projectName, () => {
 
     <template v-else-if="detail">
       <div class="flex flex-col gap-2">
-        <UiPanel class="flex p-2 mb-2">
-          <div class="flex flex-row flex-wrap items-start gap-4 sm:gap-6">
-            <div class="p-2">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Last updated</p>
-              <p class="mt-1 text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] break-all">
-                {{ fmtDate(detail.project.record?.updatedAt) }}
-              </p>
-            </div>
-            <div class="p-2">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Source</p>
-              <p class="mt-1 text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] break-all">
-                {{ detail.runtime.source || 'unknown' }}
-              </p>
-            </div>
-            <div class="p-2 sm:col-span-2">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Path</p>
-              <p class="mt-1 text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] break-all">
-                {{ detail.runtime.path }}
-              </p>
-            </div>
-            <div class="p-2 sm:col-span-2">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">.env File</p>
-              <p class="mt-1 text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] break-all">
-                {{ detail.runtime.envPath }}
-              </p>
-            </div>
-            <div class="p-2 sm:col-span-2">
-              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Repository</p>
-              <p class="mt-1 text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] break-all">
-                {{ detail.project.record?.repoUrl || 'No repository URL recorded' }}
-              </p>
+        <div class="mb-2 px-2 py-1">
+          <div class="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+            <div class="flex min-w-[11rem] flex-1 basis-[11rem] items-start gap-2 p-2">
+              <Calendar class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--muted-2)]" />
+              <div class="min-w-0">
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Last updated</p>
+                <p class="mt-1 text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)]">
+                  {{ fmtDate(detail.project.record?.updatedAt) }}
+                </p>
+              </div>
             </div>
 
+            <div class="flex min-w-[12rem] flex-1 basis-[14rem] items-start gap-2 p-2">
+              <CodeBracketsSquare class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--muted-2)]" />
+              <div class="min-w-0">
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Source</p>
+                <button
+                  type="button"
+                  class="mt-1 block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors focus-visible:outline-none focus-visible:text-[color:var(--text)] duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)]"
+                  :title="`Click to copy source path: ${detail.runtime.source || 'unknown'}`"
+                  @click="copyRuntimePath(detail.runtime.source, 'Source path')"
+                >
+                  {{ detail.runtime.source || 'unknown' }}
+                </button>
+              </div>
+            </div>
+
+            <div class="flex min-w-[12rem] flex-1 basis-[14rem] items-start gap-2 p-2">
+              <Folder class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--muted-2)]" />
+              <div class="min-w-0">
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Path</p>
+                <button
+                  type="button"
+                  class="mt-1 block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors focus-visible:outline-none focus-visible:text-[color:var(--text)] duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)]"
+                  :title="`Click to copy path: ${detail.runtime.path}`"
+                  @click="copyRuntimePath(detail.runtime.path, 'Runtime path')"
+                >
+                  {{ detail.runtime.path }}
+                </button>
+              </div>
+            </div>
+
+            <div class="flex min-w-[12rem] flex-1 basis-[14rem] items-start gap-2 p-2">
+              <Page class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--muted-2)]" />
+              <div class="min-w-0">
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">.env File</p>
+                <button
+                  type="button"
+                  class="mt-1 block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors focus-visible:outline-none focus-visible:text-[color:var(--text)] duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)]"
+                  :title="`Click to copy env file path: ${detail.runtime.envPath}`"
+                  @click="copyRuntimePath(detail.runtime.envPath, '.env file path')"
+                >
+                  {{ detail.runtime.envPath }}
+                </button>
+              </div>
+            </div>
+
+            <div class="flex min-w-[12rem] flex-1 basis-[14rem] items-start gap-2 p-2">
+              <GithubCircle class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--muted-2)]" />
+              <div class="min-w-0">
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Repository</p>
+                <button
+                  v-if="projectRepositoryUrl"
+                  type="button"
+                  class="mt-1 block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors focus-visible:outline-none focus-visible:text-[color:var(--text)] duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)]"
+                  :title="`Open repository: ${projectRepositoryUrl}`"
+                  @click="openProjectRepository"
+                >
+                  {{ projectRepositoryUrl }}
+                </button>
+                <p
+                  v-else
+                  class="mt-1 text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)]"
+                >
+                  No repository URL recorded
+                </p>
+              </div>
+            </div>
           </div>
-        </UiPanel>
+        </div>
       </div>
 
       <ProjectSectionTabs
@@ -2282,97 +2375,100 @@ watch(projectName, () => {
         variant="projects"
         class="flex flex-col p-6 gap-4"
       >
-        <div class="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Workbench</h2>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex flex-1 flex-wrap items-center gap-3">
+            <h2 class="text-xl font-semibold text-[color:var(--text)]">Workbench</h2>
           </div>
-          <div class="flex flex-wrap items-center gap-2">
+          <UiPanel
+            variant="soft"
+            class="flex flex-wrap items-center p-4 gap-2"
+          >
+            <div
+              v-if="workbenchComposeSupported"
+              class="flex flex-row flex-wrap items-center gap-2"
+            >
+              <UiButton
+                variant="primary"
+                size="sm"
+                :disabled="
+                  workbenchStatus === 'loading' ||
+                  workbenchCatalogStatus === 'loading' ||
+                  workbenchImportStatus === 'loading' ||
+                  workbenchResolveStatus === 'loading' ||
+                  workbenchResourceMutationStatus === 'loading' ||
+                  workbenchOptionalServiceMutationStatus === 'loading' ||
+                  workbenchPreviewStatus === 'loading' ||
+                  workbenchApplyStatus === 'loading' ||
+                  workbenchRestoreStatus === 'loading'
+                "
+                @click="refreshWorkbench"
+              >
+                <span class="inline-flex items-center gap-2">
+                  <NavIcon name="refresh" class="h-3.5 w-3.5" />
+                  <UiInlineSpinner v-if="workbenchStatus === 'loading'" />
+                  Refresh shell
+                </span>
+              </UiButton>
+              <UiButton
+                v-if="isAdmin && workbenchSnapshotReady"
+                variant="primary"
+                size="sm"
+                :disabled="
+                  workbenchResolveStatus === 'loading' ||
+                  workbenchCatalogStatus === 'loading' ||
+                  workbenchPortMutationStatus === 'loading' ||
+                  workbenchResourceMutationStatus === 'loading' ||
+                  workbenchOptionalServiceMutationStatus === 'loading' ||
+                  workbenchPreviewStatus === 'loading' ||
+                  workbenchApplyStatus === 'loading' ||
+                  workbenchRestoreStatus === 'loading'
+                "
+                @click="resolveWorkbenchPorts"
+              >
+                <span class="inline-flex items-center gap-2">
+                  <UiInlineSpinner v-if="workbenchResolveStatus === 'loading'" />
+                  {{ workbenchResolveLabel }}
+                </span>
+              </UiButton>
+              <UiButton
+                v-if="isAdmin"
+                variant="primary"
+                size="sm"
+                :disabled="
+                  workbenchImportStatus === 'loading' ||
+                  workbenchCatalogStatus === 'loading' ||
+                  workbenchResolveStatus === 'loading' ||
+                  workbenchPortMutationStatus === 'loading' ||
+                  workbenchResourceMutationStatus === 'loading' ||
+                  workbenchOptionalServiceMutationStatus === 'loading' ||
+                  workbenchPreviewStatus === 'loading' ||
+                  workbenchApplyStatus === 'loading' ||
+                  workbenchRestoreStatus === 'loading'
+                "
+                @click="importWorkbench"
+              >
+                <span class="inline-flex items-center gap-2">
+                  <UiInlineSpinner v-if="workbenchImportStatus === 'loading'" />
+                  {{ workbenchImportLabel }}
+                </span>
+              </UiButton>
+              <UiButton
+                v-if="isAdmin && workbenchSnapshotReady"
+                variant="ghost"
+                size="sm"
+                :disabled="workbenchRestoreStatus === 'loading'"
+                @click="workbenchRestorePanelOpen = true"
+              >
+                <span class="inline-flex items-center gap-2">
+                  <UiInlineSpinner v-if="workbenchBackupInventoryStatus === 'loading'" />
+                  Compose restore
+                </span>
+              </UiButton>
+            </div>
             <UiBadge :tone="workbenchStatusTone">
               {{ workbenchStatusLabel }}
             </UiBadge>
-          </div>
-        </div>
-
-        <div class="flex flex-row flex-wrap items-center gap-4">
-          <template v-if="workbenchComposeSupported">
-            <UiButton
-              variant="primary"
-              size="sm"
-              :disabled="
-                workbenchStatus === 'loading' ||
-                workbenchCatalogStatus === 'loading' ||
-                workbenchImportStatus === 'loading' ||
-                workbenchResolveStatus === 'loading' ||
-                workbenchResourceMutationStatus === 'loading' ||
-                workbenchOptionalServiceMutationStatus === 'loading' ||
-                workbenchPreviewStatus === 'loading' ||
-                workbenchApplyStatus === 'loading' ||
-                workbenchRestoreStatus === 'loading'
-              "
-              @click="refreshWorkbench"
-            >
-              <span class="inline-flex items-center gap-2">
-                <NavIcon name="refresh" class="h-3.5 w-3.5" />
-                <UiInlineSpinner v-if="workbenchStatus === 'loading'" />
-                Refresh shell
-              </span>
-            </UiButton>
-            <UiButton
-              v-if="isAdmin && workbenchSnapshotReady"
-              variant="primary"
-              size="sm"
-              :disabled="
-                workbenchResolveStatus === 'loading' ||
-                workbenchCatalogStatus === 'loading' ||
-                workbenchPortMutationStatus === 'loading' ||
-                workbenchResourceMutationStatus === 'loading' ||
-                workbenchOptionalServiceMutationStatus === 'loading' ||
-                workbenchPreviewStatus === 'loading' ||
-                workbenchApplyStatus === 'loading' ||
-                workbenchRestoreStatus === 'loading'
-              "
-              @click="resolveWorkbenchPorts"
-            >
-              <span class="inline-flex items-center gap-2">
-                <UiInlineSpinner v-if="workbenchResolveStatus === 'loading'" />
-                {{ workbenchResolveLabel }}
-              </span>
-            </UiButton>
-            <UiButton
-              v-if="isAdmin"
-              variant="primary"
-              size="sm"
-              :disabled="
-                workbenchImportStatus === 'loading' ||
-                workbenchCatalogStatus === 'loading' ||
-                workbenchResolveStatus === 'loading' ||
-                workbenchPortMutationStatus === 'loading' ||
-                workbenchResourceMutationStatus === 'loading' ||
-                workbenchOptionalServiceMutationStatus === 'loading' ||
-                workbenchPreviewStatus === 'loading' ||
-                workbenchApplyStatus === 'loading' ||
-                workbenchRestoreStatus === 'loading'
-              "
-              @click="importWorkbench"
-            >
-              <span class="inline-flex items-center gap-2">
-                <UiInlineSpinner v-if="workbenchImportStatus === 'loading'" />
-                {{ workbenchImportLabel }}
-              </span>
-            </UiButton>
-            <UiButton
-              v-if="isAdmin && workbenchSnapshotReady"
-              variant="ghost"
-              size="sm"
-              :disabled="workbenchRestoreStatus === 'loading'"
-              @click="workbenchRestorePanelOpen = true"
-            >
-              <span class="inline-flex items-center gap-2">
-                <UiInlineSpinner v-if="workbenchBackupInventoryStatus === 'loading'" />
-                Compose restore
-              </span>
-            </UiButton>
-          </template>
+          </UiPanel>
         </div>
 
         <UiInlineFeedback

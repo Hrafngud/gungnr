@@ -57,7 +57,7 @@ function portPickerOptions(port: WorkbenchPortInventoryRow) {
 </script>
 
 <template>
-  <div class="w-full">
+  <div class="w-full mb-2">
     <div class="flex mb-2">
       <h5 class="text-base font-semibold text-[color:var(--text)]">Container Port</h5>
     </div>
@@ -73,8 +73,7 @@ function portPickerOptions(port: WorkbenchPortInventoryRow) {
         class="flex flex-col gap-2"
       >
         <UiListRow as="article">
-          <div class="flex flex-col gap-3">
-            <div class="flex flex-col items-start w-full gap-3">
+            <div class="flex flex-col items-start w-full">
               <div class="flex w-full flex-row items-center gap-1">
                 <span class="text-[11px] min-w-1/6 uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
                   Host port
@@ -98,7 +97,6 @@ function portPickerOptions(port: WorkbenchPortInventoryRow) {
                   @commit="props.setManualPort(port)"
                   @action="props.resetPortToAuto(port)"
                 />
-              </div>
             </div>
 
             <div class="flex flex-col w-full gap-2">

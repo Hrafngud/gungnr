@@ -83,7 +83,7 @@ defineProps<{
 <template>
   <UiPanel
     variant="soft"
-    class="space-y-4 p-4 text-sm text-[color:var(--muted)]"
+    class=" p-4 text-sm text-[color:var(--muted)]"
   >
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>

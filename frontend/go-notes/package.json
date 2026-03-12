@@ -15,6 +15,7 @@
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/vue-query": "^5.92.9",
     "axios": "^1.13.2",
+    "iconoir-vue": "^7.11.0",
     "pinia": "^3.0.4",
     "vue": "^3.5.24",
     "vue-router": "^4.6.4"
