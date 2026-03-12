@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import UiButton from '@/components/ui/UiButton.vue'
 import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
-import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
-import UiInput from '@/components/ui/UiInput.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
+import UiSelectTypingInput from '@/components/ui/UiSelectTypingInput.vue'
 import UiState from '@/components/ui/UiState.vue'
 import type { WorkbenchRequestStatus } from '@/stores/workbench'
 import type {
@@ -11,12 +9,9 @@ import type {
   WorkbenchPortInventoryRow,
 } from '@/components/workbench/projectDetailWorkbenchTypes'
 import type { WorkbenchPortSuggestion } from '@/components/workbench/workbenchInspectorPresentation'
-import {
-  workbenchCompactToneClass,
-  workbenchGuidanceToneClass,
-} from '@/components/workbench/workbenchInspectorPresentation'
+import { workbenchGuidanceToneClass } from '@/components/workbench/workbenchInspectorPresentation'
 
-defineProps<{
+const props = defineProps<{
   isAdmin: boolean
   optionalServiceMutationStatus: WorkbenchRequestStatus
   previewStatus: WorkbenchRequestStatus
@@ -31,153 +26,105 @@ defineProps<{
   setManualPort: (port: WorkbenchPortInventoryRow) => void
   resetPortToAuto: (port: WorkbenchPortInventoryRow) => void
   portSuggestionStatus: (port: WorkbenchPortInventoryRow) => WorkbenchRequestStatus
-  loadPortSuggestions: (port: WorkbenchPortInventoryRow) => void
+  loadPortSuggestions: (
+    port: WorkbenchPortInventoryRow,
+    options?: { silent?: boolean },
+  ) => void | Promise<void>
   portMutationFeedback: (port: WorkbenchPortInventoryRow) => WorkbenchInlineFeedbackState | null
   portSuggestionFeedback: (port: WorkbenchPortInventoryRow) => WorkbenchInlineFeedbackState | null
 }>()
+
+function portEditorDisabled(port: WorkbenchPortInventoryRow): boolean {
+  return (
+    !props.isAdmin ||
+    props.portMutationBusy(port) ||
+    props.resolveStatus === 'loading' ||
+    props.optionalServiceMutationStatus === 'loading' ||
+    props.previewStatus === 'loading' ||
+    props.applyStatus === 'loading' ||
+    props.restoreStatus === 'loading'
+  )
+}
+
+function portPickerOptions(port: WorkbenchPortInventoryRow) {
+  const suggestions = props.portSuggestionResultByKey[port.key]?.suggestions ?? []
+  return suggestions.map((suggestion) => ({
+    key: `${suggestion.rank}-${suggestion.hostPort}`,
+    value: String(suggestion.hostPort),
+    label: `#${suggestion.rank} · ${suggestion.hostPort}`,
+  }))
+}
 </script>
 
 <template>
-  <div class="rounded-2xl p-3">
-    <div class="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Ports</p>
-        <h5 class="mt-1 text-base font-semibold text-[color:var(--text)]">Mappings</h5>
-      </div>
+  <div class="w-full">
+    <div class="flex mb-2">
+      <h5 class="text-base font-semibold text-[color:var(--text)]">Container Port</h5>
     </div>
 
-    <UiState v-if="selectedServicePorts.length === 0">
+    <UiState v-if="props.selectedServicePorts.length === 0">
       No Workbench port rows are stored for this service yet.
     </UiState>
-    <div v-else class="w-ful">
-      <UiListRow
-        v-for="port in selectedServicePorts"
+
+    <div v-else class="flex w-full flex-col gap-2">
+      <div
+        v-for="port in props.selectedServicePorts"
         :key="port.key"
-        as="article"
+        class="flex flex-col gap-2"
       >
-        <div class="flex flex-row justify-between">
-          <div class="rounded-2xl p-3">
-            <div class="workbench-port-editor">
-                <span class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+        <UiListRow as="article">
+          <div class="flex flex-col gap-3">
+            <div class="flex flex-col items-start w-full gap-3">
+              <div class="flex w-full flex-row items-center gap-1">
+                <span class="text-[11px] min-w-1/6 uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
                   Host port
                 </span>
-                <UiInput
-                  :model-value="portInputValue(port)"
-                  type="number"
-                  min="1"
-                  max="65535"
-                  step="1"
+                <UiSelectTypingInput
+                  :model-value="props.portInputValue(port)"
+                  :options="portPickerOptions(port)"
+                  :status="props.portSuggestionStatus(port)"
+                  :disabled="portEditorDisabled(port)"
+                  :busy="props.portMutationBusy(port)"
+                  input-type="number"
                   placeholder="8080"
-                  :disabled="
-                    !isAdmin ||
-                    portMutationBusy(port) ||
-                    optionalServiceMutationStatus === 'loading' ||
-                    previewStatus === 'loading' ||
-                    applyStatus === 'loading' ||
-                    restoreStatus === 'loading'
-                  "
-                  @update:model-value="setPortInputValue(port.key, $event)"
+                  :min="1"
+                  :max="65535"
+                  :step="1"
+                  :show-action="props.isAdmin"
+                  action-label="Auto allocation"
+                  toggle-aria-label="Toggle port suggestions"
+                  @update:model-value="props.setPortInputValue(port.key, $event)"
+                  @request-options="props.loadPortSuggestions(port, { silent: true })"
+                  @commit="props.setManualPort(port)"
+                  @action="props.resetPortToAuto(port)"
                 />
-              <div v-if="isAdmin" class="flex flex-row gap-2 p-2">
-                <UiButton
-                  variant="primary"
-                  size="sm"
-                  :disabled="
-                    portMutationBusy(port) ||
-                    resolveStatus === 'loading' ||
-                    optionalServiceMutationStatus === 'loading' ||
-                    previewStatus === 'loading' ||
-                    applyStatus === 'loading' ||
-                    restoreStatus === 'loading'
-                  "
-                  @click="setManualPort(port)"
-                >
-                  <span class="inline-flex items-center gap-2">
-                    <UiInlineSpinner v-if="portMutationBusy(port)" />
-                    Set manual
-                  </span>
-                </UiButton>
-                <UiButton
-                  variant="ghost"
-                  size="sm"
-                  :disabled="
-                    portMutationBusy(port) ||
-                    resolveStatus === 'loading' ||
-                    optionalServiceMutationStatus === 'loading' ||
-                    previewStatus === 'loading' ||
-                    applyStatus === 'loading' ||
-                    restoreStatus === 'loading'
-                  "
-                  @click="resetPortToAuto(port)"
-                >
-                  Reset
-                </UiButton>
-                <UiButton
-                  variant="ghost"
-                  size="sm"
-                  :disabled="
-                    portSuggestionStatus(port) === 'loading' ||
-                    portMutationBusy(port) ||
-                    optionalServiceMutationStatus === 'loading' ||
-                    previewStatus === 'loading' ||
-                    applyStatus === 'loading' ||
-                    restoreStatus === 'loading'
-                  "
-                  @click="loadPortSuggestions(port)"
-                >
-                  <span class="inline-flex items-center gap-2">
-                    <UiInlineSpinner v-if="portSuggestionStatus(port) === 'loading'" />
-                    Suggestions
-                  </span>
-                </UiButton>
               </div>
             </div>
 
-            <UiInlineFeedback
-              v-if="portMutationFeedback(port)"
-              :tone="portMutationFeedback(port)?.tone || 'neutral'"
-            >
-              {{ portMutationFeedback(port)?.message }}
-            </UiInlineFeedback>
-            <UiInlineFeedback
-              v-if="portSuggestionFeedback(port)"
-              :tone="portSuggestionFeedback(port)?.tone || 'neutral'"
-            >
-              {{ portSuggestionFeedback(port)?.message }}
-            </UiInlineFeedback>
-
-            <div
-              v-if="portSuggestionResultByKey[port.key]?.suggestions?.length"
-              class="flex flex-wrap gap-2"
-            >
-              <UiButton
-                v-for="suggestion in portSuggestionResultByKey[port.key]?.suggestions || []"
-                :key="`${port.key}-suggestion-${suggestion.rank}-${suggestion.hostPort}`"
-                variant="ghost"
-                size="sm"
-                :disabled="
-                  portMutationBusy(port) ||
-                  optionalServiceMutationStatus === 'loading' ||
-                  previewStatus === 'loading' ||
-                  applyStatus === 'loading' ||
-                  restoreStatus === 'loading'
-                "
-                @click="setPortInputValue(port.key, String(suggestion.hostPort))"
+            <div class="flex flex-col w-full gap-2">
+              <UiInlineFeedback
+                v-if="props.portMutationFeedback(port)"
+                :tone="props.portMutationFeedback(port)?.tone || 'neutral'"
               >
-                #{{ suggestion.rank }} · {{ suggestion.hostPort }}
-              </UiButton>
+                {{ props.portMutationFeedback(port)?.message }}
+              </UiInlineFeedback>
+              <UiInlineFeedback
+                v-if="props.portSuggestionFeedback(port)"
+                :tone="props.portSuggestionFeedback(port)?.tone || 'neutral'"
+              >
+                {{ props.portSuggestionFeedback(port)?.message }}
+              </UiInlineFeedback>
             </div>
-
-            <p
-              class="text-xs"
-              :class="workbenchGuidanceToneClass(port.allocationStatus)"
-            >
-              {{ port.guidance }}
-            </p>
           </div>
-        </div>
-      </UiListRow>
+        </UiListRow>
+
+        <p
+          class="px-1 text-xs"
+          :class="workbenchGuidanceToneClass(port.allocationStatus)"
+        >
+          {{ port.guidance }}
+        </p>
+      </div>
     </div>
   </div>
 </template>
-

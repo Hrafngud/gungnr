@@ -11,8 +11,8 @@ export const PROJECT_DETAIL_SECTION_TABS = [
   },
   {
     id: 'archive',
-    label: 'Plan and execute',
-    description: 'Archive cleanup planning and queue execution.',
+    label: 'Archive',
+    description: 'Archive planning and execution.',
   },
   {
     id: 'activity',

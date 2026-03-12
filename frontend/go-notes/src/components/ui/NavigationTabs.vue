@@ -94,7 +94,7 @@ function selectTab(tabId: string) {
 
 .navigation-tabs__tab--active {
   border-color: var(--border);
-  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  background: var(--surface);
   color: var(--accent-ink);
 }
 
@@ -105,7 +105,7 @@ function selectTab(tabId: string) {
   right: 0;
   bottom: -1px;
   height: 1px;
-  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  background: var(--surface);
 }
 
 .navigation-tabs__tab:disabled {

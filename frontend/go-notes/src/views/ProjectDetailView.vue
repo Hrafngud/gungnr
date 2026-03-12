@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
+import UiFormSidePanel from '@/components/ui/UiFormSidePanel.vue'
 import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiInput from '@/components/ui/UiInput.vue'
@@ -13,8 +14,8 @@ import ProjectActivityTimelineSection from '@/components/projectDetail/ProjectAc
 import ProjectArchiveExecutionSection from '@/components/projectDetail/ProjectArchiveExecutionSection.vue'
 import ProjectRuntimeUnitsSection from '@/components/projectDetail/ProjectRuntimeUnitsSection.vue'
 import ProjectSectionTabs from '@/components/projectDetail/ProjectSectionTabs.vue'
+import WorkbenchAddServicesSection from '@/components/workbench/WorkbenchAddServicesSection.vue'
 import WorkbenchServiceInspectorPanel from '@/components/workbench/WorkbenchServiceInspectorPanel.vue'
-import WorkbenchCatalogControlsPanel from '@/components/workbench/WorkbenchCatalogControlsPanel.vue'
 import type { ProjectDetailSectionTab } from '@/composables/projectDetail/useProjectDetailTabs'
 import {
   useWorkbenchCatalogQuery,
@@ -89,6 +90,7 @@ const error = ref<string | null>(null)
 const detail = ref<ProjectDetail | null>(null)
 const stackRestarting = ref(false)
 const stackRestartError = ref<string | null>(null)
+const workbenchRestorePanelOpen = ref(false)
 const workbenchRestoreSelectedBackupId = ref('')
 const workbenchRestoreConfirmInput = ref('')
 const workbenchPendingOptionalServiceMutation = ref<WorkbenchPendingOptionalServiceMutation | null>(null)
@@ -648,7 +650,6 @@ const workbenchServiceInventory = computed<WorkbenchServiceInventoryRow[]>(() =>
     }
   })
 })
-const workbenchWarningsList = computed(() => workbenchSnapshot.value?.warnings ?? [])
 const workbenchPreviewIssues = computed(() =>
   workbenchPreviewError.value ? workbenchIssueListFromDetails(workbenchPreviewError.value.details) : [],
 )
@@ -695,31 +696,6 @@ const workbenchPreviewLabel = computed(() => {
 const workbenchApplyLabel = computed(() => {
   if (workbenchApplyStatus.value === 'loading') return 'Applying compose...'
   return 'Apply compose'
-})
-const workbenchPreviewStatusLabel = computed(() => {
-  if (workbenchComposeImportRequired.value) return 'Import required'
-  if (workbenchPreviewStatus.value === 'loading') return 'Generating'
-  if (workbenchHasCleanPreview.value) return 'Clean preview'
-  if (workbenchPreviewError.value) return 'Preview blocked'
-  if (workbenchLastPreviewResult.value) return 'Preview stale'
-  return 'Preview required'
-})
-const workbenchPreviewStatusTone = computed<BadgeTone>(() => {
-  if (workbenchComposeImportRequired.value) return 'warn'
-  if (workbenchPreviewStatus.value === 'loading') return 'warn'
-  if (workbenchHasCleanPreview.value) return 'ok'
-  if (workbenchPreviewError.value) {
-    return isWorkbenchComposeBlockedError(workbenchPreviewError.value, 'preview') ? 'warn' : 'error'
-  }
-  if (workbenchLastPreviewResult.value) return 'warn'
-  return 'neutral'
-})
-const workbenchPreviewComposeLineCount = computed(
-  () => workbenchLastPreviewResult.value?.compose.split('\n').length ?? 0,
-)
-const workbenchPreviewFingerprintLabel = computed(() => {
-  const fingerprint = workbenchLastPreviewResult.value?.sourceFingerprint?.trim()
-  return fingerprint || 'No preview generated'
 })
 const workbenchComposeActionBusy = computed(() =>
   workbenchPreviewStatus.value === 'loading' ||
@@ -1417,7 +1393,9 @@ function workbenchResourceInputValue(
   resource: WorkbenchResourceInventoryRow,
   field: WorkbenchResourceField,
 ): string {
-  return workbenchResourceInputs.value[resource.key]?.[field] ?? ''
+  const inputValue = workbenchResourceInputs.value[resource.key]?.[field]
+  if (inputValue !== undefined) return inputValue
+  return resource[field]?.trim() || ''
 }
 
 function syncWorkbenchResourceInputs(resources: WorkbenchResourceInventoryRow[]) {
@@ -1646,15 +1624,6 @@ function workbenchResourceSetPayload(
   }
 
   return changedFieldCount > 0 ? payload : null
-}
-
-const statusTone = (status: string): BadgeTone => {
-  const normalized = status.trim().toLowerCase()
-  if (!normalized) return 'neutral'
-  if (normalized === 'running' || normalized === 'up' || normalized.includes('running')) return 'ok'
-  if (normalized.includes('failed') || normalized.includes('error')) return 'error'
-  if (normalized.includes('pending') || normalized.includes('building')) return 'warn'
-  return 'neutral'
 }
 
 const fmtDate = (value?: string | null) => {
@@ -1900,20 +1869,29 @@ const resetWorkbenchPortToAuto = async (port: WorkbenchPortInventoryRow) => {
   toastStore.success(`Auto allocation restored for ${port.serviceName}.`, 'Workbench port')
 }
 
-const loadWorkbenchPortSuggestions = async (port: WorkbenchPortInventoryRow) => {
+const loadWorkbenchPortSuggestions = async (
+  port: WorkbenchPortInventoryRow,
+  options: { silent?: boolean } = {},
+) => {
   const name = projectName.value
   if (!name) return
   if (!isAdmin.value) {
-    toastStore.error('Admin access required.', 'Workbench suggestions blocked')
+    if (!options.silent) {
+      toastStore.error('Admin access required.', 'Workbench suggestions blocked')
+    }
     return
   }
 
   const result = await workbenchStore.loadPortSuggestions(name, port.selector, 5)
   if (!result) {
     const parsedError = workbenchPortSuggestionErrorByKey.value[port.key]
-    toastStore.error(parsedError?.message ?? 'Workbench suggestions failed.', 'Workbench')
+    if (!options.silent) {
+      toastStore.error(parsedError?.message ?? 'Workbench suggestions failed.', 'Workbench')
+    }
     return
   }
+
+  if (options.silent) return
 
   if (result.suggestionCount === 0) {
     toastStore.warn(`No open host-port suggestions found for ${port.serviceName}.`, 'Workbench')
@@ -2211,10 +2189,16 @@ watch(workbenchRestoreSelectedBackupId, () => {
   workbenchRestoreConfirmInput.value = ''
 })
 
+watch(workbenchRestorePanelOpen, (isOpen) => {
+  if (!isOpen || !isAdmin.value || workbenchBackupInventoryStatus.value === 'loading') return
+  void refreshWorkbenchComposeBackups()
+})
+
 onMounted(load)
 watch(projectName, () => {
   activeSectionTab.value = 'workbench'
   stackRestartError.value = null
+  workbenchRestorePanelOpen.value = false
   workbenchRestoreSelectedBackupId.value = ''
   workbenchRestoreConfirmInput.value = ''
   workbenchPortManualInputs.value = {}
@@ -2251,41 +2235,6 @@ watch(projectName, () => {
     <UiState v-else-if="error" tone="error">{{ error }}</UiState>
 
     <template v-else-if="detail">
-      <UiPanel
-        variant="soft"
-        class="flex flex-row justify-between items-start gap-4 p-4 mb-4 flex-wrap"
-      >
-        <div>
-          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Workspace guidance</p>
-          <p class="mt-1 text-sm text-[color:var(--muted)]">
-            Read access is available to all authenticated users. Restart actions require admin permissions.
-          </p>
-        </div>
-        <div class="flex flex-row gap-2 items-center">
-        <UiButton
-              variant="ghost"
-              size="sm"
-              :disabled="stackRestarting || !isAdmin"
-              @click="restartStack"
-            >
-              <span class="inline-flex items-center gap-2">
-                <NavIcon name="restart" class="h-3.5 w-3.5" />
-                <UiInlineSpinner v-if="stackRestarting" />
-                {{ stackRestarting ? 'Restarting stack...' : 'Restart stack' }}
-              </span>
-            </UiButton>
-        <UiBadge :tone="statusTone(detail.project.record?.status || '')">
-          {{ detail.project.record?.status || 'unknown' }}
-        </UiBadge>
-
-        </div>
-      </UiPanel>
-      <UiInlineFeedback v-if="stackRestartError" tone="error">
-        {{ stackRestartError }}
-      </UiInlineFeedback>
-
-      <hr />
-
       <div class="flex flex-col gap-2">
         <UiPanel class="flex p-2 mb-2">
           <div class="flex flex-row flex-wrap items-start gap-4 sm:gap-6">
@@ -2326,19 +2275,16 @@ watch(projectName, () => {
 
       <ProjectSectionTabs
         v-model="activeSectionTab"
-        class="mb-4"
       />
 
-      <div
+      <UiPanel
         v-if="activeSectionTab === 'workbench'"
+        variant="projects"
         class="flex flex-col p-6 gap-4"
       >
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Workbench</h2>
-            <p class="mt-2 text-sm text-[color:var(--muted)]">
-              Read/import state for the stored Workbench model plus admin-only optional-service controls, a service-first inspector, and the existing compose preview/apply workflow.
-            </p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <UiBadge :tone="workbenchStatusTone">
@@ -2414,6 +2360,18 @@ watch(projectName, () => {
                 {{ workbenchImportLabel }}
               </span>
             </UiButton>
+            <UiButton
+              v-if="isAdmin && workbenchSnapshotReady"
+              variant="ghost"
+              size="sm"
+              :disabled="workbenchRestoreStatus === 'loading'"
+              @click="workbenchRestorePanelOpen = true"
+            >
+              <span class="inline-flex items-center gap-2">
+                <UiInlineSpinner v-if="workbenchBackupInventoryStatus === 'loading'" />
+                Compose restore
+              </span>
+            </UiButton>
           </template>
         </div>
 
@@ -2484,679 +2442,312 @@ watch(projectName, () => {
             :resource-mutation-busy="workbenchResourceMutationBusy"
             :reset-resource-inputs="resetWorkbenchResourceInputs"
             :resource-mutation-feedback="workbenchResourceMutationFeedback"
-          />
-          <div class="w-full">
-            <UiPanel
-              variant="soft"
-              class="workbench-shell-card workbench-shell-card--secondary space-y-4 p-4 text-sm text-[color:var(--muted)]"
-            >
-              <div class="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Compose workflow</p>
-                  <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Preview and apply</h3>
-                </div>
-                <div class="flex flex-wrap items-center gap-2">
-                  <UiBadge :tone="workbenchPreviewStatusTone">
-                    {{ workbenchPreviewStatusLabel }}
-                  </UiBadge>
-                  <UiBadge :tone="workbenchHasCleanPreview ? 'ok' : workbenchComposeImportRequired ? 'warn' : 'neutral'">
-                    {{
-                      workbenchHasCleanPreview
-                        ? 'Apply ready'
-                        : workbenchComposeImportRequired
-                          ? 'Import required'
-                          : 'Preview required'
-                    }}
-                  </UiBadge>
-                  <UiBadge :tone="workbenchComposeIssueInventory.length > 0 ? 'warn' : 'ok'">
-                    {{ workbenchComposeIssueInventory.length }} blockers
-                  </UiBadge>
-                </div>
-              </div>
-
-              <p class="text-sm">
-                Selected-service port edits, budget changes, and catalog-managed service mutations all feed this one compose path. Generate a fresh preview from the stored snapshot, review blockers and non-blocking warnings here, then apply the exact artifact while the snapshot revision and fingerprint still match.
-              </p>
-
-              <div v-if="isAdmin" class="flex flex-wrap gap-2">
-                <UiButton
-                  variant="ghost"
-                  size="sm"
-                  class="w-full justify-center sm:w-auto"
-                  :disabled="
-                    workbenchComposeActionBusy ||
-                    workbenchComposeImportRequired ||
-                    workbenchImportStatus === 'loading' ||
-                    workbenchResolveStatus === 'loading' ||
-                    workbenchPortMutationStatus === 'loading' ||
-                    workbenchResourceMutationStatus === 'loading' ||
-                    workbenchOptionalServiceMutationStatus === 'loading'
-                  "
-                  @click="previewWorkbenchCompose"
-                >
-                  <span class="inline-flex items-center gap-2">
-                    <UiInlineSpinner v-if="workbenchPreviewStatus === 'loading'" />
-                    {{ workbenchPreviewLabel }}
-                  </span>
-                </UiButton>
-                <UiButton
-                  variant="ghost"
-                  size="sm"
-                  class="w-full justify-center sm:w-auto"
-                  :disabled="!workbenchLastPreviewResult?.compose || workbenchComposeActionBusy"
-                  @click="copyWorkbenchPreviewCompose"
-                >
-                  Copy preview
-                </UiButton>
-                <UiButton
-                  variant="primary"
-                  size="sm"
-                  class="w-full justify-center sm:w-auto"
-                  :disabled="workbenchApplyActionDisabled"
-                  @click="applyWorkbenchCompose"
-                >
-                  <span class="inline-flex items-center gap-2">
-                    <UiInlineSpinner v-if="workbenchApplyStatus === 'loading'" />
-                    {{ workbenchApplyLabel }}
-                  </span>
-                </UiButton>
-              </div>
-              <p v-else class="text-xs text-[color:var(--muted)]">
-                Read-only access: admin permissions are required to generate compose preview output and apply stored Workbench changes.
-              </p>
-
-              <UiInlineFeedback
-                v-if="workbenchPreviewFeedback"
-                :tone="workbenchPreviewFeedback.tone"
-              >
-                {{ workbenchPreviewFeedback.message }}
-              </UiInlineFeedback>
-              <UiInlineFeedback
-                v-if="workbenchApplyFeedback"
-                :tone="workbenchApplyFeedback.tone"
-              >
-                {{ workbenchApplyFeedback.message }}
-              </UiInlineFeedback>
-              <UiPanel
-                v-if="workbenchComposeRemediationState"
-                variant="soft"
-                class="space-y-3 border border-[color:var(--line)] p-3"
-              >
-                <div class="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-                      {{ workbenchComposeRemediationState.sourceLabel }}
-                    </p>
-                    <h4 class="mt-1 font-semibold text-[color:var(--text)]">
-                      {{ workbenchComposeRemediationState.title }}
-                    </h4>
-                  </div>
-                  <UiBadge :tone="workbenchComposeRemediationState.tone">
-                    Needs attention
-                  </UiBadge>
-                </div>
-                <p>{{ workbenchComposeRemediationState.message }}</p>
-
-                <div
-                  v-if="
-                    workbenchComposeRemediationState.details?.expectedRevision != null ||
-                    workbenchComposeRemediationState.details?.revision != null ||
-                    workbenchComposeRemediationState.details?.sourceFingerprint ||
-                    workbenchComposeRemediationState.details?.currentSourceFingerprint
-                  "
-                  class="grid gap-2 sm:grid-cols-2 xl:grid-cols-4"
-                >
-                  <UiPanel
-                    v-if="workbenchComposeRemediationState.details?.expectedRevision != null"
-                    variant="raise"
-                    class="space-y-1 p-3"
-                  >
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-                      Expected revision
-                    </p>
-                    <p class="text-sm font-semibold text-[color:var(--text)]">
-                      {{ workbenchComposeRemediationState.details?.expectedRevision }}
-                    </p>
-                  </UiPanel>
-                  <UiPanel
-                    v-if="workbenchComposeRemediationState.details?.revision != null"
-                    variant="raise"
-                    class="space-y-1 p-3"
-                  >
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-                      Current revision
-                    </p>
-                    <p class="text-sm font-semibold text-[color:var(--text)]">
-                      {{ workbenchComposeRemediationState.details?.revision }}
-                    </p>
-                  </UiPanel>
-                  <UiPanel
-                    v-if="workbenchComposeRemediationState.details?.sourceFingerprint"
-                    variant="raise"
-                    class="space-y-1 p-3"
-                  >
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-                      Stored fingerprint
-                    </p>
-                    <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
-                      {{ workbenchComposeRemediationState.details?.sourceFingerprint }}
-                    </p>
-                  </UiPanel>
-                  <UiPanel
-                    v-if="workbenchComposeRemediationState.details?.currentSourceFingerprint"
-                    variant="raise"
-                    class="space-y-1 p-3"
-                  >
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-                      On-disk fingerprint
-                    </p>
-                    <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
-                      {{ workbenchComposeRemediationState.details?.currentSourceFingerprint }}
-                    </p>
-                  </UiPanel>
-                </div>
-                <div
-                  v-if="
-                    isAdmin &&
-                    (workbenchComposeRemediationState.primaryAction ||
-                      workbenchComposeRemediationState.secondaryAction)
-                  "
-                  class="flex flex-wrap gap-2"
-                >
-                  <UiButton
-                    v-if="workbenchComposeRemediationState.primaryAction"
-                    variant="primary"
-                    size="sm"
-                    :disabled="
-                      workbenchRemediationActionDisabled(
-                        workbenchComposeRemediationState.primaryAction,
-                      )
-                    "
-                    @click="
-                      runWorkbenchRemediationAction(workbenchComposeRemediationState.primaryAction)
-                    "
-                  >
-                    {{
-                      workbenchRemediationActionLabel(
-                        workbenchComposeRemediationState.primaryAction,
-                      )
-                    }}
-                  </UiButton>
-                  <UiButton
-                    v-if="workbenchComposeRemediationState.secondaryAction"
-                    variant="ghost"
-                    size="sm"
-                    :disabled="
-                      workbenchRemediationActionDisabled(
-                        workbenchComposeRemediationState.secondaryAction,
-                      )
-                    "
-                    @click="
-                      runWorkbenchRemediationAction(workbenchComposeRemediationState.secondaryAction)
-                    "
-                  >
-                    {{
-                      workbenchRemediationActionLabel(
-                        workbenchComposeRemediationState.secondaryAction,
-                      )
-                    }}
-                  </UiButton>
-                </div>
-              </UiPanel>
-          <WorkbenchCatalogControlsPanel
-            :is-admin="isAdmin"
-            :compose-path="workbenchSnapshot?.composePath || 'No compose path recorded'"
-            :fingerprint-label="workbenchFingerprintLabel"
-            :current-compose-summary="workbenchCurrentComposeSummary"
-            :optional-service-inventory="workbenchOptionalServiceInventory"
-            :catalog-status="workbenchCatalogStatus"
-            :catalog-error-message="workbenchCatalogErrorMessage"
-            :pending-optional-service-mutation="workbenchPendingOptionalServiceMutation"
-            :optional-service-pending-confirmation="workbenchOptionalServicePendingConfirmation"
-            :optional-service-pending-action="workbenchOptionalServicePendingAction"
-            :optional-service-action-disabled="workbenchOptionalServiceActionDisabled"
-            :queue-optional-service-mutation="queueWorkbenchOptionalServiceMutation"
-            :optional-service-busy="workbenchOptionalServiceBusy"
-            :optional-service-pending-label="workbenchOptionalServicePendingLabel"
-            :optional-service-feedback="workbenchOptionalServiceFeedback"
-            :confirm-optional-service-mutation="confirmWorkbenchOptionalServiceMutation"
-            :cancel-optional-service-mutation="cancelWorkbenchOptionalServiceMutation"
-          />
-
-              <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                <UiPanel variant="soft" class="space-y-1 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Current revision</p>
-                  <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchSnapshot.revision }}</p>
-                </UiPanel>
-                <UiPanel variant="soft" class="space-y-1 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Preview revision</p>
-                  <p class="text-lg font-semibold text-[color:var(--text)]">
-                    {{ workbenchLastPreviewResult?.revision ?? '—' }}
-                  </p>
-                </UiPanel>
-                <UiPanel variant="soft" class="space-y-1 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Compose lines</p>
-                  <p class="text-lg font-semibold text-[color:var(--text)]">
-                    {{ workbenchPreviewComposeLineCount }}
-                  </p>
-                </UiPanel>
-                <UiPanel variant="soft" class="space-y-1 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Snapshot match</p>
-                  <p class="text-lg font-semibold text-[color:var(--text)]">
-                    {{ workbenchPreviewMatchesSnapshot ? 'Yes' : 'No' }}
-                  </p>
-                </UiPanel>
-                <UiPanel variant="soft" class="space-y-1 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Import warnings</p>
-                  <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchWarningsList.length }}</p>
-                </UiPanel>
-                <UiPanel variant="soft" class="space-y-1 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Blocking diagnostics</p>
-                  <p class="text-lg font-semibold text-[color:var(--text)]">
-                    {{ workbenchComposeIssueInventory.length }}
-                  </p>
-                </UiPanel>
-              </div>
-
-              <div class="grid gap-3 lg:grid-cols-2">
-                <UiPanel variant="raise" class="space-y-2 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Current fingerprint</p>
-                  <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
-                    {{ workbenchFingerprintLabel }}
-                  </p>
-                </UiPanel>
-                <UiPanel variant="raise" class="space-y-2 p-3">
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Preview fingerprint</p>
-                  <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
-                    {{ workbenchPreviewFingerprintLabel }}
-                  </p>
-                </UiPanel>
-              </div>
-
-              <UiState v-if="isAdmin && workbenchComposeImportRequired" tone="warn">
-                Restore changed the compose file on disk. Re-import the restored compose before preview/apply so the stored Workbench snapshot matches the file again.
-              </UiState>
-              <UiState v-else-if="isAdmin && !workbenchHasCleanPreview" tone="warn">
-                Run a clean preview from the current snapshot before apply. Validation blockers, stale revisions, compose drift, or any stored model change will keep apply disabled.
-              </UiState>
-              <UiState v-else-if="isAdmin" tone="ok">
-                The latest preview matches the visible snapshot revision and fingerprint, so apply is enabled.
-              </UiState>
-              <p v-else class="text-xs text-[color:var(--muted)]">
-                Non-admin users can inspect stored warnings and diagnostics here, but preview/apply stays admin-only.
-              </p>
-
-              <div class="grid gap-3 lg:grid-cols-2">
-                <div class="space-y-3">
-                  <div class="flex flex-wrap items-center justify-between gap-2">
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Blocking diagnostics</p>
-                    <UiBadge :tone="workbenchComposeIssueInventory.length > 0 ? 'warn' : 'ok'">
-                      {{ workbenchComposeIssueInventory.length }}
-                    </UiBadge>
-                  </div>
-                  <UiState v-if="workbenchComposeIssueInventory.length === 0" tone="ok">
-                    No preview/apply blockers are active right now.
-                  </UiState>
-                  <div v-else class="space-y-2">
-                    <UiPanel
-                      v-for="row in workbenchComposeIssueInventory"
-                      :key="row.key"
-                      variant="soft"
-                      class="space-y-2 p-3"
-                    >
-                      <div class="flex flex-wrap items-start justify-between gap-2">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <UiBadge :tone="row.source === 'preview' ? 'warn' : 'error'">
-                            {{ row.sourceLabel }}
-                          </UiBadge>
-                          <UiBadge tone="warn">{{ row.issue.code }}</UiBadge>
-                        </div>
-                        <span class="font-mono text-[11px] text-[color:var(--muted-2)] break-all">
-                          {{ row.issue.path || 'compose' }}
-                        </span>
-                      </div>
-                      <p class="text-xs text-[color:var(--text)]">{{ row.issue.message }}</p>
-                    </UiPanel>
-                  </div>
-                </div>
-
-                <div class="space-y-3">
-                  <div class="flex flex-wrap items-center justify-between gap-2">
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Snapshot warnings</p>
-                    <UiBadge :tone="workbenchWarningsList.length > 0 ? 'warn' : 'ok'">
-                      {{ workbenchWarningsList.length }}
-                    </UiBadge>
-                  </div>
-                  <UiState v-if="workbenchWarningsList.length === 0" tone="ok">
-                    No non-blocking import or pass-through warnings are recorded.
-                  </UiState>
-                  <div v-else class="max-h-[18rem] space-y-2 overflow-auto pr-1">
-                    <UiPanel
-                      v-for="warning in workbenchWarningsList"
-                      :key="`compose-warning-${warning.code}-${warning.path}-${warning.message}`"
-                      variant="soft"
-                      class="space-y-2 p-3"
-                    >
-                      <div class="flex flex-wrap items-start justify-between gap-2">
-                        <UiBadge tone="warn">{{ warning.code }}</UiBadge>
-                        <span class="font-mono text-[11px] text-[color:var(--muted-2)] break-all">
-                          {{ warning.path || 'compose' }}
-                        </span>
-                      </div>
-                      <p class="text-xs text-[color:var(--text)]">{{ warning.message }}</p>
-                    </UiPanel>
-                  </div>
-                </div>
-              </div>
-
-              <UiState
-                v-if="!workbenchLastPreviewResult && !workbenchPreviewError"
-                :tone="isAdmin ? 'neutral' : 'warn'"
-              >
-                {{
-                  workbenchComposeImportRequired
-                    ? 'Re-import the restored compose before generating another preview or applying stored Workbench changes.'
-                    : isAdmin
-                      ? 'Generate a compose preview to inspect the exact YAML output for the current catalog-managed service mix before apply.'
-                      : 'An admin must generate a compose preview before compose apply becomes available.'
-                }}
-              </UiState>
-              <template v-else-if="workbenchLastPreviewResult">
-                <div class="grid gap-3 sm:grid-cols-3">
-                  <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Preview revision</p>
-                    <p class="text-lg font-semibold text-[color:var(--text)]">
-                      {{ workbenchLastPreviewResult.revision }}
-                    </p>
-                  </UiPanel>
-                  <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Compose lines</p>
-                    <p class="text-lg font-semibold text-[color:var(--text)]">
-                      {{ workbenchPreviewComposeLineCount }}
-                    </p>
-                  </UiPanel>
-                  <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Snapshot match</p>
-                    <p class="text-lg font-semibold text-[color:var(--text)]">
-                      {{ workbenchPreviewMatchesSnapshot ? 'Yes' : 'No' }}
-                    </p>
-                  </UiPanel>
-                </div>
-
-                <UiPanel variant="raise" class="overflow-hidden p-0">
-                  <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-xs text-[color:var(--muted)]">
-                    <div>
-                      <p class="uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Generated compose</p>
-                      <p class="mt-1 font-mono text-[11px] text-[color:var(--text)] break-all">
-                        {{ workbenchPreviewFingerprintLabel }}
-                      </p>
-                    </div>
-                    <UiBadge :tone="workbenchPreviewMatchesSnapshot ? 'ok' : 'warn'">
-                      {{ workbenchPreviewMatchesSnapshot ? 'Current snapshot' : 'Needs refresh' }}
-                    </UiBadge>
-                  </div>
-                  <pre
-                    class="max-h-[32rem] overflow-auto border-t border-[color:var(--line)] px-4 py-3 font-mono text-[12px] leading-5 text-[color:var(--text)] whitespace-pre"
-                  ><code>{{ workbenchLastPreviewResult.compose }}</code></pre>
-                </UiPanel>
-              </template>
-            </UiPanel>
-          </div>
-
-          <div class="workbench-shell-grid grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
-            <UiPanel
-              variant="soft"
-              class="workbench-shell-card workbench-shell-card--secondary space-y-4 p-4"
-            >
-              <div class="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Compose restore</p>
-                  <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Retained backups</h3>
-                </div>
-                <div class="flex flex-wrap items-center gap-2">
-                  <UiBadge :tone="workbenchComposeBackups.length > 0 ? 'ok' : 'neutral'">
-                    {{ workbenchComposeBackups.length }} retained
-                  </UiBadge>
-                  <UiBadge :tone="workbenchComposeImportRequired ? 'warn' : 'neutral'">
-                    {{ workbenchComposeImportRequired ? 'Import required' : 'Model unchanged' }}
-                  </UiBadge>
-                </div>
-              </div>
-
-              <p class="text-sm text-[color:var(--muted)]">
-                Restore replaces the on-disk compose artifact from a retained backup. The stored Workbench model, including catalog-managed service selections, does not change automatically, so older backups can require an import before preview/apply resumes.
-              </p>
-
-              <UiInlineFeedback
-                v-if="workbenchRestoreFeedback"
-                :tone="workbenchRestoreFeedback.tone"
-              >
-                {{ workbenchRestoreFeedback.message }}
-              </UiInlineFeedback>
-              <UiInlineFeedback
-                v-else-if="workbenchBackupInventoryError"
-                :tone="workbenchBackupInventoryError.code === 'WB-409-BACKUP-INTEGRITY' ? 'warn' : 'error'"
-              >
-                {{ workbenchBackupInventoryErrorMessage }}
-              </UiInlineFeedback>
-              <UiPanel
-                v-if="workbenchRestoreRemediationState"
-                variant="soft"
-                class="space-y-3 border border-[color:var(--line)] p-3 text-sm text-[color:var(--muted)]"
-              >
-                <div class="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-                      {{ workbenchRestoreRemediationState.sourceLabel }}
-                    </p>
-                    <h4 class="mt-1 font-semibold text-[color:var(--text)]">
-                      {{ workbenchRestoreRemediationState.title }}
-                    </h4>
-                  </div>
-                  <UiBadge :tone="workbenchRestoreRemediationState.tone">
-                    Follow-up required
-                  </UiBadge>
-                </div>
-                <p>{{ workbenchRestoreRemediationState.message }}</p>
-
-                <div
-                  v-if="
-                    workbenchRestoreRemediationState.details?.sourceFingerprint ||
-                    workbenchRestoreRemediationState.details?.currentSourceFingerprint
-                  "
-                  class="grid gap-2 sm:grid-cols-2"
-                >
-                  <UiPanel
-                    v-if="workbenchRestoreRemediationState.details?.sourceFingerprint"
-                    variant="raise"
-                    class="space-y-1 p-3"
-                  >
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-                      Stored fingerprint
-                    </p>
-                    <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
-                      {{ workbenchRestoreRemediationState.details?.sourceFingerprint }}
-                    </p>
-                  </UiPanel>
-                  <UiPanel
-                    v-if="workbenchRestoreRemediationState.details?.currentSourceFingerprint"
-                    variant="raise"
-                    class="space-y-1 p-3"
-                  >
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-                      Restored fingerprint
-                    </p>
-                    <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
-                      {{ workbenchRestoreRemediationState.details?.currentSourceFingerprint }}
-                    </p>
-                  </UiPanel>
-                </div>
-
-                <div
-                  v-if="isAdmin && workbenchRestoreRemediationState.primaryAction"
-                  class="flex flex-wrap gap-2"
-                >
-                  <UiButton
-                    variant="ghost"
-                    size="sm"
-                    :disabled="
-                      workbenchRemediationActionDisabled(
-                        workbenchRestoreRemediationState.primaryAction,
-                      )
-                    "
-                    @click="
-                      runWorkbenchRemediationAction(workbenchRestoreRemediationState.primaryAction)
-                    "
-                  >
-                    {{
-                      workbenchRemediationActionLabel(
-                        workbenchRestoreRemediationState.primaryAction,
-                      )
-                    }}
-                  </UiButton>
-                </div>
-              </UiPanel>
-
-              <UiState v-if="!isAdmin" tone="warn">
-                Read-only access: admin permissions are required to inspect retained compose backups and trigger restore.
-              </UiState>
-              <UiState v-else-if="workbenchBackupInventoryStatus === 'loading'" loading>
-                Loading retained compose backups...
-              </UiState>
-              <UiState v-else-if="workbenchComposeBackups.length === 0">
-                No retained compose backups are available yet. The first successful compose apply creates the initial restore target.
-              </UiState>
-              <div v-else class="space-y-3">
-                <button
-                  v-for="backup in workbenchComposeBackups"
-                  :key="backup.backupId"
-                  type="button"
-                  class="w-full rounded-2xl border px-4 py-3 text-left transition"
-                  :class="
-                    backup.backupId === workbenchSelectedComposeBackup?.backupId
-                      ? 'border-[color:var(--accent)] bg-[color:var(--panel)]'
-                      : 'border-[color:var(--line)] bg-[color:var(--panel-soft)] hover:border-[color:var(--accent)]/60'
-                  "
-                  :disabled="workbenchRestoreStatus === 'loading'"
-                  @click="workbenchRestoreSelectedBackupId = backup.backupId"
-                >
-                  <div class="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Backup</p>
-                      <p class="mt-2 font-mono text-sm text-[color:var(--text)]">{{ backup.backupId }}</p>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-2">
-                      <UiBadge :tone="backup.backupId === workbenchLatestComposeBackup?.backupId ? 'ok' : 'neutral'">
-                        {{ backup.backupId === workbenchLatestComposeBackup?.backupId ? 'Newest' : `Rev ${backup.revision}` }}
-                      </UiBadge>
-                      <UiBadge :tone="backup.backupId === workbenchSelectedComposeBackup?.backupId ? 'ok' : 'neutral'">
-                        {{ backup.backupId === workbenchSelectedComposeBackup?.backupId ? 'Selected' : 'Available' }}
-                      </UiBadge>
-                    </div>
-                  </div>
-                  <div class="mt-3 grid gap-2 text-xs text-[color:var(--muted)] sm:grid-cols-3">
-                    <p><span class="text-[color:var(--muted-2)]">Created</span> {{ fmtDate(backup.createdAt) }}</p>
-                    <p><span class="text-[color:var(--muted-2)]">Bytes</span> {{ backup.composeBytes }}</p>
-                    <p class="truncate"><span class="text-[color:var(--muted-2)]">Fingerprint</span> {{ backup.sourceFingerprint || '—' }}</p>
-                  </div>
-                </button>
-              </div>
-            </UiPanel>
-
-            <UiPanel
-              variant="raise"
-              class="workbench-shell-card workbench-shell-card--secondary space-y-4 p-4 text-sm text-[color:var(--muted)]"
-            >
-              <div>
-                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Restore execution</p>
-                <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Target and confirmation</h3>
-              </div>
-              <p>
-                Confirmation phrase:
-                <span class="font-mono text-[color:var(--text)]">{{ workbenchRestoreConfirmationPhrase }}</span>
-              </p>
-
-              <UiState v-if="!workbenchSelectedComposeBackup" tone="neutral">
-                Select a retained backup to inspect its metadata and enable restore.
-              </UiState>
-              <template v-else>
-                <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                  <UiPanel variant="soft" class="space-y-1 p-3">
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Selected backup</p>
-                    <p class="font-mono text-sm text-[color:var(--text)]">{{ workbenchSelectedComposeBackup.backupId }}</p>
-                  </UiPanel>
-                  <UiPanel variant="soft" class="space-y-1 p-3">
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Stored revision</p>
-                    <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchSelectedComposeBackup.revision }}</p>
-                  </UiPanel>
-                  <UiPanel variant="soft" class="space-y-1 p-3">
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Created</p>
-                    <p class="text-sm font-semibold text-[color:var(--text)]">{{ fmtDate(workbenchSelectedComposeBackup.createdAt) }}</p>
-                  </UiPanel>
-                  <UiPanel variant="soft" class="space-y-2 p-3">
-                    <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Backup fingerprint</p>
-                    <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
-                      {{ workbenchSelectedComposeBackup.sourceFingerprint || 'No fingerprint recorded' }}
-                    </p>
-                  </UiPanel>
-                </div>
-
-                <UiState
-                  v-if="workbenchLastRestoreResult?.requiresImport"
-                  tone="warn"
-                >
-                  The last restore left compose drift against the stored Workbench snapshot. Safe recovery path: import, preview, then apply the desired catalog-managed state.
-                </UiState>
-              </template>
-
-              <label class="block text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-                Confirmation phrase
-              </label>
-              <UiInput
-                v-model="workbenchRestoreConfirmInput"
-                :disabled="!isAdmin || workbenchRestoreActionDisabled"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="Type the phrase exactly"
+          >
+            <template #selector-column-bottom>
+              <WorkbenchAddServicesSection
+                :is-admin="isAdmin"
+                :compose-action-busy="workbenchComposeActionBusy"
+                :compose-import-required="workbenchComposeImportRequired"
+                :import-status="workbenchImportStatus"
+                :resolve-status="workbenchResolveStatus"
+                :port-mutation-status="workbenchPortMutationStatus"
+                :resource-mutation-status="workbenchResourceMutationStatus"
+                :optional-service-mutation-status="workbenchOptionalServiceMutationStatus"
+                :preview-status="workbenchPreviewStatus"
+                :apply-status="workbenchApplyStatus"
+                :preview-label="workbenchPreviewLabel"
+                :apply-label="workbenchApplyLabel"
+                :has-preview-compose="Boolean(workbenchLastPreviewResult?.compose)"
+                :apply-action-disabled="workbenchApplyActionDisabled"
+                :compose-issue-inventory="workbenchComposeIssueInventory"
+                :preview-feedback="workbenchPreviewFeedback"
+                :apply-feedback="workbenchApplyFeedback"
+                :compose-remediation-state="workbenchComposeRemediationState"
+                :remediation-action-disabled="workbenchRemediationActionDisabled"
+                :remediation-action-label="workbenchRemediationActionLabel"
+                :run-remediation-action="runWorkbenchRemediationAction"
+                :preview-compose="previewWorkbenchCompose"
+                :copy-preview-compose="copyWorkbenchPreviewCompose"
+                :apply-compose="applyWorkbenchCompose"
+                :compose-path="workbenchSnapshot?.composePath || 'No compose path recorded'"
+                :fingerprint-label="workbenchFingerprintLabel"
+                :current-compose-summary="workbenchCurrentComposeSummary"
+                :optional-service-inventory="workbenchOptionalServiceInventory"
+                :catalog-status="workbenchCatalogStatus"
+                :catalog-error-message="workbenchCatalogErrorMessage"
+                :pending-optional-service-mutation="workbenchPendingOptionalServiceMutation"
+                :optional-service-pending-confirmation="workbenchOptionalServicePendingConfirmation"
+                :optional-service-pending-action="workbenchOptionalServicePendingAction"
+                :optional-service-action-disabled="workbenchOptionalServiceActionDisabled"
+                :queue-optional-service-mutation="queueWorkbenchOptionalServiceMutation"
+                :optional-service-busy="workbenchOptionalServiceBusy"
+                :optional-service-pending-label="workbenchOptionalServicePendingLabel"
+                :optional-service-feedback="workbenchOptionalServiceFeedback"
+                :confirm-optional-service-mutation="confirmWorkbenchOptionalServiceMutation"
+                :cancel-optional-service-mutation="cancelWorkbenchOptionalServiceMutation"
               />
-
-              <div class="flex flex-wrap items-center gap-3">
-                <UiButton
-                  variant="danger"
-                  size="sm"
-                  class="w-full justify-center sm:w-auto"
-                  :disabled="!canRestoreWorkbenchCompose"
-                  @click="restoreWorkbenchCompose"
-                >
-                  <span class="inline-flex items-center gap-2">
-                    <UiInlineSpinner v-if="workbenchRestoreStatus === 'loading'" />
-                    {{ workbenchRestoreLabel }}
-                  </span>
-                </UiButton>
-                <UiButton
-                  v-if="isAdmin"
-                  variant="ghost"
-                  size="sm"
-                  class="w-full justify-center sm:w-auto"
-                  :disabled="workbenchRestoreStatus === 'loading' || workbenchBackupInventoryStatus === 'loading'"
-                  @click="refreshWorkbenchComposeBackups"
-                >
-                  Refresh backups
-                </UiButton>
-                <p v-if="!isAdmin" class="text-xs text-[color:var(--muted)]">
-                  Read-only access: admin permissions are required to restore compose from retained backups.
-                </p>
-              </div>
-            </UiPanel>
-          </div>
+            </template>
+          </WorkbenchServiceInspectorPanel>
           </div>
           </template>
         </template>
-      </div>
+      </UiPanel>
+
+      <UiFormSidePanel
+        v-if="activeSectionTab === 'workbench' && workbenchComposeSupported && workbenchSnapshotReady"
+        v-model="workbenchRestorePanelOpen"
+        title="Compose restore"
+        eyebrow="Workbench"
+      >
+        <div class="space-y-4 text-sm text-[color:var(--muted)]">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Retained backups</p>
+              <h3 class="mt-2 text-base font-semibold text-[color:var(--text)]">Select and restore compose</h3>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <UiBadge :tone="workbenchComposeBackups.length > 0 ? 'ok' : 'neutral'">
+                {{ workbenchComposeBackups.length }} retained
+              </UiBadge>
+              <UiBadge :tone="workbenchComposeImportRequired ? 'warn' : 'neutral'">
+                {{ workbenchComposeImportRequired ? 'Import required' : 'Model unchanged' }}
+              </UiBadge>
+            </div>
+          </div>
+
+          <p class="text-xs text-[color:var(--muted)]">
+            Restore replaces the on-disk compose artifact from a retained backup. The stored Workbench model does not change automatically, so older backups can require a re-import before preview/apply resumes.
+          </p>
+
+          <UiInlineFeedback
+            v-if="workbenchRestoreFeedback"
+            :tone="workbenchRestoreFeedback.tone"
+          >
+            {{ workbenchRestoreFeedback.message }}
+          </UiInlineFeedback>
+          <UiInlineFeedback
+            v-else-if="workbenchBackupInventoryError"
+            :tone="workbenchBackupInventoryError.code === 'WB-409-BACKUP-INTEGRITY' ? 'warn' : 'error'"
+          >
+            {{ workbenchBackupInventoryErrorMessage }}
+          </UiInlineFeedback>
+
+          <UiPanel
+            v-if="workbenchRestoreRemediationState"
+            variant="soft"
+            class="space-y-3 border border-[color:var(--line)] p-3 text-sm text-[color:var(--muted)]"
+          >
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                  {{ workbenchRestoreRemediationState.sourceLabel }}
+                </p>
+                <h4 class="mt-1 font-semibold text-[color:var(--text)]">
+                  {{ workbenchRestoreRemediationState.title }}
+                </h4>
+              </div>
+              <UiBadge :tone="workbenchRestoreRemediationState.tone">
+                Follow-up required
+              </UiBadge>
+            </div>
+            <p>{{ workbenchRestoreRemediationState.message }}</p>
+
+            <div
+              v-if="
+                workbenchRestoreRemediationState.details?.sourceFingerprint ||
+                workbenchRestoreRemediationState.details?.currentSourceFingerprint
+              "
+              class="grid gap-2 sm:grid-cols-2"
+            >
+              <UiPanel
+                v-if="workbenchRestoreRemediationState.details?.sourceFingerprint"
+                variant="raise"
+                class="space-y-1 p-3"
+              >
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                  Stored fingerprint
+                </p>
+                <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
+                  {{ workbenchRestoreRemediationState.details?.sourceFingerprint }}
+                </p>
+              </UiPanel>
+              <UiPanel
+                v-if="workbenchRestoreRemediationState.details?.currentSourceFingerprint"
+                variant="raise"
+                class="space-y-1 p-3"
+              >
+                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                  Restored fingerprint
+                </p>
+                <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
+                  {{ workbenchRestoreRemediationState.details?.currentSourceFingerprint }}
+                </p>
+              </UiPanel>
+            </div>
+
+            <div
+              v-if="isAdmin && workbenchRestoreRemediationState.primaryAction"
+              class="flex flex-wrap gap-2"
+            >
+              <UiButton
+                variant="ghost"
+                size="sm"
+                :disabled="
+                  workbenchRemediationActionDisabled(
+                    workbenchRestoreRemediationState.primaryAction,
+                  )
+                "
+                @click="
+                  runWorkbenchRemediationAction(workbenchRestoreRemediationState.primaryAction)
+                "
+              >
+                {{
+                  workbenchRemediationActionLabel(
+                    workbenchRestoreRemediationState.primaryAction,
+                  )
+                }}
+              </UiButton>
+            </div>
+          </UiPanel>
+
+          <UiState v-if="!isAdmin" tone="warn">
+            Read-only access: admin permissions are required to inspect retained compose backups and trigger restore.
+          </UiState>
+          <UiState v-else-if="workbenchBackupInventoryStatus === 'loading'" loading>
+            Loading retained compose backups...
+          </UiState>
+          <UiState v-else-if="workbenchComposeBackups.length === 0">
+            No retained compose backups are available yet. The first successful compose apply creates the initial restore target.
+          </UiState>
+          <div v-else class="space-y-3">
+            <button
+              v-for="backup in workbenchComposeBackups"
+              :key="backup.backupId"
+              type="button"
+              class="w-full rounded-2xl border px-4 py-3 text-left transition"
+              :class="
+                backup.backupId === workbenchSelectedComposeBackup?.backupId
+                  ? 'border-[color:var(--accent)] bg-[color:var(--panel)]'
+                  : 'border-[color:var(--line)] bg-[color:var(--panel-soft)] hover:border-[color:var(--accent)]/60'
+              "
+              :disabled="workbenchRestoreStatus === 'loading'"
+              @click="workbenchRestoreSelectedBackupId = backup.backupId"
+            >
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Backup</p>
+                  <p class="mt-2 font-mono text-sm text-[color:var(--text)]">{{ backup.backupId }}</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <UiBadge :tone="backup.backupId === workbenchLatestComposeBackup?.backupId ? 'ok' : 'neutral'">
+                    {{ backup.backupId === workbenchLatestComposeBackup?.backupId ? 'Newest' : `Rev ${backup.revision}` }}
+                  </UiBadge>
+                  <UiBadge :tone="backup.backupId === workbenchSelectedComposeBackup?.backupId ? 'ok' : 'neutral'">
+                    {{ backup.backupId === workbenchSelectedComposeBackup?.backupId ? 'Selected' : 'Available' }}
+                  </UiBadge>
+                </div>
+              </div>
+              <div class="mt-3 grid gap-2 text-xs text-[color:var(--muted)] sm:grid-cols-3">
+                <p><span class="text-[color:var(--muted-2)]">Created</span> {{ fmtDate(backup.createdAt) }}</p>
+                <p><span class="text-[color:var(--muted-2)]">Bytes</span> {{ backup.composeBytes }}</p>
+                <p class="truncate"><span class="text-[color:var(--muted-2)]">Fingerprint</span> {{ backup.sourceFingerprint || '—' }}</p>
+              </div>
+            </button>
+          </div>
+
+          <UiPanel
+            variant="raise"
+            class="space-y-4 p-4 text-sm text-[color:var(--muted)]"
+          >
+            <div>
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Restore execution</p>
+              <h3 class="mt-2 text-base font-semibold text-[color:var(--text)]">Target and confirmation</h3>
+            </div>
+            <p>
+              Confirmation phrase:
+              <span class="font-mono text-[color:var(--text)]">{{ workbenchRestoreConfirmationPhrase }}</span>
+            </p>
+
+            <UiState v-if="!workbenchSelectedComposeBackup" tone="neutral">
+              Select a retained backup to inspect its metadata and enable restore.
+            </UiState>
+            <template v-else>
+              <div class="grid gap-3 sm:grid-cols-2">
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Selected backup</p>
+                  <p class="font-mono text-sm text-[color:var(--text)]">{{ workbenchSelectedComposeBackup.backupId }}</p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Stored revision</p>
+                  <p class="text-lg font-semibold text-[color:var(--text)]">{{ workbenchSelectedComposeBackup.revision }}</p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-1 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Created</p>
+                  <p class="text-sm font-semibold text-[color:var(--text)]">{{ fmtDate(workbenchSelectedComposeBackup.createdAt) }}</p>
+                </UiPanel>
+                <UiPanel variant="soft" class="space-y-2 p-3">
+                  <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Backup fingerprint</p>
+                  <p class="font-mono text-[11px] text-[color:var(--text)] break-all">
+                    {{ workbenchSelectedComposeBackup.sourceFingerprint || 'No fingerprint recorded' }}
+                  </p>
+                </UiPanel>
+              </div>
+
+              <UiState
+                v-if="workbenchLastRestoreResult?.requiresImport"
+                tone="warn"
+              >
+                The last restore left compose drift against the stored Workbench snapshot. Safe recovery path: import, preview, then apply the desired catalog-managed state.
+              </UiState>
+            </template>
+
+            <label class="block text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+              Confirmation phrase
+            </label>
+            <UiInput
+              v-model="workbenchRestoreConfirmInput"
+              :disabled="!isAdmin || workbenchRestoreActionDisabled"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Type the phrase exactly"
+            />
+
+            <div class="flex flex-wrap items-center gap-3">
+              <UiButton
+                variant="danger"
+                size="sm"
+                class="w-full justify-center sm:w-auto"
+                :disabled="!canRestoreWorkbenchCompose"
+                @click="restoreWorkbenchCompose"
+              >
+                <span class="inline-flex items-center gap-2">
+                  <UiInlineSpinner v-if="workbenchRestoreStatus === 'loading'" />
+                  {{ workbenchRestoreLabel }}
+                </span>
+              </UiButton>
+              <UiButton
+                v-if="isAdmin"
+                variant="ghost"
+                size="sm"
+                class="w-full justify-center sm:w-auto"
+                :disabled="workbenchRestoreStatus === 'loading' || workbenchBackupInventoryStatus === 'loading'"
+                @click="refreshWorkbenchComposeBackups"
+              >
+                Refresh backups
+              </UiButton>
+            </div>
+          </UiPanel>
+        </div>
+      </UiFormSidePanel>
 
       <ProjectRuntimeUnitsSection
         v-else-if="activeSectionTab === 'runtime'"
         :containers="detail.containers"
+        :project-status="detail.project.record?.status || ''"
+        :is-admin="isAdmin"
+        :stack-restarting="stackRestarting"
+        :stack-restart-error="stackRestartError"
+        @restart-stack="restartStack"
       />
       <ProjectArchiveExecutionSection
         v-else-if="activeSectionTab === 'archive'"
@@ -3173,60 +2764,3 @@ watch(projectName, () => {
     </template>
   </section>
 </template>
-<style scoped>
-.workbench-shell {
-  display: flex;
-  flex-direction: column;
-  gap: 0.875rem;
-}
-
-.workbench-shell-card {
-  min-width: 0;
-  border-radius: 1.25rem;
-}
-
-.workbench-shell-grid {
-  gap: 0.875rem;
-}
-
-.workbench-shell-card--left,
-.workbench-shell-card--right,
-.workbench-shell-card--secondary {
-  padding: 0.875rem;
-}
-
-@media (min-width: 640px) {
-  .workbench-shell-card--left,
-  .workbench-shell-card--right,
-  .workbench-shell-card--secondary {
-    padding: 1rem;
-  }
-}
-
-@media (min-width: 1100px) {
-  .workbench-shell {
-    display: grid;
-    grid-template-columns: minmax(0, 1.52fr) minmax(19rem, 0.98fr);
-    align-items: start;
-    column-gap: 1rem;
-    row-gap: 0.875rem;
-  }
-
-  .workbench-shell-grid {
-    display: contents;
-  }
-
-  .workbench-shell-card--left {
-    grid-column: 1;
-  }
-
-  .workbench-shell-card--right {
-    grid-column: 2;
-  }
-
-  .workbench-shell-card--secondary {
-    grid-column: 1 / -1;
-  }
-}
-
-</style>

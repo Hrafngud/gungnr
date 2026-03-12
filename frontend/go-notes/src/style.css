@@ -130,6 +130,14 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.panel-projects {
+  border-radius: 0;
+  background: var(--surface);
+  box-shadow: none;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .chip {
   border-radius: 999px;
   border: 1px solid var(--border);

@@ -210,43 +210,47 @@ const isActive = (to: string) => {
 
       <div class="min-h-screen flex-1">
 
-        <header class="sticky top-0 z-20 border-b border-[color:var(--border)] bg-gradient-to-br from-zinc-600/30 to-zinc-900 px-4 py-4">
-          <div class="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-4">
-            <div class="flex flex-row justify-between gap-8 items-center">
-              <div class="w-4 h-fit flex items-center">
+        <header class="sticky top-0 z-20 border-b border-[color:var(--border)] bg-gradient-to-br from-zinc-700/25 to-zinc-900 px-4 py-3">
+          <div class="mx-auto flex w-full max-w-7xl items-center gap-3">
+            <div class="flex shrink-0 items-center gap-3 sm:gap-6">
+              <div class="flex h-5 w-5 items-center">
                 <img src="/logo.svg" alt="Gungnr logo">
               </div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              <p class="max-w-[12rem] truncate text-[11px] uppercase tracking-[0.28em] text-[color:var(--muted-2)] sm:max-w-none">
                 {{ pageTitle }}
               </p>
             </div>
-            <div class="flex flex-wrap items-center gap-3">
-              <button
-                v-if="auth.user"
-                type="button"
-                class="btn btn-ghost px-4 py-2 text-xs font-semibold"
-                @click="handleLogout"
-              >
-                <span class="flex items-center gap-2">
-                  <NavIcon name="logout" class="h-3.5 w-3.5" />
-                  Sign out
-                </span>
-              </button>
-              <RouterLink
-                v-else
-                to="/login"
-                class="btn btn-primary px-4 py-2 text-xs font-semibold"
-              >
-                <span class="flex items-center gap-2">
-                  <NavIcon name="login" class="h-3.5 w-3.5" />
-                  Sign in
-                </span>
-              </RouterLink>
-            </div>
-          </div>
-          <HostStatusHeader />
 
-          <nav class="mx-auto mt-4 flex w-full max-w-7xl gap-2 overflow-x-auto pb-2 lg:hidden">
+            <HostStatusHeader class="min-w-0 flex-1">
+              <template #right>
+                <button
+                  v-if="auth.user"
+                  type="button"
+                  class="btn btn-ghost px-3 py-1 text-xs font-semibold"
+                  aria-label="Sign out"
+                  @click="handleLogout"
+                >
+                  <span class="flex items-center gap-1.5">
+                    <NavIcon name="logout" class="h-3 w-3" />
+                    <span class="hidden md:inline">Sign out</span>
+                  </span>
+                </button>
+                <RouterLink
+                  v-else
+                  to="/login"
+                  class="btn btn-primary px-3 py-1 text-xs font-semibold"
+                  aria-label="Sign in"
+                >
+                  <span class="flex items-center gap-1.5">
+                    <NavIcon name="login" class="h-3 w-3" />
+                    <span class="hidden md:inline">Sign in</span>
+                  </span>
+                </RouterLink>
+              </template>
+            </HostStatusHeader>
+          </div>
+
+          <nav class="mx-auto mt-3 flex w-full max-w-7xl gap-2 overflow-x-auto pb-2 lg:hidden">
             <RouterLink
               v-for="item in navItems"
               :key="`mobile-${item.to}`"

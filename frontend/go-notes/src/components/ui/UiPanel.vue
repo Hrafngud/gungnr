@@ -4,7 +4,7 @@ import type { Component } from 'vue'
 
 defineOptions({ inheritAttrs: false })
 
-type PanelVariant = 'default' | 'soft' | 'raise'
+type PanelVariant = 'default' | 'soft' | 'raise' | 'projects'
 
 const props = withDefaults(defineProps<{
   as?: string | Component
@@ -20,6 +20,8 @@ const variantClass = computed(() => {
       return 'panel-soft'
     case 'raise':
       return 'panel-raise'
+    case 'projects':
+      return 'panel-projects'
     default:
       return 'panel'
   }

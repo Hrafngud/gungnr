@@ -14,7 +14,7 @@ defineProps<{
 
 <template>
   <div class="workbench-inspector-section p-6">
-    <div class="flex flex-row items-center justify-between">
+    <div class="flex flex-row items-center py-4 justify-between mb-4 border-b-2 border-zinc-700">
       <div class="flex flex-row items-center justify-between w-full">
         <span class="text-sm"> Service name:</span>
         <h4 class="mt-1 text-xl font-semibold text-[color:var(--text)]">

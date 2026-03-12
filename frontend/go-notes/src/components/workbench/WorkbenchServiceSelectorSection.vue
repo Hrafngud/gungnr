@@ -20,10 +20,10 @@ const emit = defineEmits<{
     variant="soft"
     class="space-y-5 p-6"
   >
-    <div class="flex flex-wrap items-start justify-between gap-3">
+    <div class="flex flex-wrap items-start justify-between">
       <div>
         <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Containers</p>
-        <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Container selector</h2>
+        <h2 class="text-xl font-semibold text-[color:var(--text)]">Container selector</h2>
       </div>
       <UiBadge :tone="serviceInventory.length > 0 ? 'ok' : 'neutral'">
         {{ serviceInventory.length }} tracked
@@ -33,37 +33,21 @@ const emit = defineEmits<{
     <UiState v-if="serviceInventory.length === 0">
       No Workbench service rows are stored for this snapshot yet.
     </UiState>
-    <div v-else class="grid gap-4 md:grid-cols-2">
+    <div v-else class="w-full flex flex-col max-h-[10vw] overflow-y-auto">
       <UiListRow
         v-for="service in serviceInventory"
         :key="service.serviceName"
         as="button"
         type="button"
-        class="workbench-service-selector-card text-left"
+        class="text-left"
         :aria-pressed="selectedServiceName === service.serviceName"
         :class="{ 'workbench-service-selector-card--active': selectedServiceName === service.serviceName }"
         @click="emit('select', service.serviceName)"
       >
-        <div class="workbench-service-selector-card__main">
-          <div class="workbench-service-selector-card__header">
-            <h3 class="text-lg font-semibold text-[color:var(--text)]">
-              {{ service.serviceName }}
-            </h3>
-            <p class="workbench-service-selector-card__origin text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">
-              {{ service.originLabel }}
-            </p>
-          </div>
-          <p class="workbench-service-selector-card__meta text-xs text-[color:var(--muted)]">
-            {{
-              service.image ||
-              service.buildSource ||
-              service.restartPolicy ||
-              'Stored compose service'
-            }}
-          </p>
-        </div>
-
-        <div class="workbench-service-selector-card__stats text-xs text-[color:var(--muted)]">
+        <h3 class="text-lg font-semibold text-[color:var(--text)]">
+          {{ service.serviceName }}
+        </h3>
+        <div class="flex flex-row justify-between text-xs text-[color:var(--muted)]">
           <div class="workbench-service-selector-card__stat-row">
             <span>Dependencies</span>
             <span class="text-[color:var(--text)]">{{ service.dependencies.length }}</span>
@@ -76,6 +60,12 @@ const emit = defineEmits<{
             <span>Restart</span>
             <span class="text-[color:var(--text)] break-all text-right">{{ service.restartPolicy || '—' }}</span>
           </div>
+          <div class="workbench-service-selector-card__stat-row">
+            <span> Origin: </span>
+            <p class="workbench-service-selector-card__origin text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">
+              {{ service.originLabel }}
+            </p>
+            </div>
         </div>
       </UiListRow>
     </div>
@@ -143,19 +133,15 @@ const emit = defineEmits<{
   min-height: 2.25em;
 }
 
-.workbench-service-selector-card__stats {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  margin-top: auto;
-}
 
 .workbench-service-selector-card__stat-row {
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
   min-height: 1.15rem;
+  cursor: pointer;
 }
 
 @media (max-width: 640px) {

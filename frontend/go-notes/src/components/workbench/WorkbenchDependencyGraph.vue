@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import UiPanel from '../ui/UiPanel.vue'
 const props = defineProps<{
   serviceName: string
   dependsOn: string[]

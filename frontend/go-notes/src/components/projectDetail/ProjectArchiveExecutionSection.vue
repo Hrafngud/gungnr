@@ -52,6 +52,10 @@ const canSubmitArchive = computed(() => {
   return archiveConfirmInput.value.trim() === archiveConfirmationPhrase.value
 })
 
+const deletableDnsRecordsCount = computed(() =>
+  archivePlan.value?.dnsRecords.filter((record) => record.deleteEligible).length ?? 0,
+)
+
 function applyArchiveDefaults(plan: ProjectArchivePlan) {
   archiveOptions.value = {
     removeContainers: plan.defaults.removeContainers,
@@ -153,11 +157,11 @@ watch(
 </script>
 
 <template>
-  <UiPanel class="space-y-5 p-6">
+  <UiPanel variant="projects" class="space-y-5 p-6">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Archive cleanup</p>
-        <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Plan and execute</h2>
+        <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Project lifecycle</p>
+        <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">Archive</h2>
         <p class="mt-2 text-sm text-[color:var(--muted)]">
           Cleanup is asynchronous and always queued as a project job.
         </p>
@@ -178,99 +182,47 @@ watch(
     <UiState v-else-if="archivePlanError" tone="error">{{ archivePlanError }}</UiState>
 
     <template v-else-if="archivePlan">
-      <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Containers</p>
-          <p class="text-lg font-semibold text-[color:var(--text)]">{{ archivePlan.containers.length }}</p>
-        </UiPanel>
-        <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Hostnames</p>
-          <p class="text-lg font-semibold text-[color:var(--text)]">{{ archivePlan.hostnames.length }}</p>
-        </UiPanel>
-        <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Ingress rules</p>
-          <p class="text-lg font-semibold text-[color:var(--text)]">{{ archivePlan.ingressRules.length }}</p>
-        </UiPanel>
-        <UiPanel variant="soft" class="space-y-1 p-3 text-sm text-[color:var(--muted)]">
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">DNS records</p>
-          <p class="text-lg font-semibold text-[color:var(--text)]">
-            {{ archivePlan.dnsRecords.filter((record) => record.deleteEligible).length }}/{{ archivePlan.dnsRecords.length }}
-          </p>
-        </UiPanel>
-      </div>
-
-      <UiInlineFeedback v-if="archivePlan.warnings.length > 0" tone="warn">
-        {{ archivePlan.warnings.length }} warning(s): {{ archivePlan.warnings.join(' | ') }}
-      </UiInlineFeedback>
-      <UiInlineFeedback v-if="archiveExecutedWithWarnings" tone="warn">
-        Last archive request was queued with warnings in the plan preview. Review job logs after completion.
-      </UiInlineFeedback>
-      <UiInlineFeedback v-if="archiveExecuteError" tone="error">
-        {{ archiveExecuteError }}
-      </UiInlineFeedback>
-
-      <div class="grid gap-4 xl:grid-cols-2">
-        <UiPanel variant="soft" class="space-y-3 p-4">
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">DNS targets</p>
-          <UiState v-if="archivePlan.dnsRecords.length === 0">No DNS records matched.</UiState>
-          <ul v-else class="space-y-2 text-xs text-[color:var(--muted)]">
-            <li
-              v-for="record in archivePlan.dnsRecords"
-              :key="`${record.zoneId}-${record.id}-${record.name}`"
-              class="space-y-1"
-            >
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <span class="font-mono text-[color:var(--text)] break-all">{{ record.name }}</span>
-                <UiBadge :tone="record.deleteEligible ? 'ok' : 'warn'">
-                  {{ record.deleteEligible ? 'deletable' : 'skip' }}
-                </UiBadge>
-              </div>
-              <p class="font-mono text-[11px] text-[color:var(--muted-2)] break-all">
-                {{ record.type }} → {{ record.content }}
-              </p>
-              <p v-if="record.skipReason" class="text-[11px] text-[color:var(--muted)]">
-                {{ record.skipReason }}
-              </p>
-            </li>
-          </ul>
-        </UiPanel>
-      </div>
-
       <UiPanel variant="raise" class="space-y-4 p-5">
         <div>
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Execution</p>
+          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Archive Project</p>
           <p class="mt-2 text-sm text-[color:var(--muted)]">
             Confirmation phrase: <span class="font-mono text-[color:var(--text)]">{{ archiveConfirmationPhrase }}</span>
           </p>
         </div>
 
-        <div class="grid gap-3 sm:grid-cols-2">
-          <UiToggle v-model="archiveOptions.removeContainers" :disabled="!isAdmin">
+        <div class="flex flex-wrap items-center gap-3">
+          <UiToggle v-model="archiveOptions.removeContainers" :disabled="!isAdmin" class="min-w-[240px] flex-1">
             Remove project containers
           </UiToggle>
-          <UiToggle v-model="archiveOptions.removeVolumes" :disabled="!isAdmin || !archiveOptions.removeContainers">
+          <UiToggle
+            v-model="archiveOptions.removeVolumes"
+            :disabled="!isAdmin || !archiveOptions.removeContainers"
+            class="min-w-[240px] flex-1"
+          >
             Remove container volumes
           </UiToggle>
-          <UiToggle v-model="archiveOptions.removeIngress" :disabled="!isAdmin">
+          <UiToggle v-model="archiveOptions.removeIngress" :disabled="!isAdmin" class="min-w-[240px] flex-1">
             Remove ingress rules
           </UiToggle>
-          <UiToggle v-model="archiveOptions.removeDns" :disabled="!isAdmin">
+          <UiToggle v-model="archiveOptions.removeDns" :disabled="!isAdmin" class="min-w-[240px] flex-1">
             Remove DNS records
           </UiToggle>
         </div>
 
-        <label class="block text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-          Confirmation phrase
-        </label>
-        <UiInput
-          v-model="archiveConfirmInput"
-          :disabled="!isAdmin || archiveExecuting"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="Type the phrase exactly"
-        />
-
-        <div class="flex flex-wrap items-center gap-3">
+        <div class="flex flex-wrap items-end gap-3">
+          <div class="min-w-[280px] flex-1">
+            <label class="block text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+              Confirmation phrase
+            </label>
+            <UiInput
+              v-model="archiveConfirmInput"
+              :disabled="!isAdmin || archiveExecuting"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Type the phrase exactly"
+              class="mt-2"
+            />
+          </div>
           <UiButton
             variant="danger"
             size="sm"
@@ -287,6 +239,74 @@ watch(
           </p>
         </div>
       </UiPanel>
+
+      <UiInlineFeedback v-if="archivePlan.warnings.length > 0" tone="warn">
+        {{ archivePlan.warnings.length }} warning(s): {{ archivePlan.warnings.join(' | ') }}
+      </UiInlineFeedback>
+      <UiInlineFeedback v-if="archiveExecutedWithWarnings" tone="warn">
+        Last archive request was queued with warnings in the plan preview. Review job logs after completion.
+      </UiInlineFeedback>
+      <UiInlineFeedback v-if="archiveExecuteError" tone="error">
+        {{ archiveExecuteError }}
+      </UiInlineFeedback>
+
+      <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+        <UiPanel variant="soft" class="space-y-3 p-4">
+          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Plan summary</p>
+          <div class="flex flex-wrap gap-3">
+            <div class="min-w-[140px] flex-1 rounded-xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Containers</p>
+              <p class="mt-1 text-lg font-semibold text-[color:var(--text)]">{{ archivePlan.containers.length }}</p>
+            </div>
+            <div class="min-w-[140px] flex-1 rounded-xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Hostnames</p>
+              <p class="mt-1 text-lg font-semibold text-[color:var(--text)]">{{ archivePlan.hostnames.length }}</p>
+            </div>
+            <div class="min-w-[140px] flex-1 rounded-xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Ingress rules</p>
+              <p class="mt-1 text-lg font-semibold text-[color:var(--text)]">{{ archivePlan.ingressRules.length }}</p>
+            </div>
+            <div class="min-w-[140px] flex-1 rounded-xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">DNS records</p>
+              <p class="mt-1 text-lg font-semibold text-[color:var(--text)]">
+                {{ deletableDnsRecordsCount }}/{{ archivePlan.dnsRecords.length }}
+              </p>
+            </div>
+          </div>
+        </UiPanel>
+
+        <UiPanel variant="soft" class="space-y-3 p-4">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">DNS targets</p>
+            <p class="text-xs text-[color:var(--muted)]">
+              {{ deletableDnsRecordsCount }} deletable / {{ archivePlan.dnsRecords.length }} total
+            </p>
+          </div>
+          <UiState v-if="archivePlan.dnsRecords.length === 0">No DNS records matched.</UiState>
+          <div v-else class="overflow-x-auto pb-1">
+            <ul class="flex min-w-max items-stretch gap-2 text-xs text-[color:var(--muted)]">
+              <li
+                v-for="record in archivePlan.dnsRecords"
+                :key="`${record.zoneId}-${record.id}-${record.name}`"
+                class="w-[320px] space-y-1 rounded-xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span class="font-mono text-[color:var(--text)] break-all">{{ record.name }}</span>
+                  <UiBadge :tone="record.deleteEligible ? 'ok' : 'warn'">
+                    {{ record.deleteEligible ? 'deletable' : 'skip' }}
+                  </UiBadge>
+                </div>
+                <p class="font-mono text-[11px] text-[color:var(--muted-2)] break-all">
+                  {{ record.type }} → {{ record.content }}
+                </p>
+                <p v-if="record.skipReason" class="text-[11px] text-[color:var(--muted)]">
+                  {{ record.skipReason }}
+                </p>
+              </li>
+            </ul>
+          </div>
+        </UiPanel>
+      </div>
     </template>
   </UiPanel>
 </template>

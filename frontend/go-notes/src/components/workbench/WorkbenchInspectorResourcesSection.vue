@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
-import UiInput from '@/components/ui/UiInput.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
+import UiSelectTypingInput from '@/components/ui/UiSelectTypingInput.vue'
 import UiState from '@/components/ui/UiState.vue'
 import type { WorkbenchResourceField } from '@/types/workbench'
 import type {
@@ -13,7 +14,46 @@ import type {
 } from '@/components/workbench/projectDetailWorkbenchTypes'
 import { workbenchCompactToneClass } from '@/components/workbench/workbenchInspectorPresentation'
 
-defineProps<{
+const cpuPresetValues = [
+  '0.25',
+  '0.50',
+  '1',
+  '2',
+  '4',
+  '8',
+]
+
+const memoryPresetValues = [
+  '256M',
+  '512M',
+  '768M',
+  '1G',
+  '2G',
+  '4G',
+  '6G',
+  '8G',
+]
+
+const resourcePresetValuesByField: Record<WorkbenchResourceField, string[]> = {
+  limitCpus: cpuPresetValues,
+  reservationCpus: cpuPresetValues,
+  limitMemory: memoryPresetValues,
+  reservationMemory: memoryPresetValues,
+}
+
+function resourcePresetValues(field: WorkbenchResourceField): string[] {
+  return resourcePresetValuesByField[field] ?? []
+}
+
+function resourcePickerOptions(field: WorkbenchResourceField) {
+  return resourcePresetValues(field).map((value) => ({
+    key: value,
+    value,
+    label: value,
+  }))
+}
+
+const props = defineProps<{
   isAdmin: boolean
   selectedServiceResource: WorkbenchResourceInventoryRow | null
   resourceEditorFields: WorkbenchResourceEditorField[]
@@ -38,98 +78,145 @@ defineProps<{
     resource: WorkbenchResourceInventoryRow,
   ) => WorkbenchInlineFeedbackState | null
 }>()
+
+const limitFields = computed(() => props.resourceEditorFields.filter((field) => field.section === 'limits'))
+const reservationFields = computed(() => props.resourceEditorFields.filter((field) => field.section === 'reservations'))
+
+function resourceFieldLabel(field: WorkbenchResourceField): string {
+  return field.includes('Memory') ? 'RAM' : 'CPU'
+}
 </script>
 
 <template>
-  <div class="space-y-3 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/30 p-3">
-    <div class="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Resources</p>
-        <h5 class="mt-1 text-base font-semibold text-[color:var(--text)]">Budgets</h5>
-      </div>
-      <div class="flex flex-wrap gap-2 text-[11px]">
-        <span :class="['workbench-compact-status', workbenchCompactToneClass(selectedServiceResource?.tracked ? 'ok' : 'neutral')]">
-          <span class="workbench-compact-status__dot" />
-          {{ selectedServiceResource?.tracked ? 'Tracked' : 'No row' }}
-        </span>
-        <span :class="['workbench-compact-status', workbenchCompactToneClass(selectedServiceResource?.hasLimits ? 'ok' : 'neutral')]">
-          <span class="workbench-compact-status__dot" />
-          {{ selectedServiceResource?.hasLimits ? 'Limits set' : 'Limits empty' }}
-        </span>
-        <span :class="['workbench-compact-status', workbenchCompactToneClass(selectedServiceResource?.hasReservations ? 'ok' : 'neutral')]">
-          <span class="workbench-compact-status__dot" />
-          {{ selectedServiceResource?.hasReservations ? 'Reservations set' : 'Reservations empty' }}
-        </span>
-      </div>
+  <div class="w-full space-y-3">
+    <div class="flex mb-2">
+      <h5 class="text-base font-semibold text-[color:var(--text)]">Resource Allocation</h5>
     </div>
 
     <UiState v-if="!selectedServiceResource">
       No Workbench resource row is stored for this service yet.
     </UiState>
     <div v-else class="space-y-3">
-      <div class="grid gap-3 sm:grid-cols-2">
-        <UiPanel
-          v-for="field in resourceEditorFields"
-          :key="`${selectedServiceResource.key}-${field.key}`"
-          variant="raise"
-          class="space-y-3 p-3"
-        >
-          <div class="flex flex-wrap items-start justify-between gap-2">
-            <div>
-              <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-                {{ field.section === 'limits' ? 'Limits' : 'Reservations' }}
-              </p>
-              <h6 class="mt-1 text-sm font-semibold text-[color:var(--text)]">
-                {{ field.label }}
-              </h6>
-            </div>
-            <span :class="['workbench-compact-status', workbenchCompactToneClass(selectedServiceResource[field.key] ? 'ok' : 'neutral')]">
-              <span class="workbench-compact-status__dot" />
-              {{ selectedServiceResource[field.key] ? 'Stored' : 'Empty' }}
-            </span>
-          </div>
-
-          <div class="space-y-2 text-xs text-[color:var(--muted)]">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <span>Current</span>
-              <span class="font-mono text-[color:var(--text)]">
-                {{ selectedServiceResource[field.key] || 'Not declared' }}
-              </span>
-            </div>
-
-            <label class="space-y-1">
-              <span class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-                New value
-              </span>
-              <UiInput
-                :model-value="resourceInputValue(selectedServiceResource, field.key)"
-                type="text"
-                :placeholder="field.placeholder"
-                :disabled="!isAdmin || resourceActionDisabled(selectedServiceResource)"
-                @update:model-value="
-                  setResourceInputValue(
-                    selectedServiceResource.serviceName,
-                    field.key,
-                    $event,
-                  )
-                "
-              />
-            </label>
-          </div>
-
-          <UiButton
-            v-if="isAdmin"
-            variant="ghost"
-            size="sm"
-            :disabled="
-              !selectedServiceResource[field.key] ||
-              resourceActionDisabled(selectedServiceResource)
-            "
-            @click="clearResourceFields(selectedServiceResource, [field.key])"
+      <div class="space-y-2">
+        <p class="text-base font-semibold text-[color:var(--text)]">Limits</p>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <UiPanel
+            v-for="field in limitFields"
+            :key="`${selectedServiceResource.key}-${field.key}`"
+            variant="raise"
+            class="space-y-3 p-3"
           >
-            Clear {{ field.label.toLowerCase() }}
-          </UiButton>
-        </UiPanel>
+            <div class="flex flex-wrap items-start justify-between gap-2">
+              <span :class="['workbench-compact-status', workbenchCompactToneClass(selectedServiceResource[field.key] ? 'ok' : 'neutral')]">
+                <span class="workbench-compact-status__dot" />
+                {{ selectedServiceResource[field.key] ? 'Stored' : 'Empty' }}
+              </span>
+              <UiButton
+                v-if="isAdmin"
+                variant="ghost"
+                size="sm"
+                :disabled="
+                  !selectedServiceResource[field.key] ||
+                  resourceActionDisabled(selectedServiceResource)
+                "
+                @click="clearResourceFields(selectedServiceResource, [field.key])"
+              >
+                Clear {{ resourceFieldLabel(field.key).toLowerCase() }}
+              </UiButton>
+            </div>
+
+            <div class="space-y-2 text-xs text-[color:var(--muted)]">
+              <div class="flex flex-row items-center justify-between">
+                <h6 class="mt-1 text-sm font-semibold text-[color:var(--text)]">
+                  {{ resourceFieldLabel(field.key) }}
+                </h6>
+                <div class="w-5/6">
+                <UiSelectTypingInput
+                  :model-value="resourceInputValue(selectedServiceResource, field.key)"
+                  :options="resourcePickerOptions(field.key)"
+                  status="ready"
+                  input-type="text"
+                  :placeholder="field.placeholder"
+                  :disabled="!isAdmin || resourceActionDisabled(selectedServiceResource)"
+                  :busy="resourceMutationBusy(selectedServiceResource)"
+                  :can-request-options="false"
+                  empty-message="No presets available."
+                  toggle-aria-label="Toggle preset values"
+                  @update:model-value="
+                    setResourceInputValue(
+                      selectedServiceResource.serviceName,
+                      field.key,
+                      $event,
+                    )
+                  "
+                />
+                </div>
+              </div>
+            </div>
+
+          </UiPanel>
+        </div>
+      </div>
+
+      <div class="space-y-2">
+        <p class="text-base font-semibold text-[color:var(--text)]">Reservations</p>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <UiPanel
+            v-for="field in reservationFields"
+            :key="`${selectedServiceResource.key}-${field.key}`"
+            variant="raise"
+            class="space-y-3 p-3"
+          >
+            <div class="flex flex-wrap items-start justify-between gap-2">
+              <span :class="['workbench-compact-status', workbenchCompactToneClass(selectedServiceResource[field.key] ? 'ok' : 'neutral')]">
+                <span class="workbench-compact-status__dot" />
+                {{ selectedServiceResource[field.key] ? 'Stored' : 'Empty' }}
+              </span>
+              <UiButton
+                v-if="isAdmin"
+                variant="ghost"
+                size="sm"
+                :disabled="
+                  !selectedServiceResource[field.key] ||
+                  resourceActionDisabled(selectedServiceResource)
+                "
+                @click="clearResourceFields(selectedServiceResource, [field.key])"
+              >
+                Clear {{ resourceFieldLabel(field.key).toLowerCase() }}
+              </UiButton>
+            </div>
+
+            <div class="space-y-2 text-xs text-[color:var(--muted)]">
+              <div class="flex flex-row items-center justify-between">
+                <h6 class="mt-1 text-sm font-semibold text-[color:var(--text)]">
+                  {{ resourceFieldLabel(field.key) }}
+                </h6>
+                <div class="w-5/6">
+                <UiSelectTypingInput
+                  :model-value="resourceInputValue(selectedServiceResource, field.key)"
+                  :options="resourcePickerOptions(field.key)"
+                  status="ready"
+                  input-type="text"
+                  :placeholder="field.placeholder"
+                  :disabled="!isAdmin || resourceActionDisabled(selectedServiceResource)"
+                  :busy="resourceMutationBusy(selectedServiceResource)"
+                  :can-request-options="false"
+                  empty-message="No presets available."
+                  toggle-aria-label="Toggle preset values"
+                  @update:model-value="
+                    setResourceInputValue(
+                      selectedServiceResource.serviceName,
+                      field.key,
+                      $event,
+                    )
+                  "
+                />
+                </div>
+              </div>
+            </div>
+
+          </UiPanel>
+        </div>
       </div>
 
       <div v-if="isAdmin" class="flex flex-wrap gap-2">
@@ -183,4 +270,3 @@ defineProps<{
     </div>
   </div>
 </template>
-

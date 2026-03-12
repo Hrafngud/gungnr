@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import UiBadge from '@/components/ui/UiBadge.vue'
 import UiState from '@/components/ui/UiState.vue'
 import WorkbenchDependencyGraph from '@/components/workbench/WorkbenchDependencyGraph.vue'
 import type { WorkbenchTopologyInventoryRow } from '@/components/workbench/projectDetailWorkbenchTypes'
@@ -30,4 +29,3 @@ defineProps<{
     </div>
   </div>
 </template>
-

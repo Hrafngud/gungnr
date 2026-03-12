@@ -181,7 +181,7 @@ watch(jobLogsPanelOpen, (open) => {
 </script>
 
 <template>
-  <UiPanel class="space-y-5 p-6">
+  <UiPanel variant="projects" class="space-y-5 p-6">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Project jobs</p>

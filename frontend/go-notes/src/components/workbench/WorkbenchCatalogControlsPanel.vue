@@ -53,23 +53,6 @@ function workbenchCompactToneClass(tone: BadgeTone): string {
 <template>
   <div class="flex flex-col gap-4">
     <UiPanel variant="soft" class="space-y-4 p-4">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Optional services</p>
-          <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Catalog controls</h3>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <span class="workbench-compact-metric">
-            <span class="workbench-compact-metric__value">{{ optionalServiceInventory.length }}</span>
-            <span>entries</span>
-          </span>
-          <span class="workbench-compact-metric">
-            <span class="workbench-compact-metric__value">{{ currentComposeSummary.catalogManagedServices }}</span>
-            <span>managed</span>
-          </span>
-        </div>
-      </div>
-
       <UiState v-if="catalogStatus === 'loading'" loading>
         Loading optional-service catalog...
       </UiState>
@@ -79,15 +62,15 @@ function workbenchCompactToneClass(tone: BadgeTone): string {
       <UiState v-else-if="optionalServiceInventory.length === 0">
         No optional-service catalog entries are available for this project yet.
       </UiState>
-      <div v-else class="workbench-catalog-list ">
+      <div v-else class="w-full h-[40vh] overflow-y-auto">
         <UiListRow
           v-for="entry in optionalServiceInventory"
           :key="entry.key"
           as="article"
-          class="workbench-catalog-ro"
+          class="w-full"
         >
-          <div class="workbench-catalog-row__main">
-            <div class="min-w-0">
+          <div class="flex flex-row justify-between gap-4 items-center w-full">
+            <div class="min-w-0 flex flex-col gap-2">
               <p class="text-[11px] uppercase tracking-[0.18em] text-[color:var(--muted-2)]">
                 {{ entry.category }}
               </p>
@@ -98,7 +81,7 @@ function workbenchCompactToneClass(tone: BadgeTone): string {
                 {{ entry.defaultServiceName }} · {{ entry.defaultContainerPortLabel }}
               </p>
             </div>
-            <div class="workbench-catalog-row__chips">
+            <div class="w-full">
               <span :class="['workbench-compact-status', workbenchCompactToneClass(entry.availabilityTone)]">
                 <span class="workbench-compact-status__dot" />
                 {{ entry.availabilityLabel }}
@@ -108,20 +91,19 @@ function workbenchCompactToneClass(tone: BadgeTone): string {
                 {{ entry.currentStateLabel }}
               </span>
             </div>
-            <div v-if="isAdmin" class="workbench-catalog-row__actions">
               <UiButton
                 v-if="!optionalServicePendingConfirmation(entry)"
                 :variant="optionalServicePendingAction(entry) === 'remove' ? 'ghost' : 'primary'"
                 size="sm"
                 :disabled="optionalServiceActionDisabled(entry)"
                 @click="queueOptionalServiceMutation(entry)"
+                class="w-[10vw] cursor-pointer"
               >
                 <span class="inline-flex items-center gap-2">
                   <UiInlineSpinner v-if="optionalServiceBusy(entry)" />
                   {{ optionalServicePendingLabel(entry) }}
                 </span>
               </UiButton>
-            </div>
           </div>
 
           <p

@@ -1,10 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import UiBadge from '@/components/ui/UiBadge.vue'
 import UiState from '@/components/ui/UiState.vue'
-import UiPanel from '@/components/ui/UiPanel.vue'
 import WorkbenchInspectorDependenciesSection from '@/components/workbench/WorkbenchInspectorDependenciesSection.vue'
-import WorkbenchInspectorOverviewSection from '@/components/workbench/WorkbenchInspectorOverviewSection.vue'
 import WorkbenchInspectorServiceControlsSection from '@/components/workbench/WorkbenchInspectorServiceControlsSection.vue'
 import WorkbenchServiceSelectorSection from '@/components/workbench/WorkbenchServiceSelectorSection.vue'
 import type { WorkbenchRequestStatus } from '@/stores/workbench'
@@ -38,7 +35,10 @@ const props = defineProps<{
   setManualPort: (port: WorkbenchPortInventoryRow) => void
   resetPortToAuto: (port: WorkbenchPortInventoryRow) => void
   portSuggestionStatus: (port: WorkbenchPortInventoryRow) => WorkbenchRequestStatus
-  loadPortSuggestions: (port: WorkbenchPortInventoryRow) => void
+  loadPortSuggestions: (
+    port: WorkbenchPortInventoryRow,
+    options?: { silent?: boolean },
+  ) => void | Promise<void>
   portMutationFeedback: (port: WorkbenchPortInventoryRow) => WorkbenchInlineFeedbackState | null
   portSuggestionFeedback: (port: WorkbenchPortInventoryRow) => WorkbenchInlineFeedbackState | null
   resourceInputValue: (
@@ -120,8 +120,7 @@ watch(
 
 <template>
   <div class="flex flex-col gap-4">
-    <UiPanel
-      variant="soft"
+    <div
       class="flex"
     >
       <UiState v-if="!selectedService">
@@ -129,17 +128,13 @@ watch(
       </UiState>
       <template v-else>
         <div class="w-full flex flex-row gap-2 justify-between items-start">
-          <div class="flex flex-col w-1/2">
+          <div class="flex flex-col w-1/2 gap-2">
             <WorkbenchServiceSelectorSection
-            :service-inventory="serviceInventory"
-            :selected-service-name="selectedService?.serviceName ?? ''"
-            @select="selectedServiceName = $event"
+              :service-inventory="serviceInventory"
+              :selected-service-name="selectedService?.serviceName ?? ''"
+              @select="selectedServiceName = $event"
             />
-            <WorkbenchInspectorOverviewSection
-              :selected-service="selectedService"
-              :selected-service-topology="selectedServiceTopology"
-              :selected-service-ports="selectedServicePorts"
-            />
+            <slot name="selector-column-bottom" />
           </div>
           <div class="flex flex-col w-1/2 p-6">
             <WorkbenchInspectorDependenciesSection :selected-service-topology="selectedServiceTopology" />
@@ -176,6 +171,6 @@ watch(
         </div>
 
       </template>
-    </UiPanel>
+    </div>
   </div>
 </template>

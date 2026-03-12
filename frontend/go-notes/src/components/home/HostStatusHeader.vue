@@ -140,55 +140,76 @@ const jobSummary = computed(() => {
 </script>
 
 <template>
-  <div
-    class="mt-3 flex flex-col gap-3 text-[11px] text-[color:var(--muted)] sm:text-xs md:flex-row md:flex-wrap md:items-center md:justify-between"
-  >
-    <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
-      <div class="flex items-center gap-2">
-      <span class="h-2 w-2 rounded-full" :class="dotClass(dockerHealth?.status)"></span>
-      <span class="text-[color:var(--muted-2)]">Docker</span>
-      <span class="font-semibold text-[color:var(--text)]">{{ dockerSummary }}</span>
-      </div>
-      <div class="flex items-center gap-2">
-      <span class="h-2 w-2 rounded-full" :class="dotClass(tunnelHealth?.status)"></span>
-      <span class="text-[color:var(--muted-2)]">Tunnel</span>
-      <span class="font-semibold text-[color:var(--text)]">{{ tunnelSummary }}</span>
-      </div>
-      <div class="flex items-center gap-2">
-      <span class="text-[color:var(--muted-2)]">Domain</span>
-      <span class="font-semibold text-[color:var(--text)]">{{ domainLabel }}</span>
-      </div>
-      <div class="flex items-center gap-2">
-      <span class="text-[color:var(--muted-2)]">Jobs</span>
-      <span class="font-semibold text-[color:var(--text)]">{{ jobSummary }}</span>
-      </div>
-      <span v-if="settingsError" class="text-[color:var(--danger)]">
-      Host status unavailable
-      </span>
-    </div>
-    <div class="flex flex-wrap items-center gap-2">
-      <UiButton
-        variant="ghost"
-        size="chip"
-        :disabled="hostLoading"
-        @click="loadHostStatus"
+  <div class="min-w-0 text-[10px] text-[color:var(--muted)] sm:text-[11px]">
+    <div class="flex items-center gap-2">
+      <div
+        class="host-status-track flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto whitespace-nowrap pr-1"
+        role="status"
+        aria-live="polite"
       >
-        <span class="flex items-center gap-2">
-          <NavIcon name="refresh" class="h-3 w-3" />
-          {{ hostLoading ? 'Refreshing' : 'Refresh' }}
+        <div class="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-2.5 py-1">
+          <span class="h-1.5 w-1.5 rounded-full" :class="dotClass(dockerHealth?.status)"></span>
+          <span class="text-[color:var(--muted-2)]">Docker</span>
+          <span class="font-semibold text-[color:var(--text)]">{{ dockerSummary }}</span>
+        </div>
+        <div class="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-2.5 py-1">
+          <span class="h-1.5 w-1.5 rounded-full" :class="dotClass(tunnelHealth?.status)"></span>
+          <span class="text-[color:var(--muted-2)]">Tunnel</span>
+          <span class="font-semibold text-[color:var(--text)]">{{ tunnelSummary }}</span>
+        </div>
+        <div
+          class="hidden items-center gap-1.5 rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-2.5 py-1 lg:inline-flex"
+        >
+          <span class="text-[color:var(--muted-2)]">Domain</span>
+          <span class="font-semibold text-[color:var(--text)]">{{ domainLabel }}</span>
+        </div>
+        <div
+          class="hidden items-center gap-1.5 rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-2.5 py-1 md:inline-flex"
+        >
+          <span class="text-[color:var(--muted-2)]">Jobs</span>
+          <span class="font-semibold text-[color:var(--text)]">{{ jobSummary }}</span>
+        </div>
+        <span v-if="settingsError" class="pl-1 text-[color:var(--danger)]">
+          Host status unavailable
         </span>
-      </UiButton>
-      <UiButton
-        :as="RouterLink"
-        to="/host-settings"
-        variant="ghost"
-        size="chip"
-      >
-        <span class="flex items-center gap-2">
-          <NavIcon name="host" class="h-3 w-3" />
-          Host settings
-        </span>
-      </UiButton>
+      </div>
+      <div class="flex shrink-0 items-center gap-1.5">
+        <UiButton
+          variant="ghost"
+          size="chip"
+          :disabled="hostLoading"
+          :aria-label="hostLoading ? 'Refreshing host status' : 'Refresh host status'"
+          @click="loadHostStatus"
+        >
+          <span class="flex items-center gap-1.5">
+            <NavIcon name="refresh" class="h-3 w-3" />
+            <span class="hidden sm:inline">{{ hostLoading ? 'Refreshing' : 'Refresh' }}</span>
+          </span>
+        </UiButton>
+        <UiButton
+          :as="RouterLink"
+          to="/host-settings"
+          variant="ghost"
+          size="chip"
+          aria-label="Host settings"
+        >
+          <span class="flex items-center gap-1.5">
+            <NavIcon name="host" class="h-3 w-3" />
+            <span class="hidden sm:inline">Host settings</span>
+          </span>
+        </UiButton>
+        <slot name="right" />
+      </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.host-status-track {
+  scrollbar-width: none;
+}
+
+.host-status-track::-webkit-scrollbar {
+  display: none;
+}
+</style>

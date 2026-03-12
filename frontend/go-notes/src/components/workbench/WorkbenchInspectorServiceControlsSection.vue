@@ -29,7 +29,10 @@ defineProps<{
   setManualPort: (port: WorkbenchPortInventoryRow) => void
   resetPortToAuto: (port: WorkbenchPortInventoryRow) => void
   portSuggestionStatus: (port: WorkbenchPortInventoryRow) => WorkbenchRequestStatus
-  loadPortSuggestions: (port: WorkbenchPortInventoryRow) => void
+  loadPortSuggestions: (
+    port: WorkbenchPortInventoryRow,
+    options?: { silent?: boolean },
+  ) => void | Promise<void>
   portMutationFeedback: (port: WorkbenchPortInventoryRow) => WorkbenchInlineFeedbackState | null
   portSuggestionFeedback: (port: WorkbenchPortInventoryRow) => WorkbenchInlineFeedbackState | null
   resourceInputValue: (
