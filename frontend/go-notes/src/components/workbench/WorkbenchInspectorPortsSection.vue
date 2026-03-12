@@ -38,74 +38,26 @@ defineProps<{
 </script>
 
 <template>
-  <div class="space-y-3 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/30 p-3">
+  <div class="rounded-2xl p-3">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
         <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Ports</p>
         <h5 class="mt-1 text-base font-semibold text-[color:var(--text)]">Mappings</h5>
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <span class="workbench-compact-metric">
-          <span class="workbench-compact-metric__value">
-            {{ selectedServicePorts.filter((port) => port.allocationStatus === 'assigned').length }}
-          </span>
-          <span>assigned</span>
-        </span>
-        <span class="workbench-compact-metric">
-          <span class="workbench-compact-metric__value">
-            {{ selectedServicePorts.filter((port) => port.allocationStatus === 'unresolved').length }}
-          </span>
-          <span>unresolved</span>
-        </span>
       </div>
     </div>
 
     <UiState v-if="selectedServicePorts.length === 0">
       No Workbench port rows are stored for this service yet.
     </UiState>
-    <div v-else class="space-y-3">
+    <div v-else class="w-ful">
       <UiListRow
         v-for="port in selectedServicePorts"
         :key="port.key"
         as="article"
-        class="space-y-3"
       >
-        <div class="flex flex-wrap items-start justify-between gap-3">
-          <div class="min-w-0">
-            <h6 class="text-base font-semibold text-[color:var(--text)]">
-              {{ port.containerPort }}/{{ port.protocol }}
-            </h6>
-            <p class="mt-1 font-mono text-[11px] text-[color:var(--muted-2)]">
-              {{ port.mappingLabel }}
-            </p>
-          </div>
-          <div class="flex flex-wrap gap-2 text-[11px]">
-            <span :class="['workbench-compact-status', workbenchCompactToneClass(port.assignmentStrategyTone)]">
-              <span class="workbench-compact-status__dot" />
-              {{ port.assignmentStrategyLabel }}
-            </span>
-            <span :class="['workbench-compact-status', workbenchCompactToneClass(port.allocationStatusTone)]">
-              <span class="workbench-compact-status__dot" />
-              {{ port.allocationStatusLabel }}
-            </span>
-          </div>
-        </div>
-
-        <div class="grid gap-3 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-          <div class="grid gap-2 text-xs text-[color:var(--muted)]">
-            <div class="flex flex-wrap items-start justify-between gap-2">
-              <span>Requested</span>
-              <span class="font-mono text-[color:var(--text)]">{{ port.requestedHostPort || 'Auto' }}</span>
-            </div>
-            <div class="flex flex-wrap items-start justify-between gap-2">
-              <span>Effective</span>
-              <span class="font-mono text-[color:var(--text)]">{{ port.effectiveHostPortLabel }}</span>
-            </div>
-          </div>
-
-          <div class="space-y-3 rounded-2xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
+        <div class="flex flex-row justify-between">
+          <div class="rounded-2xl p-3">
             <div class="workbench-port-editor">
-              <label class="space-y-2">
                 <span class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
                   Host port
                 </span>
@@ -126,8 +78,7 @@ defineProps<{
                   "
                   @update:model-value="setPortInputValue(port.key, $event)"
                 />
-              </label>
-              <div v-if="isAdmin" class="workbench-port-editor__actions">
+              <div v-if="isAdmin" class="flex flex-row gap-2 p-2">
                 <UiButton
                   variant="primary"
                   size="sm"

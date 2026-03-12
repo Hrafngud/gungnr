@@ -57,40 +57,11 @@ defineProps<{
 
 <template>
   <div class="workbench-inspector-section workbench-inspector-section--editing">
-    <div class="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Service controls</p>
-        <h4 class="mt-1 text-base font-semibold text-[color:var(--text)]">Ports and budgets</h4>
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <span class="workbench-compact-metric">
-          <span class="workbench-compact-metric__value">{{ selectedServicePorts.length }}</span>
-          <span>ports</span>
-        </span>
-        <span class="workbench-compact-metric">
-          <span class="workbench-compact-metric__value">
-            {{ selectedServiceResource?.hasLimits ? 1 : 0 }}
-          </span>
-          <span>limits</span>
-        </span>
-        <span class="workbench-compact-metric">
-          <span class="workbench-compact-metric__value">
-            {{ selectedServiceResource?.hasReservations ? 1 : 0 }}
-          </span>
-          <span>reservations</span>
-        </span>
-      </div>
-    </div>
-
-    <p class="text-xs text-[color:var(--muted)]">
-      Current values and supported edits stay together here. Host-port allocation still prefers the compose-declared host port before the next free fallback.
-    </p>
-
     <UiState v-if="!isAdmin" tone="neutral">
       Read-only visibility: admin permissions are required to change host ports or resource budgets.
     </UiState>
 
-    <div class="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+    <div class="w-full">
       <WorkbenchInspectorPortsSection
         :is-admin="isAdmin"
         :optional-service-mutation-status="optionalServiceMutationStatus"

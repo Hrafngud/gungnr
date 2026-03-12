@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiState from '@/components/ui/UiState.vue'
+import UiPanel from '@/components/ui/UiPanel.vue'
 import WorkbenchInspectorDependenciesSection from '@/components/workbench/WorkbenchInspectorDependenciesSection.vue'
 import WorkbenchInspectorOverviewSection from '@/components/workbench/WorkbenchInspectorOverviewSection.vue'
 import WorkbenchInspectorServiceControlsSection from '@/components/workbench/WorkbenchInspectorServiceControlsSection.vue'
@@ -119,65 +120,62 @@ watch(
 
 <template>
   <div class="flex flex-col gap-4">
-    <WorkbenchServiceSelectorSection
-      :service-inventory="serviceInventory"
-      :selected-service-name="selectedService?.serviceName ?? ''"
-      @select="selectedServiceName = $event"
-    />
-
-    <div
-      class="bg-transparent"
+    <UiPanel
+      variant="soft"
+      class="flex"
     >
-      <div class="flex flex-wrap items-start justify-between gap-3 bg--bg p-4 rounded">
-        <div>
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Selected service</p>
-          <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">Inspector</h3>
-        </div>
-        <UiBadge :tone="selectedService ? 'ok' : 'neutral'">
-          {{ selectedService ? selectedService.serviceName : 'No selection' }}
-        </UiBadge>
-      </div>
-
       <UiState v-if="!selectedService">
         Select a stored service to inspect its metadata, relationships, ports, and resources in one place.
       </UiState>
       <template v-else>
-        <WorkbenchInspectorOverviewSection
-          :selected-service="selectedService"
-          :selected-service-topology="selectedServiceTopology"
-          :selected-service-ports="selectedServicePorts"
-        />
-        <WorkbenchInspectorDependenciesSection :selected-service-topology="selectedServiceTopology" />
-        <WorkbenchInspectorServiceControlsSection
-          :is-admin="isAdmin"
-          :optional-service-mutation-status="optionalServiceMutationStatus"
-          :preview-status="previewStatus"
-          :apply-status="applyStatus"
-          :restore-status="restoreStatus"
-          :resolve-status="resolveStatus"
-          :selected-service-ports="selectedServicePorts"
-          :selected-service-resource="selectedServiceResource"
-          :resource-editor-fields="resourceEditorFields"
-          :port-suggestion-result-by-key="portSuggestionResultByKey"
-          :port-input-value="portInputValue"
-          :set-port-input-value="setPortInputValue"
-          :port-mutation-busy="portMutationBusy"
-          :set-manual-port="setManualPort"
-          :reset-port-to-auto="resetPortToAuto"
-          :port-suggestion-status="portSuggestionStatus"
-          :load-port-suggestions="loadPortSuggestions"
-          :port-mutation-feedback="portMutationFeedback"
-          :port-suggestion-feedback="portSuggestionFeedback"
-          :resource-input-value="resourceInputValue"
-          :set-resource-input-value="setResourceInputValue"
-          :resource-action-disabled="resourceActionDisabled"
-          :clear-resource-fields="clearResourceFields"
-          :save-resource="saveResource"
-          :resource-mutation-busy="resourceMutationBusy"
-          :reset-resource-inputs="resetResourceInputs"
-          :resource-mutation-feedback="resourceMutationFeedback"
-        />
+        <div class="w-full flex flex-row gap-2 justify-between items-start">
+          <div class="flex flex-col w-1/2">
+            <WorkbenchServiceSelectorSection
+            :service-inventory="serviceInventory"
+            :selected-service-name="selectedService?.serviceName ?? ''"
+            @select="selectedServiceName = $event"
+            />
+            <WorkbenchInspectorOverviewSection
+              :selected-service="selectedService"
+              :selected-service-topology="selectedServiceTopology"
+              :selected-service-ports="selectedServicePorts"
+            />
+          </div>
+          <div class="flex flex-col w-1/2 p-6">
+            <WorkbenchInspectorDependenciesSection :selected-service-topology="selectedServiceTopology" />
+            <WorkbenchInspectorServiceControlsSection
+              :is-admin="isAdmin"
+              :optional-service-mutation-status="optionalServiceMutationStatus"
+              :preview-status="previewStatus"
+              :apply-status="applyStatus"
+              :restore-status="restoreStatus"
+              :resolve-status="resolveStatus"
+              :selected-service-ports="selectedServicePorts"
+              :selected-service-resource="selectedServiceResource"
+              :resource-editor-fields="resourceEditorFields"
+              :port-suggestion-result-by-key="portSuggestionResultByKey"
+              :port-input-value="portInputValue"
+              :set-port-input-value="setPortInputValue"
+              :port-mutation-busy="portMutationBusy"
+              :set-manual-port="setManualPort"
+              :reset-port-to-auto="resetPortToAuto"
+              :port-suggestion-status="portSuggestionStatus"
+              :load-port-suggestions="loadPortSuggestions"
+              :port-mutation-feedback="portMutationFeedback"
+              :port-suggestion-feedback="portSuggestionFeedback"
+              :resource-input-value="resourceInputValue"
+              :set-resource-input-value="setResourceInputValue"
+              :resource-action-disabled="resourceActionDisabled"
+              :clear-resource-fields="clearResourceFields"
+              :save-resource="saveResource"
+              :resource-mutation-busy="resourceMutationBusy"
+              :reset-resource-inputs="resetResourceInputs"
+              :resource-mutation-feedback="resourceMutationFeedback"
+            />
+          </div>
+        </div>
+
       </template>
-    </div>
+    </UiPanel>
   </div>
 </template>

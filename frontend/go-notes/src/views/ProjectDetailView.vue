@@ -2291,23 +2291,31 @@ watch(projectName, () => {
           <div class="flex flex-row flex-wrap items-start gap-4 sm:gap-6">
             <div class="p-2">
               <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Last updated</p>
-              <p class="text-sm text-[color:var(--muted)]">{{ fmtDate(detail.project.record?.updatedAt) }}</p>
+              <p class="mt-1 text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] break-all">
+                {{ fmtDate(detail.project.record?.updatedAt) }}
+              </p>
             </div>
             <div class="p-2">
               <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Source</p>
-              <p class="text-sm text-[color:var(--text)]">{{ detail.runtime.source || 'unknown' }}</p>
+              <p class="mt-1 text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] break-all">
+                {{ detail.runtime.source || 'unknown' }}
+              </p>
             </div>
             <div class="p-2 sm:col-span-2">
               <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Path</p>
-              <p class="font-mono text-xs text-[color:var(--muted)] break-all">{{ detail.runtime.path }}</p>
+              <p class="mt-1 text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] break-all">
+                {{ detail.runtime.path }}
+              </p>
             </div>
             <div class="p-2 sm:col-span-2">
               <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">.env File</p>
-              <p class="font-mono text-xs text-[color:var(--muted)] break-all">{{ detail.runtime.envPath }}</p>
+              <p class="mt-1 text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] break-all">
+                {{ detail.runtime.envPath }}
+              </p>
             </div>
             <div class="p-2 sm:col-span-2">
               <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Repository</p>
-              <p class="text-sm text-[color:var(--muted)] break-all">
+              <p class="mt-1 text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] break-all">
                 {{ detail.project.record?.repoUrl || 'No repository URL recorded' }}
               </p>
             </div>
@@ -2323,7 +2331,7 @@ watch(projectName, () => {
 
       <div
         v-if="activeSectionTab === 'workbench'"
-        class="flex flex-col bg-transparent p-6 gap-4"
+        class="flex flex-col p-6 gap-4"
       >
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>

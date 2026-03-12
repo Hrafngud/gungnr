@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-
+import UiPanel from '../ui/UiPanel.vue'
 const props = defineProps<{
   serviceName: string
   dependsOn: string[]
@@ -22,9 +22,18 @@ const downstream = computed(() => normalizeList(props.dependedBy))
 </script>
 
 <template>
-  <div class="dependency-graph">
-    <div class="dependency-graph__lane">
-      <p class="dependency-graph__label">Depends On</p>
+  <div class="flex flex-col justify-between">
+    <div class="h-[5vh] flex flex-row items-center w-full justify-between">
+      <div class="p-2 flex flex-col items-start justify-center h-[10vh]">
+      <p v-if="upstream.length > 0" class="dependency-graph__flow">
+        <span v-for="node in upstream" :key="`${serviceName}-flow-in-${node}`">{{ node }} -&gt; {{ serviceName }}</span>
+      </p>
+      <p v-if="downstream.length > 0" class="dependency-graph__flow">
+        <span v-for="node in downstream" :key="`${serviceName}-flow-out-${node}`">{{ serviceName }} -&gt; {{ node }}</span>
+      </p>
+    </div>
+      <div class="dependency-graph__lane">
+      <p class="dependency-graph__label text-sm">Depends On</p>
       <div v-if="upstream.length > 0" class="dependency-graph__nodes">
         <span
           v-for="node in upstream"
@@ -35,20 +44,9 @@ const downstream = computed(() => normalizeList(props.dependedBy))
         </span>
       </div>
       <p v-else class="dependency-graph__empty">None</p>
-    </div>
-
-    <div class="dependency-graph__center">
-      <span class="dependency-graph__node dependency-graph__node--active">{{ serviceName }}</span>
-      <p v-if="upstream.length > 0" class="dependency-graph__flow">
-        <span v-for="node in upstream" :key="`${serviceName}-flow-in-${node}`">{{ node }} -&gt; {{ serviceName }}</span>
-      </p>
-      <p v-if="downstream.length > 0" class="dependency-graph__flow">
-        <span v-for="node in downstream" :key="`${serviceName}-flow-out-${node}`">{{ serviceName }} -&gt; {{ node }}</span>
-      </p>
-    </div>
-
-    <div class="dependency-graph__lane">
-      <p class="dependency-graph__label">Required By</p>
+      </div>
+      <div class="dependency-graph__lane">
+      <p class="dependency-graph__label text-sm">Required By</p>
       <div v-if="downstream.length > 0" class="dependency-graph__nodes">
         <span
           v-for="node in downstream"
@@ -59,6 +57,7 @@ const downstream = computed(() => normalizeList(props.dependedBy))
         </span>
       </div>
       <p v-else class="dependency-graph__empty">None</p>
+    </div>
     </div>
   </div>
 </template>
@@ -98,7 +97,6 @@ const downstream = computed(() => normalizeList(props.dependedBy))
 }
 
 .dependency-graph__label {
-  font-size: 0.65rem;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--muted-2);
