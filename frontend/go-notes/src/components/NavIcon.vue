@@ -26,6 +26,8 @@ type IconName =
   | 'eye'
   | 'eye-off'
 
+export type { IconName }
+
 const props = defineProps<{
   name: IconName
   class?: string

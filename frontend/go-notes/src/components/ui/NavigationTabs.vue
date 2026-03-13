@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import type { IconName } from '@/components/NavIcon.vue'
+import NavIcon from '@/components/NavIcon.vue'
 import UiTooltip from '@/components/ui/UiTooltip.vue'
 
 type NavigationTab = {
   id: string
   label: string
+  icon?: IconName
   description?: string
 }
 
@@ -50,7 +53,14 @@ function selectTab(tabId: string) {
           :disabled="disabled"
           @click="selectTab(tab.id)"
         >
-          <span class="navigation-tabs__label">{{ tab.label }}</span>
+          <span class="navigation-tabs__content">
+            <NavIcon
+              v-if="tab.icon"
+              :name="tab.icon"
+              class="navigation-tabs__icon"
+            />
+            <span class="navigation-tabs__label">{{ tab.label }}</span>
+          </span>
         </button>
       </UiTooltip>
     </div>
@@ -59,37 +69,59 @@ function selectTab(tabId: string) {
 
 <style scoped>
 .navigation-tabs {
-  border-bottom: 1px solid var(--border);
+  --navigation-tab-width: clamp(14rem, 21vw, 18rem);
+  position: relative;
+}
+
+.navigation-tabs::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--border);
+  pointer-events: none;
 }
 
 .navigation-tabs__list {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: flex-end;
-  gap: 0.28rem;
+  position: relative;
+  z-index: 1;
+  gap: 0.32rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
 }
 
-.navigation-tabs__tooltip-host {
-  flex: 1 1 9rem;
-  min-width: 0;
+:deep(.navigation-tabs__tooltip-host) {
+  flex: 0 0 var(--navigation-tab-width);
+  min-width: var(--navigation-tab-width);
   display: flex;
 }
 
 .navigation-tabs__tab {
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: 1 1 auto;
-  min-width: 0;
-  width: 100%;
+  min-width: var(--navigation-tab-width);
+  width: var(--navigation-tab-width);
   border: 1px solid transparent;
-  border-bottom: none;
+  border-bottom: 1px solid transparent;
   border-radius: 0.55rem 0.55rem 0 0;
   background: transparent;
   color: var(--muted);
-  padding: 0.62rem 0.95rem;
-  font-size: 0.95rem;
+  margin-bottom: 0;
+  padding: 0.52rem 1.5rem;
+  font-size: 0.92rem;
   font-weight: 600;
   line-height: 1.15;
   letter-spacing: 0.01em;
+  z-index: 1;
   transition:
     color 0.2s ease,
     border-color 0.2s ease,
@@ -109,18 +141,11 @@ function selectTab(tabId: string) {
 
 .navigation-tabs__tab--active {
   border-color: var(--border);
+  border-bottom-color: var(--surface);
   background: var(--surface);
   color: var(--accent-ink);
-}
-
-.navigation-tabs__tab--active::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 1px;
-  background: var(--surface);
+  margin-bottom: -1px;
+  z-index: 3;
 }
 
 .navigation-tabs__tab:disabled {
@@ -132,6 +157,23 @@ function selectTab(tabId: string) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: center;
+}
+
+.navigation-tabs__content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.46rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.navigation-tabs__icon {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex: none;
+  opacity: 0.88;
 }
 
 .navigation-tabs--disabled .navigation-tabs__tab {
@@ -139,12 +181,12 @@ function selectTab(tabId: string) {
 }
 
 @media (max-width: 640px) {
-  .navigation-tabs__tooltip-host {
-    flex-basis: calc(50% - 0.14rem);
+  .navigation-tabs {
+    --navigation-tab-width: 11rem;
   }
 
   .navigation-tabs__tab {
-    padding: 0.58rem 0.72rem;
+    padding: 0.5rem 0.86rem;
     font-size: 0.86rem;
   }
 }

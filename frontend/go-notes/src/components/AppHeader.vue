@@ -41,13 +41,6 @@ const handleLogout = async () => {
           Home
         </RouterLink>
         <RouterLink
-          to="/overview"
-          class="rounded-full px-4 py-2 transition hover:bg-black/5"
-          active-class="bg-black/5 text-neutral-900"
-        >
-          Overview
-        </RouterLink>
-        <RouterLink
           to="/host-settings"
           class="rounded-full px-4 py-2 transition hover:bg-black/5"
           active-class="bg-black/5 text-neutral-900"

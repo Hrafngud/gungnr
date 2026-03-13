@@ -1,7 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from '@/views/LoginView.vue'
 import HomeView from '@/views/HomeView.vue'
-import OverviewView from '@/views/OverviewView.vue'
 import ContainerLogsView from '@/views/ContainerLogsView.vue'
 import HostSettingsView from '@/views/HostSettingsView.vue'
 import NetworkingView from '@/views/NetworkingView.vue'
@@ -29,12 +28,6 @@ const router = createRouter({
       name: 'home',
       component: HomeView,
       meta: { title: 'Home' },
-    },
-    {
-      path: '/overview',
-      name: 'overview',
-      component: OverviewView,
-      meta: { title: 'Overview' },
     },
     {
       path: '/jobs',
@@ -98,7 +91,7 @@ const router = createRouter({
     },
     {
       path: '/activity',
-      redirect: '/overview',
+      redirect: '/jobs',
     },
     {
       path: '/settings',
