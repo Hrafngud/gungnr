@@ -5,14 +5,13 @@ import WorkbenchInspectorDependenciesSection from '@/components/workbench/Workbe
 import WorkbenchInspectorServiceControlsSection from '@/components/workbench/WorkbenchInspectorServiceControlsSection.vue'
 import WorkbenchServiceSelectorSection from '@/components/workbench/WorkbenchServiceSelectorSection.vue'
 import type { WorkbenchRequestStatus } from '@/stores/workbench'
-import type { WorkbenchResourceField } from '@/types/workbench'
+import type { WorkbenchDependencyGraph, WorkbenchResourceField } from '@/types/workbench'
 import type {
   WorkbenchInlineFeedbackState,
   WorkbenchPortInventoryRow,
   WorkbenchResourceEditorField,
   WorkbenchResourceInventoryRow,
   WorkbenchServiceInventoryRow,
-  WorkbenchTopologyInventoryRow,
 } from '@/components/workbench/projectDetailWorkbenchTypes'
 import type { WorkbenchPortSuggestion } from '@/components/workbench/workbenchInspectorPresentation'
 
@@ -23,8 +22,10 @@ const props = defineProps<{
   applyStatus: WorkbenchRequestStatus
   restoreStatus: WorkbenchRequestStatus
   resolveStatus: WorkbenchRequestStatus
+  dependencyGraph: WorkbenchDependencyGraph | null
+  dependencyGraphStatus: WorkbenchRequestStatus
+  dependencyGraphErrorMessage: string
   serviceInventory: WorkbenchServiceInventoryRow[]
-  topologyInventory: WorkbenchTopologyInventoryRow[]
   portInventory: WorkbenchPortInventoryRow[]
   resourceInventory: WorkbenchResourceInventoryRow[]
   resourceEditorFields: WorkbenchResourceEditorField[]
@@ -76,12 +77,6 @@ const selectedService = computed<WorkbenchServiceInventoryRow | null>(() => {
     inventory[0] ??
     null
   )
-})
-
-const selectedServiceTopology = computed<WorkbenchTopologyInventoryRow | null>(() => {
-  const serviceName = selectedService.value?.serviceName
-  if (!serviceName) return null
-  return props.topologyInventory.find((row) => row.serviceName === serviceName) ?? null
 })
 
 const selectedServicePorts = computed<WorkbenchPortInventoryRow[]>(() => {
@@ -137,7 +132,12 @@ watch(
             <slot name="selector-column-bottom" />
           </div>
           <div class="flex flex-col w-1/2 p-6">
-            <WorkbenchInspectorDependenciesSection :selected-service-topology="selectedServiceTopology" />
+            <WorkbenchInspectorDependenciesSection
+              :selected-service-name="selectedService.serviceName"
+              :dependency-graph="dependencyGraph"
+              :dependency-graph-status="dependencyGraphStatus"
+              :dependency-graph-error-message="dependencyGraphErrorMessage"
+            />
             <WorkbenchInspectorServiceControlsSection
               :is-admin="isAdmin"
               :optional-service-mutation-status="optionalServiceMutationStatus"

@@ -187,7 +187,7 @@ function createBackupRequiredError(): ApiError {
 
 async function refreshWorkbenchReadState(
   projectName: string,
-  selection: { snapshot?: boolean; catalog?: boolean; backups?: boolean } = {},
+  selection: { snapshot?: boolean; graph?: boolean; catalog?: boolean; backups?: boolean } = {},
 ) {
   await invalidateWorkbenchReadQueries(queryClient, projectName, selection)
   await refetchWorkbenchReadQueries(queryClient, projectName, selection)
@@ -696,6 +696,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       importStatus.value = 'ready'
       await refreshWorkbenchReadState(normalizedProjectName, {
         snapshot: true,
+        graph: true,
         catalog: true,
         backups: true,
       })
@@ -774,6 +775,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       optionalServiceMutationStatus.value = 'ready'
       await refreshWorkbenchReadState(normalizedProjectName, {
         snapshot: true,
+        graph: true,
         catalog: true,
       })
       return result
@@ -848,6 +850,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       optionalServiceMutationStatus.value = 'ready'
       await refreshWorkbenchReadState(normalizedProjectName, {
         snapshot: true,
+        graph: true,
         catalog: true,
       })
       return result
@@ -942,6 +945,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       resolveStatus.value = 'ready'
       await refreshWorkbenchReadState(normalizedProjectName, {
         snapshot: true,
+        graph: true,
       })
       return result
     } catch (error: unknown) {
@@ -994,6 +998,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       portMutationStatus.value = 'ready'
       await refreshWorkbenchReadState(normalizedProjectName, {
         snapshot: true,
+        graph: true,
       })
       return result
     } catch (error: unknown) {
@@ -1064,6 +1069,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       resourceMutationStatus.value = 'ready'
       await refreshWorkbenchReadState(normalizedProjectName, {
         snapshot: true,
+        graph: true,
       })
       return result
     } catch (error: unknown) {
@@ -1204,6 +1210,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       moduleMutationStatus.value = 'ready'
       await refreshWorkbenchReadState(normalizedProjectName, {
         snapshot: true,
+        graph: true,
       })
       return result
     } catch (error: unknown) {
@@ -1264,6 +1271,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       previewStatus.value = 'ready'
       await refreshWorkbenchReadState(normalizedProjectName, {
         snapshot: true,
+        graph: true,
       })
       return result
     } catch (error: unknown) {
@@ -1339,6 +1347,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       applyStatus.value = 'ready'
       await refreshWorkbenchReadState(normalizedProjectName, {
         snapshot: true,
+        graph: true,
         backups: true,
       })
       return result
@@ -1426,6 +1435,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       restoreStatus.value = 'ready'
       await refreshWorkbenchReadState(normalizedProjectName, {
         snapshot: true,
+        graph: true,
         backups: true,
       })
       return result

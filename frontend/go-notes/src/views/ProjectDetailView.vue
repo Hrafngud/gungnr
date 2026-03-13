@@ -26,6 +26,7 @@ import type { ProjectDetailSectionTab } from '@/composables/projectDetail/usePro
 import {
   useWorkbenchCatalogQuery,
   useWorkbenchComposeBackupsQuery,
+  useWorkbenchGraphQuery,
   useWorkbenchSnapshotQuery,
 } from '@/composables/workbench/useWorkbenchQueries'
 import type {
@@ -40,7 +41,6 @@ import type {
   WorkbenchResourceInputState,
   WorkbenchResourceInventoryRow,
   WorkbenchServiceInventoryRow,
-  WorkbenchTopologyInventoryRow,
 } from '@/components/workbench/projectDetailWorkbenchTypes'
 import { projectsApi } from '@/services/projects'
 import { apiErrorMessage, parseApiError, type ApiError } from '@/services/api'
@@ -54,6 +54,7 @@ import type { ProjectDetail } from '@/types/projects'
 import {
   buildWorkbenchPortSelectorKey,
   type WorkbenchComposeBackupMetadata,
+  type WorkbenchDependencyGraph,
   type WorkbenchMutationIssue,
   type WorkbenchOptionalServiceCatalogEntry,
   type WorkbenchOptionalServiceMutationAction,
@@ -126,6 +127,9 @@ const workbenchBackupsQueryEnabled = computed(() => workbenchQueryEnabled.value 
 const workbenchSnapshotQuery = useWorkbenchSnapshotQuery(projectName, {
   enabled: workbenchQueryEnabled,
 })
+const workbenchGraphQuery = useWorkbenchGraphQuery(projectName, {
+  enabled: workbenchQueryEnabled,
+})
 const workbenchCatalogQuery = useWorkbenchCatalogQuery(projectName, {
   enabled: workbenchQueryEnabled,
 })
@@ -145,6 +149,7 @@ const workbenchQueryStatus = (
 }
 
 const workbenchSnapshot = computed(() => workbenchSnapshotQuery.data.value ?? null)
+const workbenchGraph = computed<WorkbenchDependencyGraph | null>(() => workbenchGraphQuery.data.value ?? null)
 const workbenchStatus = computed<WorkbenchRequestStatus>(() =>
   workbenchQueryStatus(
     workbenchQueryEnabled.value,
@@ -155,6 +160,17 @@ const workbenchStatus = computed<WorkbenchRequestStatus>(() =>
 const workbenchError = computed<ApiError | null>(() => {
   if (workbenchStatus.value !== 'error') return null
   return parseApiError(workbenchSnapshotQuery.error.value)
+})
+const workbenchGraphStatus = computed<WorkbenchRequestStatus>(() =>
+  workbenchQueryStatus(
+    workbenchQueryEnabled.value,
+    workbenchGraphQuery.isPending.value,
+    workbenchGraphQuery.isError.value,
+  ),
+)
+const workbenchGraphError = computed<ApiError | null>(() => {
+  if (workbenchGraphStatus.value !== 'error') return null
+  return parseApiError(workbenchGraphQuery.error.value)
 })
 const workbenchCatalog = computed(() => workbenchCatalogQuery.data.value ?? null)
 const workbenchCatalogStatus = computed<WorkbenchRequestStatus>(() =>
@@ -281,6 +297,12 @@ const workbenchErrorMessage = computed(() => {
 const workbenchCatalogErrorMessage = computed(() => {
   const parsedError = workbenchCatalogError.value
   if (!parsedError) return 'Optional-service catalog could not be loaded.'
+  if (parsedError.code) return `[${parsedError.code}] ${parsedError.message}`
+  return parsedError.message
+})
+const workbenchGraphErrorMessage = computed(() => {
+  const parsedError = workbenchGraphError.value
+  if (!parsedError) return 'Dependency graph data could not be loaded.'
   if (parsedError.code) return `[${parsedError.code}] ${parsedError.message}`
   return parsedError.message
 })
@@ -1015,70 +1037,6 @@ function workbenchOptionalServiceFeedback(
   return workbenchMutationFeedbackFromError(parsedError, 'optional-service')
 }
 
-const workbenchTopologyInventory = computed<WorkbenchTopologyInventoryRow[]>(() => {
-  const snapshot = workbenchSnapshot.value
-  if (!snapshot) return []
-
-  const serviceNames: string[] = []
-  const seenServiceNames = new Set<string>()
-  const dependsOnByService = new Map<string, string[]>()
-  const dependedByByService = new Map<string, string[]>()
-  const networkNamesByService = new Map<string, string[]>()
-  const moduleTypesByService = new Map<string, string[]>()
-
-  const trackServiceName = (value?: string | null) => {
-    const normalized = value?.trim()
-    if (!normalized || seenServiceNames.has(normalized)) return
-    seenServiceNames.add(normalized)
-    serviceNames.push(normalized)
-  }
-
-  const appendUnique = (targetMap: Map<string, string[]>, serviceName: string, value: string) => {
-    const normalizedServiceName = serviceName.trim()
-    const normalizedValue = value.trim()
-    if (!normalizedServiceName || !normalizedValue) return
-
-    const currentValues = targetMap.get(normalizedServiceName)
-    if (currentValues) {
-      if (!currentValues.includes(normalizedValue)) currentValues.push(normalizedValue)
-      return
-    }
-
-    targetMap.set(normalizedServiceName, [normalizedValue])
-  }
-
-  for (const service of snapshot.services) {
-    trackServiceName(service.serviceName)
-  }
-
-  for (const dependency of snapshot.dependencies) {
-    trackServiceName(dependency.serviceName)
-    trackServiceName(dependency.dependsOn)
-    appendUnique(dependsOnByService, dependency.serviceName, dependency.dependsOn)
-    appendUnique(dependedByByService, dependency.dependsOn, dependency.serviceName)
-  }
-
-  for (const networkRef of snapshot.networkRefs) {
-    trackServiceName(networkRef.serviceName)
-    appendUnique(networkNamesByService, networkRef.serviceName, networkRef.networkName)
-  }
-
-  for (const module of snapshot.modules) {
-    const serviceName = module.serviceName?.trim()
-    if (!serviceName) continue
-    trackServiceName(serviceName)
-    appendUnique(moduleTypesByService, serviceName, module.moduleType)
-  }
-
-  return serviceNames.map((serviceName) => ({
-    key: serviceName,
-    serviceName,
-    dependsOn: dependsOnByService.get(serviceName) ?? [],
-    dependedBy: dependedByByService.get(serviceName) ?? [],
-    networkNames: networkNamesByService.get(serviceName) ?? [],
-    moduleTypes: moduleTypesByService.get(serviceName) ?? [],
-  }))
-})
 const workbenchResourceFieldOrder: WorkbenchResourceField[] = [
   'limitCpus',
   'limitMemory',
@@ -1645,6 +1603,7 @@ const fmtDate = (value?: string | null) => {
 
 const refreshWorkbenchReadState = async (selection: {
   snapshot?: boolean
+  graph?: boolean
   catalog?: boolean
   backups?: boolean
 } = {}) => {
@@ -1673,6 +1632,7 @@ const load = async () => {
     } else {
       void refreshWorkbenchReadState({
         snapshot: true,
+        graph: true,
         catalog: true,
         backups: isAdmin.value,
       })
@@ -1694,6 +1654,7 @@ const refreshWorkbench = async () => {
   workbenchPendingOptionalServiceMutation.value = null
   await refreshWorkbenchReadState({
     snapshot: true,
+    graph: true,
     catalog: true,
     backups: isAdmin.value,
   })
@@ -2572,8 +2533,10 @@ watch(projectName, () => {
             :apply-status="workbenchApplyStatus"
             :restore-status="workbenchRestoreStatus"
             :resolve-status="workbenchResolveStatus"
+            :dependency-graph="workbenchGraph"
+            :dependency-graph-status="workbenchGraphStatus"
+            :dependency-graph-error-message="workbenchGraphErrorMessage"
             :service-inventory="workbenchServiceInventory"
-            :topology-inventory="workbenchTopologyInventory"
             :port-inventory="workbenchPortInventory"
             :resource-inventory="workbenchResourceInventory"
             :resource-editor-fields="workbenchResourceEditorFields"

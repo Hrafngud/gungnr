@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import UiState from '@/components/ui/UiState.vue'
 import WorkbenchDependencyGraph from '@/components/workbench/WorkbenchDependencyGraph.vue'
-import type { WorkbenchTopologyInventoryRow } from '@/components/workbench/projectDetailWorkbenchTypes'
+import type { WorkbenchRequestStatus } from '@/stores/workbench'
+import type { WorkbenchDependencyGraph as WorkbenchDependencyGraphModel } from '@/types/workbench'
 
 defineProps<{
-  selectedServiceTopology: WorkbenchTopologyInventoryRow | null
+  selectedServiceName: string
+  dependencyGraph: WorkbenchDependencyGraphModel | null
+  dependencyGraphStatus: WorkbenchRequestStatus
+  dependencyGraphErrorMessage: string
 }>()
 </script>
 
@@ -17,14 +21,22 @@ defineProps<{
       </div>
     </div>
 
-    <UiState v-if="!selectedServiceTopology">
-      No Workbench topology rows are stored for this service yet.
+    <UiState v-if="dependencyGraphStatus === 'loading'" loading>
+      Loading dependency graph...
+    </UiState>
+    <UiState v-else-if="dependencyGraphStatus === 'error'" tone="error">
+      {{ dependencyGraphErrorMessage }}
+    </UiState>
+    <UiState v-else-if="!selectedServiceName">
+      Select a service to inspect dependency links.
+    </UiState>
+    <UiState v-else-if="!dependencyGraph">
+      Dependency graph data is unavailable for this project.
     </UiState>
     <div v-else class="h-full w-full p-3 items-center gap-3">
       <WorkbenchDependencyGraph
-        :service-name="selectedServiceTopology.serviceName"
-        :depends-on="selectedServiceTopology.dependsOn"
-        :depended-by="selectedServiceTopology.dependedBy"
+        :service-name="selectedServiceName"
+        :graph="dependencyGraph"
       />
     </div>
   </div>

@@ -22,6 +22,7 @@ const (
 	workbenchPortSourceComposeHostPort = "compose_host_port"
 	workbenchPortSourceModuleDefault   = "module_default"
 	workbenchPortSourceContainerPort   = "container_port"
+	workbenchPortSourceServiceProfile  = "service_profile"
 )
 
 const (

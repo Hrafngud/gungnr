@@ -1,6 +1,12 @@
 import axios from 'axios'
 import mockData from '@/mock.json'
-import type { WorkbenchPortSelector, WorkbenchStackPort, WorkbenchStackSnapshot } from '@/types/workbench'
+import type {
+  WorkbenchDependencyGraph,
+  WorkbenchDependencyNodeStatus,
+  WorkbenchPortSelector,
+  WorkbenchStackPort,
+  WorkbenchStackSnapshot,
+} from '@/types/workbench'
 
 export class ApiError extends Error {
   code?: string
@@ -136,6 +142,7 @@ export const api = axios.create({
 
 const mockFlagKey = 'gungnr:mock'
 const workbenchSnapshotPathPattern = /^\/api\/v1\/projects\/([^/]+)\/workbench$/
+const workbenchGraphPathPattern = /^\/api\/v1\/projects\/([^/]+)\/workbench\/graph$/
 const workbenchComposePreviewPathPattern = /^\/api\/v1\/projects\/([^/]+)\/workbench\/compose\/preview$/
 const workbenchPortMutatePathPattern = /^\/api\/v1\/projects\/([^/]+)\/workbench\/ports\/mutate$/
 const workbenchPortSuggestPathPattern = /^\/api\/v1\/projects\/([^/]+)\/workbench\/ports\/suggest$/
@@ -517,6 +524,78 @@ function resolveMockWorkbenchComposePreview(
   }
 }
 
+function resolveMockWorkbenchGraph(projectName: string): { graph: WorkbenchDependencyGraph } | null {
+  const state = getMockWorkbenchState(projectName)
+  if (!state) return null
+
+  const stack = state.current
+  const serviceNames = new Set<string>()
+  stack.services.forEach((service) => {
+    const serviceName = service.serviceName.trim()
+    if (serviceName) serviceNames.add(serviceName)
+  })
+  stack.dependencies.forEach((dependency) => {
+    const toService = dependency.serviceName.trim()
+    const fromService = dependency.dependsOn.trim()
+    if (toService) serviceNames.add(toService)
+    if (fromService) serviceNames.add(fromService)
+  })
+
+  const sortedNames = [...serviceNames].sort((a, b) => a.localeCompare(b))
+  const statusByService = new Map<string, WorkbenchDependencyNodeStatus>()
+
+  const nodes = sortedNames.map((serviceName) => {
+    const status: WorkbenchDependencyNodeStatus = 'running'
+    statusByService.set(serviceName, status)
+    return {
+      serviceName,
+      status,
+      statusText: 'mock runtime: running',
+      containerCount: 1,
+      runningCount: 1,
+      healthyCount: 1,
+      failedCount: 0,
+    }
+  })
+
+  const seenEdges = new Set<string>()
+  const edges = stack.dependencies
+    .map((dependency) => {
+      const toService = dependency.serviceName.trim()
+      const fromService = dependency.dependsOn.trim()
+      if (!toService || !fromService) return null
+
+      const edgeKey = `${fromService.toLowerCase()}->${toService.toLowerCase()}`
+      if (seenEdges.has(edgeKey)) return null
+      seenEdges.add(edgeKey)
+
+      return {
+        key: `${fromService}->${toService}`,
+        fromService,
+        toService,
+        sourceStatus: statusByService.get(fromService) ?? 'unknown',
+        failureSource: false,
+      }
+    })
+    .filter((edge): edge is WorkbenchDependencyGraph['edges'][number] => Boolean(edge))
+    .sort((a, b) => {
+      const fromDiff = a.fromService.localeCompare(b.fromService)
+      if (fromDiff !== 0) return fromDiff
+      return a.toService.localeCompare(b.toService)
+    })
+
+  return {
+    graph: {
+      projectName: stack.projectName,
+      revision: stack.revision,
+      sourceFingerprint: stack.sourceFingerprint,
+      nodes,
+      edges,
+      warnings: ['mock runtime data is synthetic'],
+    },
+  }
+}
+
 function findMockPortIndex(stack: WorkbenchStackSnapshot, selector: WorkbenchPortSelector): number {
   return stack.ports.findIndex(
     (port) =>
@@ -859,6 +938,14 @@ function resolveDynamicMockResponse(
       const state = getMockWorkbenchState(projectName)
       if (!state) return undefined
       return { stack: cloneMockValue(state.current) }
+    }
+
+    const graphMatch = pathname.match(workbenchGraphPathPattern)
+    if (graphMatch) {
+      const projectSegment = graphMatch[1]
+      if (!projectSegment) return undefined
+      const projectName = decodeProjectSegment(projectSegment)
+      return resolveMockWorkbenchGraph(projectName) ?? undefined
     }
   }
 

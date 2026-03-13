@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/vue-query'
 
 interface WorkbenchReadQuerySelection {
   snapshot?: boolean
+  graph?: boolean
   catalog?: boolean
   backups?: boolean
 }
@@ -13,6 +14,7 @@ function normalizeProjectName(projectName: string): string {
 function buildQuerySelection(selection: WorkbenchReadQuerySelection): Required<WorkbenchReadQuerySelection> {
   return {
     snapshot: selection.snapshot ?? true,
+    graph: selection.graph ?? false,
     catalog: selection.catalog ?? true,
     backups: selection.backups ?? false,
   }
@@ -23,6 +25,7 @@ export const workbenchQueryKeys = {
   project: (projectName: string) => ['workbench', normalizeProjectName(projectName)] as const,
   snapshot: (projectName: string) =>
     [...workbenchQueryKeys.project(projectName), 'snapshot'] as const,
+  graph: (projectName: string) => [...workbenchQueryKeys.project(projectName), 'graph'] as const,
   catalog: (projectName: string) => [...workbenchQueryKeys.project(projectName), 'catalog'] as const,
   backups: (projectName: string) => [...workbenchQueryKeys.project(projectName), 'backups'] as const,
 }
@@ -37,6 +40,7 @@ function selectedQueryKeys(
   const resolvedSelection = buildQuerySelection(selection)
   const queryKeys: Array<readonly unknown[]> = []
   if (resolvedSelection.snapshot) queryKeys.push(workbenchQueryKeys.snapshot(normalizedProjectName))
+  if (resolvedSelection.graph) queryKeys.push(workbenchQueryKeys.graph(normalizedProjectName))
   if (resolvedSelection.catalog) queryKeys.push(workbenchQueryKeys.catalog(normalizedProjectName))
   if (resolvedSelection.backups) queryKeys.push(workbenchQueryKeys.backups(normalizedProjectName))
   return queryKeys

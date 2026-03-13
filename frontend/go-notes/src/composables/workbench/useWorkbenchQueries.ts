@@ -61,6 +61,23 @@ export function useWorkbenchCatalogQuery(
   })
 }
 
+export function useWorkbenchGraphQuery(
+  projectName: MaybeRefOrGetter<string>,
+  options: UseWorkbenchQueryOptions = {},
+) {
+  const normalizedProjectName = resolveProjectName(projectName)
+  const enabled = resolveEnabled(projectName, options.enabled)
+
+  return useQuery({
+    queryKey: computed(() => workbenchQueryKeys.graph(normalizedProjectName.value)),
+    enabled,
+    queryFn: async () => {
+      const { data } = await workbenchApi.getGraph(normalizedProjectName.value)
+      return data.graph
+    },
+  })
+}
+
 export function useWorkbenchComposeBackupsQuery(
   projectName: MaybeRefOrGetter<string>,
   options: UseWorkbenchQueryOptions = {},

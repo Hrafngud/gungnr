@@ -258,6 +258,9 @@ func TestWorkbenchSuggestStoredSnapshotHostPortsDeterministic(t *testing.T) {
 	t.Parallel()
 
 	svc := NewWorkbenchServiceWithStorage(t.TempDir(), nil, &fakeSettingsRepo{}, "test-session-secret")
+	svc.hostPortScanner = func(context.Context) (map[int]struct{}, error) {
+		return map[int]struct{}{}, nil
+	}
 	initial := WorkbenchStackSnapshot{
 		ProjectName: "demo",
 		Revision:    4,
@@ -310,8 +313,8 @@ func TestWorkbenchSuggestStoredSnapshotHostPortsDeterministic(t *testing.T) {
 	if !reflect.DeepEqual(firstSnapshot.Ports, secondSnapshot.Ports) {
 		t.Fatalf("expected snapshot to remain unchanged across suggestions\nfirst=%#v\nsecond=%#v", firstSnapshot.Ports, secondSnapshot.Ports)
 	}
-	if firstSummary.Source != workbenchPortSourceModuleDefault {
-		t.Fatalf("expected module default source, got %q", firstSummary.Source)
+	if firstSummary.Source != workbenchPortSourceServiceProfile {
+		t.Fatalf("expected service profile source, got %q", firstSummary.Source)
 	}
 	if firstSummary.PreferredHostPort == nil || *firstSummary.PreferredHostPort != 6379 {
 		t.Fatalf("expected preferred host port 6379, got %#v", firstSummary.PreferredHostPort)
@@ -335,6 +338,157 @@ func TestWorkbenchSuggestStoredSnapshotHostPortsDeterministic(t *testing.T) {
 	}
 	if stored.Revision != initial.Revision {
 		t.Fatalf("expected read-only suggestion flow to keep revision=%d, got %d", initial.Revision, stored.Revision)
+	}
+}
+
+func TestWorkbenchSuggestStoredSnapshotHostPortsFiltersOccupiedHostPorts(t *testing.T) {
+	t.Parallel()
+
+	svc := NewWorkbenchServiceWithStorage(t.TempDir(), nil, &fakeSettingsRepo{}, "test-session-secret")
+	svc.hostPortScanner = func(context.Context) (map[int]struct{}, error) {
+		return map[int]struct{}{
+			80: {},
+			81: {},
+			82: {},
+			83: {},
+			87: {},
+		}, nil
+	}
+
+	initial := WorkbenchStackSnapshot{
+		ProjectName: "demo",
+		Revision:    4,
+		Services: []WorkbenchComposeService{
+			{ServiceName: "web", Image: "nginx:stable"},
+		},
+		Ports: []WorkbenchComposePort{
+			{
+				ServiceName:   "web",
+				ContainerPort: 8080,
+				Protocol:      "tcp",
+			},
+		},
+	}
+	if err := svc.saveWorkbenchSnapshot(context.Background(), "demo", initial); err != nil {
+		t.Fatalf("save snapshot: %v", err)
+	}
+
+	snapshot, summary, err := svc.SuggestStoredSnapshotHostPorts(context.Background(), "demo", WorkbenchPortSuggestionRequest{
+		Selector: WorkbenchPortSelector{
+			ServiceName:   "web",
+			ContainerPort: 8080,
+			Protocol:      "tcp",
+		},
+		Limit: 6,
+	})
+	if err != nil {
+		t.Fatalf("suggest host ports: %v", err)
+	}
+
+	if summary.PreferredHostPort == nil || *summary.PreferredHostPort != 80 {
+		t.Fatalf("expected preferred host port 80, got %#v", summary.PreferredHostPort)
+	}
+
+	gotPorts := workbenchSuggestionPorts(summary.Suggestions)
+	expectedPorts := []int{84, 85, 86, 88, 89, 90}
+	if !reflect.DeepEqual(gotPorts, expectedPorts) {
+		t.Fatalf("unexpected suggestion ports got=%v want=%v", gotPorts, expectedPorts)
+	}
+
+	if snapshot.Revision != initial.Revision {
+		t.Fatalf("expected read-only suggestions to keep revision=%d, got %d", initial.Revision, snapshot.Revision)
+	}
+}
+
+func TestWorkbenchSuggestStoredSnapshotHostPortsMatchesWildcardHostIPSelector(t *testing.T) {
+	t.Parallel()
+
+	svc := NewWorkbenchServiceWithStorage(t.TempDir(), nil, &fakeSettingsRepo{}, "test-session-secret")
+	svc.hostPortScanner = func(context.Context) (map[int]struct{}, error) {
+		return map[int]struct{}{}, nil
+	}
+	initial := WorkbenchStackSnapshot{
+		ProjectName: "demo",
+		Revision:    2,
+		Services: []WorkbenchComposeService{
+			{ServiceName: "api", Image: "nginx:stable"},
+		},
+		Ports: []WorkbenchComposePort{
+			{
+				ServiceName:   "api",
+				ContainerPort: 8080,
+				Protocol:      "tcp",
+				HostIP:        "",
+			},
+		},
+	}
+	if err := svc.saveWorkbenchSnapshot(context.Background(), "demo", initial); err != nil {
+		t.Fatalf("save snapshot: %v", err)
+	}
+
+	_, summary, err := svc.SuggestStoredSnapshotHostPorts(context.Background(), "demo", WorkbenchPortSuggestionRequest{
+		Selector: WorkbenchPortSelector{
+			ServiceName:   "api",
+			ContainerPort: 8080,
+			Protocol:      "tcp",
+			HostIP:        "0.0.0.0",
+		},
+		Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("suggest host ports: %v", err)
+	}
+	if summary.SuggestionCount != 1 {
+		t.Fatalf("expected 1 suggestion, got %d", summary.SuggestionCount)
+	}
+}
+
+func TestWorkbenchSuggestStoredSnapshotHostPortsSupportsHostPortRawRows(t *testing.T) {
+	t.Parallel()
+
+	svc := NewWorkbenchServiceWithStorage(t.TempDir(), nil, &fakeSettingsRepo{}, "test-session-secret")
+	svc.hostPortScanner = func(context.Context) (map[int]struct{}, error) {
+		return map[int]struct{}{}, nil
+	}
+	initial := WorkbenchStackSnapshot{
+		ProjectName: "demo",
+		Revision:    2,
+		Services: []WorkbenchComposeService{
+			{ServiceName: "proxy", Image: "nginx:stable"},
+		},
+		Ports: []WorkbenchComposePort{
+			{
+				ServiceName:   "proxy",
+				ContainerPort: 8080,
+				Protocol:      "tcp",
+				HostPortRaw:   "${API_PORT}",
+				HostIP:        "",
+			},
+		},
+	}
+	if err := svc.saveWorkbenchSnapshot(context.Background(), "demo", initial); err != nil {
+		t.Fatalf("save snapshot: %v", err)
+	}
+
+	_, summary, err := svc.SuggestStoredSnapshotHostPorts(context.Background(), "demo", WorkbenchPortSuggestionRequest{
+		Selector: WorkbenchPortSelector{
+			ServiceName:   "proxy",
+			ContainerPort: 8080,
+			Protocol:      "tcp",
+			HostIP:        "0.0.0.0",
+		},
+		Limit: 3,
+	})
+	if err != nil {
+		t.Fatalf("suggest host ports: %v", err)
+	}
+	if summary.Source != workbenchPortSourceServiceProfile {
+		t.Fatalf("expected service profile source for proxy baseline, got %q", summary.Source)
+	}
+	gotPorts := workbenchSuggestionPorts(summary.Suggestions)
+	expectedPorts := []int{80, 81, 82}
+	if !reflect.DeepEqual(gotPorts, expectedPorts) {
+		t.Fatalf("unexpected suggestion ports got=%v want=%v", gotPorts, expectedPorts)
 	}
 }
 

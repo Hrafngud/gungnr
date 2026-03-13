@@ -3,6 +3,7 @@ import type {
   WorkbenchComposeApplyRequest,
   WorkbenchComposeApplyResponse,
   WorkbenchComposeBackupsResponse,
+  WorkbenchDependencyGraphResponse,
   WorkbenchOptionalServiceAddRequest,
   WorkbenchOptionalServiceCatalogResponse,
   WorkbenchOptionalServiceMutationResponse,
@@ -31,6 +32,8 @@ function workbenchProjectPath(projectName: string): string {
 export const workbenchApi = {
   getSnapshot: (projectName: string) =>
     api.get<WorkbenchSnapshotResponse>(workbenchProjectPath(projectName)),
+  getGraph: (projectName: string) =>
+    api.get<WorkbenchDependencyGraphResponse>(`${workbenchProjectPath(projectName)}/graph`),
   getCatalog: (projectName: string) =>
     api.get<WorkbenchOptionalServiceCatalogResponse>(`${workbenchProjectPath(projectName)}/catalog`),
   addOptionalService: (projectName: string, payload: WorkbenchOptionalServiceAddRequest) =>

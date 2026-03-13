@@ -87,6 +87,39 @@ export interface WorkbenchSnapshotResponse {
   stack: WorkbenchStackSnapshot
 }
 
+export type WorkbenchDependencyNodeStatus = 'running' | 'degraded' | 'failed' | 'missing' | 'unknown'
+
+export interface WorkbenchDependencyGraphNode {
+  serviceName: string
+  status: WorkbenchDependencyNodeStatus
+  statusText: string
+  containerCount: number
+  runningCount: number
+  healthyCount: number
+  failedCount: number
+}
+
+export interface WorkbenchDependencyGraphEdge {
+  key: string
+  fromService: string
+  toService: string
+  sourceStatus: WorkbenchDependencyNodeStatus
+  failureSource: boolean
+}
+
+export interface WorkbenchDependencyGraph {
+  projectName: string
+  revision: number
+  sourceFingerprint: string
+  nodes: WorkbenchDependencyGraphNode[]
+  edges: WorkbenchDependencyGraphEdge[]
+  warnings: string[]
+}
+
+export interface WorkbenchDependencyGraphResponse {
+  graph: WorkbenchDependencyGraph
+}
+
 export interface WorkbenchOptionalServiceComposeMatch {
   serviceName: string
   image?: string

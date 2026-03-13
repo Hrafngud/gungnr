@@ -34,6 +34,7 @@ type WorkbenchService struct {
 	projects        repository.ProjectRepository
 	settings        repository.SettingsRepository
 	sessionSecret   string
+	hostPortScanner workbenchHostPortScanner
 	lockManager     *workbenchProjectLockManager
 	lockWaitTimeout time.Duration
 	backupMaxCount  int
@@ -56,6 +57,7 @@ func NewWorkbenchServiceWithStorage(
 		projects:        projects,
 		settings:        settings,
 		sessionSecret:   strings.TrimSpace(sessionSecret),
+		hostPortScanner: workbenchScanOccupiedHostPorts,
 		lockManager:     newWorkbenchProjectLockManager(),
 		lockWaitTimeout: defaultWorkbenchLockWaitTimeout,
 		backupMaxCount:  defaultWorkbenchBackupMaxCount,

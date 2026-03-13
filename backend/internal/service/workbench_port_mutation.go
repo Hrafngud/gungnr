@@ -70,6 +70,25 @@ type WorkbenchPortSuggestionSummary struct {
 	Suggestions       []WorkbenchPortSuggestion `json:"suggestions"`
 }
 
+type workbenchHostPortScanner func(ctx context.Context) (map[int]struct{}, error)
+
+func workbenchScanOccupiedHostPorts(ctx context.Context) (map[int]struct{}, error) {
+	occupied := make(map[int]struct{})
+	hostPorts, hostErr := listHostListeningPorts(ctx)
+	for _, port := range hostPorts {
+		occupied[port] = struct{}{}
+	}
+	dockerPorts, dockerErr := listDockerPublishedPorts(ctx)
+	for _, port := range dockerPorts {
+		occupied[port] = struct{}{}
+	}
+
+	if hostErr != nil && dockerErr != nil {
+		return nil, fmt.Errorf("failed to inspect host listening ports")
+	}
+	return occupied, nil
+}
+
 func (s *WorkbenchService) MutateStoredSnapshotPort(
 	ctx context.Context,
 	projectName string,
@@ -166,7 +185,14 @@ func (s *WorkbenchService) SuggestStoredSnapshotHostPorts(
 		)
 	}
 
-	resolved, suggestionSummary, suggestionIssues := suggestWorkbenchSnapshotPorts(snapshot, normalizedInput)
+	var occupiedHostPorts map[int]struct{}
+	if s.hostPortScanner != nil {
+		if scanned, scanErr := s.hostPortScanner(ctx); scanErr == nil {
+			occupiedHostPorts = scanned
+		}
+	}
+
+	resolved, suggestionSummary, suggestionIssues := suggestWorkbenchSnapshotPorts(snapshot, normalizedInput, occupiedHostPorts)
 	if len(suggestionIssues) > 0 {
 		return resolved, suggestionSummary, workbenchPortSuggestionValidationError(resolved, suggestionSummary, suggestionIssues)
 	}
@@ -331,6 +357,7 @@ func mutateWorkbenchSnapshotPort(
 func suggestWorkbenchSnapshotPorts(
 	snapshot WorkbenchStackSnapshot,
 	input WorkbenchPortSuggestionRequest,
+	occupiedHostPorts map[int]struct{},
 ) (WorkbenchStackSnapshot, WorkbenchPortSuggestionSummary, []WorkbenchPortResolutionIssue) {
 	normalizedSnapshot := normalizeWorkbenchStackSnapshot(snapshot)
 	summary := WorkbenchPortSuggestionSummary{
@@ -351,7 +378,7 @@ func suggestWorkbenchSnapshotPorts(
 	}
 	summary.CurrentStatus = strings.ToLower(strings.TrimSpace(target.AllocationStatus))
 
-	candidate, candidateIssue := workbenchResolvePortCandidate(normalizedSnapshot, target, targetIndex)
+	candidate, candidateIssue := workbenchResolveSuggestionPortCandidate(normalizedSnapshot, target, targetIndex)
 	if candidateIssue != nil {
 		return normalizedSnapshot, summary, []WorkbenchPortResolutionIssue{
 			workbenchPortResolutionIssueWithCodePrefix(*candidateIssue, "WB-SUGGEST"),
@@ -365,6 +392,9 @@ func suggestWorkbenchSnapshotPorts(
 	suggestions := make([]WorkbenchPortSuggestion, 0, input.Limit)
 	rank := 1
 	for candidatePort := candidate.port; candidatePort <= 65535 && len(suggestions) < input.Limit; candidatePort++ {
+		if _, occupied := occupiedHostPorts[candidatePort]; occupied {
+			continue
+		}
 		if workbenchHostPortConflicts(reservedBindings, target.Protocol, target.HostIP, candidatePort) {
 			continue
 		}
@@ -378,6 +408,137 @@ func suggestWorkbenchSnapshotPorts(
 	summary.Suggestions = suggestions
 	summary.SuggestionCount = len(suggestions)
 	return normalizedSnapshot, summary, nil
+}
+
+func workbenchResolveSuggestionPortCandidate(
+	snapshot WorkbenchStackSnapshot,
+	port WorkbenchComposePort,
+	index int,
+) (workbenchPortResolveCandidate, *WorkbenchPortResolutionIssue) {
+	path := fmt.Sprintf("$.ports[%d]", index)
+	serviceName := strings.TrimSpace(port.ServiceName)
+	strategy := strings.ToLower(strings.TrimSpace(port.AssignmentStrategy))
+	if strategy != workbenchPortStrategyManual {
+		strategy = workbenchPortStrategyAuto
+	}
+	protocol := strings.ToLower(strings.TrimSpace(port.Protocol))
+	if protocol == "" {
+		protocol = "tcp"
+	}
+	hostIP := normalizeHostIP(strings.TrimSpace(port.HostIP))
+
+	if profilePort, ok := workbenchResolveServiceProfileBaselinePort(snapshot, serviceName); ok {
+		return workbenchPortResolveCandidate{
+			port:   profilePort,
+			source: workbenchPortSourceServiceProfile,
+			path:   path + ".serviceName",
+		}, nil
+	}
+
+	if moduleDefault, ok := workbenchResolveModuleDefaultPort(snapshot.Modules, serviceName); ok {
+		return workbenchPortResolveCandidate{
+			port:   moduleDefault,
+			source: workbenchPortSourceModuleDefault,
+			path:   path + ".hostPort",
+		}, nil
+	}
+
+	if port.ContainerPort < 1 || port.ContainerPort > 65535 {
+		return workbenchPortResolveCandidate{}, &WorkbenchPortResolutionIssue{
+			Class:    workbenchPortIssueClassSchema,
+			Code:     "WB-RESOLVE-PORT-CONTAINER-RANGE",
+			Path:     path + ".containerPort",
+			Message:  fmt.Sprintf("service %q has invalid containerPort %d", serviceName, port.ContainerPort),
+			Service:  serviceName,
+			Protocol: protocol,
+			HostIP:   hostIP,
+			HostPort: strconv.Itoa(port.ContainerPort),
+			Strategy: strategy,
+			Source:   workbenchPortSourceContainerPort,
+		}
+	}
+
+	return workbenchPortResolveCandidate{
+		port:   port.ContainerPort,
+		source: workbenchPortSourceContainerPort,
+		path:   path + ".containerPort",
+	}, nil
+}
+
+func workbenchResolveServiceProfileBaselinePort(snapshot WorkbenchStackSnapshot, serviceName string) (int, bool) {
+	image := workbenchServiceImageForName(snapshot.Services, serviceName)
+	if port, ok := workbenchServiceProfilePortFromImage(image); ok {
+		return port, true
+	}
+	return workbenchServiceProfilePortFromName(serviceName)
+}
+
+func workbenchServiceImageForName(services []WorkbenchComposeService, serviceName string) string {
+	normalizedName := strings.TrimSpace(serviceName)
+	for _, service := range services {
+		if strings.EqualFold(strings.TrimSpace(service.ServiceName), normalizedName) {
+			return strings.ToLower(strings.TrimSpace(service.Image))
+		}
+	}
+	return ""
+}
+
+func workbenchServiceProfilePortFromImage(image string) (int, bool) {
+	normalizedImage := strings.ToLower(strings.TrimSpace(image))
+	if normalizedImage == "" {
+		return 0, false
+	}
+
+	candidates := []struct {
+		keyword string
+		port    int
+	}{
+		{keyword: "postgres", port: 5432},
+		{keyword: "mysql", port: 3306},
+		{keyword: "mariadb", port: 3306},
+		{keyword: "redis", port: 6379},
+		{keyword: "mongo", port: 27017},
+		{keyword: "nginx", port: 80},
+		{keyword: "traefik", port: 80},
+		{keyword: "caddy", port: 80},
+		{keyword: "httpd", port: 80},
+		{keyword: "haproxy", port: 80},
+		{keyword: "prometheus", port: 9090},
+		{keyword: "minio", port: 9000},
+	}
+
+	for _, candidate := range candidates {
+		if strings.Contains(normalizedImage, candidate.keyword) {
+			return candidate.port, true
+		}
+	}
+	return 0, false
+}
+
+func workbenchServiceProfilePortFromName(serviceName string) (int, bool) {
+	normalizedName := strings.ToLower(strings.TrimSpace(serviceName))
+	if normalizedName == "" {
+		return 0, false
+	}
+
+	switch normalizedName {
+	case "proxy", "ingress", "gateway", "edge", "web", "frontend", "nginx":
+		return 80, true
+	case "postgres", "postgresql", "db", "database":
+		return 5432, true
+	case "mysql", "mariadb":
+		return 3306, true
+	case "redis", "cache":
+		return 6379, true
+	case "mongo", "mongodb":
+		return 27017, true
+	case "prometheus", "metrics":
+		return 9090, true
+	case "minio", "storage", "s3":
+		return 9000, true
+	default:
+		return 0, false
+	}
 }
 
 func normalizeWorkbenchPortMutationRequest(input WorkbenchPortMutationRequest) (WorkbenchPortMutationRequest, []WorkbenchPortResolutionIssue) {
@@ -561,7 +722,12 @@ func workbenchPortMatchesSelector(port WorkbenchComposePort, selector WorkbenchP
 	if portProtocol != selector.Protocol {
 		return false
 	}
-	return normalizeHostIP(strings.TrimSpace(normalized.HostIP)) == selector.HostIP
+	portHostIP := normalizeHostIP(strings.TrimSpace(normalized.HostIP))
+	selectorHostIP := normalizeHostIP(strings.TrimSpace(selector.HostIP))
+	if portHostIP == selectorHostIP {
+		return true
+	}
+	return workbenchIsWildcardHostIP(portHostIP) && workbenchIsWildcardHostIP(selectorHostIP)
 }
 
 func workbenchSnapshotReservedBindings(snapshot WorkbenchStackSnapshot, skipIndex int) []workbenchHostBinding {

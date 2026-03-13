@@ -410,6 +410,46 @@ func (c *ProjectsController) WorkbenchSnapshot(ctx *gin.Context) {
 	})
 }
 
+func (c *ProjectsController) WorkbenchGraph(ctx *gin.Context) {
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.workbench == nil {
+		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeWorkbenchStorageFailed, "workbench service unavailable", nil)
+		return
+	}
+
+	stack, err := c.workbench.GetSnapshot(ctx.Request.Context(), project)
+	if err != nil {
+		status := projectHTTPStatus(err, http.StatusInternalServerError)
+		apierror.RespondWithError(ctx, status, err, errs.CodeProjectWorkbenchReadFailed, "failed to load workbench snapshot")
+		return
+	}
+
+	containers := []service.DockerContainer{}
+	runtimeWarning := ""
+	if c.runtime == nil {
+		runtimeWarning = "runtime service unavailable; graph statuses are based on snapshot-only data"
+	} else {
+		detail, runtimeErr := c.runtime.Detail(ctx.Request.Context(), project)
+		if runtimeErr != nil {
+			runtimeWarning = "runtime container state unavailable; graph statuses are based on snapshot-only data"
+		} else {
+			containers = detail.Containers
+		}
+	}
+
+	graph := c.workbench.BuildDependencyGraph(stack, containers)
+	if runtimeWarning != "" {
+		graph.Warnings = append(graph.Warnings, runtimeWarning)
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"graph": graph,
+	})
+}
+
 func (c *ProjectsController) WorkbenchCatalog(ctx *gin.Context) {
 	project, ok := c.parseProjectParam(ctx)
 	if !ok {
