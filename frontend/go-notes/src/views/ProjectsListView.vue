@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiInput from '@/components/ui/UiInput.vue'
+import UiSelect from '@/components/ui/UiSelect.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
 import NavIcon from '@/components/NavIcon.vue'
@@ -12,10 +13,12 @@ import { usePageLoadingStore } from '@/stores/pageLoading'
 import type { Project } from '@/types/projects'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
+type SelectOption = { value: string; label: string }
 
 const projectsStore = useProjectsStore()
 const pageLoading = usePageLoadingStore()
 const searchQuery = ref('')
+const statusFilter = ref('all')
 const currentPage = ref(1)
 const pageSize = 9
 
@@ -74,10 +77,36 @@ const fmtDate = (value: string) => {
   return parsed.toLocaleString()
 }
 
+const statusOptions = computed<SelectOption[]>(() => {
+  const counts = new Map<string, { label: string; count: number }>()
+  projectsStore.projects.forEach((project) => {
+    const label = project.status.trim() || 'unknown'
+    const value = normalizeStatus(label)
+    const existing = counts.get(value)
+    if (existing) {
+      existing.count += 1
+      return
+    }
+    counts.set(value, { label, count: 1 })
+  })
+
+  const dynamicOptions = Array.from(counts.entries())
+    .sort((a, b) => a[1].label.localeCompare(b[1].label))
+    .map(([value, meta]) => ({
+      value,
+      label: `${meta.label} (${meta.count})`,
+    }))
+
+  return [{ value: 'all', label: 'All statuses' }, ...dynamicOptions]
+})
+
 const filteredProjects = computed(() => {
   const needle = searchQuery.value.trim().toLowerCase()
-  if (!needle) return projectsStore.projects
   return projectsStore.projects.filter((project) => {
+    const normalizedStatus = normalizeStatus(project.status)
+    if (statusFilter.value !== 'all' && normalizedStatus !== statusFilter.value) return false
+    if (!needle) return true
+
     const haystack = [
       project.name,
       project.status,
@@ -140,7 +169,7 @@ const load = async () => {
   pageLoading.stop()
 }
 
-watch(searchQuery, () => {
+watch([searchQuery, statusFilter], () => {
   currentPage.value = 1
 })
 
@@ -187,25 +216,34 @@ onMounted(load)
     </div>
 
     <UiPanel class="space-y-5 p-6">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div class="w-full max-w-xl space-y-2">
-          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Filter</p>
-          <UiInput
-            v-model="searchQuery"
-            class="min-w-[220px]"
-            placeholder="Filter by name, status, repo, path, or port"
+      <div class="w-full space-y-2">
+        <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Filter</p>
+        <div class="grid grid-cols-1 items-center gap-2 sm:grid-cols-[4fr_1fr]">
+          <div class="relative">
+            <NavIcon
+              name="search"
+              class="pointer-events-none absolute left-3 top-1/2 z-[1] h-4 w-4 -translate-y-1/2 text-[color:var(--muted-2)]"
+            />
+            <UiInput
+              v-model="searchQuery"
+              class="projects-search-input"
+              placeholder="Filter by name, status, repo, path, or port"
+            />
+          </div>
+          <UiSelect
+            v-model="statusFilter"
+            :options="statusOptions"
+            placeholder="All statuses"
+            class="w-full"
           />
         </div>
-        <UiState :loading="projectsStore.loading" class="text-xs">
-          {{ projectsStore.loading ? 'Refreshing project list...' : 'Project list ready' }}
-        </UiState>
       </div>
 
       <hr />
 
       <UiState v-if="projectsStore.error" tone="error">{{ projectsStore.error }}</UiState>
       <UiState v-else-if="!projectsStore.loading && filteredProjects.length === 0">
-        No projects matched the current filter.
+        No projects matched the current filters.
       </UiState>
 
       <div v-else class="space-y-4">
@@ -328,5 +366,10 @@ onMounted(load)
 
 .project-card-link:focus-visible {
   outline: none;
+}
+
+.projects-search-input {
+  background: var(--surface-inset);
+  padding-left: 2.35rem;
 }
 </style>

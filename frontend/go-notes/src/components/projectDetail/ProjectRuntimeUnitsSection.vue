@@ -1,16 +1,32 @@
 <script setup lang="ts">
+import { computed, reactive, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
+import UiModal from '@/components/ui/UiModal.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
 import NavIcon from '@/components/NavIcon.vue'
 import type { BadgeTone } from '@/components/workbench/projectDetailWorkbenchTypes'
+import { apiErrorMessage } from '@/services/api'
+import { projectsApi } from '@/services/projects'
+import { useToastStore } from '@/stores/toasts'
 import type { ProjectContainer } from '@/types/projects'
 
+type ContainerActionKind = 'stop' | 'restart' | 'remove'
+
+type ContainerActionState = {
+  stopping: boolean
+  restarting: boolean
+  removing: boolean
+  error: string | null
+}
+
 const props = defineProps<{
+  projectName: string
   containers: ProjectContainer[]
   projectStatus: string
   isAdmin: boolean
@@ -20,7 +36,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   restartStack: []
+  containerActionCompleted: []
 }>()
+
+const toastStore = useToastStore()
+const actionStates = reactive<Record<string, ContainerActionState>>({})
+const lifecycleActionModalOpen = ref(false)
+const lifecycleActionTarget = ref<ProjectContainer | null>(null)
+const lifecycleActionKind = ref<ContainerActionKind | null>(null)
 
 function containerTone(container: ProjectContainer): BadgeTone {
   const normalized = container.status.trim().toLowerCase()
@@ -38,6 +61,136 @@ function projectStatusTone(status: string): BadgeTone {
   if (normalized.includes('pending') || normalized.includes('building')) return 'warn'
   return 'neutral'
 }
+
+const isStoppedStatus = (status: string) => {
+  const normalized = status.toLowerCase()
+  return normalized.startsWith('exited') || normalized.includes('dead') || normalized.includes('created')
+}
+
+const actionStateFor = (container: ProjectContainer): ContainerActionState => {
+  if (!actionStates[container.id]) {
+    actionStates[container.id] = {
+      stopping: false,
+      restarting: false,
+      removing: false,
+      error: null,
+    }
+  }
+  return actionStates[container.id] as ContainerActionState
+}
+
+const lifecycleActionText = computed(() => {
+  const target = lifecycleActionTarget.value
+  const kind = lifecycleActionKind.value
+  if (!target || !kind) return ''
+  if (kind === 'stop') return 'stop'
+  if (kind === 'remove') return 'remove'
+  return isStoppedStatus(target.status) ? 'start' : 'restart'
+})
+
+const lifecycleActionDescription = computed(() => {
+  if (!lifecycleActionText.value) return ''
+  return `This container belongs to a Project, directly interfering on it's lifecycle may lead to fail, are you sure you wanna ${lifecycleActionText.value} the container?`
+})
+
+const lifecycleActionError = computed(() => {
+  const target = lifecycleActionTarget.value
+  if (!target) return null
+  return actionStateFor(target).error
+})
+
+const lifecycleActionLoading = computed(() => {
+  const target = lifecycleActionTarget.value
+  const kind = lifecycleActionKind.value
+  if (!target || !kind) return false
+  const state = actionStateFor(target)
+  if (kind === 'stop') return state.stopping
+  if (kind === 'restart') return state.restarting
+  return state.removing
+})
+
+const lifecycleActionConfirmVariant = computed(() =>
+  lifecycleActionKind.value === 'remove' ? 'danger' : 'primary',
+)
+
+const lifecycleActionConfirmLabel = computed(() => {
+  if (lifecycleActionLoading.value) {
+    if (lifecycleActionKind.value === 'stop') return 'Stopping...'
+    if (lifecycleActionKind.value === 'remove') return 'Removing...'
+    return isStoppedStatus(lifecycleActionTarget.value?.status ?? '') ? 'Starting...' : 'Restarting...'
+  }
+  if (lifecycleActionKind.value === 'stop') return 'Stop container'
+  if (lifecycleActionKind.value === 'remove') return 'Remove container'
+  return isStoppedStatus(lifecycleActionTarget.value?.status ?? '') ? 'Start container' : 'Restart container'
+})
+
+const openLifecycleActionModal = (container: ProjectContainer, action: ContainerActionKind) => {
+  lifecycleActionTarget.value = container
+  lifecycleActionKind.value = action
+  lifecycleActionModalOpen.value = true
+}
+
+const stopContainer = (container: ProjectContainer) => {
+  openLifecycleActionModal(container, 'stop')
+}
+
+const restartContainer = (container: ProjectContainer) => {
+  openLifecycleActionModal(container, 'restart')
+}
+
+const removeContainer = (container: ProjectContainer) => {
+  openLifecycleActionModal(container, 'remove')
+}
+
+const confirmLifecycleAction = async () => {
+  const projectName = props.projectName.trim()
+  const target = lifecycleActionTarget.value
+  const action = lifecycleActionKind.value
+  if (!projectName || !target || !action) return
+
+  const state = actionStateFor(target)
+  if (action === 'stop' && state.stopping) return
+  if (action === 'restart' && state.restarting) return
+  if (action === 'remove' && state.removing) return
+
+  state.error = null
+  if (action === 'stop') state.stopping = true
+  if (action === 'restart') state.restarting = true
+  if (action === 'remove') state.removing = true
+
+  try {
+    if (action === 'stop') {
+      await projectsApi.stopContainer(projectName, target.name)
+      toastStore.success('Container stopped.', 'Docker')
+    } else if (action === 'restart') {
+      await projectsApi.restartContainer(projectName, target.name)
+      const started = isStoppedStatus(target.status)
+      toastStore.success(started ? 'Container started.' : 'Container restarted.', 'Docker')
+    } else {
+      await projectsApi.removeContainer(projectName, target.name)
+      toastStore.success('Container removed.', 'Docker')
+    }
+
+    lifecycleActionModalOpen.value = false
+    emit('containerActionCompleted')
+  } catch (err) {
+    const message = apiErrorMessage(err)
+    state.error = message
+    const failureTitle =
+      action === 'stop' ? 'Stop failed' : action === 'restart' ? 'Restart failed' : 'Remove failed'
+    toastStore.error(message, failureTitle)
+  } finally {
+    if (action === 'stop') state.stopping = false
+    if (action === 'restart') state.restarting = false
+    if (action === 'remove') state.removing = false
+  }
+}
+
+watch(lifecycleActionModalOpen, (open) => {
+  if (open) return
+  lifecycleActionTarget.value = null
+  lifecycleActionKind.value = null
+})
 </script>
 
 <template>
@@ -107,7 +260,106 @@ function projectStatusTone(status: string): BadgeTone {
             <span class="text-[color:var(--text)]">{{ container.service || '—' }}</span>
           </div>
         </div>
+        <UiPanel variant="soft" class="space-y-3 p-4">
+          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+            Lifecycle actions
+          </p>
+          <div class="flex flex-wrap items-center gap-2">
+            <UiButton
+              variant="ghost"
+              size="sm"
+              :disabled="actionStateFor(container).stopping"
+              @click="stopContainer(container)"
+            >
+              <span class="flex items-center gap-2">
+                <NavIcon name="stop" class="h-3.5 w-3.5" />
+                <UiInlineSpinner v-if="actionStateFor(container).stopping" />
+                {{ actionStateFor(container).stopping ? 'Stopping...' : 'Stop' }}
+              </span>
+            </UiButton>
+            <UiButton
+              variant="ghost"
+              size="sm"
+              :disabled="actionStateFor(container).restarting || !isStoppedStatus(container.status)"
+              @click="restartContainer(container)"
+            >
+              <span class="flex items-center gap-2">
+                <NavIcon name="restart" class="h-3.5 w-3.5" />
+                <UiInlineSpinner v-if="actionStateFor(container).restarting" />
+                {{
+                  actionStateFor(container).restarting
+                    ? 'Restarting...'
+                    : isStoppedStatus(container.status)
+                      ? 'Start'
+                      : 'Restart'
+                }}
+              </span>
+            </UiButton>
+            <UiButton
+              variant="ghost"
+              size="sm"
+              class="text-[color:var(--danger)]"
+              :disabled="actionStateFor(container).removing"
+              @click="removeContainer(container)"
+            >
+              <span class="flex items-center gap-2">
+                <NavIcon name="trash" class="h-3.5 w-3.5" />
+                Remove
+              </span>
+            </UiButton>
+            <UiButton
+              :as="RouterLink"
+              :to="{ path: '/logs', query: { container: container.name } }"
+              variant="ghost"
+              size="sm"
+            >
+              <span class="flex items-center gap-2">
+                <NavIcon name="logs" class="h-3.5 w-3.5" />
+                Logs
+              </span>
+            </UiButton>
+          </div>
+
+          <UiInlineFeedback v-if="actionStateFor(container).error" tone="error">
+            {{ actionStateFor(container).error }}
+          </UiInlineFeedback>
+        </UiPanel>
       </UiListRow>
     </div>
+
+    <UiModal
+      v-model="lifecycleActionModalOpen"
+      title="Confirm container lifecycle action"
+    >
+      <div class="space-y-4">
+        <p class="text-sm text-[color:var(--muted)]">
+          {{ lifecycleActionDescription }}
+        </p>
+        <p class="font-mono text-xs text-[color:var(--text)] break-all">
+          {{ lifecycleActionTarget?.name || '' }}
+        </p>
+        <UiInlineFeedback v-if="lifecycleActionError" tone="error">
+          {{ lifecycleActionError }}
+        </UiInlineFeedback>
+      </div>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-3">
+          <UiButton variant="ghost" size="sm" :disabled="lifecycleActionLoading" @click="lifecycleActionModalOpen = false">
+            Cancel
+          </UiButton>
+          <UiButton
+            :variant="lifecycleActionConfirmVariant"
+            size="sm"
+            :disabled="lifecycleActionLoading"
+            @click="confirmLifecycleAction"
+          >
+            <span class="inline-flex items-center gap-2">
+              <UiInlineSpinner v-if="lifecycleActionLoading" />
+              {{ lifecycleActionConfirmLabel }}
+            </span>
+          </UiButton>
+        </div>
+      </template>
+    </UiModal>
   </UiPanel>
 </template>

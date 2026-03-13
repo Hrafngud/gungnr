@@ -2237,6 +2237,19 @@ const restartStack = async () => {
   }
 }
 
+const refreshRuntimeContainers = async () => {
+  const name = projectName.value
+  if (!name) return
+
+  try {
+    const { data } = await projectsApi.getDetail(name)
+    detail.value = data
+  } catch (err) {
+    const message = apiErrorMessage(err)
+    toastStore.error(message, 'Refresh failed')
+  }
+}
+
 watch(workbenchPortInventory, (ports) => {
   syncWorkbenchPortManualInputs(ports)
 }, { immediate: true })
@@ -2882,12 +2895,14 @@ watch(projectName, () => {
 
       <ProjectRuntimeUnitsSection
         v-else-if="activeSectionTab === 'runtime'"
+        :project-name="projectName"
         :containers="detail.containers"
         :project-status="detail.project.record?.status || ''"
         :is-admin="isAdmin"
         :stack-restarting="stackRestarting"
         :stack-restart-error="stackRestartError"
         @restart-stack="restartStack"
+        @container-action-completed="refreshRuntimeContainers"
       />
       <ProjectArchiveExecutionSection
         v-else-if="activeSectionTab === 'archive'"

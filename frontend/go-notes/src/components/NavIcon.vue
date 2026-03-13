@@ -12,6 +12,7 @@ type IconName =
   | 'projects'
   | 'logs'
   | 'users'
+  | 'search'
   | 'arrow-left'
   | 'arrow-right'
   | 'refresh'
@@ -93,6 +94,10 @@ const paths: Record<IconName, string[]> = {
     'M17 11a3 3 0 1 0 0-6a3 3 0 0 0 0 6z',
     'M3 20a4 4 0 0 1 8 0',
     'M13 20a4 4 0 0 1 8 0',
+  ],
+  search: [
+    'M11 19a8 8 0 1 1 0-16a8 8 0 0 1 0 16z',
+    'M21 21l-4.35-4.35',
   ],
   'arrow-left': [
     'M15 18l-6-6l6-6',

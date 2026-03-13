@@ -10,10 +10,10 @@ import UiSelect from '@/components/ui/UiSelect.vue'
 import UiState from '@/components/ui/UiState.vue'
 import UiToggle from '@/components/ui/UiToggle.vue'
 import NavIcon from '@/components/NavIcon.vue'
-import { hostApi } from '@/services/host'
 import { getApiBaseUrl } from '@/services/api'
-import { useToastStore } from '@/stores/toasts'
+import { hostApi } from '@/services/host'
 import { usePageLoadingStore } from '@/stores/pageLoading'
+import { useToastStore } from '@/stores/toasts'
 import type { DockerContainer } from '@/types/host'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
@@ -22,6 +22,18 @@ type ContainerState = 'running' | 'starting' | 'stopped' | 'other'
 type ContainerType = 'web' | 'api' | 'database' | 'proxy' | 'worker' | 'other'
 type ContainerTypeFilter = 'all' | ContainerType
 type ContainerStatusFilter = 'all' | ContainerState
+type LayoutState = 'grid-only' | 'grid-with-logs'
+
+type UiMachineState = {
+  layout: LayoutState
+  selectedContainer: string
+}
+
+type UiEvent
+  = | { type: 'select-container'; name: string }
+    | { type: 'close-logs' }
+    | { type: 'sync-available'; names: string[] }
+    | { type: 'route-select'; name: string }
 
 const GRID_COLUMNS = 4
 const GRID_ROWS = 3
@@ -44,7 +56,6 @@ const pageLoading = usePageLoadingStore()
 const containers = ref<DockerContainer[]>([])
 const loading = ref(false)
 const error = ref('')
-const selectedContainer = ref('')
 const streamError = ref('')
 const streamState = ref<StreamState>('idle')
 const logLines = ref<string[]>([])
@@ -59,10 +70,75 @@ const followLive = ref(true)
 const showTimestamps = ref(true)
 const logViewport = ref<HTMLElement | null>(null)
 const routeApplied = ref(false)
+const uiMachine = ref<UiMachineState>({
+  layout: 'grid-only',
+  selectedContainer: '',
+})
 
 let streamSource: EventSource | null = null
 
 const normalize = (value: string | null | undefined) => (value ?? '').trim().toLowerCase()
+
+const reduceUiMachine = (state: UiMachineState, event: UiEvent): UiMachineState => {
+  switch (event.type) {
+    case 'select-container': {
+      const name = event.name.trim()
+      if (!name) return { layout: 'grid-only', selectedContainer: '' }
+      return { layout: 'grid-with-logs', selectedContainer: name }
+    }
+    case 'route-select': {
+      const name = event.name.trim()
+      if (!name) return state
+      return { layout: 'grid-with-logs', selectedContainer: name }
+    }
+    case 'close-logs': {
+      if (!state.selectedContainer) return { layout: 'grid-only', selectedContainer: '' }
+      return { layout: 'grid-only', selectedContainer: state.selectedContainer }
+    }
+    case 'sync-available': {
+      if (event.names.length === 0) {
+        return { layout: 'grid-only', selectedContainer: '' }
+      }
+      if (state.selectedContainer && event.names.includes(state.selectedContainer)) {
+        return state
+      }
+      if (state.layout === 'grid-with-logs') {
+        const fallback = event.names[0] ?? ''
+        if (fallback) {
+          return { layout: 'grid-with-logs', selectedContainer: fallback }
+        }
+      }
+      return { layout: 'grid-only', selectedContainer: '' }
+    }
+    default:
+      return state
+  }
+}
+
+const dispatchUiEvent = (event: UiEvent) => {
+  const next = reduceUiMachine(uiMachine.value, event)
+  if (
+    next.layout === uiMachine.value.layout
+    && next.selectedContainer === uiMachine.value.selectedContainer
+  ) {
+    return
+  }
+  uiMachine.value = next
+}
+
+const selectedContainerName = computed(() => uiMachine.value.selectedContainer)
+
+const selectedContainerModel = computed({
+  get: () => uiMachine.value.selectedContainer,
+  set: (name: string) => {
+    dispatchUiEvent({ type: 'select-container', name })
+  },
+})
+
+const hasSelection = computed(() => selectedContainerName.value !== '')
+const isLogsVisible = computed(
+  () => uiMachine.value.layout === 'grid-with-logs' && hasSelection.value,
+)
 
 const isRunningStatus = (status: string) => {
   const normalized = normalize(status)
@@ -117,7 +193,7 @@ const inferContainerType = (container: DockerContainer): ContainerType => {
 const containerTypeLabel = (container: DockerContainer) => TYPE_LABELS[inferContainerType(container)]
 
 const selectedInfo = computed(() =>
-  containers.value.find((container) => container.name === selectedContainer.value),
+  containers.value.find((container) => container.name === selectedContainerName.value),
 )
 
 const routeContainer = computed(() =>
@@ -208,9 +284,7 @@ const filteredContainers = computed(() => {
       if (projectNeedle !== 'all' && container.project !== projectNeedle) {
         return false
       }
-      if (!textNeedle) {
-        return true
-      }
+      if (!textNeedle) return true
       const haystack = normalize(
         [
           container.name,
@@ -244,7 +318,13 @@ const pagedContainers = computed(() => {
   return filteredContainers.value.slice(start, start + PAGE_SIZE)
 })
 
-const placeholderCount = computed(() => Math.max(0, PAGE_SIZE - pagedContainers.value.length))
+const baseGridRows = computed(() => {
+  if (pagedContainers.value.length === 0) return 0
+  return Math.min(GRID_ROWS, Math.max(1, Math.ceil(pagedContainers.value.length / GRID_COLUMNS)))
+})
+
+const isGridCondensed = computed(() => isLogsVisible.value && pagedContainers.value.length > 0)
+const effectiveGridRows = computed(() => (isGridCondensed.value ? 1 : baseGridRows.value))
 
 const pageSummary = computed(() => {
   if (filteredContainers.value.length === 0) return '0-0 of 0'
@@ -294,13 +374,18 @@ const streamBadge = computed<{ tone: BadgeTone; label: string }>(() => {
   }
 })
 
-const hasSelection = computed(() => selectedContainer.value !== '')
 const hasLogs = computed(() => filteredLines.value.length > 0)
 const logFontSizes = [11, 12, 13, 14, 15, 16] as const
 const logFontSize = ref<number>(12)
 const maxLogFontSize = logFontSizes[logFontSizes.length - 1] ?? 16
 const canDecreaseLogFont = computed(() => logFontSize.value > logFontSizes[0])
 const canIncreaseLogFont = computed(() => logFontSize.value < maxLogFontSize)
+
+const resolvedTail = computed(() => {
+  const parsed = Number.parseInt(tailInput.value, 10)
+  if (Number.isNaN(parsed) || parsed <= 0) return 200
+  return Math.min(parsed, 5000)
+})
 
 const loadContainers = async () => {
   loading.value = true
@@ -309,13 +394,6 @@ const loadContainers = async () => {
     const { data } = await hostApi.listDocker()
     containers.value = data.containers
     applyRouteSelection()
-    if (!selectedContainer.value && data.containers.length > 0) {
-      const firstRunning = data.containers.find((container) => isRunningStatus(container.status))
-      const first = firstRunning ?? data.containers[0]
-      if (first) {
-        selectedContainer.value = first.name
-      }
-    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load containers.'
   } finally {
@@ -323,19 +401,20 @@ const loadContainers = async () => {
   }
 }
 
-const resolveTail = () => {
-  const parsed = Number.parseInt(tailInput.value, 10)
-  if (Number.isNaN(parsed) || parsed <= 0) return 200
-  return Math.min(parsed, 5000)
-}
-
 const applyRouteSelection = () => {
   if (!routeContainer.value || routeApplied.value) return
   const match = containers.value.find((container) => container.name === routeContainer.value)
-  if (match) {
-    selectedContainer.value = match.name
-    routeApplied.value = true
-  }
+  if (!match) return
+  dispatchUiEvent({ type: 'route-select', name: match.name })
+  routeApplied.value = true
+}
+
+const selectContainer = (name: string) => {
+  dispatchUiEvent({ type: 'select-container', name })
+}
+
+const closeLogsPanel = () => {
+  dispatchUiEvent({ type: 'close-logs' })
 }
 
 const clearLogs = () => {
@@ -371,55 +450,58 @@ const copyLogs = async () => {
 }
 
 const closeStream = () => {
-  if (streamSource) {
-    streamSource.close()
-    streamSource = null
-  }
+  if (!streamSource) return
+  streamSource.close()
+  streamSource = null
 }
 
 const startStream = () => {
-  if (!hasSelection.value) return
+  if (!isLogsVisible.value || !hasSelection.value) return
 
   closeStream()
   streamError.value = ''
   streamState.value = 'connecting'
 
   const params = new URLSearchParams({
-    container: selectedContainer.value,
-    tail: resolveTail().toString(),
+    container: selectedContainerName.value,
+    tail: resolvedTail.value.toString(),
     follow: followLive.value ? 'true' : 'false',
     timestamps: showTimestamps.value ? 'true' : 'false',
   })
 
   const baseUrl = getApiBaseUrl()
   const url = `${baseUrl}/api/v1/host/docker/logs?${params.toString()}`
-  streamSource = new EventSource(url, { withCredentials: true })
+  const source = new EventSource(url, { withCredentials: true })
+  streamSource = source
 
-  streamSource.onopen = () => {
+  source.onopen = () => {
+    if (streamSource !== source) return
     streamState.value = 'live'
   }
 
-  streamSource.addEventListener('log', (event) => {
+  source.addEventListener('log', (event) => {
+    if (streamSource !== source) return
     const message = event as MessageEvent
     try {
       const payload = JSON.parse(message.data) as { line: string }
-      if (payload.line) {
-        logLines.value.push(payload.line)
-        if (logLines.value.length > 2000) {
-          logLines.value.splice(0, logLines.value.length - 2000)
-        }
+      if (!payload.line) return
+      logLines.value.push(payload.line)
+      if (logLines.value.length > 2000) {
+        logLines.value.splice(0, logLines.value.length - 2000)
       }
     } catch {
       // Ignore malformed log events.
     }
   })
 
-  streamSource.addEventListener('done', () => {
+  source.addEventListener('done', () => {
+    if (streamSource !== source) return
     streamState.value = 'idle'
     closeStream()
   })
 
-  streamSource.addEventListener('error', (event) => {
+  source.addEventListener('error', (event) => {
+    if (streamSource !== source) return
     const message = event as MessageEvent
     if (message?.data) {
       try {
@@ -429,20 +511,23 @@ const startStream = () => {
         streamError.value = 'Log stream error.'
       }
       streamState.value = 'error'
-    } else if (streamSource?.readyState === EventSource.CLOSED) {
+      return
+    }
+    if (streamSource?.readyState === EventSource.CLOSED) {
       streamState.value = 'idle'
     }
   })
 }
 
 const pauseStream = () => {
+  if (!isLogsVisible.value || !hasSelection.value) return
   closeStream()
   streamState.value = 'paused'
 }
 
 const resumeStream = () => {
-  if (!hasSelection.value) return
-  startStream()
+  if (!isLogsVisible.value || !hasSelection.value) return
+  streamState.value = 'idle'
 }
 
 const scrollToBottom = async () => {
@@ -464,9 +549,7 @@ const increaseLogFontSize = () => {
     return
   }
   const next = logFontSizes[currentIndex + 1]
-  if (next) {
-    logFontSize.value = next
-  }
+  if (next) logFontSize.value = next
 }
 
 const decreaseLogFontSize = () => {
@@ -476,9 +559,7 @@ const decreaseLogFontSize = () => {
     return
   }
   const next = logFontSizes[currentIndex - 1]
-  if (next) {
-    logFontSize.value = next
-  }
+  if (next) logFontSize.value = next
 }
 
 const clearGridFilters = () => {
@@ -488,6 +569,18 @@ const clearGridFilters = () => {
   projectFilter.value = 'all'
   gridPage.value = 1
 }
+
+const streamConfigKey = computed(() => {
+  if (!isLogsVisible.value || !hasSelection.value) return 'hidden'
+  const runMode = streamState.value === 'paused' ? 'paused' : 'active'
+  return [
+    selectedContainerName.value,
+    resolvedTail.value,
+    followLive.value ? '1' : '0',
+    showTimestamps.value ? '1' : '0',
+    runMode,
+  ].join('|')
+})
 
 watch([containerFilter, containerTypeFilter, containerStatusFilter, projectFilter], () => {
   gridPage.value = 1
@@ -500,40 +593,36 @@ watch(totalPages, (pages) => {
 })
 
 watch(filteredContainers, (next) => {
-  if (next.length === 0) {
-    closeStream()
+  dispatchUiEvent({
+    type: 'sync-available',
+    names: next.map((container) => container.name),
+  })
+})
+
+watch(selectedContainerName, (next, prev) => {
+  if (next === prev) return
+  clearLogs()
+  if (streamState.value === 'paused') {
     streamState.value = 'idle'
-    selectedContainer.value = ''
-    clearLogs()
-    return
   }
-  if (!next.some((container) => container.name === selectedContainer.value)) {
-    selectedContainer.value = next[0]?.name ?? ''
+  if (!next) {
+    streamState.value = 'idle'
+    streamError.value = ''
   }
 })
 
-watch(selectedContainer, () => {
-  if (!hasSelection.value) return
-  clearLogs()
-  if (streamState.value === 'paused') {
+watch(streamConfigKey, (next) => {
+  if (next === 'hidden') {
+    closeStream()
+    streamState.value = 'idle'
+    streamError.value = ''
+    return
+  }
+  if (next.endsWith('|paused')) {
     closeStream()
     return
   }
   startStream()
-})
-
-watch([followLive, showTimestamps], () => {
-  if (streamState.value === 'paused') return
-  if (hasSelection.value) {
-    startStream()
-  }
-})
-
-watch(tailInput, () => {
-  if (streamState.value === 'paused') return
-  if (hasSelection.value) {
-    startStream()
-  }
 })
 
 watch(logLines, () => {
@@ -555,9 +644,6 @@ onMounted(async () => {
   pageLoading.start('Loading containers...')
   await loadContainers()
   pageLoading.stop()
-  if (hasSelection.value) {
-    startStream()
-  }
 })
 
 onBeforeUnmount(() => {
@@ -632,6 +718,7 @@ onBeforeUnmount(() => {
           </div>
           <p class="text-xs text-[color:var(--muted)]">
             Showing {{ pageSummary }}
+            <span v-if="effectiveGridRows > 0"> · {{ effectiveGridRows }}-row mode</span>
           </p>
         </div>
 
@@ -670,7 +757,7 @@ onBeforeUnmount(() => {
               class="xl:col-span-2"
             />
             <UiSelect
-              v-model="selectedContainer"
+              v-model="selectedContainerModel"
               placeholder="Selected container"
               :options="containerOptions"
               class="xl:col-span-2"
@@ -729,15 +816,27 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="logs-grid-shell">
-            <div class="logs-grid">
+          <div
+            class="logs-grid-shell"
+            :class="{ 'logs-grid-shell-condensed': isGridCondensed }"
+          >
+            <TransitionGroup
+              v-if="pagedContainers.length > 0"
+              name="logs-grid-item"
+              tag="div"
+              class="logs-grid"
+              :class="[
+                isGridCondensed ? 'logs-grid-condensed' : `logs-grid-mode-${effectiveGridRows}`,
+              ]"
+            >
               <button
-                v-for="container in pagedContainers"
+                v-for="(container, index) in pagedContainers"
                 :key="container.id"
                 type="button"
                 class="logs-grid-card"
-                :class="selectedContainer === container.name ? 'logs-grid-card-selected' : ''"
-                @click="selectedContainer = container.name"
+                :class="selectedContainerName === container.name ? 'logs-grid-card-selected' : ''"
+                :style="`--grid-item-index: ${index}`"
+                @click="selectContainer(container.name)"
               >
                 <div class="flex items-start justify-between gap-2">
                   <p class="truncate text-sm font-semibold text-[color:var(--text)]">
@@ -758,155 +857,163 @@ onBeforeUnmount(() => {
                   {{ container.image }}
                 </p>
               </button>
-
-              <div
-                v-for="slot in placeholderCount"
-                :key="`placeholder-${slot}`"
-                class="logs-grid-placeholder"
-                aria-hidden="true"
-              />
-            </div>
+            </TransitionGroup>
+            <UiState v-else class="logs-grid-empty-state">
+              No containers match the current filters.
+            </UiState>
           </div>
         </div>
       </UiPanel>
 
-      <UiPanel class="flex h-full flex-col gap-4 p-4">
-        <div class="logs-toolbar text-xs text-[color:var(--muted)]">
-          <div class="logs-toolbar-row logs-toolbar-row-top">
-            <div class="logs-selected-summary">
-              <span class="logs-selected-name">{{ selectedInfo?.name || 'Select a container' }}</span>
-              <span class="logs-selected-meta">
-                {{ selectedInfo ? `${containerTypeLabel(selectedInfo)} · ${selectedInfo.service || 'No compose service'}` : 'Choose from grid' }}
-              </span>
-              <span class="logs-runtime-chip">
-                <span :class="statusDotClass(selectedInfo?.status || '')" />
-                {{ selectedInfo?.status || 'Unknown' }}
-              </span>
-              <span class="logs-runtime-chip">
-                Ports: {{ selectedInfo?.ports || 'No published ports' }}
-              </span>
-            </div>
+      <Transition name="logs-panel">
+        <UiPanel
+          v-if="isLogsVisible"
+          class="flex h-full flex-col gap-4 p-4"
+        >
+          <div class="logs-toolbar text-xs text-[color:var(--muted)]">
+            <div class="logs-toolbar-row logs-toolbar-row-top">
+              <div class="logs-selected-summary">
+                <span class="logs-selected-name">{{ selectedInfo?.name || 'Select a container' }}</span>
+                <span class="logs-selected-meta">
+                  {{ selectedInfo ? `${containerTypeLabel(selectedInfo)} · ${selectedInfo.service || 'No compose service'}` : 'Choose from grid' }}
+                </span>
+                <span class="logs-runtime-chip">
+                  <span :class="statusDotClass(selectedInfo?.status || '')" />
+                  {{ selectedInfo?.status || 'Unknown' }}
+                </span>
+                <span class="logs-runtime-chip">
+                  Ports: {{ selectedInfo?.ports || 'No published ports' }}
+                </span>
+              </div>
 
-            <div class="logs-stream-meta">
-              <UiBadge :tone="streamBadge.tone">
-                {{ streamBadge.label }}
-              </UiBadge>
-              <span class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Stream
-              </span>
-              <span class="text-[color:var(--muted-2)]">·</span>
-              <span class="text-[color:var(--muted)]">{{ filteredLines.length }} lines</span>
-              <span class="text-[color:var(--muted-2)]">·</span>
-              <span class="text-[color:var(--muted)]">Tail</span>
-              <UiInput
-                v-model="tailInput"
-                type="number"
-                min="1"
-                max="5000"
-                class="w-[5.25rem]"
-              />
-              <UiToggle v-model="followLive">Follow live</UiToggle>
-              <UiToggle v-model="showTimestamps">Timestamps</UiToggle>
-              <span
-                v-if="streamState === 'connecting'"
-                class="inline-flex items-center gap-2 text-[color:var(--muted)]"
-              >
-                <UiInlineSpinner />
-                Connecting...
-              </span>
-            </div>
-          </div>
-
-          <div class="logs-toolbar-row logs-toolbar-row-bottom">
-            <div class="logs-stream-actions">
-              <UiButton
-                variant="ghost"
-                size="xs"
-                :disabled="!hasSelection || streamState === 'paused'"
-                @click="pauseStream"
-              >
-                Pause
-              </UiButton>
-              <UiButton
-                variant="ghost"
-                size="xs"
-                :disabled="!hasSelection || streamState !== 'paused'"
-                @click="resumeStream"
-              >
-                Resume
-              </UiButton>
-              <UiButton
-                variant="ghost"
-                size="xs"
-                :disabled="!hasSelection"
-                @click="clearLogs"
-              >
-                Clear
-              </UiButton>
-              <UiButton
-                variant="ghost"
-                size="xs"
-                :disabled="!hasSelection || !hasLogs"
-                @click="copyLogs"
-              >
-                Copy
-              </UiButton>
-              <div class="inline-flex items-center gap-1 rounded-[8px] bg-[color:var(--surface-2)] px-2 py-1">
-                <UiButton
-                  variant="ghost"
-                  size="xs"
-                  :disabled="!canDecreaseLogFont"
-                  @click="decreaseLogFontSize"
+              <div class="logs-stream-meta">
+                <UiBadge :tone="streamBadge.tone">
+                  {{ streamBadge.label }}
+                </UiBadge>
+                <span class="text-[11px] uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  Stream
+                </span>
+                <span class="text-[color:var(--muted-2)]">·</span>
+                <span class="text-[color:var(--muted)]">{{ filteredLines.length }} lines</span>
+                <span class="text-[color:var(--muted-2)]">·</span>
+                <span class="text-[color:var(--muted)]">Tail</span>
+                <UiInput
+                  v-model="tailInput"
+                  type="number"
+                  min="1"
+                  max="5000"
+                  class="w-[5.25rem]"
+                />
+                <UiToggle v-model="followLive">Follow live</UiToggle>
+                <UiToggle v-model="showTimestamps">Timestamps</UiToggle>
+                <span
+                  v-if="streamState === 'connecting'"
+                  class="inline-flex items-center gap-2 text-[color:var(--muted)]"
                 >
-                  A-
-                </UiButton>
-                <span class="text-[11px] text-[color:var(--muted)]">Log {{ logFontSize }}px</span>
-                <UiButton
-                  variant="ghost"
-                  size="xs"
-                  :disabled="!canIncreaseLogFont"
-                  @click="increaseLogFontSize"
-                >
-                  A+
-                </UiButton>
+                  <UiInlineSpinner />
+                  Connecting...
+                </span>
               </div>
             </div>
 
-            <UiInput
-              v-model="filterQuery"
-              placeholder="Filter log lines"
-              class="logs-stream-filter"
-            />
+            <div class="logs-toolbar-row logs-toolbar-row-bottom">
+              <div class="logs-stream-actions">
+                <UiButton
+                  variant="ghost"
+                  size="xs"
+                  :disabled="!hasSelection || streamState === 'paused'"
+                  @click="pauseStream"
+                >
+                  Pause
+                </UiButton>
+                <UiButton
+                  variant="ghost"
+                  size="xs"
+                  :disabled="!hasSelection || streamState !== 'paused'"
+                  @click="resumeStream"
+                >
+                  Resume
+                </UiButton>
+                <UiButton
+                  variant="ghost"
+                  size="xs"
+                  :disabled="!hasSelection"
+                  @click="clearLogs"
+                >
+                  Clear
+                </UiButton>
+                <UiButton
+                  variant="ghost"
+                  size="xs"
+                  :disabled="!hasSelection || !hasLogs"
+                  @click="copyLogs"
+                >
+                  Copy
+                </UiButton>
+                <div class="inline-flex items-center gap-1 rounded-[8px] bg-[color:var(--surface-2)] px-2 py-1">
+                  <UiButton
+                    variant="ghost"
+                    size="xs"
+                    :disabled="!canDecreaseLogFont"
+                    @click="decreaseLogFontSize"
+                  >
+                    A-
+                  </UiButton>
+                  <span class="text-[11px] text-[color:var(--muted)]">Log {{ logFontSize }}px</span>
+                  <UiButton
+                    variant="ghost"
+                    size="xs"
+                    :disabled="!canIncreaseLogFont"
+                    @click="increaseLogFontSize"
+                  >
+                    A+
+                  </UiButton>
+                </div>
+              </div>
+
+              <div class="logs-toolbar-right-edge">
+                <UiInput
+                  v-model="filterQuery"
+                  placeholder="Filter log lines"
+                  class="logs-stream-filter"
+                />
+                <UiButton
+                  variant="ghost"
+                  size="xs"
+                  class="logs-close-button"
+                  aria-label="Close logs panel"
+                  @click="closeLogsPanel"
+                >
+                  X
+                </UiButton>
+              </div>
+            </div>
           </div>
-        </div>
 
-        <UiState v-if="!hasSelection" class="flex-1">
-          Choose a container to start streaming logs.
-        </UiState>
+          <UiState v-if="streamError" tone="error" class="flex-1">
+            {{ streamError }}
+          </UiState>
 
-        <UiState v-else-if="streamError" tone="error" class="flex-1">
-          {{ streamError }}
-        </UiState>
-
-        <UiPanel
-          v-else
-          variant="raise"
-          class="logs-output-panel flex-1 overflow-hidden"
-        >
-          <div
-            ref="logViewport"
-            class="logs-output-viewport overflow-auto px-4 py-3 font-mono text-[color:var(--text)]"
-            :style="{ fontSize: `${logFontSize}px`, lineHeight: '1.5' }"
+          <UiPanel
+            v-else
+            variant="raise"
+            class="logs-output-panel flex-1 overflow-hidden"
           >
-            <p v-if="filteredLines.length === 0" class="text-[color:var(--muted)]">
-              No logs yet. Deploy a service or wait for new output.
-            </p>
-            <pre v-else class="whitespace-pre-wrap break-words">
+            <div
+              ref="logViewport"
+              class="logs-output-viewport overflow-auto px-4 py-3 font-mono text-[color:var(--text)]"
+              :style="{ fontSize: `${logFontSize}px`, lineHeight: '1.5' }"
+            >
+              <p v-if="filteredLines.length === 0" class="text-[color:var(--muted)]">
+                No logs yet. Deploy a service or wait for new output.
+              </p>
+              <pre v-else class="whitespace-pre-wrap break-words">
 {{ filteredLines.join('\n') }}
-            </pre>
-          </div>
+              </pre>
+            </div>
+          </UiPanel>
         </UiPanel>
-      </UiPanel>
+      </Transition>
     </div>
   </section>
 </template>
@@ -914,18 +1021,52 @@ onBeforeUnmount(() => {
 <style scoped>
 .logs-grid-shell {
   overflow-x: auto;
+  overflow-y: visible;
+}
+
+.logs-grid-shell-condensed {
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-x: contain;
+  padding-bottom: 0.15rem;
 }
 
 .logs-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-template-rows: repeat(3, minmax(0, 1fr));
+  align-content: start;
   gap: 0.5rem;
   min-width: 760px;
+  transform-origin: top center;
+  will-change: transform, opacity;
+  transition:
+    grid-template-rows 320ms cubic-bezier(0.25, 1, 0.5, 1),
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.logs-grid-card,
-.logs-grid-placeholder {
+.logs-grid-mode-1 {
+  grid-template-rows: repeat(1, minmax(120px, auto));
+}
+
+.logs-grid-mode-2 {
+  grid-template-rows: repeat(2, minmax(120px, auto));
+}
+
+.logs-grid-mode-3 {
+  grid-template-rows: repeat(3, minmax(120px, auto));
+}
+
+.logs-grid-condensed {
+  grid-template-columns: none;
+  grid-template-rows: repeat(1, minmax(120px, auto));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(18rem, 1fr);
+  min-width: max-content;
+  transform: translateY(-2px);
+}
+
+.logs-grid-card {
   min-height: 120px;
   border-radius: 10px;
   border: 1px solid transparent;
@@ -939,7 +1080,10 @@ onBeforeUnmount(() => {
   justify-content: flex-start;
   text-align: left;
   padding: 0.65rem;
-  transition: background-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+  transition:
+    background-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .logs-grid-card:hover {
@@ -953,8 +1097,49 @@ onBeforeUnmount(() => {
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 42%, var(--border));
 }
 
-.logs-grid-placeholder {
-  opacity: 0.35;
+.logs-grid-item-enter-active {
+  transition:
+    opacity 240ms cubic-bezier(0.25, 1, 0.5, 1),
+    transform 240ms cubic-bezier(0.25, 1, 0.5, 1);
+  transition-delay: calc(var(--grid-item-index, 0) * 36ms);
+}
+
+.logs-grid-item-leave-active {
+  transition:
+    opacity 180ms cubic-bezier(0.25, 1, 0.5, 1),
+    transform 180ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.logs-grid-item-move {
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.logs-grid-item-enter-from,
+.logs-grid-item-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.logs-grid-empty-state {
+  min-height: 7.5rem;
+}
+
+.logs-panel-enter-active {
+  transition:
+    opacity 280ms cubic-bezier(0.25, 1, 0.5, 1),
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.logs-panel-leave-active {
+  transition:
+    opacity 190ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 190ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.logs-panel-enter-from,
+.logs-panel-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.995);
 }
 
 .status-dot {
@@ -1040,14 +1225,6 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.logs-stream-settings {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  white-space: nowrap;
-}
-
 .logs-stream-actions {
   display: flex;
   align-items: center;
@@ -1055,9 +1232,30 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.logs-toolbar-right-edge {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-left: auto;
+}
+
 .logs-stream-filter {
   width: min(26rem, 38vw);
   min-width: 11rem;
+}
+
+.logs-close-button {
+  min-width: 2.2rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  transition:
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.logs-close-button:hover {
+  transform: translateY(-1px);
 }
 
 .logs-toolbar-row::-webkit-scrollbar {
@@ -1089,6 +1287,31 @@ onBeforeUnmount(() => {
 
   .logs-stream-filter {
     width: min(16rem, 48vw);
+  }
+
+  .logs-grid-condensed {
+    grid-auto-columns: minmax(15rem, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .logs-grid,
+  .logs-grid-card,
+  .logs-panel-enter-active,
+  .logs-panel-leave-active,
+  .logs-grid-item-enter-active,
+  .logs-grid-item-leave-active,
+  .logs-grid-item-move {
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+
+  .logs-grid-item-enter-from,
+  .logs-grid-item-leave-to,
+  .logs-panel-enter-from,
+  .logs-panel-leave-to {
+    opacity: 1;
+    transform: none;
   }
 }
 </style>
