@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
+import UiModal from '@/components/ui/UiModal.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiSkeleton from '@/components/ui/UiSkeleton.vue'
 import UiState from '@/components/ui/UiState.vue'
@@ -14,6 +15,11 @@ import type { NetBirdMode } from '@/types/netbird'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 type FeedbackTone = 'neutral' | 'ok' | 'warn' | 'error'
+
+const showConnectivityModal = ref(false)
+const showPeerModal = ref(false)
+const showSyncModal = ref(false)
+const showResourcesModal = ref(false)
 
 const authStore = useAuthStore()
 const netbirdStore = useNetbirdStore()
