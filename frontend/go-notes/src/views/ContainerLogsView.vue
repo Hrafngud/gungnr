@@ -324,7 +324,7 @@ const baseGridRows = computed(() => {
 })
 
 const isGridCondensed = computed(() => isLogsVisible.value && pagedContainers.value.length > 0)
-const effectiveGridRows = computed(() => (isGridCondensed.value ? 1 : baseGridRows.value))
+const effectiveGridRows = computed(() => baseGridRows.value)
 
 const pageSummary = computed(() => {
   if (filteredContainers.value.length === 0) return '0-0 of 0'
@@ -826,7 +826,8 @@ onBeforeUnmount(() => {
               tag="div"
               class="logs-grid"
               :class="[
-                isGridCondensed ? 'logs-grid-condensed' : `logs-grid-mode-${effectiveGridRows}`,
+                `logs-grid-mode-${effectiveGridRows}`,
+                { 'logs-grid-condensed': isGridCondensed },
               ]"
             >
               <button
@@ -1025,10 +1026,12 @@ onBeforeUnmount(() => {
 }
 
 .logs-grid-shell-condensed {
-  overflow-x: auto;
-  overflow-y: visible;
-  overscroll-behavior-x: contain;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  max-height: clamp(16rem, 34vh, 24rem);
   padding-bottom: 0.15rem;
+  padding-right: 0.25rem;
 }
 
 .logs-grid {
@@ -1058,11 +1061,7 @@ onBeforeUnmount(() => {
 }
 
 .logs-grid-condensed {
-  grid-template-columns: none;
-  grid-template-rows: repeat(1, minmax(120px, auto));
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(18rem, 1fr);
-  min-width: max-content;
+  min-width: 0;
   transform: translateY(-2px);
 }
 
@@ -1290,7 +1289,7 @@ onBeforeUnmount(() => {
   }
 
   .logs-grid-condensed {
-    grid-auto-columns: minmax(15rem, 1fr);
+    transform: none;
   }
 }
 
