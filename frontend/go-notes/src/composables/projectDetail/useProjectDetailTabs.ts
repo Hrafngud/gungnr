@@ -2,22 +2,22 @@ export const PROJECT_DETAIL_SECTION_TABS = [
   {
     id: 'workbench',
     label: 'Workbench',
-    description: 'Model snapshot, service controls, and compose workflow.',
+    description: 'Tweak your Compose files from UI!',
   },
   {
     id: 'runtime',
     label: 'Runtime units',
-    description: 'Live container inventory tied to this project.',
+    description: 'Spy on your runtime units.',
   },
   {
     id: 'archive',
     label: 'Archive',
-    description: 'Archive planning and execution.',
+    description: 'Drop the project for later.',
   },
   {
     id: 'activity',
     label: 'Activity timeline',
-    description: 'Project-scoped jobs and log inspection.',
+    description: 'Boring logs I hope you never have to read.',
   },
 ] as const
 

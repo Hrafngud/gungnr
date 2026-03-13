@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
@@ -9,6 +9,7 @@ import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
+import UiTooltip from '@/components/ui/UiTooltip.vue'
 import NavIcon from '@/components/NavIcon.vue'
 import Calendar from 'iconoir-vue/regular/Calendar'
 import CodeBracketsSquare from 'iconoir-vue/regular/CodeBracketsSquare'
@@ -102,7 +103,10 @@ const workbenchPendingOptionalServiceMutation = ref<WorkbenchPendingOptionalServ
 const workbenchPortManualInputs = ref<Record<string, string>>({})
 const workbenchResourceInputs = ref<Record<string, WorkbenchResourceInputState>>({})
 const activeSectionTab = ref<ProjectDetailSectionTab>('workbench')
+const runtimeCopyFeedbackTarget = ref<'source' | 'path' | 'env' | null>(null)
 const isAdmin = computed(() => authStore.isAdmin)
+
+let runtimeCopyFeedbackTimer: ReturnType<typeof setTimeout> | null = null
 
 const projectName = computed(() => {
   const raw = route.params.name
@@ -2133,7 +2137,11 @@ const copyTextToClipboard = async (payload: string) => {
   document.body.removeChild(textarea)
 }
 
-const copyRuntimePath = async (payload: string | null | undefined, label: string) => {
+const copyRuntimePath = async (
+  payload: string | null | undefined,
+  label: string,
+  feedbackTarget?: 'source' | 'path' | 'env',
+) => {
   const value = payload?.trim() ?? ''
   if (!value || value.toLowerCase() === 'unknown') {
     toastStore.warn(`${label} is not available for this project.`, 'Copy path')
@@ -2142,12 +2150,27 @@ const copyRuntimePath = async (payload: string | null | undefined, label: string
 
   try {
     await copyTextToClipboard(value)
+    if (feedbackTarget) runtimeCopyFeedbackTarget.value = feedbackTarget
+
+    if (runtimeCopyFeedbackTimer) {
+      clearTimeout(runtimeCopyFeedbackTimer)
+      runtimeCopyFeedbackTimer = null
+    }
+    runtimeCopyFeedbackTimer = setTimeout(() => {
+      runtimeCopyFeedbackTarget.value = null
+      runtimeCopyFeedbackTimer = null
+    }, 1500)
+
     toastStore.success(`${label} copied to clipboard.`, 'Copy path')
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Clipboard copy failed.'
     toastStore.error(message, 'Copy failed')
   }
 }
+
+const runtimeCopyTooltipText = (target: 'source' | 'path' | 'env') => (
+  runtimeCopyFeedbackTarget.value === target ? 'Copyed!' : 'Copy to clipboard.'
+)
 
 const openProjectRepository = () => {
   const raw = projectRepositoryUrl.value
@@ -2243,6 +2266,11 @@ watch(workbenchRestorePanelOpen, (isOpen) => {
 })
 
 onMounted(load)
+onBeforeUnmount(() => {
+  if (!runtimeCopyFeedbackTimer) return
+  clearTimeout(runtimeCopyFeedbackTimer)
+  runtimeCopyFeedbackTimer = null
+})
 watch(projectName, () => {
   activeSectionTab.value = 'workbench'
   stackRestartError.value = null
@@ -2300,14 +2328,18 @@ watch(projectName, () => {
               <CodeBracketsSquare class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--muted-2)]" />
               <div class="min-w-0">
                 <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Source</p>
-                <button
-                  type="button"
-                  class="mt-1 block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors focus-visible:outline-none focus-visible:text-[color:var(--text)] duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)]"
-                  :title="`Click to copy source path: ${detail.runtime.source || 'unknown'}`"
-                  @click="copyRuntimePath(detail.runtime.source, 'Source path')"
+                <UiTooltip
+                  class="mt-1"
+                  :text="runtimeCopyTooltipText('source')"
                 >
-                  {{ detail.runtime.source || 'unknown' }}
-                </button>
+                  <button
+                    type="button"
+                    class="block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors focus-visible:outline-none focus-visible:text-[color:var(--text)] duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)]"
+                    @click="copyRuntimePath(detail.runtime.source, 'Source path', 'source')"
+                  >
+                    {{ detail.runtime.source || 'unknown' }}
+                  </button>
+                </UiTooltip>
               </div>
             </div>
 
@@ -2315,14 +2347,18 @@ watch(projectName, () => {
               <Folder class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--muted-2)]" />
               <div class="min-w-0">
                 <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Path</p>
-                <button
-                  type="button"
-                  class="mt-1 block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors focus-visible:outline-none focus-visible:text-[color:var(--text)] duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)]"
-                  :title="`Click to copy path: ${detail.runtime.path}`"
-                  @click="copyRuntimePath(detail.runtime.path, 'Runtime path')"
+                <UiTooltip
+                  class="mt-1"
+                  :text="runtimeCopyTooltipText('path')"
                 >
-                  {{ detail.runtime.path }}
-                </button>
+                  <button
+                    type="button"
+                    class="block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors focus-visible:outline-none focus-visible:text-[color:var(--text)] duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)]"
+                    @click="copyRuntimePath(detail.runtime.path, 'Runtime path', 'path')"
+                  >
+                    {{ detail.runtime.path }}
+                  </button>
+                </UiTooltip>
               </div>
             </div>
 
@@ -2330,14 +2366,18 @@ watch(projectName, () => {
               <Page class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--muted-2)]" />
               <div class="min-w-0">
                 <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">.env File</p>
-                <button
-                  type="button"
-                  class="mt-1 block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors focus-visible:outline-none focus-visible:text-[color:var(--text)] duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)]"
-                  :title="`Click to copy env file path: ${detail.runtime.envPath}`"
-                  @click="copyRuntimePath(detail.runtime.envPath, '.env file path')"
+                <UiTooltip
+                  class="mt-1"
+                  :text="runtimeCopyTooltipText('env')"
                 >
-                  {{ detail.runtime.envPath }}
-                </button>
+                  <button
+                    type="button"
+                    class="block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors focus-visible:outline-none focus-visible:text-[color:var(--text)] duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)]"
+                    @click="copyRuntimePath(detail.runtime.envPath, '.env file path', 'env')"
+                  >
+                    {{ detail.runtime.envPath }}
+                  </button>
+                </UiTooltip>
               </div>
             </div>
 
@@ -2345,15 +2385,19 @@ watch(projectName, () => {
               <GithubCircle class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--muted-2)]" />
               <div class="min-w-0">
                 <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Repository</p>
-                <button
+                <UiTooltip
                   v-if="projectRepositoryUrl"
-                  type="button"
-                  class="mt-1 block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors focus-visible:outline-none focus-visible:text-[color:var(--text)] duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)]"
-                  :title="`Open repository: ${projectRepositoryUrl}`"
-                  @click="openProjectRepository"
+                  class="mt-1"
+                  text="Open repo on Github"
                 >
-                  {{ projectRepositoryUrl }}
-                </button>
+                  <button
+                    type="button"
+                    class="block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors focus-visible:outline-none focus-visible:text-[color:var(--text)] duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)]"
+                    @click="openProjectRepository"
+                  >
+                    {{ projectRepositoryUrl }}
+                  </button>
+                </UiTooltip>
                 <p
                   v-else
                   class="mt-1 text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)]"

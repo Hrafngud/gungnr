@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
 import UiSelectTypingInput from '@/components/ui/UiSelectTypingInput.vue'
 import UiState from '@/components/ui/UiState.vue'

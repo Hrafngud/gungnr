@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import UiTooltip from '@/components/ui/UiTooltip.vue'
+
 type NavigationTab = {
   id: string
   label: string
@@ -32,19 +34,25 @@ function selectTab(tabId: string) {
     :aria-label="ariaLabel"
   >
     <div class="navigation-tabs__list">
-      <button
+      <UiTooltip
         v-for="tab in tabs"
         :key="tab.id"
-        type="button"
-        class="navigation-tabs__tab"
-        :class="{ 'navigation-tabs__tab--active': modelValue === tab.id }"
-        :aria-pressed="modelValue === tab.id ? 'true' : 'false'"
-        :disabled="disabled"
-        :title="tab.description || tab.label"
-        @click="selectTab(tab.id)"
+        as="span"
+        placement="auto"
+        class="navigation-tabs__tooltip-host"
+        :text="tab.description || tab.label"
       >
-        <span class="navigation-tabs__label">{{ tab.label }}</span>
-      </button>
+        <button
+          type="button"
+          class="navigation-tabs__tab"
+          :class="{ 'navigation-tabs__tab--active': modelValue === tab.id }"
+          :aria-pressed="modelValue === tab.id ? 'true' : 'false'"
+          :disabled="disabled"
+          @click="selectTab(tab.id)"
+        >
+          <span class="navigation-tabs__label">{{ tab.label }}</span>
+        </button>
+      </UiTooltip>
     </div>
   </nav>
 </template>
@@ -61,10 +69,17 @@ function selectTab(tabId: string) {
   gap: 0.28rem;
 }
 
-.navigation-tabs__tab {
-  position: relative;
+.navigation-tabs__tooltip-host {
   flex: 1 1 9rem;
   min-width: 0;
+  display: flex;
+}
+
+.navigation-tabs__tab {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
   border: 1px solid transparent;
   border-bottom: none;
   border-radius: 0.55rem 0.55rem 0 0;
@@ -124,8 +139,11 @@ function selectTab(tabId: string) {
 }
 
 @media (max-width: 640px) {
-  .navigation-tabs__tab {
+  .navigation-tabs__tooltip-host {
     flex-basis: calc(50% - 0.14rem);
+  }
+
+  .navigation-tabs__tab {
     padding: 0.58rem 0.72rem;
     font-size: 0.86rem;
   }
