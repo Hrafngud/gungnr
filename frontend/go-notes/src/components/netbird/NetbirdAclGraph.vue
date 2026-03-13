@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
+import UiModal from '@/components/ui/UiModal.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiSkeleton from '@/components/ui/UiSkeleton.vue'
 import UiState from '@/components/ui/UiState.vue'
@@ -12,6 +13,10 @@ import { useNetbirdStore } from '@/stores/netbird'
 import type { NetBirdACLEdge, NetBirdACLNode, NetBirdMode } from '@/types/netbird'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
+
+const showNodesModal = ref(false)
+const showEdgesModal = ref(false)
+const showNotesModal = ref(false)
 
 const netbirdStore = useNetbirdStore()
 
@@ -85,10 +90,10 @@ onMounted(() => {
           NetBird
         </p>
         <h2 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
-          ACL graph
+          ACL Graph
         </h2>
         <p class="mt-1 text-xs text-[color:var(--muted)]">
-          Read-only policy visibility from managed ACL graph metadata.
+          Policy visibility and network flow
         </p>
       </div>
       <UiButton variant="ghost" size="sm" :disabled="graphLoading" @click="refreshAclGraph">
@@ -100,10 +105,6 @@ onMounted(() => {
       </UiButton>
     </div>
 
-    <UiState tone="neutral">
-      Read-only visibility: mode changes and policy apply actions are handled elsewhere.
-    </UiState>
-
     <UiState v-if="graphError" tone="error">
       {{ graphError }}
     </UiState>
@@ -112,7 +113,6 @@ onMounted(() => {
       <UiSkeleton class="h-3 w-40" />
       <UiSkeleton class="h-3 w-full" />
       <UiSkeleton class="h-3 w-2/3" />
-      <UiSkeleton class="h-3 w-3/4" />
     </UiPanel>
 
     <UiState v-else-if="!graph">
@@ -120,127 +120,163 @@ onMounted(() => {
     </UiState>
 
     <div v-else class="space-y-4">
-      <div class="grid gap-4 md:grid-cols-3">
-        <UiPanel variant="soft" class="space-y-2 p-3">
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-            Current mode
-          </p>
-          <UiBadge tone="neutral">
-            {{ modeLabel(graph.currentMode) }}
-          </UiBadge>
-          <p class="text-xs text-[color:var(--muted)]">
-            Source: <span class="text-[color:var(--text)]">{{ graph.modeSource || 'n/a' }}</span>
-          </p>
-        </UiPanel>
-        <UiPanel variant="soft" class="space-y-2 p-3">
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-            Default action
-          </p>
+      <!-- Essential Info -->
+      <UiPanel variant="soft" class="space-y-3 p-4">
+        <UiListRow class="flex items-center justify-between gap-3">
+          <span class="text-sm font-medium text-[color:var(--text)]">Current Mode</span>
+          <UiBadge tone="neutral">{{ modeLabel(graph.currentMode) }}</UiBadge>
+        </UiListRow>
+        <UiListRow class="flex items-center justify-between gap-3">
+          <span class="text-sm font-medium text-[color:var(--text)]">Default Action</span>
           <UiBadge :tone="defaultActionTone(graph.defaultAction)">
             {{ graph.defaultAction || 'unknown' }}
           </UiBadge>
-          <p class="text-xs text-[color:var(--muted)]">
-            Unspecified traffic paths follow this default action.
-          </p>
-        </UiPanel>
-        <UiPanel variant="soft" class="space-y-2 p-3">
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-            Graph summary
-          </p>
-          <div class="grid gap-1 text-xs text-[color:var(--muted)]">
-            <p>Nodes: <span class="text-[color:var(--text)]">{{ graph.nodes.length }}</span></p>
-            <p>Allow edges: <span class="text-[color:var(--text)]">{{ allowEdges.length }}</span></p>
-            <p>Notes: <span class="text-[color:var(--text)]">{{ graph.notes.length }}</span></p>
-          </div>
-        </UiPanel>
-      </div>
-
-      <div class="grid gap-4 xl:grid-cols-2">
-        <UiPanel variant="soft" class="space-y-3 p-4">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-              Nodes
-            </p>
-            <UiBadge tone="neutral">{{ graph.nodes.length }}</UiBadge>
-          </div>
-          <UiState v-if="graph.nodes.length === 0">
-            No nodes were returned by the ACL graph endpoint.
-          </UiState>
-          <ul v-else class="space-y-2">
-            <UiListRow
-              v-for="node in graph.nodes"
-              :key="node.id"
-              as="li"
-              class="space-y-1"
-            >
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <p class="text-xs font-semibold text-[color:var(--text)]">
-                  {{ nodeLabel(node) }}
-                </p>
-                <UiBadge tone="neutral">{{ nodeKindLabel(node) }}</UiBadge>
-              </div>
-              <p class="font-mono text-[11px] text-[color:var(--muted-2)]">
-                {{ node.id }}
-              </p>
-            </UiListRow>
-          </ul>
-        </UiPanel>
-
-        <UiPanel variant="soft" class="space-y-3 p-4">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-              Allow edges
-            </p>
-            <UiBadge tone="neutral">{{ allowEdges.length }}</UiBadge>
-          </div>
-          <UiState v-if="allowEdges.length === 0">
-            No allow edges are currently defined for this mode.
-          </UiState>
-          <ul v-else class="space-y-2">
-            <UiListRow
-              v-for="edge in allowEdges"
-              :key="edge.id"
-              as="li"
-              class="space-y-1"
-            >
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <p class="text-xs font-semibold text-[color:var(--text)]">
-                  {{ edge.from }} -> {{ edge.to }}
-                </p>
-                <UiBadge tone="ok">{{ edge.action }}</UiBadge>
-              </div>
-              <p class="text-xs text-[color:var(--muted)]">
-                Policy <span class="font-mono text-[color:var(--text)]">{{ edge.policy }}</span>,
-                rule <span class="font-mono text-[color:var(--text)]">{{ edge.rule }}</span>,
-                {{ edge.protocol.toUpperCase() }} ports {{ edgePortLabel(edge) }}
-              </p>
-            </UiListRow>
-          </ul>
-        </UiPanel>
-      </div>
-
-      <UiPanel variant="soft" class="space-y-3 p-4">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-            Notes and warnings
-          </p>
-          <UiBadge :tone="graph.notes.length > 0 ? 'warn' : 'ok'">
-            {{ graph.notes.length }}
-          </UiBadge>
-        </div>
-        <UiState v-if="graph.notes.length === 0" tone="ok">
-          No backend notes or warnings were reported.
-        </UiState>
-        <ul v-else class="space-y-2 text-xs text-[color:var(--muted)]">
-          <li
-            v-for="(note, index) in graph.notes"
-            :key="`netbird-acl-note-${index}`"
-            class="rounded border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-2"
-          >
-            {{ note }}
-          </li>
-        </ul>
+        </UiListRow>
       </UiPanel>
+
+      <!-- Interactive Cards -->
+      <div class="grid gap-3 sm:grid-cols-3">
+        <UiPanel
+          variant="soft"
+          class="cursor-pointer p-4 transition hover:border-[color:var(--accent)] hover:shadow-sm"
+          @click="showNodesModal = true"
+        >
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                Nodes
+              </p>
+              <p class="mt-2 text-2xl font-semibold text-[color:var(--text)]">
+                {{ graph.nodes.length }}
+              </p>
+            </div>
+            <NavIcon name="network" class="h-6 w-6 text-[color:var(--muted)]" />
+          </div>
+        </UiPanel>
+
+        <UiPanel
+          variant="soft"
+          class="cursor-pointer p-4 transition hover:border-[color:var(--accent)] hover:shadow-sm"
+          @click="showEdgesModal = true"
+        >
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                Allow Edges
+              </p>
+              <p class="mt-2 text-2xl font-semibold text-[color:var(--text)]">
+                {{ allowEdges.length }}
+              </p>
+            </div>
+            <NavIcon name="activity" class="h-6 w-6 text-[color:var(--muted)]" />
+          </div>
+        </UiPanel>
+
+        <UiPanel
+          variant="soft"
+          :class="graph.notes.length > 0 ? 'border-[color:var(--warn)]' : ''"
+          class="cursor-pointer p-4 transition hover:border-[color:var(--accent)] hover:shadow-sm"
+          @click="showNotesModal = true"
+        >
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                Warnings
+              </p>
+              <p class="mt-2 text-2xl font-semibold text-[color:var(--text)]">
+                {{ graph.notes.length }}
+              </p>
+            </div>
+            <NavIcon name="activity" class="h-6 w-6" :class="graph.notes.length > 0 ? 'text-[color:var(--warn)]' : 'text-[color:var(--muted)]'" />
+          </div>
+        </UiPanel>
+      </div>
     </div>
   </UiPanel>
+
+  <!-- Nodes Modal -->
+  <UiModal
+    v-model="showNodesModal"
+    title="Network Nodes"
+    description="Groups, projects, and services in the ACL graph"
+  >
+    <div v-if="graph">
+      <UiState v-if="graph.nodes.length === 0">
+        No nodes were returned by the ACL graph endpoint.
+      </UiState>
+      <ul v-else class="space-y-3">
+        <UiListRow
+          v-for="node in graph.nodes"
+          :key="node.id"
+          as="li"
+          class="space-y-1 py-2"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <p class="text-sm font-semibold text-[color:var(--text)]">
+              {{ nodeLabel(node) }}
+            </p>
+            <UiBadge tone="neutral">{{ nodeKindLabel(node) }}</UiBadge>
+          </div>
+          <p class="font-mono text-xs text-[color:var(--muted-2)]">
+            {{ node.id }}
+          </p>
+        </UiListRow>
+      </ul>
+    </div>
+  </UiModal>
+
+  <!-- Edges Modal -->
+  <UiModal
+    v-model="showEdgesModal"
+    title="Allow Edges"
+    description="Permitted network flows between nodes"
+  >
+    <div v-if="graph">
+      <UiState v-if="allowEdges.length === 0">
+        No allow edges are currently defined for this mode.
+      </UiState>
+      <ul v-else class="space-y-3">
+        <UiListRow
+          v-for="edge in allowEdges"
+          :key="edge.id"
+          as="li"
+          class="space-y-1 py-2"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <p class="text-sm font-semibold text-[color:var(--text)]">
+              {{ edge.from }} → {{ edge.to }}
+            </p>
+            <UiBadge tone="ok">{{ edge.action }}</UiBadge>
+          </div>
+          <p class="text-xs text-[color:var(--muted)]">
+            Policy <span class="font-mono text-[color:var(--text)]">{{ edge.policy }}</span>,
+            rule <span class="font-mono text-[color:var(--text)]">{{ edge.rule }}</span>,
+            {{ edge.protocol.toUpperCase() }} ports {{ edgePortLabel(edge) }}
+          </p>
+        </UiListRow>
+      </ul>
+    </div>
+  </UiModal>
+
+  <!-- Notes/Warnings Modal -->
+  <UiModal
+    v-model="showNotesModal"
+    title="Notes and Warnings"
+    :description="graph && graph.notes.length > 0 ? `${graph.notes.length} warning(s) reported` : 'No warnings reported'"
+  >
+    <div v-if="graph">
+      <UiState v-if="graph.notes.length === 0" tone="ok">
+        No backend notes or warnings were reported.
+      </UiState>
+      <ul v-else class="space-y-2">
+        <li
+          v-for="(note, index) in graph.notes"
+          :key="`netbird-acl-note-${index}`"
+          class="rounded border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-2 text-sm text-[color:var(--muted)]"
+        >
+          {{ note }}
+        </li>
+      </ul>
+    </div>
+  </UiModal>
 </template>

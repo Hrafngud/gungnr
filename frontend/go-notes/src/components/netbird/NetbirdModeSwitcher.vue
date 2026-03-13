@@ -712,21 +712,19 @@ onBeforeUnmount(() => {
     </UiState>
 
     <UiPanel variant="raise" class="space-y-4 p-5">
-      <div>
-        <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-          Apply mode switch
-        </p>
-        <p class="mt-2 text-sm text-[color:var(--muted)]">
-          Confirmation phrase:
-          <span class="font-mono text-[color:var(--text)]">{{ confirmationPhrase }}</span>
-        </p>
-      </div>
-
-      <UiPanel variant="soft" class="space-y-2 p-4">
-        <div class="flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center justify-between gap-3">
+        <div>
           <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-            Saved mode config
+            Apply mode switch
           </p>
+          <p class="mt-1 text-sm text-[color:var(--muted)]">
+            Type: <span class="font-mono text-[color:var(--text)]">{{ confirmationPhrase }}</span>
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <UiBadge :tone="modeConfigHasToken ? 'ok' : 'error'">
+            {{ modeConfigHasToken ? 'Config OK' : 'Config missing' }}
+          </UiBadge>
           <UiButton
             variant="ghost"
             size="sm"
@@ -736,61 +734,28 @@ onBeforeUnmount(() => {
             Edit config
           </UiButton>
         </div>
-        <div class="grid gap-1 text-xs text-[color:var(--muted)]">
-          <p>
-            API token:
-            <span class="text-[color:var(--text)]">{{ modeConfigHasToken ? 'configured' : 'missing' }}</span>
-          </p>
-          <p>
-            API base URL:
-            <span class="text-[color:var(--text)]">{{ modeConfig?.apiBaseUrl || 'default (api.netbird.io)' }}</span>
-          </p>
-          <p>
-            Host peer ID:
-            <span class="font-mono text-[color:var(--text)]">{{ modeConfig?.hostPeerId || 'n/a' }}</span>
-          </p>
-          <p>
-            Admin peer IDs:
-            <span class="text-[color:var(--text)]">{{ modeConfig?.adminPeerIds?.length ?? 0 }}</span>
-          </p>
-          <p>
-            Saved Mode B projects:
-            <span class="text-[color:var(--text)]">{{ modeConfig?.modeBProjectIds?.length ?? 0 }}</span>
-          </p>
-        </div>
-      </UiPanel>
+      </div>
 
       <label class="grid gap-2 text-sm">
-        <span class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-          Confirmation phrase
-        </span>
         <UiInput
           v-model="confirmInput"
           type="text"
           autocomplete="off"
           spellcheck="false"
           :disabled="!isAdmin || applySubmitting"
-          placeholder="Type the phrase exactly"
+          placeholder="Type confirmation phrase"
         />
       </label>
 
-      <UiState v-if="isAdmin && !modeConfigHasToken" tone="warn">
-        Save NetBird API credentials before queueing apply.
-      </UiState>
-      <UiState v-if="isAdmin && requiresPeerInputs && !modeConfigHasHostPeer" tone="warn">
-        Saved host peer ID is required for Mode A and Mode B.
-      </UiState>
-      <UiState v-if="isAdmin && requiresPeerInputs && !modeConfigHasAdminPeers" tone="warn">
-        Save at least one admin peer ID for Mode A and Mode B.
-      </UiState>
-      <UiState v-if="isAdmin && requiresModeBSelection && modeBProjectIds.length === 0" tone="warn">
-        Mode B currently has no assigned projects. Apply will isolate only the panel.
-      </UiState>
-      <UiState v-if="isAdmin && !planMatchesSelection" tone="warn">
-        Apply requires a dry-run plan for the current target mode and localhost toggle.
-      </UiState>
-      <UiState v-if="isAdmin && !confirmationReady" tone="warn">
-        Type the exact confirmation phrase to enable apply.
+      <UiState 
+        v-if="isAdmin && (!modeConfigHasToken || (requiresPeerInputs && (!modeConfigHasHostPeer || !modeConfigHasAdminPeers)) || !planMatchesSelection || !confirmationReady)" 
+        tone="warn"
+      >
+        <span v-if="!modeConfigHasToken">Missing API credentials. </span>
+        <span v-if="requiresPeerInputs && !modeConfigHasHostPeer">Missing host peer ID. </span>
+        <span v-if="requiresPeerInputs && !modeConfigHasAdminPeers">Missing admin peer IDs. </span>
+        <span v-if="!planMatchesSelection && modeConfigHasToken">Run dry-run plan first. </span>
+        <span v-if="!confirmationReady && planMatchesSelection">Type confirmation phrase to proceed.</span>
       </UiState>
 
       <div class="flex flex-wrap items-center gap-3">
@@ -802,11 +767,11 @@ onBeforeUnmount(() => {
         >
           <span class="inline-flex items-center gap-2">
             <UiInlineSpinner v-if="applySubmitting" />
-            {{ applySubmitting ? 'Queueing mode apply...' : `Queue apply (${modeLabel(targetMode)})` }}
+            {{ applySubmitting ? 'Queueing...' : `Queue apply (${modeLabel(targetMode)})` }}
           </span>
         </UiButton>
         <p v-if="!isAdmin" class="text-xs text-[color:var(--muted)]">
-          Read-only access: apply actions are admin-only.
+          Admin-only action
         </p>
       </div>
 
@@ -819,16 +784,23 @@ onBeforeUnmount(() => {
 
       <UiPanel v-if="applyPollingJobId" variant="soft" class="space-y-3 p-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-            Mode apply job
-          </p>
-          <UiBadge :tone="applyPollingStatusTone">
-            {{ applyPollingStatusLabel }}
-          </UiBadge>
+          <div class="flex items-center gap-2">
+            <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+              Job #{{ applyPollingJobId }}
+            </p>
+            <UiBadge :tone="applyPollingStatusTone">
+              {{ applyPollingStatusLabel }}
+            </UiBadge>
+          </div>
+          <UiButton
+            :as="RouterLink"
+            :to="`/jobs/${applyPollingJobId}`"
+            variant="ghost"
+            size="sm"
+          >
+            View log
+          </UiButton>
         </div>
-        <p class="text-xs text-[color:var(--muted)]">
-          Job #{{ applyPollingJobId }}
-        </p>
 
         <UiState v-if="applyPollingLifecycle === 'running'" loading>
           {{ applyPollingRunningMessage }}
@@ -838,48 +810,19 @@ onBeforeUnmount(() => {
           :tone="applyPollingTerminalTone"
         >
           {{ applyPollingTerminalMessage }}
+          <span v-if="applyPollingHasWarnings">
+            ({{ applyPollingWarnings.length }} warnings, {{ applyPollingFailureCount }} failures)
+          </span>
         </UiState>
 
-        <UiState
-          v-if="applyPollingLifecycle === 'terminal' && applyPollingHasWarnings"
-          tone="warn"
+        <UiButton
+          v-if="applyPollingLifecycle === 'error'"
+          variant="ghost"
+          size="sm"
+          @click="retryApplyPolling"
         >
-          Warnings: {{ applyPollingWarnings.length }} |
-          Rebinding failures: {{ applyPollingRebindingFailures }} |
-          Redeploy failures: {{ applyPollingRedeployFailures }}
-        </UiState>
-
-        <ul
-          v-if="applyPollingLifecycle === 'terminal' && applyPollingWarnings.length > 0"
-          class="space-y-2 text-xs text-[color:var(--muted)]"
-        >
-          <li
-            v-for="(warning, index) in applyPollingWarnings.slice(0, 5)"
-            :key="`mode-apply-warning-${index}`"
-            class="rounded border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-2"
-          >
-            {{ warning }}
-          </li>
-        </ul>
-
-        <div class="flex flex-wrap items-center gap-3">
-          <UiButton
-            v-if="applyPollingLifecycle === 'error'"
-            variant="ghost"
-            size="sm"
-            @click="retryApplyPolling"
-          >
-            Retry polling
-          </UiButton>
-          <UiButton
-            :as="RouterLink"
-            :to="`/jobs/${applyPollingJobId}`"
-            variant="ghost"
-            size="sm"
-          >
-            Open job log
-          </UiButton>
-        </div>
+          Retry polling
+        </UiButton>
       </UiPanel>
     </UiPanel>
   </UiPanel>
