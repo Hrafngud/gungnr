@@ -253,25 +253,25 @@ watch(
       <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <UiPanel variant="soft" class="space-y-3 p-4">
           <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Plan summary</p>
-          <div class="flex flex-wrap gap-3">
-            <div class="min-w-[140px] flex-1 rounded-xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
+          <div class="grid gap-3 sm:grid-cols-2">
+            <UiPanel variant="raise" class="min-w-0 space-y-1 p-3">
               <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Containers</p>
               <p class="mt-1 text-lg font-semibold text-[color:var(--text)]">{{ archivePlan.containers.length }}</p>
-            </div>
-            <div class="min-w-[140px] flex-1 rounded-xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
+            </UiPanel>
+            <UiPanel variant="raise" class="min-w-0 space-y-1 p-3">
               <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Hostnames</p>
               <p class="mt-1 text-lg font-semibold text-[color:var(--text)]">{{ archivePlan.hostnames.length }}</p>
-            </div>
-            <div class="min-w-[140px] flex-1 rounded-xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
+            </UiPanel>
+            <UiPanel variant="raise" class="min-w-0 space-y-1 p-3">
               <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Ingress rules</p>
               <p class="mt-1 text-lg font-semibold text-[color:var(--text)]">{{ archivePlan.ingressRules.length }}</p>
-            </div>
-            <div class="min-w-[140px] flex-1 rounded-xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3">
+            </UiPanel>
+            <UiPanel variant="raise" class="min-w-0 space-y-1 p-3">
               <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">DNS records</p>
               <p class="mt-1 text-lg font-semibold text-[color:var(--text)]">
                 {{ deletableDnsRecordsCount }}/{{ archivePlan.dnsRecords.length }}
               </p>
-            </div>
+            </UiPanel>
           </div>
         </UiPanel>
 
@@ -283,28 +283,31 @@ watch(
             </p>
           </div>
           <UiState v-if="archivePlan.dnsRecords.length === 0">No DNS records matched.</UiState>
-          <div v-else class="overflow-x-auto pb-1">
-            <ul class="flex min-w-max items-stretch gap-2 text-xs text-[color:var(--muted)]">
-              <li
-                v-for="record in archivePlan.dnsRecords"
-                :key="`${record.zoneId}-${record.id}-${record.name}`"
-                class="w-[320px] space-y-1 rounded-xl border border-[color:var(--line)]/70 bg-[color:var(--panel)]/35 p-3"
-              >
-                <div class="flex items-center justify-between gap-2">
-                  <span class="font-mono text-[color:var(--text)] break-all">{{ record.name }}</span>
-                  <UiBadge :tone="record.deleteEligible ? 'ok' : 'warn'">
-                    {{ record.deleteEligible ? 'deletable' : 'skip' }}
-                  </UiBadge>
-                </div>
-                <p class="font-mono text-[11px] text-[color:var(--muted-2)] break-all">
-                  {{ record.type }} → {{ record.content }}
-                </p>
-                <p v-if="record.skipReason" class="text-[11px] text-[color:var(--muted)]">
-                  {{ record.skipReason }}
-                </p>
-              </li>
-            </ul>
-          </div>
+          <ul
+            v-else
+            class="grid gap-3 text-xs text-[color:var(--muted)] [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]"
+          >
+            <UiPanel
+              v-for="record in archivePlan.dnsRecords"
+              as="li"
+              variant="raise"
+              :key="`${record.zoneId}-${record.id}-${record.name}`"
+              class="min-w-0 space-y-1 p-3"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-mono text-[color:var(--text)] break-all">{{ record.name }}</span>
+                <UiBadge :tone="record.deleteEligible ? 'ok' : 'warn'">
+                  {{ record.deleteEligible ? 'deletable' : 'skip' }}
+                </UiBadge>
+              </div>
+              <p class="font-mono text-[11px] text-[color:var(--muted-2)] break-all">
+                {{ record.type }} → {{ record.content }}
+              </p>
+              <p v-if="record.skipReason" class="text-[11px] text-[color:var(--muted)]">
+                {{ record.skipReason }}
+              </p>
+            </UiPanel>
+          </ul>
         </UiPanel>
       </div>
     </template>

@@ -57,11 +57,7 @@ function portPickerOptions(port: WorkbenchPortInventoryRow) {
 </script>
 
 <template>
-  <div class="w-full mb-2">
-    <div class="flex mb-2">
-      <h5 class="text-base font-semibold text-[color:var(--text)]">Container Port</h5>
-    </div>
-
+  <div class="w-full border-b-3 pb-2 mb-3 border-zinc-700">
     <UiState v-if="props.selectedServicePorts.length === 0">
       No Workbench port rows are stored for this service yet.
     </UiState>
@@ -75,8 +71,8 @@ function portPickerOptions(port: WorkbenchPortInventoryRow) {
         <UiListRow as="article">
             <div class="flex flex-col items-start w-full">
               <div class="flex w-full flex-row items-center gap-1">
-                <span class="text-[11px] min-w-1/6 uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-                  Host port
+                <span class="text-md uppercase font-bold min-w-1/6">
+                  Port:
                 </span>
                 <UiSelectTypingInput
                   :model-value="props.portInputValue(port)"
@@ -97,21 +93,6 @@ function portPickerOptions(port: WorkbenchPortInventoryRow) {
                   @commit="props.setManualPort(port)"
                   @action="props.resetPortToAuto(port)"
                 />
-            </div>
-
-            <div class="flex flex-col w-full gap-2">
-              <UiInlineFeedback
-                v-if="props.portMutationFeedback(port)"
-                :tone="props.portMutationFeedback(port)?.tone || 'neutral'"
-              >
-                {{ props.portMutationFeedback(port)?.message }}
-              </UiInlineFeedback>
-              <UiInlineFeedback
-                v-if="props.portSuggestionFeedback(port)"
-                :tone="props.portSuggestionFeedback(port)?.tone || 'neutral'"
-              >
-                {{ props.portSuggestionFeedback(port)?.message }}
-              </UiInlineFeedback>
             </div>
           </div>
         </UiListRow>

@@ -136,6 +136,7 @@ export const api = axios.create({
 
 const mockFlagKey = 'gungnr:mock'
 const workbenchSnapshotPathPattern = /^\/api\/v1\/projects\/([^/]+)\/workbench$/
+const workbenchComposePreviewPathPattern = /^\/api\/v1\/projects\/([^/]+)\/workbench\/compose\/preview$/
 const workbenchPortMutatePathPattern = /^\/api\/v1\/projects\/([^/]+)\/workbench\/ports\/mutate$/
 const workbenchPortSuggestPathPattern = /^\/api\/v1\/projects\/([^/]+)\/workbench\/ports\/suggest$/
 
@@ -261,6 +262,258 @@ function parseMockSelector(payload: Record<string, unknown>): WorkbenchPortSelec
     containerPort,
     ...(protocol ? { protocol } : {}),
     ...(hostIp ? { hostIp } : {}),
+  }
+}
+
+function yamlQuoted(value: string): string {
+  return JSON.stringify(value)
+}
+
+function uniqueList(values: string[]): string[] {
+  const seen = new Set<string>()
+  const ordered: string[] = []
+  values.forEach((value) => {
+    const normalized = value.trim()
+    if (!normalized || seen.has(normalized)) return
+    seen.add(normalized)
+    ordered.push(normalized)
+  })
+  return ordered
+}
+
+function mockMountPath(serviceName: string, volumeName: string): string {
+  const safeService = serviceName.replace(/[^a-zA-Z0-9_.-]+/g, '-')
+  const safeVolume = volumeName.replace(/[^a-zA-Z0-9_.-]+/g, '-')
+  return `/var/lib/${safeService}/${safeVolume}`
+}
+
+function mockComposePortBinding(port: WorkbenchStackPort): string | null {
+  const protocol = normalizePortProtocol(port)
+  const hostIp = normalizePortHostIp(port)
+  const containerPort = String(port.containerPort)
+
+  const hostPortRaw = port.hostPortRaw?.trim()
+  if (hostPortRaw) {
+    const hasExplicitPair = hostPortRaw.includes(':')
+    const mappingBase = hasExplicitPair ? hostPortRaw : `${hostPortRaw}:${containerPort}`
+    const mappingWithHostIp =
+      hostIp !== '0.0.0.0' && !hasExplicitPair ? `${hostIp}:${mappingBase}` : mappingBase
+    return protocol === 'tcp' ? mappingWithHostIp : `${mappingWithHostIp}/${protocol}`
+  }
+
+  if (typeof port.hostPort === 'number' && Number.isInteger(port.hostPort)) {
+    const mappingBase = hostIp !== '0.0.0.0' ? `${hostIp}:${port.hostPort}:${containerPort}` : `${port.hostPort}:${containerPort}`
+    return protocol === 'tcp' ? mappingBase : `${mappingBase}/${protocol}`
+  }
+
+  return null
+}
+
+function buildMockComposePreview(stack: WorkbenchStackSnapshot): string {
+  const dependenciesByService = new Map<string, string[]>()
+  stack.dependencies.forEach((dependency) => {
+    const serviceName = dependency.serviceName.trim()
+    const dependsOn = dependency.dependsOn.trim()
+    if (!serviceName || !dependsOn) return
+    const current = dependenciesByService.get(serviceName) ?? []
+    current.push(dependsOn)
+    dependenciesByService.set(serviceName, current)
+  })
+
+  const portsByService = new Map<string, WorkbenchStackPort[]>()
+  stack.ports.forEach((port) => {
+    const serviceName = port.serviceName.trim()
+    if (!serviceName) return
+    const current = portsByService.get(serviceName) ?? []
+    current.push(port)
+    portsByService.set(serviceName, current)
+  })
+
+  const resourceByService = new Map<string, WorkbenchStackSnapshot['resources'][number]>()
+  stack.resources.forEach((resource) => {
+    const serviceName = resource.serviceName.trim()
+    if (!serviceName) return
+    resourceByService.set(serviceName, resource)
+  })
+
+  const envByService = new Map<string, Array<{ variable: string; expression: string }>>()
+  stack.envRefs.forEach((ref) => {
+    const serviceName = ref.serviceName?.trim() || ''
+    const variable = ref.variable?.trim() || ''
+    const expression = ref.expression?.trim() || ''
+    if (!serviceName || !variable || !expression) return
+    const current = envByService.get(serviceName) ?? []
+    current.push({ variable, expression })
+    envByService.set(serviceName, current)
+  })
+
+  const networksByService = new Map<string, string[]>()
+  stack.networkRefs.forEach((networkRef) => {
+    const serviceName = networkRef.serviceName.trim()
+    const networkName = networkRef.networkName.trim()
+    if (!serviceName || !networkName) return
+    const current = networksByService.get(serviceName) ?? []
+    current.push(networkName)
+    networksByService.set(serviceName, current)
+  })
+
+  const volumesByService = new Map<string, string[]>()
+  stack.volumeRefs.forEach((volumeRef) => {
+    const serviceName = volumeRef.serviceName.trim()
+    const volumeName = volumeRef.volumeName.trim()
+    if (!serviceName || !volumeName) return
+    const current = volumesByService.get(serviceName) ?? []
+    current.push(volumeName)
+    volumesByService.set(serviceName, current)
+  })
+
+  const allNetworks = uniqueList(stack.networkRefs.map((ref) => ref.networkName))
+  const allVolumes = uniqueList(stack.volumeRefs.map((ref) => ref.volumeName))
+  const lines: string[] = [
+    '# Mock-generated compose preview from current Workbench snapshot.',
+    'version: "3.9"',
+  ]
+
+  if (stack.services.length === 0) {
+    lines.push('services: {}')
+    return lines.join('\n')
+  }
+
+  lines.push('services:')
+  stack.services.forEach((service, serviceIndex) => {
+    const serviceName = service.serviceName.trim()
+    if (!serviceName) return
+
+    if (serviceIndex > 0) {
+      lines.push('')
+    }
+    lines.push(`  ${serviceName}:`)
+
+    const image = service.image?.trim()
+    if (image) {
+      lines.push(`    image: ${yamlQuoted(image)}`)
+    }
+
+    const buildSource = service.buildSource?.trim()
+    if (buildSource) {
+      lines.push(`    build: ${yamlQuoted(buildSource)}`)
+    }
+
+    const restartPolicy = service.restartPolicy?.trim()
+    if (restartPolicy) {
+      lines.push(`    restart: ${yamlQuoted(restartPolicy)}`)
+    }
+
+    const dependencies = uniqueList(dependenciesByService.get(serviceName) ?? [])
+    if (dependencies.length > 0) {
+      lines.push('    depends_on:')
+      dependencies.forEach((dependsOn) => {
+        lines.push(`      - ${dependsOn}`)
+      })
+    }
+
+    const bindings = (portsByService.get(serviceName) ?? [])
+      .map((port) => mockComposePortBinding(port))
+      .filter((binding): binding is string => Boolean(binding))
+    if (bindings.length > 0) {
+      lines.push('    ports:')
+      bindings.forEach((binding) => {
+        lines.push(`      - ${yamlQuoted(binding)}`)
+      })
+    }
+
+    const environmentEntries = envByService.get(serviceName) ?? []
+    if (environmentEntries.length > 0) {
+      lines.push('    environment:')
+      environmentEntries.forEach((entry) => {
+        lines.push(`      ${entry.variable}: ${yamlQuoted(entry.expression)}`)
+      })
+    }
+
+    const resource = resourceByService.get(serviceName)
+    if (resource) {
+      const limitCpus = resource.limitCpus?.trim() || ''
+      const limitMemory = resource.limitMemory?.trim() || ''
+      const reservationCpus = resource.reservationCpus?.trim() || ''
+      const reservationMemory = resource.reservationMemory?.trim() || ''
+      const hasLimits = Boolean(limitCpus || limitMemory)
+      const hasReservations = Boolean(reservationCpus || reservationMemory)
+
+      if (hasLimits || hasReservations) {
+        lines.push('    deploy:')
+        lines.push('      resources:')
+        if (hasLimits) {
+          lines.push('        limits:')
+          if (limitCpus) {
+            lines.push(`          cpus: ${yamlQuoted(limitCpus)}`)
+          }
+          if (limitMemory) {
+            lines.push(`          memory: ${yamlQuoted(limitMemory)}`)
+          }
+        }
+        if (hasReservations) {
+          lines.push('        reservations:')
+          if (reservationCpus) {
+            lines.push(`          cpus: ${yamlQuoted(reservationCpus)}`)
+          }
+          if (reservationMemory) {
+            lines.push(`          memory: ${yamlQuoted(reservationMemory)}`)
+          }
+        }
+      }
+    }
+
+    const networks = uniqueList(networksByService.get(serviceName) ?? [])
+    if (networks.length > 0) {
+      lines.push('    networks:')
+      networks.forEach((networkName) => {
+        lines.push(`      - ${networkName}`)
+      })
+    }
+
+    const volumes = uniqueList(volumesByService.get(serviceName) ?? [])
+    if (volumes.length > 0) {
+      lines.push('    volumes:')
+      volumes.forEach((volumeName) => {
+        lines.push(`      - ${volumeName}:${mockMountPath(serviceName, volumeName)}`)
+      })
+    }
+  })
+
+  if (allNetworks.length > 0) {
+    lines.push('')
+    lines.push('networks:')
+    allNetworks.forEach((networkName) => {
+      lines.push(`  ${networkName}: {}`)
+    })
+  }
+
+  if (allVolumes.length > 0) {
+    lines.push('')
+    lines.push('volumes:')
+    allVolumes.forEach((volumeName) => {
+      lines.push(`  ${volumeName}: {}`)
+    })
+  }
+
+  return lines.join('\n')
+}
+
+function resolveMockWorkbenchComposePreview(
+  projectName: string,
+): { preview: Record<string, unknown> } | null {
+  const state = getMockWorkbenchState(projectName)
+  if (!state) return null
+
+  const stack = state.current
+  return {
+    preview: {
+      compose: buildMockComposePreview(stack),
+      metadata: {
+        revision: stack.revision,
+        sourceFingerprint: stack.sourceFingerprint,
+      },
+    },
   }
 }
 
@@ -612,6 +865,14 @@ function resolveDynamicMockResponse(
   if (normalizedMethod !== 'POST') return undefined
 
   const payload = parseMockPayload(data)
+  const previewMatch = pathname.match(workbenchComposePreviewPathPattern)
+  if (previewMatch) {
+    const projectSegment = previewMatch[1]
+    if (!projectSegment) return undefined
+    const projectName = decodeProjectSegment(projectSegment)
+    return resolveMockWorkbenchComposePreview(projectName) ?? undefined
+  }
+
   const mutateMatch = pathname.match(workbenchPortMutatePathPattern)
   if (mutateMatch) {
     const projectSegment = mutateMatch[1]

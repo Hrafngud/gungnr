@@ -20,7 +20,7 @@ defineProps<{
     <UiState v-if="!selectedServiceTopology">
       No Workbench topology rows are stored for this service yet.
     </UiState>
-    <div v-else class="h-full w-full p-6 items-center gap-4">
+    <div v-else class="h-full w-full p-3 items-center gap-3">
       <WorkbenchDependencyGraph
         :service-name="selectedServiceTopology.serviceName"
         :depends-on="selectedServiceTopology.dependsOn"

@@ -2388,7 +2388,7 @@ watch(projectName, () => {
               class="flex flex-row flex-wrap items-center gap-2"
             >
               <UiButton
-                variant="primary"
+                variant="ghost"
                 size="sm"
                 :disabled="
                   workbenchStatus === 'loading' ||
@@ -2411,7 +2411,7 @@ watch(projectName, () => {
               </UiButton>
               <UiButton
                 v-if="isAdmin && workbenchSnapshotReady"
-                variant="primary"
+                variant="ghost"
                 size="sm"
                 :disabled="
                   workbenchResolveStatus === 'loading' ||
@@ -2432,7 +2432,7 @@ watch(projectName, () => {
               </UiButton>
               <UiButton
                 v-if="isAdmin"
-                variant="primary"
+                variant="ghost"
                 size="sm"
                 :disabled="
                   workbenchImportStatus === 'loading' ||

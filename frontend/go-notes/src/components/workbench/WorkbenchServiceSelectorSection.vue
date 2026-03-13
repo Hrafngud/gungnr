@@ -33,7 +33,7 @@ const emit = defineEmits<{
     <UiState v-if="serviceInventory.length === 0">
       No Workbench service rows are stored for this snapshot yet.
     </UiState>
-    <div v-else class="w-full flex flex-col max-h-[10vw] overflow-y-auto">
+    <div v-else class="w-full flex flex-col h-1/2 overflow-y-auto">
       <UiListRow
         v-for="service in serviceInventory"
         :key="service.serviceName"
