@@ -1,13 +1,6 @@
 <div align="center">
 
-<svg viewBox="124 82 252 338" width="120" height="160" xmlns="http://www.w3.org/2000/svg">
-  <path d="M263.00,342.00 L235.00,343.00 L229.00,352.00 L248.00,417.00 L253.00,414.00 L268.00,361.00 L269.00,352.00 Z" fill="currentColor" fill-rule="evenodd"/>
-  <path d="M175.00,308.00 L181.00,316.00 L196.00,324.00 L236.00,332.00 L264.00,332.00 L297.00,326.00 L318.00,316.00 L324.00,307.00 L320.00,298.00 L303.00,289.00 L276.00,284.00 L275.00,287.00 L296.00,295.00 L300.00,299.00 L300.00,305.00 L289.00,311.00 L273.00,315.00 L227.00,315.00 L200.00,306.00 L199.00,299.00 L208.00,292.00 L224.00,288.00 L224.00,284.00 L189.00,292.00 L177.00,300.00 Z" fill="currentColor" fill-rule="evenodd"/>
-  <path d="M248.00,244.00 L242.00,248.00 L242.00,255.00 L246.00,259.00 L246.00,270.00 L236.00,279.00 L236.00,304.00 L262.00,305.00 L263.00,279.00 L253.00,270.00 L253.00,260.00 L257.00,256.00 L257.00,248.00 Z" fill="currentColor" fill-rule="evenodd"/>
-  <path d="M277.00,139.00 L281.00,159.00 L312.00,175.00 L332.00,195.00 L347.00,221.00 L353.00,248.00 L352.00,277.00 L341.00,307.00 L331.00,322.00 L314.00,339.00 L303.00,347.00 L281.00,356.00 L276.00,376.00 L282.00,376.00 L318.00,360.00 L331.00,350.00 L350.00,329.00 L367.00,296.00 L371.00,280.00 L373.00,253.00 L371.00,236.00 L358.00,199.00 L342.00,177.00 L329.00,164.00 L310.00,151.00 L288.00,141.00 Z" fill="currentColor" fill-rule="evenodd"/>
-  <path d="M217.00,139.00 L201.00,145.00 L175.00,160.00 L151.00,184.00 L138.00,205.00 L130.00,227.00 L126.00,266.00 L130.00,290.00 L138.00,311.00 L156.00,338.00 L186.00,363.00 L207.00,373.00 L222.00,376.00 L218.00,356.00 L189.00,342.00 L164.00,317.00 L152.00,295.00 L145.00,264.00 L149.00,230.00 L160.00,205.00 L173.00,188.00 L187.00,175.00 L199.00,167.00 L217.00,160.00 L222.00,139.00 Z" fill="currentColor" fill-rule="evenodd"/>
-  <path d="M246.00,84.00 L216.00,217.00 L222.00,226.00 L222.00,231.00 L211.00,233.00 L208.00,249.00 L231.00,267.00 L237.00,263.00 L236.00,247.00 L240.00,242.00 L246.00,104.00 L247.00,96.00 L252.00,95.00 L258.00,240.00 L263.00,248.00 L261.00,262.00 L268.00,267.00 L287.00,253.00 L291.00,246.00 L287.00,231.00 L277.00,231.00 L277.00,226.00 L282.00,220.00 L279.00,199.00 L253.00,84.00 Z" fill="currentColor" fill-rule="evenodd"/>
-</svg>
+![Gungnr Logo](frontend/go-notes/public/logo.svg)
 
 # Gungnr
 
@@ -18,9 +11,15 @@ exposing local services via Cloudflare Tunnel. It runs on Linux hosts with acces
 the templates directory, and the local cloudflared config, and serves a web UI behind 
 an nginx proxy.
 
-Important: Do not edit `deploy.sh`. It is reference-only; the UI must mirror its CLI behavior before advanced automation.
-Setup is now driven by a one-time terminal bootstrap (`install.sh` + `gungnr bootstrap`).
+Why I did it:
 
+The `deploy.sh` silly little shell script tells a lot about the history of this project:
+  Basically, it was a collection of automations to manage templates for projects so I could start coding with the whole HTTPS and deploy stuff right away. From my computer.
+  But since I also intended to expand the features after using it for a while, I decided to create a more sophisticated full stack application, that would allow me to expand the capabilities even further.
+
+This project is perfect for simple development and test environment, personal use, and even share a machine with friends or colleagues to run simple useful service.
+I'm planning to expand the list of docker service presets avaliable in the future, as well as the tech stack templates.
+  
 ## Architecture
 - Go API + Postgres + job runner.
 - Vue 3 UI served by nginx.
@@ -37,10 +36,9 @@ Setup is now driven by a one-time terminal bootstrap (`install.sh` + `gungnr boo
 - Queue storage defaults to `INFRA_QUEUE_ROOT=/templates/.infra` with `intents/`, `claims/`, `results/`, and `logs/` subdirectories.
 
 ## Requirements
-- Sudo access to install dependencies.
-- GitHub OAuth app credentials (Client ID/Secret + callback URL) for bootstrap input.
-- Cloudflare account, domain, and API token with tunnel + DNS edit permissions for bootstrap input.
-- `install.sh` installs or verifies Docker, Docker Compose v2, and `cloudflared`.
+- Cloudflared, Docker and Docker Compose on host machine.
+- GitHub account.
+- Cloudflare account (free tier) and a domain registered on Cloudflare.
 
 ## Compatibility
 Currently, Gungnr is **only supported on Linux**. We are looking forward to introducing a compatibility layer for other operating systems soon.
@@ -62,31 +60,65 @@ Scripts created under `~/gungnr/state`:
 - `~/gungnr/state/cloudflared-run.sh` (starts the tunnel using the generated config)
 - `~/gungnr/state/cloudflared-ensure.sh` (checks the process and relaunches if needed)
 
-Run the ensure script manually:
-```bash
-~/gungnr/state/cloudflared-ensure.sh
-```
 
-View the managed crontab entries:
-```bash
-crontab -l | rg 'gungnr-cloudflared'
-```
+## Installation
 
-Remove only the watchdog entries (leaves other cron jobs intact):
-```bash
-crontab -l | rg -v 'gungnr-cloudflared' | crontab -
-```
+### Method 1 - Install Script (Recommended)
 
-## Gungnr setup
-1) Run `./install.sh` to install the CLI and prerequisites.
-2) Run `gungnr bootstrap` and follow the prompts to configure the machine.
-3) Open the printed panel URL and login via GitHub.
-4) Configure GitHub App settings in the UI if you want to enable template creation.
+**0)** Do all Cloudflare and Github prerequisite config [as instructed on docs](https://docs.jdoss.pro/docs.html#install-steps)!!
+
+**1)** Run:
+  ```
+   wget -qO /tmp/gungnr-install.sh https://raw.githubusercontent.com/Hrafngud/gungnr/main/install.sh && chmd +x /tmp/gungnr-install.sh && /tmp/gungnr-install.sh
+  ```
+   to install the CLI and prerequisites.
+
+**2)** Run `gungnr bootstrap` and follow the prompts to configure the application.
+
+**3)** Open the printed panel URL and login via GitHub.
+
+**4)** Configure GitHub App settings in the UI if you want to enable template creation (optional).
+
+
+---
+
+### Method 2 - Build From Source (For Development)
+
+**0)** Do all Cloudflare and Github prerequisite config [as instructed on docs](https://docs.jdoss.pro/docs.html#install-steps)!!
+
+**1)** Create a directory:
+  ```
+  mkdir gungnr-dev
+  cd gungnr-dev
+  ```
+  then clone Gungnr:
+
+  ```
+  git clone https://github.com/Hrafngud/gungnr.git
+  ```
+
+  <em>OBS: If you clone it at `~/` , it will conflict with gungnr default config directory, do it into a separate directory.</em>
+  
+**2)** Build:
+  ```
+  go build -o ./gungnr ./cmd/gungnr
+
+  ```
+  
+**3)** Run bootstrap:
+
+  ```
+  ./gungnr bootstrap
+  ```
+**4)** Open the printed panel URL and login via GitHub.
+
+**5)** Configure GitHub App settings in the UI if you want to enable template creation (optional).
 
 ## Documentation
-External docs are published from `docs/` via GitHub Pages.
-Live URL: https://hrafngud.github.io/gungnr/
+Live: https://docs.jdoss.pro
+
 Local source: `docs/index.html` (landing), `docs/docs.html` (docs), `docs/errors.html` (errors).
+(If you forked the repo, you can continue to document new features there.)
 
 ## Roadmap
 
@@ -103,14 +135,19 @@ Local source: `docs/index.html` (landing), `docs/docs.html` (docs), `docs/errors
 - **CLI operations**: `gungnr restart`, `gungnr tunnel run`, and `gungnr uninstall` commands for panel and tunnel control.
 
 ### Planned Features
-- **Expanded RBAC**: More granular permissions and role customization.
+- **Expanded RBAC**: Define clearer RBAC rules and presets for different case scenarios.
 - **Additional templates**: Support for different fullstack stacks beyond the current Vue + Go + PostgreSQL.
 - **Enhanced bootstrap**: Idempotent re-runs and safe upgrade paths.
 - **Daemon management**: Optional auto-restart for cloudflared with systemd integration.
 - **Additional CLI commands**: More panel and tunnel control operations.
+- **Interoperability**: Modern support for integration with external tools (API's, MCP's etc.).
 - **macOS support**: Compatibility layer for macOS (amd64/arm64) via native installer.
 - **Windows support**: PowerShell-based installation and management flows.
-- **Windows support**: PowerShell-based installation and management flows.
+- **Feedback and support official channels**: Currently, if you have an problem you can open an issue directly.
+- **Console and Filesystem**: Adding console and filesystem views. 
+- **TUI installer persistence**: Persisting the installation state for a while even when user shutdown the TUI.
+- **Advanced Docker deployment**: For a broad compatibility with images that require custom setup before startup.
+- **More one click deployments**: Testing and validating more tools for quick deployment.
 
 ## Environment configuration
 The bootstrap CLI generates a complete `.env`. Reference values:
@@ -157,6 +194,10 @@ host as a user-managed process. This is an optional, non-primary path. Locally
 managed tunnels (`config_src=local`) cannot be updated via the Cloudflare API.
 
 ## Test token auth (optional)
+
+Since only OAuth is supported, when you wish to hit the panel with curl, or give a token to an agent/test suite,
+you can leverage this endpoint for grabbing a token, this is optional and requires setting up the variables in .env:
+
 If `ADMIN_LOGIN` and `ADMIN_PASSWORD` are set, you can request a bearer token:
 ```bash
 curl -sS http://localhost/test-token \
@@ -247,8 +288,3 @@ VITE_API_BASE_URL=http://localhost:8080 npm run dev`
 - The nginx proxy exposes port 80 by default.
 - The API and web ports are not exposed unless you uncomment them in
   `docker-compose.yml` and set `API_PORT` / `WEB_PORT`.
-
-## Troubleshooting
-- Check service health: `make ps`, `make logs`
-- Validate ingress rules: `cloudflared tunnel ingress validate`
-- Test rule matching: `cloudflared tunnel ingress rule https://sub.example.com`
