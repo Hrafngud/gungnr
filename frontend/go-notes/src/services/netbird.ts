@@ -23,5 +23,5 @@ export const netbirdApi = {
     api.post<NetBirdModeApplyResponse>('/api/v1/netbird/mode/apply', payload),
   reapplyPolicies: (payload: NetBirdPolicyReapplyRequest = {}) =>
     api.post<NetBirdPolicyReapplyResponse>('/api/v1/netbird/policies/reapply', payload),
-  getAclGraph: () => api.get<NetBirdACLGraphResponse>('/api/v1/netbird/acl/graph'),
+  getGraph: () => api.get<NetBirdACLGraphResponse>('/api/v1/netbird/graph'),
 }

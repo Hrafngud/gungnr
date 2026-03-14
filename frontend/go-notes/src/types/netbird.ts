@@ -189,6 +189,8 @@ export interface NetBirdACLNode {
   id: string
   label: string
   kind: string
+  kindLabel: string
+  tone: string
   groupName?: string
   projectId?: number
   projectName?: string
@@ -198,23 +200,38 @@ export interface NetBirdACLEdge {
   id: string
   from: string
   to: string
+  fromLabel: string
+  toLabel: string
   policy: string
   rule: string
+  ruleLabel: string
   action: string
   protocol: string
   ports: string[]
   bidirectional: boolean
+  tone: string
+}
+
+export interface NetBirdGraphSummary {
+  nodeCount: number
+  edgeCount: number
+  allowEdgeCount: number
 }
 
 export interface NetBirdACLGraph {
   currentMode: NetBirdMode
+  modeLabel: string
   configuredMode: NetBirdMode
+  configuredModeLabel: string
   effectiveModeBProjectIds: number[]
   configuredModeBProjectIds: number[]
   modeSource: string
   modeSourceJobId?: number
   modeDrift: boolean
   defaultAction: string
+  defaultActionLabel: string
+  defaultActionTone: string
+  summary: NetBirdGraphSummary
   nodes: NetBirdACLNode[]
   edges: NetBirdACLEdge[]
   notes: string[]

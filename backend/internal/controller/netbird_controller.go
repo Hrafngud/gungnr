@@ -61,6 +61,10 @@ func (c *NetBirdController) Status(ctx *gin.Context) {
 }
 
 func (c *NetBirdController) ACLGraph(ctx *gin.Context) {
+	c.Graph(ctx)
+}
+
+func (c *NetBirdController) Graph(ctx *gin.Context) {
 	if c.service == nil {
 		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeNetBirdUnavailable, "netbird service unavailable", nil)
 		return

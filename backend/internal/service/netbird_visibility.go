@@ -81,22 +81,35 @@ type NetBirdAPIReachability struct {
 
 type NetBirdACLGraph struct {
 	CurrentMode               NetBirdMode      `json:"currentMode"`
+	ModeLabel                 string           `json:"modeLabel"`
 	ConfiguredMode            NetBirdMode      `json:"configuredMode"`
+	ConfiguredModeLabel       string           `json:"configuredModeLabel"`
 	EffectiveModeBProjectIDs  []uint           `json:"effectiveModeBProjectIds"`
 	ConfiguredModeBProjectIDs []uint           `json:"configuredModeBProjectIds"`
 	ModeSource                string           `json:"modeSource"`
 	ModeSourceJobID           uint             `json:"modeSourceJobId,omitempty"`
 	ModeDrift                 bool             `json:"modeDrift"`
 	DefaultAction             string           `json:"defaultAction"`
+	DefaultActionLabel        string           `json:"defaultActionLabel"`
+	DefaultActionTone         string           `json:"defaultActionTone"`
+	Summary                   NetBirdGraphMeta `json:"summary"`
 	Nodes                     []NetBirdACLNode `json:"nodes"`
 	Edges                     []NetBirdACLEdge `json:"edges"`
 	Notes                     []string         `json:"notes"`
+}
+
+type NetBirdGraphMeta struct {
+	NodeCount      int `json:"nodeCount"`
+	EdgeCount      int `json:"edgeCount"`
+	AllowEdgeCount int `json:"allowEdgeCount"`
 }
 
 type NetBirdACLNode struct {
 	ID          string `json:"id"`
 	Label       string `json:"label"`
 	Kind        string `json:"kind"`
+	KindLabel   string `json:"kindLabel"`
+	Tone        string `json:"tone"`
 	GroupName   string `json:"groupName,omitempty"`
 	ProjectID   uint   `json:"projectId,omitempty"`
 	ProjectName string `json:"projectName,omitempty"`
@@ -106,12 +119,16 @@ type NetBirdACLEdge struct {
 	ID            string   `json:"id"`
 	From          string   `json:"from"`
 	To            string   `json:"to"`
+	FromLabel     string   `json:"fromLabel"`
+	ToLabel       string   `json:"toLabel"`
 	Policy        string   `json:"policy"`
 	Rule          string   `json:"rule"`
+	RuleLabel     string   `json:"ruleLabel"`
 	Action        string   `json:"action"`
 	Protocol      string   `json:"protocol"`
 	Ports         []string `json:"ports"`
 	Bidirectional bool     `json:"bidirectional"`
+	Tone          string   `json:"tone"`
 }
 
 type netBirdModeApplySnapshot struct {
@@ -341,6 +358,7 @@ func (s *NetBirdService) ACLGraph(ctx context.Context) (NetBirdACLGraph, error) 
 
 	graph := buildNetBirdACLGraph(runtimeState.EffectiveMode, catalog, runtimeModeProjects)
 	graph.ConfiguredMode = runtimeState.ConfiguredMode
+	graph.ConfiguredModeLabel = netBirdModeLabel(runtimeState.ConfiguredMode)
 	graph.EffectiveModeBProjectIDs = normalizeUintList(runtimeState.EffectiveModeBProjectIDs)
 	graph.ConfiguredModeBProjectIDs = normalizeUintList(runtimeState.ConfiguredModeBProjectIDs)
 	graph.ModeSource = runtimeState.Source
@@ -701,6 +719,11 @@ func buildNetBirdACLGraph(mode NetBirdMode, catalog NetBirdCatalog, projects []N
 		if _, exists := nodeByID[node.ID]; exists {
 			return
 		}
+		if node.KindLabel == "" || node.Tone == "" {
+			kindLabel, tone := netBirdNodeKindPresentation(node)
+			node.KindLabel = kindLabel
+			node.Tone = tone
+		}
 		nodeByID[node.ID] = node
 		nodes = append(nodes, node)
 	}
@@ -748,14 +771,77 @@ func buildNetBirdACLGraph(mode NetBirdMode, catalog NetBirdCatalog, projects []N
 	}
 
 	edges := make([]NetBirdACLEdge, 0, len(catalog.Policies))
+	edgeSet := make(map[string]struct{}, len(catalog.Policies))
+	addEdge := func(
+		fromID string,
+		toID string,
+		policyName string,
+		ruleName string,
+		action string,
+		protocol string,
+		ports []string,
+		bidirectional bool,
+	) {
+		fromNode, hasFrom := nodeByID[fromID]
+		toNode, hasTo := nodeByID[toID]
+		if !hasFrom || !hasTo {
+			return
+		}
+
+		normalizedKey := strings.ToLower(strings.Join(
+			[]string{
+				fromID,
+				toID,
+				policyName,
+				ruleName,
+				action,
+				protocol,
+				strings.Join(ports, ","),
+			},
+			"|",
+		))
+		if _, exists := edgeSet[normalizedKey]; exists {
+			return
+		}
+		edgeSet[normalizedKey] = struct{}{}
+
+		ruleLabel := fmt.Sprintf(
+			"%s/%s · %s %s",
+			policyName,
+			ruleName,
+			strings.ToUpper(strings.TrimSpace(protocol)),
+			netBirdACLPortLabel(ports),
+		)
+
+		edges = append(edges, NetBirdACLEdge{
+			ID:            fmt.Sprintf("%s:%s:%s:%s", policyName, ruleName, fromID, toID),
+			From:          fromID,
+			To:            toID,
+			FromLabel:     fromNode.Label,
+			ToLabel:       toNode.Label,
+			Policy:        policyName,
+			Rule:          ruleName,
+			RuleLabel:     ruleLabel,
+			Action:        action,
+			Protocol:      protocol,
+			Ports:         append([]string(nil), ports...),
+			Bidirectional: bidirectional,
+			Tone:          netBirdACLEdgeTone(action),
+		})
+	}
+
 	for _, policy := range catalog.Policies {
 		if !policy.Enabled {
 			continue
 		}
+		policyName := strings.TrimSpace(policy.Name)
 		for _, rule := range policy.Rules {
-			if !rule.Enabled || strings.ToLower(strings.TrimSpace(rule.Action)) != netBirdActionAccept {
+			action := strings.TrimSpace(rule.Action)
+			if !rule.Enabled || strings.ToLower(action) != netBirdActionAccept {
 				continue
 			}
+			ruleName := strings.TrimSpace(rule.Name)
+			protocol := strings.TrimSpace(rule.Protocol)
 			fromIDs := resolveGraphNodeIDs(rule.Sources, placeholderToNode)
 			toIDs := resolveGraphNodeIDs(rule.Destinations, placeholderToNode)
 			if len(fromIDs) == 0 || len(toIDs) == 0 {
@@ -765,18 +851,28 @@ func buildNetBirdACLGraph(mode NetBirdMode, catalog NetBirdCatalog, projects []N
 			sort.Strings(ports)
 			for _, fromID := range fromIDs {
 				for _, toID := range toIDs {
-					edgeID := fmt.Sprintf("%s:%s:%s:%s", strings.TrimSpace(policy.Name), strings.TrimSpace(rule.Name), fromID, toID)
-					edges = append(edges, NetBirdACLEdge{
-						ID:            edgeID,
-						From:          fromID,
-						To:            toID,
-						Policy:        strings.TrimSpace(policy.Name),
-						Rule:          strings.TrimSpace(rule.Name),
-						Action:        strings.TrimSpace(rule.Action),
-						Protocol:      strings.TrimSpace(rule.Protocol),
-						Ports:         ports,
-						Bidirectional: rule.Bidirectional,
-					})
+					addEdge(
+						fromID,
+						toID,
+						policyName,
+						ruleName,
+						action,
+						protocol,
+						ports,
+						rule.Bidirectional,
+					)
+					if rule.Bidirectional && fromID != toID {
+						addEdge(
+							toID,
+							fromID,
+							policyName,
+							ruleName,
+							action,
+							protocol,
+							ports,
+							rule.Bidirectional,
+						)
+					}
 				}
 			}
 		}
@@ -796,12 +892,85 @@ func buildNetBirdACLGraph(mode NetBirdMode, catalog NetBirdCatalog, projects []N
 	})
 
 	return NetBirdACLGraph{
-		CurrentMode:   mode,
-		DefaultAction: "deny",
-		Nodes:         nodes,
-		Edges:         edges,
-		Notes:         []string{"All unspecified paths are blocked by the managed policy model."},
+		CurrentMode:         mode,
+		ModeLabel:           netBirdModeLabel(mode),
+		ConfiguredMode:      mode,
+		ConfiguredModeLabel: netBirdModeLabel(mode),
+		DefaultAction:       "deny-by-default",
+		DefaultActionLabel:  "Deny by default",
+		DefaultActionTone:   "ok",
+		Summary: NetBirdGraphMeta{
+			NodeCount:      len(nodes),
+			EdgeCount:      len(edges),
+			AllowEdgeCount: netBirdACLAllowEdgeCount(edges),
+		},
+		Nodes: nodes,
+		Edges: edges,
+		Notes: []string{"All unspecified paths are blocked by the managed policy model."},
 	}
+}
+
+func netBirdModeLabel(mode NetBirdMode) string {
+	switch mode {
+	case NetBirdModeA:
+		return "Mode A"
+	case NetBirdModeB:
+		return "Mode B"
+	default:
+		return "Legacy"
+	}
+}
+
+func netBirdNodeKindPresentation(node NetBirdACLNode) (string, string) {
+	normalizedKind := strings.ToLower(strings.TrimSpace(node.Kind))
+	switch normalizedKind {
+	case "group":
+		groupName := strings.ToLower(strings.TrimSpace(node.GroupName))
+		if strings.Contains(groupName, "admin") {
+			return "Admins", "group"
+		}
+		return "Group", "group"
+	case "service":
+		label := strings.ToLower(strings.TrimSpace(node.Label))
+		if strings.Contains(label, "panel") {
+			return "Panel", "service"
+		}
+		return "Service", "service"
+	case "project":
+		return "Project", "project"
+	default:
+		return "Node", "neutral"
+	}
+}
+
+func netBirdACLPortLabel(ports []string) string {
+	if len(ports) == 0 {
+		return "any"
+	}
+	return strings.Join(ports, ", ")
+}
+
+func netBirdACLEdgeTone(action string) string {
+	normalized := strings.ToLower(strings.TrimSpace(action))
+	switch normalized {
+	case "allow", "accept":
+		return "allow"
+	case "deny", "block":
+		return "error"
+	default:
+		return "neutral"
+	}
+}
+
+func netBirdACLAllowEdgeCount(edges []NetBirdACLEdge) int {
+	count := 0
+	for _, edge := range edges {
+		action := strings.ToLower(strings.TrimSpace(edge.Action))
+		if action == "accept" || action == "allow" {
+			count++
+		}
+	}
+	return count
 }
 
 func resolveGraphNodeIDs(rawValues []string, mapByPlaceholder map[string]string) []string {

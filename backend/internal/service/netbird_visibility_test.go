@@ -261,6 +261,24 @@ func TestACLGraph_UsesLastSuccessfulApplyAsRuntimeMode(t *testing.T) {
 	if !graph.ModeDrift {
 		t.Fatal("expected mode drift to be true")
 	}
+	if graph.ModeLabel != "Mode A" {
+		t.Fatalf("expected modeLabel %q, got %q", "Mode A", graph.ModeLabel)
+	}
+	if graph.ConfiguredModeLabel != "Legacy" {
+		t.Fatalf("expected configuredModeLabel %q, got %q", "Legacy", graph.ConfiguredModeLabel)
+	}
+	if graph.DefaultActionTone != "ok" {
+		t.Fatalf("expected defaultActionTone %q, got %q", "ok", graph.DefaultActionTone)
+	}
+	if graph.Summary.NodeCount != len(graph.Nodes) {
+		t.Fatalf("expected summary nodeCount %d, got %d", len(graph.Nodes), graph.Summary.NodeCount)
+	}
+	if graph.Summary.EdgeCount != len(graph.Edges) {
+		t.Fatalf("expected summary edgeCount %d, got %d", len(graph.Edges), graph.Summary.EdgeCount)
+	}
+	if graph.Summary.AllowEdgeCount != len(graph.Edges) {
+		t.Fatalf("expected summary allowEdgeCount %d, got %d", len(graph.Edges), graph.Summary.AllowEdgeCount)
+	}
 }
 
 type fakeNetBirdProjectRepo struct{}

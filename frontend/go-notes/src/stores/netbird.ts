@@ -241,7 +241,7 @@ export const useNetbirdStore = defineStore('netbird', () => {
     aclGraph.value.loading = true
     aclGraph.value.error = null
     try {
-      const { data } = await netbirdApi.getAclGraph()
+      const { data } = await netbirdApi.getGraph()
       aclGraph.value.data = data.graph
     } catch (err: unknown) {
       aclGraph.value.error = apiErrorMessage(err)

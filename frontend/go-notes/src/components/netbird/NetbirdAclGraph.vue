@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import NodeEdgeGraph from '@/components/graph/NodeEdgeGraph.vue'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
@@ -9,10 +10,8 @@ import UiPanel from '@/components/ui/UiPanel.vue'
 import UiSkeleton from '@/components/ui/UiSkeleton.vue'
 import UiState from '@/components/ui/UiState.vue'
 import NavIcon from '@/components/NavIcon.vue'
+import type { NodeEdgeGraphEdge, NodeEdgeGraphNode } from '@/types/graph'
 import { useNetbirdStore } from '@/stores/netbird'
-import type { NetBirdACLEdge, NetBirdACLNode, NetBirdMode } from '@/types/netbird'
-
-type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
 const showNodesModal = ref(false)
 const showEdgesModal = ref(false)
@@ -23,52 +22,26 @@ const graph = computed(() => netbirdStore.aclGraph.data)
 const graphLoading = computed(() => netbirdStore.aclGraph.loading)
 const graphError = computed(() => netbirdStore.aclGraph.error)
 
-const allowEdges = computed(() => {
+const graphNodes = computed<NodeEdgeGraphNode[]>(() => {
   if (!graph.value) return []
-  return graph.value.edges.filter((edge) => {
-    const action = edge.action.trim().toLowerCase()
-    return action === 'accept' || action === 'allow'
-  })
+  return graph.value.nodes.map((node) => ({
+    id: node.id,
+    label: node.label,
+    subtitle: node.kindLabel,
+    tone: node.tone as NodeEdgeGraphNode['tone'],
+  }))
 })
 
-const modeLabel = (mode: NetBirdMode) => {
-  if (mode === 'mode_a') return 'Mode A'
-  if (mode === 'mode_b') return 'Mode B'
-  return 'Legacy'
-}
-
-const defaultActionTone = (action: string): BadgeTone => {
-  const normalized = action.trim().toLowerCase()
-  if (normalized.includes('deny') || normalized.includes('block')) return 'ok'
-  if (normalized.includes('allow') || normalized.includes('accept')) return 'warn'
-  return 'neutral'
-}
-
-const nodeLabel = (node: { label: string; projectName?: string }) => {
-  if (node.projectName) return node.projectName
-  return node.label
-}
-
-const nodeKindLabel = (node: NetBirdACLNode) => {
-  const normalizedKind = node.kind.trim().toLowerCase()
-  if (normalizedKind === 'group') {
-    const groupName = (node.groupName || node.label || '').trim().toLowerCase()
-    if (groupName.includes('admin')) return 'Admins'
-    return 'Group'
-  }
-  if (normalizedKind === 'service') {
-    const label = (node.label || '').trim().toLowerCase()
-    if (label.includes('panel')) return 'Panel'
-    return 'Service'
-  }
-  if (normalizedKind === 'project') return 'Project'
-  return node.kind || 'unknown'
-}
-
-const edgePortLabel = (edge: NetBirdACLEdge) => {
-  if (edge.ports.length === 0) return 'any'
-  return edge.ports.join(', ')
-}
+const graphEdges = computed<NodeEdgeGraphEdge[]>(() => {
+  if (!graph.value) return []
+  return graph.value.edges.map((edge) => ({
+    id: edge.id,
+    from: edge.from,
+    to: edge.to,
+    label: edge.ruleLabel,
+    tone: edge.tone as NodeEdgeGraphEdge['tone'],
+  }))
+})
 
 const refreshAclGraph = async () => {
   await netbirdStore.loadAclGraph()
@@ -92,7 +65,7 @@ onMounted(() => {
           ACL Graph
         </h2>
         <p class="mt-1 text-xs text-[color:var(--muted)]">
-          Policy visibility and network flow
+          Policy topology and permitted network flows.
         </p>
       </div>
       <UiButton variant="ghost" size="sm" :disabled="graphLoading" @click="refreshAclGraph">
@@ -119,22 +92,7 @@ onMounted(() => {
     </UiState>
 
     <div v-else class="space-y-4">
-      <!-- Essential Info -->
-      <UiPanel variant="soft" class="space-y-3 p-4">
-        <UiListRow class="flex items-center justify-between gap-3">
-          <span class="text-sm font-medium text-[color:var(--text)]">Current Mode</span>
-          <UiBadge tone="neutral">{{ modeLabel(graph.currentMode) }}</UiBadge>
-        </UiListRow>
-        <UiListRow class="flex items-center justify-between gap-3">
-          <span class="text-sm font-medium text-[color:var(--text)]">Default Action</span>
-          <UiBadge :tone="defaultActionTone(graph.defaultAction)">
-            {{ graph.defaultAction || 'unknown' }}
-          </UiBadge>
-        </UiListRow>
-      </UiPanel>
-
-      <!-- Interactive Cards -->
-      <div class="grid gap-3 sm:grid-cols-2">
+      <div class="grid gap-3 sm:grid-cols-3">
         <UiPanel
           variant="soft"
           class="cursor-pointer p-4 transition hover:border-[color:var(--accent)] hover:shadow-sm"
@@ -146,7 +104,7 @@ onMounted(() => {
                 Nodes
               </p>
               <p class="mt-2 text-2xl font-semibold text-[color:var(--text)]">
-                {{ graph.nodes.length }}
+                {{ graph.summary.nodeCount }}
               </p>
             </div>
             <NavIcon name="network" class="h-6 w-6 text-[color:var(--muted)]" />
@@ -164,25 +122,44 @@ onMounted(() => {
                 Allow Edges
               </p>
               <p class="mt-2 text-2xl font-semibold text-[color:var(--text)]">
-                {{ allowEdges.length }}
+                {{ graph.summary.allowEdgeCount }}
               </p>
             </div>
             <NavIcon name="activity" class="h-6 w-6 text-[color:var(--muted)]" />
           </div>
         </UiPanel>
+
+        <UiPanel variant="soft" class="p-4">
+          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+            Total Edges
+          </p>
+          <p class="mt-2 text-2xl font-semibold text-[color:var(--text)]">
+            {{ graph.summary.edgeCount }}
+          </p>
+        </UiPanel>
       </div>
+
+      <NodeEdgeGraph
+        :nodes="graphNodes"
+        :edges="graphEdges"
+        aria-label="NetBird ACL topology graph"
+        empty-message="No graph nodes were returned by the NetBird graph endpoint."
+      />
+
+      <UiState v-if="graph.notes.length > 0" tone="warn">
+        {{ graph.notes[0] }}
+      </UiState>
     </div>
   </UiPanel>
 
-  <!-- Nodes Modal -->
   <UiModal
     v-model="showNodesModal"
     title="Network Nodes"
-    description="Groups, projects, and services in the ACL graph"
+    description="Groups, projects, and services in the NetBird graph"
   >
     <div v-if="graph">
       <UiState v-if="graph.nodes.length === 0">
-        No nodes were returned by the ACL graph endpoint.
+        No nodes were returned by the NetBird graph endpoint.
       </UiState>
       <ul v-else class="space-y-3">
         <UiListRow
@@ -193,9 +170,9 @@ onMounted(() => {
         >
           <div class="flex flex-wrap items-center justify-between gap-3">
             <p class="text-sm font-semibold text-[color:var(--text)]">
-              {{ nodeLabel(node) }}
+              {{ node.label }}
             </p>
-            <UiBadge tone="neutral">{{ nodeKindLabel(node) }}</UiBadge>
+            <UiBadge tone="neutral">{{ node.kindLabel }}</UiBadge>
           </div>
           <p class="font-mono text-xs text-[color:var(--muted-2)]">
             {{ node.id }}
@@ -205,33 +182,30 @@ onMounted(() => {
     </div>
   </UiModal>
 
-  <!-- Edges Modal -->
   <UiModal
     v-model="showEdgesModal"
     title="Allow Edges"
     description="Permitted network flows between nodes"
   >
     <div v-if="graph">
-      <UiState v-if="allowEdges.length === 0">
+      <UiState v-if="graph.edges.length === 0">
         No allow edges are currently defined for this mode.
       </UiState>
       <ul v-else class="space-y-3">
         <UiListRow
-          v-for="edge in allowEdges"
+          v-for="edge in graph.edges"
           :key="edge.id"
           as="li"
           class="space-y-1 py-2"
         >
           <div class="flex flex-wrap items-center justify-between gap-3">
             <p class="text-sm font-semibold text-[color:var(--text)]">
-              {{ edge.from }} → {{ edge.to }}
+              {{ edge.fromLabel }} -> {{ edge.toLabel }}
             </p>
             <UiBadge tone="ok">{{ edge.action }}</UiBadge>
           </div>
           <p class="text-xs text-[color:var(--muted)]">
-            Policy <span class="font-mono text-[color:var(--text)]">{{ edge.policy }}</span>,
-            rule <span class="font-mono text-[color:var(--text)]">{{ edge.rule }}</span>,
-            {{ edge.protocol.toUpperCase() }} ports {{ edgePortLabel(edge) }}
+            {{ edge.ruleLabel }}
           </p>
         </UiListRow>
       </ul>

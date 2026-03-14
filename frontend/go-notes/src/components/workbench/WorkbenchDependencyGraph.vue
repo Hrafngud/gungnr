@@ -1,97 +1,16 @@
 <script setup lang="ts">
-import { computed, getCurrentInstance } from 'vue'
+import { computed } from 'vue'
+import NodeEdgeGraph from '@/components/graph/NodeEdgeGraph.vue'
+import type { NodeEdgeGraphEdge, NodeEdgeGraphNode } from '@/types/graph'
 import type {
   WorkbenchDependencyGraph as WorkbenchDependencyGraphModel,
   WorkbenchDependencyNodeStatus,
 } from '@/types/workbench'
 
-type NodeRelation = 'upstream' | 'downstream' | 'bidirectional'
-
-interface GraphNode {
-  name: string
-  relation: NodeRelation
-  status: WorkbenchDependencyNodeStatus
-  statusText: string
-  x: number
-  y: number
-  width: number
-  height: number
-}
-
-interface GraphEdge {
-  key: string
-  fromX: number
-  fromY: number
-  toX: number
-  toY: number
-  tone: 'inbound' | 'outbound'
-  curve: number
-  label: string
-  failureSource: boolean
-}
-
-interface NeighborInventoryRow {
-  name: string
-  relation: NodeRelation
-  status: WorkbenchDependencyNodeStatus
-  statusText: string
-  inboundFailure: boolean
-  outboundFailure: boolean
-}
-
 const props = defineProps<{
   serviceName: string
   graph: WorkbenchDependencyGraphModel
 }>()
-
-const graphUid = getCurrentInstance()?.uid ?? 0
-const inboundMarkerId = `dependency-graph-arrow-inbound-${graphUid}`
-const outboundMarkerId = `dependency-graph-arrow-outbound-${graphUid}`
-const failureMarkerId = `dependency-graph-arrow-failure-${graphUid}`
-
-function truncateLabel(value: string, max = 14): string {
-  if (value.length <= max) return value
-  return `${value.slice(0, Math.max(1, max - 3))}...`
-}
-
-function nodeWidth(name: string): number {
-  return Math.min(132, Math.max(76, 22 + name.length * 5))
-}
-
-function ellipseOffset(width: number, height: number, unitX: number, unitY: number): number {
-  const a = Math.max(1, width / 2)
-  const b = Math.max(1, height / 2)
-  return 1 / Math.sqrt((unitX * unitX) / (a * a) + (unitY * unitY) / (b * b))
-}
-
-function edgePath(edge: GraphEdge): string {
-  if (edge.curve === 0) {
-    return `M ${edge.fromX} ${edge.fromY} L ${edge.toX} ${edge.toY}`
-  }
-
-  const dx = edge.toX - edge.fromX
-  const dy = edge.toY - edge.fromY
-  const distance = Math.hypot(dx, dy) || 1
-  const controlX = (edge.fromX + edge.toX) / 2 + (-dy / distance) * edge.curve
-  const controlY = (edge.fromY + edge.toY) / 2 + (dx / distance) * edge.curve
-
-  return `M ${edge.fromX} ${edge.fromY} Q ${controlX} ${controlY} ${edge.toX} ${edge.toY}`
-}
-
-function statusClass(status: WorkbenchDependencyNodeStatus): string {
-  switch (status) {
-    case 'running':
-      return 'dependency-graph__node--status-running'
-    case 'degraded':
-      return 'dependency-graph__node--status-degraded'
-    case 'failed':
-      return 'dependency-graph__node--status-failed'
-    case 'missing':
-      return 'dependency-graph__node--status-missing'
-    default:
-      return 'dependency-graph__node--status-unknown'
-  }
-}
 
 function statusLabel(status: WorkbenchDependencyNodeStatus): string {
   switch (status) {
@@ -105,6 +24,21 @@ function statusLabel(status: WorkbenchDependencyNodeStatus): string {
       return 'Missing'
     default:
       return 'Unknown'
+  }
+}
+
+function statusTone(status: WorkbenchDependencyNodeStatus): NodeEdgeGraphNode['tone'] {
+  switch (status) {
+    case 'running':
+      return 'running'
+    case 'degraded':
+      return 'degraded'
+    case 'failed':
+      return 'failed'
+    case 'missing':
+      return 'missing'
+    default:
+      return 'unknown'
   }
 }
 
@@ -134,80 +68,101 @@ const selectedServiceAvailable = computed(() => {
   })
 })
 
-const neighborInventory = computed<NeighborInventoryRow[]>(() => {
-  if (!selectedServiceKey.value) return []
+const connectedEdges = computed(() =>
+  props.graph.edges.filter((edge) => {
+    const from = edge.fromService.trim().toLowerCase()
+    const to = edge.toService.trim().toLowerCase()
+    return from === selectedServiceKey.value || to === selectedServiceKey.value
+  }),
+)
 
-  const inventory = new Map<
-    string,
-    {
-      name: string
-      upstream: boolean
-      downstream: boolean
-      inboundFailure: boolean
-      outboundFailure: boolean
-      status: WorkbenchDependencyNodeStatus
-      statusText: string
-    }
-  >()
+const graphNodes = computed<NodeEdgeGraphNode[]>(() => {
+  const nodes = new Map<string, NodeEdgeGraphNode>()
+  const selectedLabel = selectedServiceNode.value?.serviceName ?? props.serviceName.trim()
+  const selectedStatus = selectedServiceNode.value?.status ?? 'unknown'
+  const selectedStatusText = selectedServiceNode.value?.statusText ?? 'no runtime status'
 
-  const ensureNeighbor = (serviceName: string) => {
-    const key = serviceName.trim().toLowerCase()
-    if (!key) return null
-
-    const existing = inventory.get(key)
-    if (existing) return existing
-
-    const node = nodeIndex.value.get(key)
-    const created = {
-      name: node?.serviceName ?? serviceName.trim(),
-      upstream: false,
-      downstream: false,
-      inboundFailure: false,
-      outboundFailure: false,
-      status: node?.status ?? 'unknown',
-      statusText: node?.statusText ?? 'unknown',
-    }
-    inventory.set(key, created)
-    return created
+  if (selectedLabel) {
+    nodes.set(selectedLabel, {
+      id: selectedLabel,
+      label: selectedLabel,
+      subtitle: `${statusLabel(selectedStatus)} · ${selectedStatusText}`,
+      tone: statusTone(selectedStatus),
+    })
   }
 
-  for (const edge of props.graph.edges) {
+  for (const edge of connectedEdges.value) {
+    const candidates = [edge.fromService, edge.toService]
+    for (const candidate of candidates) {
+      const key = candidate.trim().toLowerCase()
+      if (!key) continue
+      const node = nodeIndex.value.get(key)
+      const label = node?.serviceName ?? candidate.trim()
+      if (!label || nodes.has(label)) continue
+      const status = node?.status ?? 'unknown'
+      const statusText = node?.statusText ?? 'unknown'
+      nodes.set(label, {
+        id: label,
+        label,
+        subtitle: `${statusLabel(status)} · ${statusText}`,
+        tone: statusTone(status),
+      })
+    }
+  }
+
+  const rows = [...nodes.values()]
+  return rows.sort((left, right) => {
+    if (left.id === selectedLabel) return -1
+    if (right.id === selectedLabel) return 1
+    return left.label.localeCompare(right.label)
+  })
+})
+
+const graphEdges = computed<NodeEdgeGraphEdge[]>(() =>
+  connectedEdges.value.map((edge) => {
     const fromKey = edge.fromService.trim().toLowerCase()
     const toKey = edge.toService.trim().toLowerCase()
-
-    if (toKey === selectedServiceKey.value) {
-      const neighbor = ensureNeighbor(edge.fromService)
-      if (!neighbor) continue
-      neighbor.upstream = true
-      neighbor.inboundFailure = neighbor.inboundFailure || edge.failureSource
-      continue
+    const fromService = nodeIndex.value.get(fromKey)?.serviceName ?? edge.fromService.trim()
+    const toService = nodeIndex.value.get(toKey)?.serviceName ?? edge.toService.trim()
+    let tone: NodeEdgeGraphEdge['tone'] = 'neutral'
+    if (edge.failureSource) {
+      tone = 'error'
+    } else if (toService.toLowerCase() === selectedServiceKey.value) {
+      tone = 'inbound'
+    } else if (fromService.toLowerCase() === selectedServiceKey.value) {
+      tone = 'outbound'
     }
 
-    if (fromKey === selectedServiceKey.value) {
-      const neighbor = ensureNeighbor(edge.toService)
-      if (!neighbor) continue
-      neighbor.downstream = true
-      neighbor.outboundFailure = neighbor.outboundFailure || edge.failureSource
+    return {
+      id: edge.key,
+      from: fromService,
+      to: toService,
+      label: `${fromService} -> ${toService} (${statusLabel(edge.sourceStatus)})`,
+      tone,
     }
+  }),
+)
+
+const totalLinkedServices = computed(() => {
+  const services = new Set<string>()
+  for (const edge of connectedEdges.value) {
+    const from = edge.fromService.trim().toLowerCase()
+    const to = edge.toService.trim().toLowerCase()
+    if (from && from !== selectedServiceKey.value) services.add(from)
+    if (to && to !== selectedServiceKey.value) services.add(to)
   }
-
-  return [...inventory.values()]
-    .map((entry) => {
-      let relation: NodeRelation = 'upstream'
-      if (entry.upstream && entry.downstream) relation = 'bidirectional'
-      else if (entry.downstream) relation = 'downstream'
-
-      return {
-        name: entry.name,
-        relation,
-        status: entry.status,
-        statusText: entry.statusText,
-        inboundFailure: entry.inboundFailure,
-        outboundFailure: entry.outboundFailure,
-      }
-    })
-    .sort((a, b) => a.name.localeCompare(b.name))
+  return services.size
 })
+
+const failedDependencyCount = computed(() =>
+  connectedEdges.value.filter((edge) => edge.failureSource).length,
+)
+
+const graphWarnings = computed(() =>
+  props.graph.warnings
+    .map((warning) => warning.trim())
+    .filter((warning) => warning.length > 0),
+)
 
 const statusCountRows = computed(() => {
   const counts: Record<WorkbenchDependencyNodeStatus, number> = {
@@ -218,8 +173,10 @@ const statusCountRows = computed(() => {
     unknown: 0,
   }
 
-  for (const node of neighborInventory.value) {
-    counts[node.status] += 1
+  for (const node of graphNodes.value) {
+    if (node.id.trim().toLowerCase() === selectedServiceKey.value) continue
+    const status = nodeIndex.value.get(node.id.trim().toLowerCase())?.status ?? 'unknown'
+    counts[status] += 1
   }
 
   return (['running', 'degraded', 'failed', 'missing', 'unknown'] as WorkbenchDependencyNodeStatus[])
@@ -230,127 +187,6 @@ const statusCountRows = computed(() => {
     }))
     .filter((entry) => entry.count > 0)
 })
-
-const layout = computed(() => {
-  const neighborCount = neighborInventory.value.length
-  const ringRadius = Math.min(108, Math.max(58, 48 + neighborCount * 10))
-  const outerPadding = 24
-  const centerX = ringRadius + outerPadding
-  const centerY = ringRadius + outerPadding
-  const width = centerX * 2
-  const centerWidth = nodeWidth(props.serviceName) + 12
-  const centerHeight = 31
-  const centerStatus = selectedServiceNode.value?.status ?? 'unknown'
-  const centerStatusText = selectedServiceNode.value?.statusText ?? 'unknown'
-
-  const nodes: GraphNode[] = neighborInventory.value.map((neighbor, index) => {
-    const angle = neighborCount === 1 ? -Math.PI / 2 : (-Math.PI / 2) + (index * (Math.PI * 2)) / neighborCount
-    return {
-      name: neighbor.name,
-      relation: neighbor.relation,
-      status: neighbor.status,
-      statusText: neighbor.statusText,
-      x: centerX + Math.cos(angle) * ringRadius,
-      y: centerY + Math.sin(angle) * ringRadius,
-      width: nodeWidth(neighbor.name),
-      height: 26,
-    }
-  })
-
-  const centerNode: GraphNode = {
-    name: props.serviceName,
-    relation: 'bidirectional',
-    status: centerStatus,
-    statusText: centerStatusText,
-    x: centerX,
-    y: centerY,
-    width: centerWidth,
-    height: centerHeight,
-  }
-
-  const edges: GraphEdge[] = []
-  for (const node of nodes) {
-    const deltaX = node.x - centerNode.x
-    const deltaY = node.y - centerNode.y
-    const distance = Math.hypot(deltaX, deltaY) || 1
-    const unitX = deltaX / distance
-    const unitY = deltaY / distance
-
-    const fromCenterOffset = ellipseOffset(centerNode.width, centerNode.height, unitX, unitY) + 1.5
-    const toCenterOffset = ellipseOffset(centerNode.width, centerNode.height, -unitX, -unitY) + 6
-    const fromNodeOffset = ellipseOffset(node.width, node.height, -unitX, -unitY) + 1.5
-    const toNodeOffset = ellipseOffset(node.width, node.height, unitX, unitY) + 6
-
-    const inboundCurve = node.relation === 'bidirectional' ? 7 : 0
-    const outboundCurve = node.relation === 'bidirectional' ? -7 : 0
-
-    const relation = neighborInventory.value.find((entry) => entry.name === node.name)
-
-    if (node.relation === 'upstream' || node.relation === 'bidirectional') {
-      edges.push({
-        key: `edge-inbound-${node.name}`,
-        fromX: node.x - unitX * fromNodeOffset,
-        fromY: node.y - unitY * fromNodeOffset,
-        toX: centerNode.x + unitX * toCenterOffset,
-        toY: centerNode.y + unitY * toCenterOffset,
-        tone: 'inbound',
-        curve: inboundCurve,
-        label: `${props.serviceName} depends on ${node.name}`,
-        failureSource: relation?.inboundFailure ?? false,
-      })
-    }
-
-    if (node.relation === 'downstream' || node.relation === 'bidirectional') {
-      edges.push({
-        key: `edge-outbound-${node.name}`,
-        fromX: centerNode.x + unitX * fromCenterOffset,
-        fromY: centerNode.y + unitY * fromCenterOffset,
-        toX: node.x - unitX * toNodeOffset,
-        toY: node.y - unitY * toNodeOffset,
-        tone: 'outbound',
-        curve: outboundCurve,
-        label: `${node.name} depends on ${props.serviceName}`,
-        failureSource: relation?.outboundFailure ?? false,
-      })
-    }
-  }
-
-  const verticalMargin = 14
-  const minY = Math.min(centerNode.y - centerNode.height / 2, ...nodes.map((node) => node.y - node.height / 2))
-  const maxY = Math.max(centerNode.y + centerNode.height / 2, ...nodes.map((node) => node.y + node.height / 2))
-  const yShift = verticalMargin - minY
-
-  centerNode.y += yShift
-  for (const node of nodes) {
-    node.y += yShift
-  }
-  for (const edge of edges) {
-    edge.fromY += yShift
-    edge.toY += yShift
-  }
-
-  const height = maxY - minY + verticalMargin * 2
-
-  return {
-    width,
-    height,
-    centerX,
-    centerY,
-    centerWidth,
-    centerHeight,
-    centerNode,
-    nodes,
-    edges,
-  }
-})
-
-const totalLinkedServices = computed(() => neighborInventory.value.length)
-const failedDependencyCount = computed(() => layout.value.edges.filter((edge) => edge.failureSource).length)
-const graphWarnings = computed(() =>
-  props.graph.warnings
-    .map((warning) => warning.trim())
-    .filter((warning) => warning.length > 0),
-)
 </script>
 
 <template>
@@ -392,123 +228,13 @@ const graphWarnings = computed(() =>
     </div>
 
     <div class="dependency-graph__surface">
-      <svg
-        v-if="layout.nodes.length > 0"
-        class="dependency-graph__canvas"
-        role="img"
+      <NodeEdgeGraph
+        v-if="graphEdges.length > 0"
+        :nodes="graphNodes"
+        :edges="graphEdges"
+        :focus-node-id="selectedServiceNode?.serviceName ?? serviceName"
         :aria-label="`Dependency graph for ${serviceName}`"
-        :viewBox="`0 0 ${layout.width} ${layout.height}`"
-      >
-        <defs>
-          <marker
-            :id="inboundMarkerId"
-            viewBox="0 0 10 10"
-            markerWidth="7.2"
-            markerHeight="7.2"
-            refX="8.5"
-            refY="5"
-            markerUnits="userSpaceOnUse"
-            orient="auto-start-reverse"
-          >
-            <path d="M0 0 L10 5 L0 10 z" class="dependency-graph__arrow dependency-graph__arrow--inbound" />
-          </marker>
-          <marker
-            :id="outboundMarkerId"
-            viewBox="0 0 10 10"
-            markerWidth="7.2"
-            markerHeight="7.2"
-            refX="8.5"
-            refY="5"
-            markerUnits="userSpaceOnUse"
-            orient="auto-start-reverse"
-          >
-            <path d="M0 0 L10 5 L0 10 z" class="dependency-graph__arrow dependency-graph__arrow--outbound" />
-          </marker>
-          <marker
-            :id="failureMarkerId"
-            viewBox="0 0 10 10"
-            markerWidth="7.2"
-            markerHeight="7.2"
-            refX="8.5"
-            refY="5"
-            markerUnits="userSpaceOnUse"
-            orient="auto-start-reverse"
-          >
-            <path d="M0 0 L10 5 L0 10 z" class="dependency-graph__arrow dependency-graph__arrow--failure" />
-          </marker>
-        </defs>
-
-        <path
-          v-for="(edge, edgeIndex) in layout.edges"
-          :key="edge.key"
-          :d="edgePath(edge)"
-          :class="[
-            'dependency-graph__edge',
-            edge.failureSource
-              ? 'dependency-graph__edge--failure'
-              : edge.tone === 'inbound'
-                ? 'dependency-graph__edge--inbound'
-                : 'dependency-graph__edge--outbound',
-          ]"
-          :style="{ '--edge-delay': `${50 + edgeIndex * 50}ms` }"
-          fill="none"
-          :marker-end="
-            edge.failureSource
-              ? `url(#${failureMarkerId})`
-              : edge.tone === 'inbound'
-                ? `url(#${inboundMarkerId})`
-                : `url(#${outboundMarkerId})`
-          "
-        >
-          <title>{{ edge.label }}</title>
-        </path>
-
-        <g
-          v-for="(node, nodeIndex) in layout.nodes"
-          :key="`node-${node.name}`"
-          :class="[
-            'dependency-graph__node',
-            statusClass(node.status),
-            node.relation === 'upstream' ? 'dependency-graph__node--upstream' : '',
-            node.relation === 'downstream' ? 'dependency-graph__node--downstream' : '',
-            node.relation === 'bidirectional' ? 'dependency-graph__node--bidirectional' : '',
-          ]"
-          :style="{ '--node-delay': `${80 + nodeIndex * 45}ms` }"
-        >
-          <rect
-            :x="node.x - node.width / 2"
-            :y="node.y - node.height / 2"
-            :width="node.width"
-            :height="node.height"
-            :rx="node.height / 2"
-          />
-          <text :x="node.x" :y="node.y">
-            {{ truncateLabel(node.name) }}
-          </text>
-          <title>{{ `${node.name} • ${statusLabel(node.status)} • ${node.statusText}` }}</title>
-        </g>
-
-        <g
-          :class="[
-            'dependency-graph__node',
-            'dependency-graph__node--active',
-            statusClass(layout.centerNode.status),
-          ]"
-          style="--node-delay: 35ms;"
-        >
-          <rect
-            :x="layout.centerX - layout.centerWidth / 2"
-            :y="layout.centerY - layout.centerHeight / 2"
-            :width="layout.centerWidth"
-            :height="layout.centerHeight"
-            :rx="layout.centerHeight / 2"
-          />
-          <text :x="layout.centerX" :y="layout.centerY">
-            {{ truncateLabel(serviceName, 16) }}
-          </text>
-          <title>{{ `${serviceName} • ${statusLabel(layout.centerNode.status)} • ${layout.centerNode.statusText}` }}</title>
-        </g>
-      </svg>
+      />
 
       <p v-else-if="selectedServiceAvailable" class="dependency-graph__empty">
         No upstream or downstream links are registered for this service yet.
@@ -522,9 +248,6 @@ const graphWarnings = computed(() =>
 
 <style scoped>
 .dependency-graph {
-  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
-  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   display: grid;
   gap: 0.55rem;
   padding: 0.62rem;
@@ -627,114 +350,7 @@ const graphWarnings = computed(() =>
 }
 
 .dependency-graph__surface {
-  border-radius: 0.78rem;
-  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  background:
-    linear-gradient(to right, oklch(38% 0.012 254 / 0.46) 1px, transparent 1px),
-    linear-gradient(to bottom, oklch(38% 0.012 254 / 0.46) 1px, transparent 1px),
-    radial-gradient(circle at 1px 1px, oklch(79% 0.014 250 / 0.12) 1px, transparent 1.6px),
-    linear-gradient(180deg, oklch(22% 0.015 252 / 0.36), oklch(19% 0.013 252 / 0.42));
-  background-size: 14px 14px, 14px 14px, 14px 14px, 100% 100%;
-  min-height: 9rem;
-  display: grid;
-  place-items: center;
-  padding: 0.35rem 0.52rem;
-}
-
-.dependency-graph__canvas {
-  display: block;
-  width: min(100%, 360px);
-  height: auto;
-  max-height: 14.5rem;
-}
-
-.dependency-graph__arrow {
-  opacity: 0.98;
-}
-
-.dependency-graph__arrow--inbound {
-  fill: oklch(75% 0.11 196);
-}
-
-.dependency-graph__arrow--outbound {
-  fill: oklch(74% 0.1 242);
-}
-
-.dependency-graph__arrow--failure {
-  fill: oklch(74% 0.16 30);
-}
-
-.dependency-graph__edge {
-  stroke-width: 1.5;
-  vector-effect: non-scaling-stroke;
-  stroke-linecap: round;
-  opacity: 0.96;
-}
-
-.dependency-graph__edge--inbound {
-  stroke: oklch(75% 0.11 196 / 0.95);
-}
-
-.dependency-graph__edge--outbound {
-  stroke: oklch(74% 0.1 242 / 0.95);
-}
-
-.dependency-graph__edge--failure {
-  stroke: oklch(74% 0.16 30 / 0.95);
-}
-
-.dependency-graph__node {
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.dependency-graph__node rect {
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-
-.dependency-graph__node text {
-  fill: oklch(97% 0.013 252);
-  font-size: 9.5px;
-  font-weight: 650;
-  text-anchor: middle;
-  dominant-baseline: middle;
-  pointer-events: none;
-}
-
-.dependency-graph__node--status-running rect {
-  fill: oklch(48% 0.11 147 / 0.68);
-  stroke: oklch(78% 0.15 147 / 0.9);
-}
-
-.dependency-graph__node--status-degraded rect {
-  fill: oklch(53% 0.11 85 / 0.68);
-  stroke: oklch(84% 0.14 88 / 0.9);
-}
-
-.dependency-graph__node--status-failed rect {
-  fill: oklch(50% 0.15 30 / 0.7);
-  stroke: oklch(81% 0.17 30 / 0.92);
-}
-
-.dependency-graph__node--status-missing rect {
-  fill: oklch(55% 0.12 58 / 0.66);
-  stroke: oklch(84% 0.15 62 / 0.9);
-}
-
-.dependency-graph__node--status-unknown rect {
-  fill: oklch(48% 0.03 252 / 0.68);
-  stroke: oklch(80% 0.05 252 / 0.9);
-}
-
-.dependency-graph__node--active rect {
-  stroke-width: 1.45;
-}
-
-.dependency-graph__node--upstream rect,
-.dependency-graph__node--downstream rect,
-.dependency-graph__node--bidirectional rect {
-  filter: saturate(1.05);
+  min-height: 12rem;
 }
 
 .dependency-graph__empty {
@@ -757,71 +373,6 @@ const graphWarnings = computed(() =>
   .dependency-graph__status-legend {
     margin-left: 0;
     width: 100%;
-  }
-
-  .dependency-graph__canvas {
-    width: min(100%, 312px);
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .dependency-graph__edge {
-    stroke-dasharray: 3 5;
-    animation:
-      dependency-edge-appear 520ms var(--ease-out-quint) both,
-      dependency-edge-flow 10s linear infinite;
-    animation-delay: var(--edge-delay, 0ms), calc(var(--edge-delay, 0ms) + 420ms);
-  }
-
-  .dependency-graph__edge--failure {
-    stroke-dasharray: 2 4;
-  }
-
-  .dependency-graph__node {
-    opacity: 0;
-    animation: dependency-node-enter 560ms var(--ease-out-expo) both;
-    animation-delay: var(--node-delay, 0ms);
-  }
-
-  .dependency-graph__node--active {
-    animation: dependency-node-enter 560ms var(--ease-out-expo) both;
-    animation-delay: var(--node-delay, 0ms);
-  }
-
-  @keyframes dependency-edge-appear {
-    from {
-      opacity: 0;
-      stroke-dashoffset: 24;
-    }
-    to {
-      opacity: 0.96;
-      stroke-dashoffset: 0;
-    }
-  }
-
-  @keyframes dependency-edge-flow {
-    to {
-      stroke-dashoffset: -56;
-    }
-  }
-
-  @keyframes dependency-node-enter {
-    from {
-      opacity: 0;
-      transform: translateY(8px) scale(0.96);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .dependency-graph__edge,
-  .dependency-graph__node,
-  .dependency-graph__node--active {
-    animation: none !important;
   }
 }
 </style>

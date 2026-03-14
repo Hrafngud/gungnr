@@ -920,6 +920,240 @@ function resolveMockWorkbenchPortSuggestions(
   }
 }
 
+function objectOrNull(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function isNonNull<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined
+}
+
+function normalizeMockNetbirdModeLabel(mode: string): string {
+  const normalized = mode.trim().toLowerCase()
+  if (normalized === 'mode_a') return 'Mode A'
+  if (normalized === 'mode_b') return 'Mode B'
+  return 'Legacy'
+}
+
+function normalizeMockNetbirdDefaultActionLabel(action: string): string {
+  const normalized = action.trim().toLowerCase()
+  if (normalized.includes('deny')) return 'Deny by default'
+  if (normalized.includes('allow') || normalized.includes('accept')) return 'Allow by default'
+  return action.trim() || 'Unknown'
+}
+
+function normalizeMockNetbirdDefaultActionTone(action: string): string {
+  const normalized = action.trim().toLowerCase()
+  if (normalized.includes('deny') || normalized.includes('block')) return 'ok'
+  if (normalized.includes('allow') || normalized.includes('accept')) return 'warn'
+  return 'neutral'
+}
+
+function normalizeMockNetbirdGraphResponse(value: unknown): unknown {
+  const response = objectOrNull(value)
+  if (!response) return value
+  const rawGraph = objectOrNull(response.graph)
+  if (!rawGraph) return value
+
+  const normalizedCurrentMode = stringOrUndefined(rawGraph.currentMode) ?? 'legacy'
+  const normalizedConfiguredMode = stringOrUndefined(rawGraph.configuredMode) ?? normalizedCurrentMode
+  const defaultAction = stringOrUndefined(rawGraph.defaultAction) ?? 'deny-by-default'
+
+  interface NormalizedMockNetbirdNode {
+    id: string
+    label: string
+    kind: string
+    kindLabel: string
+    tone: string
+    groupName?: string
+    projectName?: string
+    projectId?: number
+  }
+
+  interface NormalizedMockNetbirdEdge {
+    id: string
+    from: string
+    to: string
+    fromLabel: string
+    toLabel: string
+    policy: string
+    rule: string
+    ruleLabel: string
+    action: string
+    protocol: string
+    ports: string[]
+    bidirectional: boolean
+    tone: string
+  }
+
+  const rawNodes = Array.isArray(rawGraph.nodes) ? rawGraph.nodes : []
+  const nodes = rawNodes
+    .map((rawNode, index) => {
+      const node = objectOrNull(rawNode)
+      if (!node) return null
+      const id = stringOrUndefined(node.id) ?? `node-${index + 1}`
+      const label = stringOrUndefined(node.label) ?? id
+      const kind = stringOrUndefined(node.kind) ?? 'node'
+      const groupName = stringOrUndefined(node.groupName)
+      const projectName = stringOrUndefined(node.projectName)
+      const projectID = numberOrUndefined(node.projectId)
+
+      let kindLabel = stringOrUndefined(node.kindLabel) ?? ''
+      let tone = stringOrUndefined(node.tone) ?? ''
+      const normalizedKind = kind.trim().toLowerCase()
+      if (!kindLabel) {
+        if (normalizedKind === 'group') {
+          const normalizedGroupName = (groupName ?? label).trim().toLowerCase()
+          kindLabel = normalizedGroupName.includes('admin') ? 'Admins' : 'Group'
+        } else if (normalizedKind === 'service') {
+          kindLabel = label.trim().toLowerCase().includes('panel') ? 'Panel' : 'Service'
+        } else if (normalizedKind === 'project') {
+          kindLabel = 'Project'
+        } else {
+          kindLabel = 'Node'
+        }
+      }
+      if (!tone) {
+        if (normalizedKind === 'group') tone = 'group'
+        else if (normalizedKind === 'service') tone = 'service'
+        else if (normalizedKind === 'project') tone = 'project'
+        else tone = 'neutral'
+      }
+
+      const normalized: NormalizedMockNetbirdNode = {
+        id,
+        label,
+        kind,
+        kindLabel,
+        tone,
+        ...(groupName ? { groupName } : {}),
+        ...(projectName ? { projectName } : {}),
+        ...(projectID != null ? { projectId: Math.trunc(projectID) } : {}),
+      }
+      return normalized
+    })
+    .filter(isNonNull)
+
+  const nodeLabelByID = new Map<string, string>(
+    nodes.map((node) => [node.id, node.label]),
+  )
+
+  const rawEdges = Array.isArray(rawGraph.edges) ? rawGraph.edges : []
+  const edges = rawEdges
+    .map((rawEdge, index) => {
+      const edge = objectOrNull(rawEdge)
+      if (!edge) return null
+
+      const from = stringOrUndefined(edge.from)
+      const to = stringOrUndefined(edge.to)
+      if (!from || !to) return null
+
+      const policy = stringOrUndefined(edge.policy) ?? 'policy'
+      const rule = stringOrUndefined(edge.rule) ?? 'rule'
+      const action = stringOrUndefined(edge.action) ?? 'accept'
+      const protocol = stringOrUndefined(edge.protocol) ?? 'tcp'
+      const bidirectional = Boolean(edge.bidirectional)
+      const ports = Array.isArray(edge.ports)
+        ? edge.ports
+            .map((entry) => stringOrUndefined(entry))
+            .filter((entry): entry is string => Boolean(entry))
+        : []
+      const portLabel = ports.length > 0 ? ports.join(', ') : 'any'
+      const tone =
+        stringOrUndefined(edge.tone) ??
+        (['accept', 'allow'].includes(action.trim().toLowerCase()) ? 'allow' : 'neutral')
+      const fromLabel = stringOrUndefined(edge.fromLabel) ?? nodeLabelByID.get(from) ?? from
+      const toLabel = stringOrUndefined(edge.toLabel) ?? nodeLabelByID.get(to) ?? to
+      const ruleLabel =
+        stringOrUndefined(edge.ruleLabel) ??
+        `${policy}/${rule} · ${protocol.trim().toUpperCase()} ${portLabel}`
+
+      const normalized: NormalizedMockNetbirdEdge = {
+        id: stringOrUndefined(edge.id) ?? `edge-${index + 1}:${from}:${to}`,
+        from,
+        to,
+        fromLabel,
+        toLabel,
+        policy,
+        rule,
+        ruleLabel,
+        action,
+        protocol,
+        ports,
+        bidirectional,
+        tone,
+      }
+      return normalized
+    })
+    .filter(isNonNull)
+
+  const allowEdgeCount = edges.filter((edge) => {
+    const action = String(edge.action || '')
+    const normalized = action.trim().toLowerCase()
+    return normalized === 'accept' || normalized === 'allow'
+  }).length
+
+  const summary = objectOrNull(rawGraph.summary)
+  const nodeCount = Math.trunc(numberOrUndefined(summary?.nodeCount) ?? nodes.length)
+  const edgeCount = Math.trunc(numberOrUndefined(summary?.edgeCount) ?? edges.length)
+  const normalizedAllowEdgeCount = Math.trunc(
+    numberOrUndefined(summary?.allowEdgeCount) ?? allowEdgeCount,
+  )
+
+  const effectiveModeBProjectIds = Array.isArray(rawGraph.effectiveModeBProjectIds)
+    ? rawGraph.effectiveModeBProjectIds
+        .map((entry) => numberOrUndefined(entry))
+        .filter((entry): entry is number => Number.isFinite(entry))
+        .map((entry) => Math.trunc(entry))
+    : []
+  const configuredModeBProjectIds = Array.isArray(rawGraph.configuredModeBProjectIds)
+    ? rawGraph.configuredModeBProjectIds
+        .map((entry) => numberOrUndefined(entry))
+        .filter((entry): entry is number => Number.isFinite(entry))
+        .map((entry) => Math.trunc(entry))
+    : []
+  const notes = Array.isArray(rawGraph.notes)
+    ? rawGraph.notes
+        .map((entry) => stringOrUndefined(entry))
+        .filter((entry): entry is string => Boolean(entry))
+    : []
+
+  return {
+    graph: {
+      currentMode: normalizedCurrentMode,
+      modeLabel:
+        stringOrUndefined(rawGraph.modeLabel) ?? normalizeMockNetbirdModeLabel(normalizedCurrentMode),
+      configuredMode: normalizedConfiguredMode,
+      configuredModeLabel:
+        stringOrUndefined(rawGraph.configuredModeLabel) ??
+        normalizeMockNetbirdModeLabel(normalizedConfiguredMode),
+      effectiveModeBProjectIds,
+      configuredModeBProjectIds,
+      modeSource: stringOrUndefined(rawGraph.modeSource) ?? 'mock',
+      ...(numberOrUndefined(rawGraph.modeSourceJobId) != null
+        ? { modeSourceJobId: Math.trunc(numberOrUndefined(rawGraph.modeSourceJobId) ?? 0) }
+        : {}),
+      modeDrift: Boolean(rawGraph.modeDrift),
+      defaultAction,
+      defaultActionLabel:
+        stringOrUndefined(rawGraph.defaultActionLabel) ??
+        normalizeMockNetbirdDefaultActionLabel(defaultAction),
+      defaultActionTone:
+        stringOrUndefined(rawGraph.defaultActionTone) ??
+        normalizeMockNetbirdDefaultActionTone(defaultAction),
+      summary: {
+        nodeCount,
+        edgeCount,
+        allowEdgeCount: normalizedAllowEdgeCount,
+      },
+      nodes,
+      edges,
+      notes,
+    },
+  }
+}
+
 function resolveDynamicMockResponse(
   method: string,
   url: string | null | undefined,
@@ -999,7 +1233,13 @@ api.interceptors.request.use((config) => {
   const key = getMockKey(method, config.url)
   if (!key) return config
 
-  const mockResponse = (mockData as Record<string, unknown>)[key]
+  let mockResponse = (mockData as Record<string, unknown>)[key]
+  if (!mockResponse && key === 'GET /api/v1/netbird/graph') {
+    mockResponse = (mockData as Record<string, unknown>)['GET /api/v1/netbird/acl/graph']
+  }
+  if (key === 'GET /api/v1/netbird/graph' && mockResponse) {
+    mockResponse = normalizeMockNetbirdGraphResponse(mockResponse)
+  }
   if (!mockResponse) return config
 
   config.adapter = async () => ({
