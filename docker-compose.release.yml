@@ -74,6 +74,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${TEMPLATES_DIR:-/templates}:${TEMPLATES_DIR:-/templates}
       - ${CLOUDFLARED_DIR:-/home/user/.cloudflared}:${CLOUDFLARED_DIR:-/home/user/.cloudflared}
+      - ${HOST_HOME_DIR:-/home}:${HOST_HOME_DIR:-/home}
     # Port mapping removed for production exposure; keep if needed for local debugging
     # ports:
     #   - "${API_PORT:-8080}:8080"

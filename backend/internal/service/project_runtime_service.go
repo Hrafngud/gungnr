@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go-notes/internal/errs"
+	"go-notes/internal/models"
 	"go-notes/internal/repository"
 )
 
@@ -83,22 +84,28 @@ func (s *ProjectRuntimeService) Resolve(ctx context.Context, projectName string)
 }
 
 func (s *ProjectRuntimeService) ListSummaries(ctx context.Context) ([]ProjectSummary, error) {
+	projectContainers, runtimeAvailable := s.groupProjectContainers(ctx)
+	if runtimeAvailable {
+		if _, err := s.syncRuntimeProjects(ctx, projectContainers); err != nil {
+			return nil, err
+		}
+	}
+
 	projects, err := s.projects.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	projectContainers, runtimeAvailable := s.groupProjectContainers(ctx)
-
 	summaries := make([]ProjectSummary, 0, len(projects))
 	for _, project := range projects {
+		key := strings.ToLower(strings.TrimSpace(project.Name))
+
 		status := strings.TrimSpace(project.Status)
 		if runtimeAvailable {
-			key := strings.ToLower(strings.TrimSpace(project.Name))
 			status = deriveProjectRuntimeStatus(projectContainers[key])
 		}
 
-		summaries = append(summaries, ProjectSummary{
+		summary := ProjectSummary{
 			ID:        project.ID,
 			Name:      project.Name,
 			RepoURL:   project.RepoURL,
@@ -108,7 +115,15 @@ func (s *ProjectRuntimeService) ListSummaries(ctx context.Context) ([]ProjectSum
 			Status:    status,
 			CreatedAt: project.CreatedAt,
 			UpdatedAt: project.UpdatedAt,
-		})
+		}
+
+		if runtimeAvailable && strings.TrimSpace(summary.Path) == "" {
+			if runtimeDir, _, runtimeErr := resolveDirFromRuntimeCompose(ctx, s.templatesDir, key); runtimeErr == nil {
+				summary.Path = runtimeDir
+			}
+		}
+
+		summaries = append(summaries, summary)
 	}
 
 	return summaries, nil
@@ -321,6 +336,109 @@ func isHealthyContainerStatus(status string) bool {
 	}
 
 	return true
+}
+
+func deriveProjectRuntimePorts(containers []DockerContainer) (int, int) {
+	proxyPort := 0
+	dbPort := 0
+	for _, container := range containers {
+		for _, binding := range container.PortBindings {
+			if !binding.Published || binding.HostPort <= 0 {
+				continue
+			}
+			if proxyPort == 0 && binding.ContainerPort == 80 {
+				proxyPort = binding.HostPort
+			}
+			if dbPort == 0 && binding.ContainerPort == 5432 {
+				dbPort = binding.HostPort
+			}
+			if proxyPort != 0 && dbPort != 0 {
+				return proxyPort, dbPort
+			}
+		}
+	}
+	return proxyPort, dbPort
+}
+
+func (s *ProjectRuntimeService) syncRuntimeProjects(
+	ctx context.Context,
+	projectContainers map[string][]DockerContainer,
+) (bool, error) {
+	projects, err := s.projects.List(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	projectByName := make(map[string]models.Project, len(projects))
+	for _, project := range projects {
+		key := strings.ToLower(strings.TrimSpace(project.Name))
+		if key == "" {
+			continue
+		}
+		projectByName[key] = project
+	}
+
+	changed := false
+	for key, containers := range projectContainers {
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		if normalized == "" {
+			continue
+		}
+		if err := ValidateProjectName(normalized); err != nil {
+			continue
+		}
+
+		status := deriveProjectRuntimeStatus(containers)
+		proxyPort, dbPort := deriveProjectRuntimePorts(containers)
+		path := ""
+		if runtimeDir, _, runtimeErr := resolveDirFromRuntimeCompose(ctx, s.templatesDir, normalized); runtimeErr == nil {
+			path = runtimeDir
+		}
+
+		if project, exists := projectByName[normalized]; exists {
+			updated := false
+
+			if strings.TrimSpace(project.Status) != status {
+				project.Status = status
+				updated = true
+			}
+			if proxyPort > 0 && project.ProxyPort != proxyPort {
+				project.ProxyPort = proxyPort
+				updated = true
+			}
+			if dbPort > 0 && project.DBPort != dbPort {
+				project.DBPort = dbPort
+				updated = true
+			}
+			if path != "" && strings.TrimSpace(project.Path) != path {
+				project.Path = path
+				updated = true
+			}
+
+			if updated {
+				if err := s.projects.Update(ctx, &project); err != nil {
+					return changed, err
+				}
+				changed = true
+			}
+			continue
+		}
+
+		created := models.Project{
+			Name:      normalized,
+			Path:      path,
+			ProxyPort: proxyPort,
+			DBPort:    dbPort,
+			Status:    status,
+		}
+		if err := s.projects.Create(ctx, &created); err != nil {
+			return changed, err
+		}
+		projectByName[normalized] = created
+		changed = true
+	}
+
+	return changed, nil
 }
 
 func envFileInfo(path string) (exists bool, sizeBytes int64, updatedAt *time.Time) {
