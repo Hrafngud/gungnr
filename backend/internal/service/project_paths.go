@@ -59,18 +59,77 @@ func resolveProjectPath(
 		resolution.ProjectDir = dir
 		resolution.Source = "db_path"
 	} else {
-		dir, err := resolveDirFromTemplatesScan(templatesDir, normalized)
-		if err != nil {
-			return projectPathResolution{}, err
+		templateDir, templateErr := resolveDirFromTemplatesScan(templatesDir, normalized)
+		if templateErr == nil {
+			resolution.ProjectDir = templateDir
+			resolution.Source = "templates_scan"
+		} else {
+			runtimeDir, runtimeComposeFiles, runtimeErr := resolveDirFromRuntimeCompose(ctx, templatesDir, normalized)
+			if runtimeErr != nil {
+				return projectPathResolution{}, templateErr
+			}
+			resolution.ProjectDir = runtimeDir
+			resolution.Source = "compose_runtime"
+			resolution.ComposeFiles = runtimeComposeFiles
 		}
-		resolution.ProjectDir = dir
-		resolution.Source = "templates_scan"
 	}
 
-	resolution.ComposeFiles = existingComposeFiles(resolution.ProjectDir)
+	if len(resolution.ComposeFiles) == 0 {
+		resolution.ComposeFiles = existingComposeFiles(resolution.ProjectDir)
+	}
 	resolution.EnvPath, resolution.EnvExists = resolveProjectEnvPath(resolution.ProjectDir)
 
 	return resolution, nil
+}
+
+func resolveDirFromRuntimeCompose(
+	ctx context.Context,
+	templatesDir string,
+	normalizedName string,
+) (string, []string, error) {
+	meta, err := readComposeProjectMeta(ctx, normalizedName)
+	if err != nil {
+		return "", nil, err
+	}
+
+	projectDir, err := resolveComposeProjectDir(strings.TrimSpace(templatesDir), normalizedName, meta.WorkingDir, meta.ConfigFiles)
+	if err != nil {
+		hint := composeProjectDirHint(strings.TrimSpace(templatesDir), normalizedName, meta)
+		if hint == "" {
+			return "", nil, err
+		}
+		// Runtime label metadata can point to host paths unavailable inside the API
+		// container; keep the hint so project detail can resolve consistently.
+		return hint, nil, nil
+	}
+
+	composeFiles := resolveComposeConfigFiles(projectDir, meta.ConfigFiles)
+	return projectDir, composeFiles, nil
+}
+
+func composeProjectDirHint(baseDir, normalizedName string, meta composeProjectMeta) string {
+	workingDir := strings.TrimSpace(meta.WorkingDir)
+	if workingDir != "" {
+		return filepath.Clean(workingDir)
+	}
+
+	for _, raw := range meta.ConfigFiles {
+		file := strings.TrimSpace(raw)
+		if file == "" {
+			continue
+		}
+		dir := strings.TrimSpace(filepath.Dir(file))
+		if dir == "" || dir == "." || dir == "/" {
+			continue
+		}
+		return filepath.Clean(dir)
+	}
+
+	baseDir = strings.TrimSpace(baseDir)
+	if baseDir == "" {
+		return ""
+	}
+	return filepath.Join(baseDir, normalizedName)
 }
 
 func lookupProjectRecord(

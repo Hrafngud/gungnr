@@ -468,6 +468,10 @@ type composeProjectMeta struct {
 }
 
 func (s *HostService) readComposeProjectMeta(ctx context.Context, project string) (composeProjectMeta, error) {
+	return readComposeProjectMeta(ctx, project)
+}
+
+func readComposeProjectMeta(ctx context.Context, project string) (composeProjectMeta, error) {
 	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "-q", "--filter", "label=com.docker.compose.project="+project)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
