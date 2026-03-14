@@ -55,12 +55,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <UiPanel as="article" class="space-y-4 p-5">
+  <UiPanel as="article" class="w-full p-4">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-          NetBird
-        </p>
         <h2 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
           ACL Graph
         </h2>
@@ -91,52 +88,42 @@ onMounted(() => {
       ACL graph is not available yet.
     </UiState>
 
-    <div v-else class="space-y-4">
-      <div class="grid gap-3 sm:grid-cols-3">
-        <UiPanel
-          variant="soft"
-          class="cursor-pointer p-4 transition hover:border-[color:var(--accent)] hover:shadow-sm"
+    <div v-else class="w-full p-2">
+      <div class="flex flex-row justify-evenly mb-2">
+        <div
+          class="cursor-pointer bg-zinc-800 rounded-sm w-3/8 p-2"
           @click="showNodesModal = true"
         >
-          <div class="flex items-center justify-between">
-            <div>
+          <div class="flex flex-row items-center justify-between">
+              <div class="flex flex-row gap-2 items-center">
+                <NavIcon name="network" class="h-6 w-6 text-[color:var(--muted)]" />
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                 Nodes
               </p>
-              <p class="mt-2 text-2xl font-semibold text-[color:var(--text)]">
+              </div>
+              <p class="text-2xl font-semibold text-[color:var(--text)]">
                 {{ graph.summary.nodeCount }}
               </p>
-            </div>
-            <NavIcon name="network" class="h-6 w-6 text-[color:var(--muted)]" />
           </div>
-        </UiPanel>
+        </div>
 
-        <UiPanel
-          variant="soft"
-          class="cursor-pointer p-4 transition hover:border-[color:var(--accent)] hover:shadow-sm"
+        <div
+          class="cursor-pointer bg-zinc-800 rounded-sm w-3/8 p-2"
           @click="showEdgesModal = true"
         >
-          <div class="flex items-center justify-between">
-            <div>
+          <div class="flex flex-row items-center justify-between">
+              
+              <div class="flex flex-row gap-2 items-center">
+              <NavIcon name="activity" class="h-6 w-6 text-[color:var(--muted)]" />
               <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
                 Allow Edges
               </p>
-              <p class="mt-2 text-2xl font-semibold text-[color:var(--text)]">
+              </div>
+              <p class="text-2xl font-semibold text-[color:var(--text)]">
                 {{ graph.summary.allowEdgeCount }}
               </p>
-            </div>
-            <NavIcon name="activity" class="h-6 w-6 text-[color:var(--muted)]" />
           </div>
-        </UiPanel>
-
-        <UiPanel variant="soft" class="p-4">
-          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-            Total Edges
-          </p>
-          <p class="mt-2 text-2xl font-semibold text-[color:var(--text)]">
-            {{ graph.summary.edgeCount }}
-          </p>
-        </UiPanel>
+        </div>
       </div>
 
       <NodeEdgeGraph

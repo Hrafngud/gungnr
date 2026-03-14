@@ -1,22 +1,23 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import NavIcon from '@/components/NavIcon.vue'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiFormSidePanel from '@/components/ui/UiFormSidePanel.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
+import UiModal from '@/components/ui/UiModal.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiState from '@/components/ui/UiState.vue'
+import UiStatusToggleButton from '@/components/ui/UiStatusToggleButton.vue'
 import UiToggle from '@/components/ui/UiToggle.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useNetbirdStore } from '@/stores/netbird'
 import { useProjectsStore } from '@/stores/projects'
 import type { NetBirdMode, NetBirdServiceRebindingOperation } from '@/types/netbird'
 import type { Project } from '@/types/projects'
-import { jobStatusLabel, jobStatusTone } from '@/utils/jobStatus'
 
 type SelectOption = {
   value: string | number
@@ -31,9 +32,9 @@ const modeOptions: SelectOption[] = [
 ]
 
 const modeDescriptions: Record<NetBirdMode, string> = {
-  legacy: 'Existing listener behavior without NetBird policy isolation.',
-  mode_a: 'Admins can reach only the panel listener over NetBird.',
-  mode_b: 'Admins can reach panel plus per-project ingress over NetBird.',
+  legacy: 'Docker default network isolation / expose',
+  mode_a: 'Gungnr is isolated in a dedicated Netbird interface.',
+  mode_b: 'Mode A + per-project isolation networks over NetBird.',
 }
 
 const isNetBirdMode = (value: unknown): value is NetBirdMode =>
@@ -63,6 +64,9 @@ const modeBProjectsTouched = ref(false)
 const allowLocalhost = ref(false)
 const modeBProjectIds = ref<number[]>([])
 const confirmInput = ref('')
+const applyFlowModalOpen = ref(false)
+const applyFlowStep = ref<'review' | 'confirm'>('review')
+const showConfigRequirementHint = ref(false)
 const modeInitialized = ref(false)
 const terminalRefreshJobId = ref<number | null>(null)
 
@@ -87,8 +91,6 @@ const applyJob = computed(() => netbirdStore.modeApply.job)
 const applyPolling = computed(() => netbirdStore.modeApplyPolling)
 const applyPollingLifecycle = computed(() => applyPolling.value.lifecycle)
 const applyPollingError = computed(() => applyPolling.value.error)
-const applyPollingJob = computed(() => applyPolling.value.lastJob)
-const applyPollingSummary = computed(() => applyPolling.value.summary)
 
 const modeConfig = computed(() => netbirdStore.modeConfig.data)
 const modeConfigLoading = computed(() => netbirdStore.modeConfig.loading)
@@ -97,49 +99,6 @@ const modeConfigSaving = computed(() => netbirdStore.modeConfig.saving)
 const modeConfigSaveError = computed(() => netbirdStore.modeConfig.saveError)
 
 const applyPollingJobId = computed(() => applyPolling.value.jobId ?? applyJob.value?.id ?? null)
-const applyPollingStatus = computed(
-  () =>
-    applyPollingJob.value?.status ??
-    applyJob.value?.status ??
-    (applyPollingLifecycle.value === 'running' ? 'pending' : ''),
-)
-const applyPollingStatusLabel = computed(() => jobStatusLabel(applyPollingStatus.value))
-const applyPollingStatusTone = computed(() => jobStatusTone(applyPollingStatus.value))
-const applyPollingWarnings = computed(() => applyPollingSummary.value?.warnings ?? [])
-const applyPollingRebindingFailures = computed(
-  () => applyPollingSummary.value?.rebindingExecution?.counts?.failed ?? 0,
-)
-const applyPollingRedeployFailures = computed(
-  () => applyPollingSummary.value?.redeployExecution?.counts?.failed ?? 0,
-)
-const applyPollingFailureCount = computed(
-  () => applyPollingRebindingFailures.value + applyPollingRedeployFailures.value,
-)
-const applyPollingHasWarnings = computed(
-  () => applyPollingWarnings.value.length > 0 || applyPollingFailureCount.value > 0,
-)
-const applyPollingTerminalTone = computed<'ok' | 'warn' | 'error'>(() => {
-  if (applyPollingStatus.value === 'failed') return 'error'
-  return applyPollingHasWarnings.value ? 'warn' : 'ok'
-})
-const applyPollingRunningMessage = computed(() => {
-  if (applyPollingStatus.value === 'running') {
-    return 'Mode apply is running. NetBird reconcile and rebinding steps are in progress.'
-  }
-  if (applyPollingStatus.value === 'pending') {
-    return 'Mode apply is queued. Polling will continue until the job reaches a terminal state.'
-  }
-  return 'Polling latest mode-apply job status...'
-})
-const applyPollingTerminalMessage = computed(() => {
-  if (applyPollingStatus.value === 'failed') {
-    return applyPollingJob.value?.error?.trim() || 'Mode apply failed. Open the job log for details.'
-  }
-  if (applyPollingHasWarnings.value) {
-    return 'Mode apply completed with warnings. Review warning details below.'
-  }
-  return 'Mode apply completed successfully.'
-})
 
 const parsedConfigAdminPeerIds = computed(() =>
   configAdminPeerIdsInput.value
@@ -179,6 +138,29 @@ const canApply = computed(() =>
   confirmationReady.value,
 )
 
+const applyConfigMissingItems = computed(() => {
+  const items: string[] = []
+  if (!modeConfigHasToken.value) {
+    items.push('API token')
+  }
+  if (requiresPeerInputs.value && !modeConfigHasHostPeer.value) {
+    items.push('host peer ID')
+  }
+  if (requiresPeerInputs.value && !modeConfigHasAdminPeers.value) {
+    items.push('admin peer IDs')
+  }
+  return items
+})
+const applyConfigRequirementsMet = computed(() => applyConfigMissingItems.value.length === 0)
+const applyFlowTitle = computed(() =>
+  applyFlowStep.value === 'review' ? 'Review dry-run plan' : 'Confirm mode switch',
+)
+const applyFlowDescription = computed(() =>
+  applyFlowStep.value === 'review'
+    ? `Review plan feedback before queueing ${modeLabel(targetMode.value)}.`
+    : `Type ${confirmationPhrase.value} to queue ${modeLabel(targetMode.value)}.`,
+)
+
 const modeLabel = (mode: NetBirdMode) => {
   if (mode === 'mode_a') return 'Mode A'
   if (mode === 'mode_b') return 'Mode B'
@@ -190,14 +172,6 @@ const projectStatusTone = (project: Project): 'ok' | 'warn' | 'neutral' => {
   if (statusValue === 'running') return 'ok'
   if (statusValue === 'degraded') return 'warn'
   return 'neutral'
-}
-
-const projectStatusLabel = (project: Project) => {
-  const statusValue = (project.status || '').trim().toLowerCase()
-  if (statusValue === 'running') return 'running'
-  if (statusValue === 'degraded') return 'degraded'
-  if (statusValue === 'down') return 'down'
-  return statusValue || 'unknown'
 }
 
 const listenerLabel = (listeners: string[]) =>
@@ -225,11 +199,27 @@ const openConfigPanel = () => {
 
 const triggerPlan = async () => {
   if (!isAdmin.value) return
+  if (!applyConfigRequirementsMet.value) {
+    showConfigRequirementHint.value = true
+    applyFlowModalOpen.value = false
+    return
+  }
+  showConfigRequirementHint.value = false
   await netbirdStore.planModeSwitch({
     targetMode: targetMode.value,
     allowLocalhost: allowLocalhost.value,
     modeBProjectIds: requiresModeBSelection.value ? normalizeProjectIDs(modeBProjectIds.value) : [],
   })
+  if (!planError.value && plan.value) {
+    applyFlowStep.value = 'review'
+    confirmInput.value = ''
+    applyFlowModalOpen.value = true
+  }
+}
+
+const goToConfirmStep = () => {
+  if (!plan.value || !planMatchesSelection.value) return
+  applyFlowStep.value = 'confirm'
 }
 
 const triggerApply = async () => {
@@ -239,6 +229,11 @@ const triggerApply = async () => {
     allowLocalhost: allowLocalhost.value,
     modeBProjectIds: requiresModeBSelection.value ? normalizeProjectIDs(modeBProjectIds.value) : [],
   })
+  if (!applyError.value) {
+    applyFlowModalOpen.value = false
+    applyFlowStep.value = 'review'
+    confirmInput.value = ''
+  }
 }
 
 const toggleModeBProject = (projectId: number) => {
@@ -308,11 +303,6 @@ const reloadModeConfig = async () => {
   hydrateConfigForm()
 }
 
-const retryApplyPolling = () => {
-  if (!applyPollingJobId.value) return
-  void netbirdStore.startModeApplyJobPolling(applyPollingJobId.value)
-}
-
 const isTerminalJobStatus = (value?: string) => {
   const normalized = (value || '').trim().toLowerCase()
   return normalized === 'completed' || normalized === 'failed'
@@ -354,7 +344,18 @@ watch(
 
 watch([targetMode, allowLocalhost, modeBProjectIds], () => {
   confirmInput.value = ''
+  applyFlowModalOpen.value = false
+  applyFlowStep.value = 'review'
 })
+
+watch(
+  () => applyConfigRequirementsMet.value,
+  (ready) => {
+    if (ready) {
+      showConfigRequirementHint.value = false
+    }
+  },
+)
 
 watch(
   () => status.value?.peerId,
@@ -424,20 +425,11 @@ onBeforeUnmount(() => {
   <UiPanel as="article" class="space-y-5 p-5">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-          NetBird
-        </p>
         <h2 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
           Mode switch
         </h2>
-        <p class="mt-1 text-xs text-[color:var(--muted)]">
-          Plan first, then apply mode changes through an explicit confirmation gate.
-        </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <UiBadge tone="neutral">
-          Current: {{ status ? modeLabel(status.currentMode) : 'unknown' }}
-        </UiBadge>
         <UiBadge :tone="modeConfigHasToken ? 'ok' : 'warn'">
           Config token: {{ modeConfigHasToken ? 'set' : 'missing' }}
         </UiBadge>
@@ -452,6 +444,7 @@ onBeforeUnmount(() => {
       <UiButton
         variant="ghost"
         size="sm"
+        :class="showConfigRequirementHint && !applyConfigRequirementsMet ? 'ring-2 ring-[color:var(--accent)] ring-offset-2 ring-offset-[color:var(--surface)]' : ''"
         :disabled="!isAdmin || modeConfigLoading"
         @click="openConfigPanel"
       >
@@ -460,20 +453,33 @@ onBeforeUnmount(() => {
           {{ modeConfigLoading ? 'Loading config...' : 'Edit mode config' }}
         </span>
       </UiButton>
-      <p class="text-xs text-[color:var(--muted)]">
-        Credentials are saved once and reused across mode switches.
-      </p>
     </div>
+
+    <UiState v-if="showConfigRequirementHint && !applyConfigRequirementsMet" tone="warn">
+      Complete NetBird mode config first, then run dry-run plan again. Missing:
+      <span class="font-semibold">{{ applyConfigMissingItems.join(', ') }}</span>.
+    </UiState>
 
     <UiState v-if="modeConfigError" tone="error">
       {{ modeConfigError }}
     </UiState>
 
     <UiPanel variant="soft" class="space-y-4 p-4">
-      <div class="grid gap-2 text-sm">
-        <label class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+      <div class="grid grid-cols-2">
+        <div class="flex flex-col self-start gap-2 col-span-1">
+        <label class="text-xs h-10 uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
           Target mode
         </label>
+        <div class="flex flex-wrap items-center gap-3">
+        <UiToggle
+          v-model="allowLocalhost"
+          :disabled="!isAdmin || planLoading || applySubmitting"
+        >
+          Allow localhost listeners
+        </UiToggle>
+      </div>
+        </div>
+        <div class="flex flex-col gap-2 col-span-1">
         <UiSelect
           :model-value="targetMode"
           :options="modeOptions"
@@ -484,18 +490,7 @@ onBeforeUnmount(() => {
         <p class="text-xs text-[color:var(--muted)]">
           {{ modeDescriptions[targetMode] }}
         </p>
-      </div>
-
-      <div class="flex flex-wrap items-center gap-3">
-        <UiToggle
-          v-model="allowLocalhost"
-          :disabled="!isAdmin || planLoading || applySubmitting"
-        >
-          Allow localhost listeners
-        </UiToggle>
-        <UiBadge :tone="allowLocalhost ? 'ok' : 'neutral'">
-          {{ allowLocalhost ? 'Enabled' : 'Disabled' }}
-        </UiBadge>
+        </div>
       </div>
 
       <UiPanel
@@ -510,38 +505,54 @@ onBeforeUnmount(() => {
           <UiBadge tone="neutral">{{ modeBProjectIds.length }}</UiBadge>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2">
+        <div class="mode-b-action-buttons">
           <UiButton
             variant="ghost"
             size="sm"
+            class="mode-b-action-button"
             :disabled="!isAdmin || projectsLoading"
             @click="selectRunningModeBProjects"
           >
-            Select running
+            <span class="inline-flex items-center gap-2">
+              <NavIcon name="activity" class="h-3.5 w-3.5" />
+              Select running
+            </span>
           </UiButton>
           <UiButton
             variant="ghost"
             size="sm"
+            class="mode-b-action-button"
             :disabled="!isAdmin || projectsLoading"
             @click="selectAllModeBProjects"
           >
-            Select all
+            <span class="inline-flex items-center gap-2">
+              <NavIcon name="projects" class="h-3.5 w-3.5" />
+              Select all
+            </span>
           </UiButton>
           <UiButton
             variant="ghost"
             size="sm"
+            class="mode-b-action-button"
             :disabled="!isAdmin"
             @click="clearModeBProjects"
           >
-            Clear
+            <span class="inline-flex items-center gap-2">
+              <NavIcon name="stop" class="h-3.5 w-3.5" />
+              Clear
+            </span>
           </UiButton>
           <UiButton
             variant="ghost"
             size="sm"
+            class="mode-b-action-button"
             :disabled="!isAdmin"
             @click="resetModeBProjectsToEffective"
           >
-            Reset to active
+            <span class="inline-flex items-center gap-2">
+              <NavIcon name="refresh" class="h-3.5 w-3.5" />
+              Reset to active
+            </span>
           </UiButton>
         </div>
 
@@ -554,28 +565,24 @@ onBeforeUnmount(() => {
         <UiState v-else-if="projects.length === 0">
           No projects found.
         </UiState>
-        <ul v-else class="max-h-56 space-y-2 overflow-y-auto pr-1">
-          <UiListRow
-            v-for="project in projects"
-            :key="`mode-b-project-${project.id}`"
-            as="li"
-            class="flex items-center justify-between gap-3"
-          >
-            <label class="flex min-w-0 items-center gap-3 text-left">
-              <input
-                type="checkbox"
-                class="h-4 w-4 rounded border border-[color:var(--border)] bg-[color:var(--surface)]"
-                :checked="modeBProjectIds.includes(project.id)"
-                :disabled="!isAdmin"
-                @change="toggleModeBProject(project.id)"
-              />
-              <span class="truncate text-sm text-[color:var(--text)]">{{ project.name }}</span>
-            </label>
-            <UiBadge :tone="projectStatusTone(project)">
-              {{ projectStatusLabel(project) }}
-            </UiBadge>
-          </UiListRow>
-        </ul>
+        <div
+          v-else
+          class="mode-b-project-grid-shell"
+          role="group"
+          aria-label="Mode B project assignments"
+        >
+          <div class="mode-b-project-grid">
+            <UiStatusToggleButton
+              v-for="project in projects"
+              :key="`mode-b-project-${project.id}`"
+              :model-value="modeBProjectIds.includes(project.id)"
+              :label="project.name"
+              :status-tone="projectStatusTone(project)"
+              :disabled="!isAdmin"
+              @update:model-value="toggleModeBProject(project.id)"
+            />
+          </div>
+        </div>
 
         <p class="text-xs text-[color:var(--muted)]">
           Selected projects will run ingress listeners under NetBird in Mode B. Unselected projects remain on legacy listeners.
@@ -614,127 +621,139 @@ onBeforeUnmount(() => {
       Building NetBird mode plan...
     </UiState>
 
-    <div v-else-if="plan" class="space-y-4">
-      <UiPanel variant="soft" class="space-y-3 p-4">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-            Service rebinding operations
-          </p>
-          <UiBadge tone="neutral">{{ plan.serviceRebindingOperations.length }}</UiBadge>
-        </div>
-        <UiState v-if="plan.serviceRebindingOperations.length === 0">
-          No listener rebinding changes are required.
-        </UiState>
-        <ul v-else class="space-y-2">
-          <UiListRow
-            v-for="operation in plan.serviceRebindingOperations"
-            :key="`${operation.service}-${operation.projectId ?? 0}-${operation.port}`"
-            as="li"
-            class="space-y-2"
-          >
-            <div class="flex flex-wrap items-center justify-between gap-3">
-              <p class="text-xs font-semibold text-[color:var(--text)]">
-                {{ rebindingTitle(operation) }}
-              </p>
-              <UiBadge tone="neutral">Port {{ operation.port }}</UiBadge>
-            </div>
-            <div class="grid gap-1 text-xs text-[color:var(--muted)]">
-              <p>From: <span class="font-mono text-[color:var(--text)]">{{ listenerLabel(operation.fromListeners) }}</span></p>
-              <p>To: <span class="font-mono text-[color:var(--text)]">{{ listenerLabel(operation.toListeners) }}</span></p>
-              <p>{{ operation.reason }}</p>
-            </div>
-          </UiListRow>
-        </ul>
-      </UiPanel>
-
-      <UiPanel variant="soft" class="space-y-3 p-4">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-            Redeploy targets
-          </p>
-          <UiBadge tone="neutral">
-            {{ (plan.redeployTargets.panel ? 1 : 0) + plan.redeployTargets.projects.length }}
-          </UiBadge>
-        </div>
-        <div class="grid gap-1 text-xs text-[color:var(--muted)]">
-          <p>
-            Panel:
-            <span class="text-[color:var(--text)]">
-              {{ plan.redeployTargets.panel ? 'required' : 'not required' }}
-            </span>
-          </p>
-        </div>
-        <UiState v-if="plan.redeployTargets.projects.length === 0">
-          No project stack redeploys are required.
-        </UiState>
-        <ul v-else class="space-y-2 text-xs text-[color:var(--muted)]">
-          <UiListRow
-            v-for="project in plan.redeployTargets.projects"
-            :key="`${project.projectId}-${project.port}`"
-            as="li"
-            class="space-y-1"
-          >
-            <div class="flex flex-wrap items-center justify-between gap-3">
-              <p class="font-semibold text-[color:var(--text)]">{{ project.projectName }}</p>
-              <UiBadge tone="neutral">Port {{ project.port }}</UiBadge>
-            </div>
-            <p>{{ project.reason }}</p>
-          </UiListRow>
-        </ul>
-      </UiPanel>
-
-      <UiPanel variant="soft" class="space-y-3 p-4">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-            Planner warnings
-          </p>
-          <UiBadge :tone="plan.warnings.length > 0 ? 'warn' : 'ok'">
-            {{ plan.warnings.length }}
-          </UiBadge>
-        </div>
-        <UiState v-if="plan.warnings.length === 0" tone="ok">
-          No warnings reported for this dry-run.
-        </UiState>
-        <ul v-else class="space-y-2 text-xs text-[color:var(--muted)]">
-          <li
-            v-for="(warning, index) in plan.warnings"
-            :key="`warning-${index}`"
-            class="rounded border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-2"
-          >
-            {{ warning }}
-          </li>
-        </ul>
-      </UiPanel>
-    </div>
-
-    <UiState v-else>
+    <UiState v-else-if="!plan">
       Run a dry-run plan to preview rebinding and redeploy impact before apply.
     </UiState>
 
-    <UiPanel variant="raise" class="space-y-4 p-5">
-      <div class="flex items-center justify-between gap-3">
-        <div>
-          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-            Apply mode switch
-          </p>
-          <p class="mt-1 text-sm text-[color:var(--muted)]">
-            Type: <span class="font-mono text-[color:var(--text)]">{{ confirmationPhrase }}</span>
-          </p>
+    <UiState v-if="applyError" tone="error">
+      {{ applyError }}
+    </UiState>
+    <UiState v-if="applyPollingLifecycle === 'error'" tone="error">
+      {{ applyPollingError || 'Mode apply polling failed.' }}
+    </UiState>
+
+  </UiPanel>
+
+  <UiModal
+    v-model="applyFlowModalOpen"
+    :title="applyFlowTitle"
+    :description="applyFlowDescription"
+    class="!w-[min(1100px,96vw)]"
+  >
+    <div v-if="applyFlowStep === 'review'" class="space-y-4">
+      <UiState v-if="!plan || !planMatchesSelection" tone="warn">
+        Plan snapshot is stale or missing. Run dry-run plan again from the mode switch section.
+      </UiState>
+
+      <div v-else class="space-y-4">
+        <div class="grid gap-4 lg:grid-cols-2">
+          <UiPanel variant="soft" class="max-h-[420px] space-y-3 overflow-y-auto p-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                Service rebinding operations
+              </p>
+              <UiBadge tone="neutral">{{ plan.serviceRebindingOperations.length }}</UiBadge>
+            </div>
+            <UiState v-if="plan.serviceRebindingOperations.length === 0">
+              No listener rebinding changes are required.
+            </UiState>
+            <ul v-else class="space-y-2">
+              <UiListRow
+                v-for="operation in plan.serviceRebindingOperations"
+                :key="`${operation.service}-${operation.projectId ?? 0}-${operation.port}`"
+                as="li"
+                class="space-y-2"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <p class="text-xs font-semibold text-[color:var(--text)]">
+                    {{ rebindingTitle(operation) }}
+                  </p>
+                  <UiBadge tone="neutral">Port {{ operation.port }}</UiBadge>
+                </div>
+                <div class="grid gap-1 text-xs text-[color:var(--muted)]">
+                  <p>From: <span class="font-mono text-[color:var(--text)]">{{ listenerLabel(operation.fromListeners) }}</span></p>
+                  <p>To: <span class="font-mono text-[color:var(--text)]">{{ listenerLabel(operation.toListeners) }}</span></p>
+                  <p>{{ operation.reason }}</p>
+                </div>
+              </UiListRow>
+            </ul>
+          </UiPanel>
+
+          <UiPanel variant="soft" class="max-h-[420px] space-y-3 overflow-y-auto p-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+                Redeploy targets
+              </p>
+              <UiBadge tone="neutral">
+                {{ (plan.redeployTargets.panel ? 1 : 0) + plan.redeployTargets.projects.length }}
+              </UiBadge>
+            </div>
+            <div class="grid gap-1 text-xs text-[color:var(--muted)]">
+              <p>
+                Panel:
+                <span class="text-[color:var(--text)]">
+                  {{ plan.redeployTargets.panel ? 'required' : 'not required' }}
+                </span>
+              </p>
+            </div>
+            <UiState v-if="plan.redeployTargets.projects.length === 0">
+              No project stack redeploys are required.
+            </UiState>
+            <ul v-else class="space-y-2 text-xs text-[color:var(--muted)]">
+              <UiListRow
+                v-for="project in plan.redeployTargets.projects"
+                :key="`${project.projectId}-${project.port}`"
+                as="li"
+                class="space-y-1"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <p class="font-semibold text-[color:var(--text)]">{{ project.projectName }}</p>
+                  <UiBadge tone="neutral">Port {{ project.port }}</UiBadge>
+                </div>
+                <p>{{ project.reason }}</p>
+              </UiListRow>
+            </ul>
+          </UiPanel>
         </div>
-        <div class="flex items-center gap-2">
-          <UiBadge :tone="modeConfigHasToken ? 'ok' : 'error'">
-            {{ modeConfigHasToken ? 'Config OK' : 'Config missing' }}
-          </UiBadge>
-          <UiButton
-            variant="ghost"
-            size="sm"
-            :disabled="!isAdmin"
-            @click="openConfigPanel"
-          >
-            Edit config
-          </UiButton>
-        </div>
+
+        <UiPanel variant="soft" class="space-y-3 p-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+              Planner warnings
+            </p>
+            <UiBadge :tone="plan.warnings.length > 0 ? 'warn' : 'ok'">
+              {{ plan.warnings.length }}
+            </UiBadge>
+          </div>
+          <UiState v-if="plan.warnings.length === 0" tone="ok">
+            No warnings reported for this dry-run.
+          </UiState>
+          <ul v-else class="space-y-2 text-xs text-[color:var(--muted)]">
+            <li
+              v-for="(warning, index) in plan.warnings"
+              :key="`warning-${index}`"
+              class="rounded border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-2"
+            >
+              {{ warning }}
+            </li>
+          </ul>
+        </UiPanel>
       </div>
+    </div>
+
+    <div v-else class="space-y-4">
+      <div class="rounded border border-[color:var(--accent-soft)] bg-[color:var(--surface-2)] px-4 py-3">
+        <p class="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+          Confirmation phrase
+        </p>
+        <p class="mt-2 break-all font-mono text-xl font-semibold text-[color:var(--accent-strong)]">
+          {{ confirmationPhrase }}
+        </p>
+      </div>
+
+      <UiState v-if="applyError" tone="error">
+        {{ applyError }}
+      </UiState>
 
       <label class="grid gap-2 text-sm">
         <UiInput
@@ -742,90 +761,59 @@ onBeforeUnmount(() => {
           type="text"
           autocomplete="off"
           spellcheck="false"
+          class="!border-[color:var(--border-soft)] !bg-[color:var(--surface-inset)]"
           :disabled="!isAdmin || applySubmitting"
           placeholder="Type confirmation phrase"
         />
       </label>
-
-      <UiState 
-        v-if="isAdmin && (!modeConfigHasToken || (requiresPeerInputs && (!modeConfigHasHostPeer || !modeConfigHasAdminPeers)) || !planMatchesSelection || !confirmationReady)" 
-        tone="warn"
-      >
-        <span v-if="!modeConfigHasToken">Missing API credentials. </span>
-        <span v-if="requiresPeerInputs && !modeConfigHasHostPeer">Missing host peer ID. </span>
-        <span v-if="requiresPeerInputs && !modeConfigHasAdminPeers">Missing admin peer IDs. </span>
-        <span v-if="!planMatchesSelection && modeConfigHasToken">Run dry-run plan first. </span>
-        <span v-if="!confirmationReady && planMatchesSelection">Type confirmation phrase to proceed.</span>
-      </UiState>
-
-      <div class="flex flex-wrap items-center gap-3">
-        <UiButton
-          variant="danger"
-          size="sm"
-          :disabled="!canApply"
-          @click="triggerApply"
-        >
-          <span class="inline-flex items-center gap-2">
-            <UiInlineSpinner v-if="applySubmitting" />
-            {{ applySubmitting ? 'Queueing...' : `Queue apply (${modeLabel(targetMode)})` }}
-          </span>
-        </UiButton>
-        <p v-if="!isAdmin" class="text-xs text-[color:var(--muted)]">
-          Admin-only action
-        </p>
-      </div>
-
-      <UiState v-if="applyError" tone="error">
-        {{ applyError }}
-      </UiState>
-      <UiState v-if="applyPollingLifecycle === 'error'" tone="error">
-        {{ applyPollingError || 'Mode apply polling failed.' }}
-      </UiState>
-
-      <UiPanel v-if="applyPollingJobId" variant="soft" class="space-y-3 p-4">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="flex items-center gap-2">
-            <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-              Job #{{ applyPollingJobId }}
-            </p>
-            <UiBadge :tone="applyPollingStatusTone">
-              {{ applyPollingStatusLabel }}
-            </UiBadge>
-          </div>
+      <p class="text-xs text-[color:var(--muted)]">
+        Queue apply activates once this input matches the phrase exactly.
+      </p>
+    </div>
+    <template #footer>
+      <div class="flex flex-wrap justify-end gap-3">
+        <template v-if="applyFlowStep === 'review'">
           <UiButton
-            :as="RouterLink"
-            :to="`/jobs/${applyPollingJobId}`"
             variant="ghost"
             size="sm"
+            :disabled="applySubmitting"
+            @click="applyFlowModalOpen = false"
           >
-            View log
+            Cancel
           </UiButton>
-        </div>
-
-        <UiState v-if="applyPollingLifecycle === 'running'" loading>
-          {{ applyPollingRunningMessage }}
-        </UiState>
-        <UiState
-          v-else-if="applyPollingLifecycle === 'terminal'"
-          :tone="applyPollingTerminalTone"
-        >
-          {{ applyPollingTerminalMessage }}
-          <span v-if="applyPollingHasWarnings">
-            ({{ applyPollingWarnings.length }} warnings, {{ applyPollingFailureCount }} failures)
-          </span>
-        </UiState>
-
-        <UiButton
-          v-if="applyPollingLifecycle === 'error'"
-          variant="ghost"
-          size="sm"
-          @click="retryApplyPolling"
-        >
-          Retry polling
-        </UiButton>
-      </UiPanel>
-    </UiPanel>
-  </UiPanel>
+          <UiButton
+            variant="primary"
+            size="sm"
+            :disabled="!plan || !planMatchesSelection || applySubmitting"
+            @click="goToConfirmStep"
+          >
+            Proceed
+          </UiButton>
+        </template>
+        <template v-else>
+          <UiButton
+            variant="ghost"
+            size="sm"
+            :disabled="applySubmitting"
+            @click="applyFlowStep = 'review'"
+          >
+            Back
+          </UiButton>
+          <UiButton
+            variant="danger"
+            size="sm"
+            :disabled="!canApply"
+            @click="triggerApply"
+          >
+            <span class="inline-flex items-center gap-2">
+              <UiInlineSpinner v-if="applySubmitting" />
+              {{ applySubmitting ? 'Queueing...' : `Queue apply (${modeLabel(targetMode)})` }}
+            </span>
+          </UiButton>
+        </template>
+      </div>
+    </template>
+  </UiModal>
 
   <UiFormSidePanel
     v-model="configPanelOpen"
@@ -927,3 +915,34 @@ onBeforeUnmount(() => {
     </form>
   </UiFormSidePanel>
 </template>
+
+<style scoped>
+.mode-b-action-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.25rem, 1fr));
+  gap: 0.5rem;
+}
+
+.mode-b-action-button {
+  justify-content: center;
+}
+
+.mode-b-project-grid-shell {
+  --mode-b-row-height: 2.75rem;
+  --mode-b-gap: 0.5rem;
+  width: 100%;
+  max-height: calc((var(--mode-b-row-height) * 2.5) + (var(--mode-b-gap) * 2));
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+
+.mode-b-project-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: var(--mode-b-row-height);
+  gap: var(--mode-b-gap);
+  width: 100%;
+}
+</style>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted } from 'vue'
 import NetbirdAclGraph from '@/components/netbird/NetbirdAclGraph.vue'
+import NetbirdModeSwitchJobLog from '@/components/netbird/NetbirdModeSwitchJobLog.vue'
 import NetbirdModeSwitcher from '@/components/netbird/NetbirdModeSwitcher.vue'
 import NetbirdStatusCard from '@/components/netbird/NetbirdStatusCard.vue'
 import UiBadge from '@/components/ui/UiBadge.vue'
@@ -49,7 +50,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="page space-y-8">
+  <section class="page flex flex-col gap-2">
     <div class="flex flex-wrap items-start justify-between gap-4">
       <div>
         <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
@@ -75,20 +76,23 @@ onBeforeUnmount(() => {
     <UiState v-if="!isAdmin" tone="warn">
       Read-only visibility is active. Mode planning and apply controls are limited to admin and superuser accounts.
     </UiState>
-
-    <div class="flex flex-col gap-2">
-      <NetbirdStatusCard />
-      <NetbirdAclGraph />
+    <NetbirdStatusCard />
+    <div class="grid w-full gap-4 lg:grid-cols-2">
+      <div>
+        <NetbirdModeSwitcher v-if="isAdmin" />
+        <UiPanel v-else variant="soft" class="space-y-2 p-4">
+          <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
+            Mode switcher
+          </p>
+          <p class="text-sm text-[color:var(--muted)]">
+            This section is intentionally hidden for non-admin roles to prevent unauthorized mode changes.
+          </p>
+        </UiPanel>
+      </div>
+      <div>
+        <NetbirdAclGraph />
+      </div>
     </div>
-
-    <NetbirdModeSwitcher v-if="isAdmin" />
-    <UiPanel v-else variant="soft" class="space-y-2 p-4">
-      <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">
-        Mode switcher
-      </p>
-      <p class="text-sm text-[color:var(--muted)]">
-        This section is intentionally hidden for non-admin roles to prevent unauthorized mode changes.
-      </p>
-    </UiPanel>
+    <NetbirdModeSwitchJobLog v-if="isAdmin" />
   </section>
 </template>
