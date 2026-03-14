@@ -7,6 +7,7 @@ import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
+import UiStatusDot from '@/components/ui/UiStatusDot.vue'
 import UiState from '@/components/ui/UiState.vue'
 import UiToggle from '@/components/ui/UiToggle.vue'
 import NavIcon from '@/components/NavIcon.vue'
@@ -170,12 +171,12 @@ const containerStateLabel = (status: string) => {
   return 'Other'
 }
 
-const statusDotClass = (status: string) => {
+const statusDotTone = (status: string): BadgeTone => {
   const state = resolveContainerState(status)
-  if (state === 'running') return 'status-dot status-dot-ok'
-  if (state === 'starting') return 'status-dot status-dot-warn'
-  if (state === 'stopped') return 'status-dot status-dot-error'
-  return 'status-dot status-dot-neutral'
+  if (state === 'running') return 'ok'
+  if (state === 'starting') return 'warn'
+  if (state === 'stopped') return 'error'
+  return 'neutral'
 }
 
 const inferContainerType = (container: DockerContainer): ContainerType => {
@@ -767,15 +768,15 @@ onBeforeUnmount(() => {
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div class="flex flex-wrap items-center gap-2 text-xs text-[color:var(--muted)]">
               <span class="inline-flex items-center gap-1 rounded-[8px] border border-[color:var(--border)] px-2 py-1">
-                <span class="status-dot status-dot-ok" />
+                <UiStatusDot tone="ok" size="md" />
                 {{ statusCounts.running }} running
               </span>
               <span class="inline-flex items-center gap-1 rounded-[8px] border border-[color:var(--border)] px-2 py-1">
-                <span class="status-dot status-dot-warn" />
+                <UiStatusDot tone="warn" size="md" />
                 {{ statusCounts.starting }} starting
               </span>
               <span class="inline-flex items-center gap-1 rounded-[8px] border border-[color:var(--border)] px-2 py-1">
-                <span class="status-dot status-dot-error" />
+                <UiStatusDot tone="error" size="md" />
                 {{ statusCounts.stopped }} stopped
               </span>
             </div>
@@ -844,7 +845,7 @@ onBeforeUnmount(() => {
                     {{ container.name }}
                   </p>
                   <span class="inline-flex items-center gap-1 text-[10px] text-[color:var(--muted)]">
-                    <span :class="statusDotClass(container.status)" />
+                    <UiStatusDot :tone="statusDotTone(container.status)" size="md" />
                     {{ containerStateLabel(container.status) }}
                   </span>
                 </div>
@@ -879,7 +880,7 @@ onBeforeUnmount(() => {
                   {{ selectedInfo ? `${containerTypeLabel(selectedInfo)} · ${selectedInfo.service || 'No compose service'}` : 'Choose from grid' }}
                 </span>
                 <span class="logs-runtime-chip">
-                  <span :class="statusDotClass(selectedInfo?.status || '')" />
+                  <UiStatusDot :tone="statusDotTone(selectedInfo?.status || '')" size="md" />
                   {{ selectedInfo?.status || 'Unknown' }}
                 </span>
                 <span class="logs-runtime-chip">
@@ -1139,29 +1140,6 @@ onBeforeUnmount(() => {
 .logs-panel-leave-to {
   opacity: 0;
   transform: translateY(10px) scale(0.995);
-}
-
-.status-dot {
-  display: inline-flex;
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 9999px;
-}
-
-.status-dot-ok {
-  background: #22c55e;
-}
-
-.status-dot-warn {
-  background: #f59e0b;
-}
-
-.status-dot-error {
-  background: #ef4444;
-}
-
-.status-dot-neutral {
-  background: color-mix(in oklab, var(--muted) 75%, transparent);
 }
 
 .logs-runtime-chip {

@@ -8,6 +8,7 @@ import UiInlineFeedback from '@/components/ui/UiInlineFeedback.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
+import UiCopyableValue from '@/components/ui/UiCopyableValue.vue'
 import UiState from '@/components/ui/UiState.vue'
 import UiTooltip from '@/components/ui/UiTooltip.vue'
 import NavIcon from '@/components/NavIcon.vue'
@@ -50,6 +51,7 @@ import { useAuthStore } from '@/stores/auth'
 import { usePageLoadingStore } from '@/stores/pageLoading'
 import { useToastStore } from '@/stores/toasts'
 import { useWorkbenchStore, type WorkbenchRequestStatus } from '@/stores/workbench'
+import { isCopyValueAllowed, writeTextToClipboard } from '@/utils/clipboard'
 import type { ProjectDetail } from '@/types/projects'
 import {
   buildWorkbenchPortSelectorKey,
@@ -2081,36 +2083,19 @@ const runWorkbenchRemediationAction = async (action?: WorkbenchRemediationAction
   }
 }
 
-const copyTextToClipboard = async (payload: string) => {
-  if (navigator?.clipboard?.writeText) {
-    await navigator.clipboard.writeText(payload)
-    return
-  }
-
-  const textarea = document.createElement('textarea')
-  textarea.value = payload
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.focus()
-  textarea.select()
-  document.execCommand('copy')
-  document.body.removeChild(textarea)
-}
-
 const copyRuntimePath = async (
   payload: string | null | undefined,
   label: string,
   feedbackTarget?: 'source' | 'path' | 'env',
 ) => {
   const value = payload?.trim() ?? ''
-  if (!value || value.toLowerCase() === 'unknown') {
+  if (!isCopyValueAllowed(value)) {
     toastStore.warn(`${label} is not available for this project.`, 'Copy path')
     return
   }
 
   try {
-    await copyTextToClipboard(value)
+    await writeTextToClipboard(value)
     if (feedbackTarget) runtimeCopyFeedbackTarget.value = feedbackTarget
 
     if (runtimeCopyFeedbackTimer) {
@@ -2128,10 +2113,6 @@ const copyRuntimePath = async (
     toastStore.error(message, 'Copy failed')
   }
 }
-
-const runtimeCopyTooltipText = (target: 'source' | 'path' | 'env') => (
-  runtimeCopyFeedbackTarget.value === target ? 'Copyed!' : 'Copy to clipboard.'
-)
 
 const openProjectRepository = () => {
   const raw = projectRepositoryUrl.value
@@ -2167,7 +2148,7 @@ const copyWorkbenchPreviewCompose = async () => {
   }
 
   try {
-    await copyTextToClipboard(compose)
+    await writeTextToClipboard(compose)
     toastStore.success('Compose preview copied to clipboard.', 'Workbench preview')
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Clipboard copy failed.'
@@ -2302,18 +2283,16 @@ watch(projectName, () => {
               <CodeBracketsSquare class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--muted-2)]" />
               <div class="min-w-0">
                 <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Source</p>
-                <UiTooltip
+                <UiCopyableValue
                   class="mt-1"
-                  :text="runtimeCopyTooltipText('source')"
-                >
-                  <button
-                    type="button"
-                    class="block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors focus-visible:outline-none focus-visible:text-[color:var(--text)] duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)]"
-                    @click="copyRuntimePath(detail.runtime.source, 'Source path', 'source')"
-                  >
-                    {{ detail.runtime.source || 'unknown' }}
-                  </button>
-                </UiTooltip>
+                  :value="detail.runtime.source || 'unknown'"
+                  :copyable="isCopyValueAllowed(detail.runtime.source || '')"
+                  :copied="runtimeCopyFeedbackTarget === 'source'"
+                  button-class="block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)] focus-visible:outline-none focus-visible:text-[color:var(--text)]"
+                  value-class="block"
+                  static-class="block max-w-[14rem] overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)]"
+                  @copy="copyRuntimePath(detail.runtime.source, 'Source path', 'source')"
+                />
               </div>
             </div>
 
@@ -2321,18 +2300,16 @@ watch(projectName, () => {
               <Folder class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--muted-2)]" />
               <div class="min-w-0">
                 <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Path</p>
-                <UiTooltip
+                <UiCopyableValue
                   class="mt-1"
-                  :text="runtimeCopyTooltipText('path')"
-                >
-                  <button
-                    type="button"
-                    class="block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors focus-visible:outline-none focus-visible:text-[color:var(--text)] duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)]"
-                    @click="copyRuntimePath(detail.runtime.path, 'Runtime path', 'path')"
-                  >
-                    {{ detail.runtime.path }}
-                  </button>
-                </UiTooltip>
+                  :value="detail.runtime.path || 'unknown'"
+                  :copyable="isCopyValueAllowed(detail.runtime.path || '')"
+                  :copied="runtimeCopyFeedbackTarget === 'path'"
+                  button-class="block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)] focus-visible:outline-none focus-visible:text-[color:var(--text)]"
+                  value-class="block"
+                  static-class="block max-w-[14rem] overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)]"
+                  @copy="copyRuntimePath(detail.runtime.path, 'Runtime path', 'path')"
+                />
               </div>
             </div>
 
@@ -2340,18 +2317,16 @@ watch(projectName, () => {
               <Page class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--muted-2)]" />
               <div class="min-w-0">
                 <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">.env File</p>
-                <UiTooltip
+                <UiCopyableValue
                   class="mt-1"
-                  :text="runtimeCopyTooltipText('env')"
-                >
-                  <button
-                    type="button"
-                    class="block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors focus-visible:outline-none focus-visible:text-[color:var(--text)] duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)]"
-                    @click="copyRuntimePath(detail.runtime.envPath, '.env file path', 'env')"
-                  >
-                    {{ detail.runtime.envPath }}
-                  </button>
-                </UiTooltip>
+                  :value="detail.runtime.envPath || 'unknown'"
+                  :copyable="isCopyValueAllowed(detail.runtime.envPath || '')"
+                  :copied="runtimeCopyFeedbackTarget === 'env'"
+                  button-class="block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)] focus-visible:outline-none focus-visible:text-[color:var(--text)]"
+                  value-class="block"
+                  static-class="block max-w-[14rem] overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)]"
+                  @copy="copyRuntimePath(detail.runtime.envPath, '.env file path', 'env')"
+                />
               </div>
             </div>
 

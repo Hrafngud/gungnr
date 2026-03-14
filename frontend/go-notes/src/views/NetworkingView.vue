@@ -4,8 +4,9 @@ import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
+import UiStatusDot from '@/components/ui/UiStatusDot.vue'
 import UiState from '@/components/ui/UiState.vue'
-import UiTooltip from '@/components/ui/UiTooltip.vue'
+import UiCopyableValue from '@/components/ui/UiCopyableValue.vue'
 import NavIcon from '@/components/NavIcon.vue'
 import NetworkingReadonlyRow from '@/components/networking/NetworkingReadonlyRow.vue'
 import { cloudflareApi } from '@/services/cloudflare'
@@ -15,6 +16,7 @@ import { apiErrorMessage } from '@/services/api'
 import { usePageLoadingStore } from '@/stores/pageLoading'
 import { useToastStore } from '@/stores/toasts'
 import { useAuthStore } from '@/stores/auth'
+import { isCopyValueAllowed as isClipboardValueAllowed, writeTextToClipboard } from '@/utils/clipboard'
 import type { CloudflarePreflight, CloudflareZone } from '@/types/cloudflare'
 import type { CloudflaredPreview, Settings, SettingsSources } from '@/types/settings'
 import type { TunnelHealth } from '@/types/health'
@@ -353,16 +355,16 @@ const healthTone = (status?: string): BadgeTone => {
   }
 }
 
-const statusDotClass = (status?: string) => {
+const statusDotTone = (status?: string): BadgeTone => {
   switch (status) {
     case 'ok':
-      return 'networking-status-dot-ok'
+      return 'ok'
     case 'warning':
-      return 'networking-status-dot-warn'
+      return 'warn'
     case 'error':
-      return 'networking-status-dot-error'
+      return 'error'
     default:
-      return 'networking-status-dot-neutral'
+      return 'neutral'
   }
 }
 
@@ -517,44 +519,13 @@ function parseIngressRoutes(contents: string): IngressRoute[] {
   return routes
 }
 
-async function copyTextToClipboard(payload: string) {
-  if (navigator?.clipboard?.writeText) {
-    await navigator.clipboard.writeText(payload)
-    return
-  }
-
-  const textarea = document.createElement('textarea')
-  textarea.value = payload
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.focus()
-  textarea.select()
-  document.execCommand('copy')
-  document.body.removeChild(textarea)
-}
-
 function isCopyValueAllowed(value: string) {
-  const normalized = value.trim().toLowerCase()
-  if (!normalized) return false
-
-  return ![
-    '—',
-    '--',
-    'unset',
-    'unknown',
-    'unavailable',
-    'n/a',
-  ].includes(normalized)
+  return isClipboardValueAllowed(value)
 }
 
 function isRowCopyable(row: NetworkingFieldRow) {
   if (row.copyable === false) return false
   return isCopyValueAllowed(row.value)
-}
-
-function copyTooltipText(fieldKey: string) {
-  return copiedFieldKey.value === fieldKey ? 'Copied!' : 'Copy to clipboard.'
 }
 
 async function copyReadonlyValue(payload: string, label: string, fieldKey: string) {
@@ -565,7 +536,7 @@ async function copyReadonlyValue(payload: string, label: string, fieldKey: strin
   }
 
   try {
-    await copyTextToClipboard(value)
+    await writeTextToClipboard(value)
     copiedFieldKey.value = fieldKey
 
     if (copiedFieldTimer) clearTimeout(copiedFieldTimer)
@@ -658,7 +629,7 @@ const copyPreviewContents = async () => {
         </div>
         <div class="networking-summary-card__body">
           <p class="networking-summary-card__value">{{ tunnelHealth?.status || 'unknown' }}</p>
-          <span class="networking-status-dot" :class="statusDotClass(tunnelHealth?.status)" />
+          <UiStatusDot :tone="statusDotTone(tunnelHealth?.status)" />
         </div>
       </UiPanel>
 
@@ -791,21 +762,14 @@ const copyPreviewContents = async () => {
               class="networking-quad-item"
             >
               <p class="networking-quad-item__label">{{ row.label }}</p>
-
-              <UiTooltip
-                v-if="isRowCopyable(row)"
-                :text="copyTooltipText(row.key)"
-              >
-                <button
-                  type="button"
-                  class="networking-quad-copy-btn"
-                  @click="copyReadonlyValue(row.value, row.copyLabel, row.key)"
-                >
-                  {{ row.value }}
-                </button>
-              </UiTooltip>
-
-              <p v-else class="networking-quad-item__value">{{ row.value }}</p>
+              <UiCopyableValue
+                :value="row.value"
+                :copyable="isRowCopyable(row)"
+                :copied="copiedFieldKey === row.key"
+                button-class="networking-quad-copy-btn"
+                static-class="networking-quad-item__value"
+                @copy="copyReadonlyValue(row.value, row.copyLabel, row.key)"
+              />
             </article>
           </div>
         </div>
@@ -831,7 +795,7 @@ const copyPreviewContents = async () => {
             >
               <div class="networking-check-row">
                 <span class="networking-check-label">
-                  <span class="networking-status-dot" :class="statusDotClass(check.status)" />
+                  <UiStatusDot :tone="statusDotTone(check.status)" />
                   {{ check.label }}
                 </span>
                 <span class="networking-check-status">{{ check.status }}</span>
@@ -941,15 +905,14 @@ const copyPreviewContents = async () => {
 
             <div class="networking-route-cell">
               <span class="networking-route-mobile-label">Full hostname</span>
-              <UiTooltip :text="copyTooltipText(`${route.key}-hostname`)">
-                <button
-                  type="button"
-                  class="networking-route-copy-btn"
-                  @click="copyReadonlyValue(route.hostname, 'Hostname', `${route.key}-hostname`)"
-                >
-                  <span class="networking-route-copy-btn__text">{{ route.hostname }}</span>
-                </button>
-              </UiTooltip>
+              <UiCopyableValue
+                :value="route.hostname"
+                :copied="copiedFieldKey === `${route.key}-hostname`"
+                button-class="networking-route-copy-btn"
+                value-class="networking-route-copy-btn__text"
+                static-class="networking-route-copy-btn__text"
+                @copy="copyReadonlyValue(route.hostname, 'Hostname', `${route.key}-hostname`)"
+              />
             </div>
 
             <div class="networking-route-cell">
@@ -959,15 +922,14 @@ const copyPreviewContents = async () => {
 
             <div class="networking-route-cell">
               <span class="networking-route-mobile-label">Target service</span>
-              <UiTooltip :text="copyTooltipText(`${route.key}-service`)">
-                <button
-                  type="button"
-                  class="networking-route-copy-btn"
-                  @click="copyReadonlyValue(route.service, 'Target service', `${route.key}-service`)"
-                >
-                  <span class="networking-route-copy-btn__text">{{ route.service }}</span>
-                </button>
-              </UiTooltip>
+              <UiCopyableValue
+                :value="route.service"
+                :copied="copiedFieldKey === `${route.key}-service`"
+                button-class="networking-route-copy-btn"
+                value-class="networking-route-copy-btn__text"
+                static-class="networking-route-copy-btn__text"
+                @copy="copyReadonlyValue(route.service, 'Target service', `${route.key}-service`)"
+              />
             </div>
           </article>
         </div>
@@ -1242,7 +1204,7 @@ const copyPreviewContents = async () => {
   text-transform: uppercase;
 }
 
-.networking-quad-item__value {
+:deep(.networking-quad-item__value) {
   margin: 0;
   color: var(--text);
   font-size: 0.8rem;
@@ -1253,7 +1215,7 @@ const copyPreviewContents = async () => {
   white-space: nowrap;
 }
 
-.networking-quad-copy-btn {
+:deep(.networking-quad-copy-btn) {
   margin: 0;
   padding: 0;
   border: 0;
@@ -1273,8 +1235,8 @@ const copyPreviewContents = async () => {
     transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.networking-quad-copy-btn:hover,
-.networking-quad-copy-btn:focus-visible {
+:deep(.networking-quad-copy-btn:hover),
+:deep(.networking-quad-copy-btn:focus-visible) {
   color: var(--accent-strong);
   transform: translateX(2px);
   outline: none;
@@ -1323,29 +1285,6 @@ const copyPreviewContents = async () => {
   overflow: hidden;
 }
 
-.networking-status-dot {
-  display: inline-flex;
-  width: 0.48rem;
-  height: 0.48rem;
-  border-radius: 9999px;
-}
-
-.networking-status-dot-ok {
-  background: #22c55e;
-}
-
-.networking-status-dot-warn {
-  background: #f59e0b;
-}
-
-.networking-status-dot-error {
-  background: #ef4444;
-}
-
-.networking-status-dot-neutral {
-  background: color-mix(in oklab, var(--muted) 75%, transparent);
-}
-
 .networking-routes-head {
   grid-template-columns: minmax(0, 0.65fr) minmax(0, 1.42fr) minmax(0, 0.55fr) minmax(0, 1.2fr);
   gap: 0.75rem;
@@ -1383,7 +1322,7 @@ const copyPreviewContents = async () => {
   text-transform: uppercase;
 }
 
-.networking-route-copy-btn {
+:deep(.networking-route-copy-btn) {
   display: inline-flex;
   align-items: center;
   gap: 0;
@@ -1401,14 +1340,14 @@ const copyPreviewContents = async () => {
     transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.networking-route-copy-btn:hover,
-.networking-route-copy-btn:focus-visible {
+:deep(.networking-route-copy-btn:hover),
+:deep(.networking-route-copy-btn:focus-visible) {
   color: var(--accent-strong);
   transform: translateX(2px);
   outline: none;
 }
 
-.networking-route-copy-btn__text {
+:deep(.networking-route-copy-btn__text) {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1450,7 +1389,7 @@ const copyPreviewContents = async () => {
     display: block;
   }
 
-  .networking-route-copy-btn {
+  :deep(.networking-route-copy-btn) {
     justify-content: flex-start;
     width: 100%;
   }

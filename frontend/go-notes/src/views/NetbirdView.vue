@@ -76,7 +76,7 @@ onBeforeUnmount(() => {
       Read-only visibility is active. Mode planning and apply controls are limited to admin and superuser accounts.
     </UiState>
 
-    <div class="grid gap-6 2xl:grid-cols-2">
+    <div class="flex flex-col gap-2">
       <NetbirdStatusCard />
       <NetbirdAclGraph />
     </div>

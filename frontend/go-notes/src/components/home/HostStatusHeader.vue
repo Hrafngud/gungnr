@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import UiButton from '@/components/ui/UiButton.vue'
+import UiStatusDot from '@/components/ui/UiStatusDot.vue'
 import NavIcon from '@/components/NavIcon.vue'
 import { useJobsStore } from '@/stores/jobs'
 import { healthApi } from '@/services/health'
@@ -104,19 +105,6 @@ const statusLabel = (status?: string) => {
   }
 }
 
-const dotClass = (status?: string) => {
-  switch (healthTone(status)) {
-    case 'ok':
-      return 'bg-[color:var(--success)]'
-    case 'warn':
-      return 'bg-[color:var(--warning)]'
-    case 'error':
-      return 'bg-[color:var(--danger)]'
-    default:
-      return 'bg-[color:var(--muted-2)]'
-  }
-}
-
 const dockerSummary = computed(() => {
   const status = statusLabel(dockerHealth.value?.status)
   const count = dockerHealth.value?.containers
@@ -148,12 +136,12 @@ const jobSummary = computed(() => {
         aria-live="polite"
       >
         <div class="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-2.5 py-1">
-          <span class="h-1.5 w-1.5 rounded-full" :class="dotClass(dockerHealth?.status)"></span>
+          <UiStatusDot size="xs" palette="semantic" :tone="healthTone(dockerHealth?.status)" />
           <span class="text-[color:var(--muted-2)]">Docker</span>
           <span class="font-semibold text-[color:var(--text)]">{{ dockerSummary }}</span>
         </div>
         <div class="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-2.5 py-1">
-          <span class="h-1.5 w-1.5 rounded-full" :class="dotClass(tunnelHealth?.status)"></span>
+          <UiStatusDot size="xs" palette="semantic" :tone="healthTone(tunnelHealth?.status)" />
           <span class="text-[color:var(--muted-2)]">Tunnel</span>
           <span class="font-semibold text-[color:var(--text)]">{{ tunnelSummary }}</span>
         </div>

@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
-import UiTooltip from '@/components/ui/UiTooltip.vue'
+import UiCopyableValue from '@/components/ui/UiCopyableValue.vue'
 
 const props = withDefaults(defineProps<{
   label: string
@@ -16,31 +15,22 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   copy: []
 }>()
-
-const tooltipText = computed(() => (
-  props.copied ? 'Copied!' : 'Copy to clipboard.'
-))
 </script>
 
 <template>
   <UiListRow class="networking-readonly-row">
     <span class="networking-readonly-row__label">{{ label }}</span>
 
-    <UiTooltip
-      v-if="copyable"
+    <UiCopyableValue
       class="networking-readonly-row__value-wrap"
-      :text="tooltipText"
-    >
-      <button
-        type="button"
-        class="networking-readonly-row__value-btn"
-        @click="emit('copy')"
-      >
-        <span class="networking-readonly-row__value-text">{{ value }}</span>
-      </button>
-    </UiTooltip>
-
-    <span v-else class="networking-readonly-row__value-static">{{ value }}</span>
+      :value="value"
+      :copyable="copyable"
+      :copied="copied"
+      button-class="networking-readonly-row__value-btn"
+      value-class="networking-readonly-row__value-text"
+      static-class="networking-readonly-row__value-static"
+      @copy="emit('copy')"
+    />
   </UiListRow>
 </template>
 
@@ -64,7 +54,7 @@ const tooltipText = computed(() => (
   max-width: min(34rem, 100%);
 }
 
-.networking-readonly-row__value-btn {
+:deep(.networking-readonly-row__value-btn) {
   display: inline-flex;
   max-width: 100%;
   align-items: center;
@@ -83,21 +73,21 @@ const tooltipText = computed(() => (
     transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.networking-readonly-row__value-btn:hover,
-.networking-readonly-row__value-btn:focus-visible {
+:deep(.networking-readonly-row__value-btn:hover),
+:deep(.networking-readonly-row__value-btn:focus-visible) {
   color: var(--accent-strong);
   transform: translateX(2px);
   outline: none;
 }
 
-.networking-readonly-row__value-text {
+:deep(.networking-readonly-row__value-text) {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.networking-readonly-row__value-static {
+:deep(.networking-readonly-row__value-static) {
   color: var(--text);
   font-size: 0.76rem;
   line-height: 1.35;
@@ -110,12 +100,12 @@ const tooltipText = computed(() => (
 
 @media (max-width: 800px) {
   .networking-readonly-row__value-wrap,
-  .networking-readonly-row__value-static {
+  :deep(.networking-readonly-row__value-static) {
     width: 100%;
     max-width: none;
   }
 
-  .networking-readonly-row__value-btn {
+  :deep(.networking-readonly-row__value-btn) {
     width: 100%;
     justify-content: space-between;
   }

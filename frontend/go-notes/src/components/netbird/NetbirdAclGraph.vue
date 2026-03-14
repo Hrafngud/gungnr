@@ -16,7 +16,6 @@ type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
 const showNodesModal = ref(false)
 const showEdgesModal = ref(false)
-const showNotesModal = ref(false)
 
 const netbirdStore = useNetbirdStore()
 
@@ -135,7 +134,7 @@ onMounted(() => {
       </UiPanel>
 
       <!-- Interactive Cards -->
-      <div class="grid gap-3 sm:grid-cols-3">
+      <div class="grid gap-3 sm:grid-cols-2">
         <UiPanel
           variant="soft"
           class="cursor-pointer p-4 transition hover:border-[color:var(--accent)] hover:shadow-sm"
@@ -169,25 +168,6 @@ onMounted(() => {
               </p>
             </div>
             <NavIcon name="activity" class="h-6 w-6 text-[color:var(--muted)]" />
-          </div>
-        </UiPanel>
-
-        <UiPanel
-          variant="soft"
-          :class="graph.notes.length > 0 ? 'border-[color:var(--warn)]' : ''"
-          class="cursor-pointer p-4 transition hover:border-[color:var(--accent)] hover:shadow-sm"
-          @click="showNotesModal = true"
-        >
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Warnings
-              </p>
-              <p class="mt-2 text-2xl font-semibold text-[color:var(--text)]">
-                {{ graph.notes.length }}
-              </p>
-            </div>
-            <NavIcon name="activity" class="h-6 w-6" :class="graph.notes.length > 0 ? 'text-[color:var(--warn)]' : 'text-[color:var(--muted)]'" />
           </div>
         </UiPanel>
       </div>
@@ -254,28 +234,6 @@ onMounted(() => {
             {{ edge.protocol.toUpperCase() }} ports {{ edgePortLabel(edge) }}
           </p>
         </UiListRow>
-      </ul>
-    </div>
-  </UiModal>
-
-  <!-- Notes/Warnings Modal -->
-  <UiModal
-    v-model="showNotesModal"
-    title="Notes and Warnings"
-    :description="graph && graph.notes.length > 0 ? `${graph.notes.length} warning(s) reported` : 'No warnings reported'"
-  >
-    <div v-if="graph">
-      <UiState v-if="graph.notes.length === 0" tone="ok">
-        No backend notes or warnings were reported.
-      </UiState>
-      <ul v-else class="space-y-2">
-        <li
-          v-for="(note, index) in graph.notes"
-          :key="`netbird-acl-note-${index}`"
-          class="rounded border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-2 text-sm text-[color:var(--muted)]"
-        >
-          {{ note }}
-        </li>
       </ul>
     </div>
   </UiModal>
