@@ -14,6 +14,12 @@ export const PROJECT_DETAIL_SECTION_TABS = [
     description: 'Spy on your runtime units.',
   },
   {
+    id: 'environment',
+    label: 'Environment',
+    icon: 'edit',
+    description: 'Edit project environment variables.',
+  },
+  {
     id: 'archive',
     label: 'Archive',
     icon: 'template',

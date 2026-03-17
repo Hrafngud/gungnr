@@ -312,8 +312,9 @@ func (s *HostService) restartProjectStack(ctx context.Context, requestID, projec
 
 	hostLogf(logger, "submitting compose_up_stack intent via infra bridge for project %q", project)
 	result, err := s.infraClient.ComposeUpStack(ctx, requestID, contract.ComposeUpStackPayload{
-		Project: project,
-		Build:   true,
+		Project:       project,
+		Build:         true,
+		ForceRecreate: true,
 	})
 	if err != nil {
 		hostLogf(logger, "infra bridge compose_up_stack error: %v", err)

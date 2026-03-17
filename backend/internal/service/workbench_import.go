@@ -289,6 +289,9 @@ func (s *WorkbenchService) loadStoredWorkbenchSnapshot(
 
 	payload, err := loadSettingsEncryptedPayload(s.sessionSecret, stored.NetBirdConfigEncrypted)
 	if err != nil {
+		if isSettingsPayloadDecryptMismatch(err) {
+			return WorkbenchStackSnapshot{}, false, nil
+		}
 		return WorkbenchStackSnapshot{}, false, workbenchStorageError(projectName, "failed to decode workbench settings payload", err)
 	}
 	if len(payload.Workbench) == 0 {
@@ -324,7 +327,10 @@ func (s *WorkbenchService) saveWorkbenchSnapshot(
 
 	payload, err := loadSettingsEncryptedPayload(s.sessionSecret, stored.NetBirdConfigEncrypted)
 	if err != nil {
-		return workbenchStorageError(projectName, "failed to decode workbench settings payload", err)
+		if !isSettingsPayloadDecryptMismatch(err) {
+			return workbenchStorageError(projectName, "failed to decode workbench settings payload", err)
+		}
+		payload = settingsEncryptedPayload{}
 	}
 	if payload.Workbench == nil {
 		payload.Workbench = map[string]workbenchStoredSnapshot{}
@@ -353,4 +359,13 @@ func workbenchStorageError(projectName, message string, cause error) error {
 		details["cause"] = cause.Error()
 	}
 	return errs.WithDetails(errs.Wrap(errs.CodeWorkbenchStorageFailed, message, cause), details)
+}
+
+func isSettingsPayloadDecryptMismatch(err error) bool {
+	if err == nil {
+		return false
+	}
+	normalized := strings.ToLower(err.Error())
+	return strings.Contains(normalized, "decrypt settings payload:") &&
+		strings.Contains(normalized, "message authentication failed")
 }

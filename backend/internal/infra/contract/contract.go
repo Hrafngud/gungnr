@@ -84,10 +84,11 @@ type RestartTunnelPayload struct {
 }
 
 type ComposeUpStackPayload struct {
-	Project     string   `json:"project"`
-	ProjectDir  string   `json:"project_dir,omitempty"`
-	ConfigFiles []string `json:"config_files,omitempty"`
-	Build       bool     `json:"build,omitempty"`
+	Project       string   `json:"project"`
+	ProjectDir    string   `json:"project_dir,omitempty"`
+	ConfigFiles   []string `json:"config_files,omitempty"`
+	Build         bool     `json:"build,omitempty"`
+	ForceRecreate bool     `json:"force_recreate,omitempty"`
 }
 
 type DockerStopContainerPayload struct {

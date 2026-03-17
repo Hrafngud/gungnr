@@ -319,6 +319,23 @@
     "total": 3,
     "totalPages": 1
   },
+  "GET /api/v1/projects/mock-service/env": {
+    "env": {
+      "path": "/templates/mock-service/.env",
+      "exists": true,
+      "sizeBytes": 124,
+      "updatedAt": "2026-03-09T14:10:00Z",
+      "content": "DATABASE_URL=postgres://notes:notes@db:5432/notes?sslmode=disable\nAPI_PORT=8080\nVITE_API_BASE_URL=http://localhost:8080\n"
+    }
+  },
+  "PUT /api/v1/projects/mock-service/env": {
+    "env": {
+      "path": "/templates/mock-service/.env",
+      "sizeBytes": 128,
+      "updatedAt": "2026-03-17T12:30:00Z",
+      "backupPath": "/templates/mock-service/.env.backup.20260317-123000"
+    }
+  },
   "GET /api/v1/projects/mock-service/archive/plan": {
     "plan": {
       "project": {

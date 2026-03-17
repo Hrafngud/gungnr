@@ -734,6 +734,107 @@ func TestWorkbenchGetSnapshotStorageDecodeFailure(t *testing.T) {
 	}
 }
 
+func TestWorkbenchGetSnapshotIgnoresSettingsDecryptMismatch(t *testing.T) {
+	t.Parallel()
+
+	templatesDir := t.TempDir()
+	projectDir := filepath.Join(templatesDir, "demo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+
+	encoded, err := encodeSettingsEncryptedPayload("legacy-session-secret", settingsEncryptedPayload{
+		Workbench: map[string]workbenchStoredSnapshot{
+			"demo": {
+				ProjectName:  "demo",
+				ProjectDir:   projectDir,
+				ComposePath:  filepath.Join(projectDir, "docker-compose.yml"),
+				ModelVersion: workbenchModelVersion,
+				Revision:     9,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode legacy payload: %v", err)
+	}
+
+	svc := NewWorkbenchServiceWithStorage(
+		templatesDir,
+		nil,
+		&fakeSettingsRepo{settings: &models.Settings{NetBirdConfigEncrypted: encoded}},
+		"test-session-secret",
+	)
+
+	snapshot, err := svc.GetSnapshot(context.Background(), "demo")
+	if err != nil {
+		t.Fatalf("GetSnapshot: %v", err)
+	}
+	if snapshot.Revision != 0 {
+		t.Fatalf("expected fallback empty snapshot revision 0, got %d", snapshot.Revision)
+	}
+	if snapshot.ProjectName != "demo" {
+		t.Fatalf("expected normalized project name demo, got %q", snapshot.ProjectName)
+	}
+}
+
+func TestWorkbenchImportComposeSnapshotResetsLegacyEncryptedPayloadOnSecretMismatch(t *testing.T) {
+	t.Parallel()
+
+	templatesDir := t.TempDir()
+	projectDir := filepath.Join(templatesDir, "demo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "docker-compose.yml"), []byte("services:\n  app:\n    image: nginx:1.25\n"), 0o644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+
+	legacyEncrypted, err := encodeSettingsEncryptedPayload("legacy-session-secret", settingsEncryptedPayload{
+		Workbench: map[string]workbenchStoredSnapshot{
+			"demo": {
+				ProjectName:       "demo",
+				ProjectDir:        projectDir,
+				ComposePath:       filepath.Join(projectDir, "docker-compose.yml"),
+				ModelVersion:      workbenchModelVersion,
+				Revision:          4,
+				SourceFingerprint: "sha256:legacy",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode legacy payload: %v", err)
+	}
+
+	settingsRepo := &fakeSettingsRepo{settings: &models.Settings{NetBirdConfigEncrypted: legacyEncrypted}}
+	svc := NewWorkbenchServiceWithStorage(templatesDir, nil, settingsRepo, "test-session-secret")
+
+	imported, changed, err := svc.ImportComposeSnapshot(context.Background(), "demo", "manual")
+	if err != nil {
+		t.Fatalf("ImportComposeSnapshot: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected import to mark changed=true after mismatch reset")
+	}
+	if imported.Revision != 1 {
+		t.Fatalf("expected first fresh revision 1, got %d", imported.Revision)
+	}
+	if settingsRepo.settings == nil {
+		t.Fatal("expected settings payload to be persisted")
+	}
+
+	payload, err := loadSettingsEncryptedPayload("test-session-secret", settingsRepo.settings.NetBirdConfigEncrypted)
+	if err != nil {
+		t.Fatalf("decode refreshed payload: %v", err)
+	}
+	storedSnapshot, ok := payload.Workbench["demo"]
+	if !ok {
+		t.Fatal("expected refreshed workbench snapshot for demo")
+	}
+	if storedSnapshot.Revision != 1 {
+		t.Fatalf("expected stored revision 1, got %d", storedSnapshot.Revision)
+	}
+}
+
 func TestWorkbenchImportAndNetBirdConfigShareSettingsPayload(t *testing.T) {
 	t.Parallel()
 

@@ -13,12 +13,12 @@ import UiState from '@/components/ui/UiState.vue'
 import UiTooltip from '@/components/ui/UiTooltip.vue'
 import NavIcon from '@/components/NavIcon.vue'
 import Calendar from 'iconoir-vue/regular/Calendar'
-import CodeBracketsSquare from 'iconoir-vue/regular/CodeBracketsSquare'
 import Folder from 'iconoir-vue/regular/Folder'
 import Page from 'iconoir-vue/regular/Page'
 import GithubCircle from 'iconoir-vue/regular/GithubCircle'
 import ProjectActivityTimelineSection from '@/components/projectDetail/ProjectActivityTimelineSection.vue'
 import ProjectArchiveExecutionSection from '@/components/projectDetail/ProjectArchiveExecutionSection.vue'
+import ProjectEnvironmentVariablesSection from '@/components/projectDetail/ProjectEnvironmentVariablesSection.vue'
 import ProjectRuntimeUnitsSection from '@/components/projectDetail/ProjectRuntimeUnitsSection.vue'
 import ProjectSectionTabs from '@/components/projectDetail/ProjectSectionTabs.vue'
 import WorkbenchAddServicesSection from '@/components/workbench/WorkbenchAddServicesSection.vue'
@@ -106,7 +106,7 @@ const workbenchPendingOptionalServiceMutation = ref<WorkbenchPendingOptionalServ
 const workbenchPortManualInputs = ref<Record<string, string>>({})
 const workbenchResourceInputs = ref<Record<string, WorkbenchResourceInputState>>({})
 const activeSectionTab = ref<ProjectDetailSectionTab>('workbench')
-const runtimeCopyFeedbackTarget = ref<'source' | 'path' | 'env' | null>(null)
+const runtimeCopyFeedbackTarget = ref<'path' | 'env' | null>(null)
 const isAdmin = computed(() => authStore.isAdmin)
 
 let runtimeCopyFeedbackTimer: ReturnType<typeof setTimeout> | null = null
@@ -151,6 +151,20 @@ const workbenchQueryStatus = (
 }
 
 const workbenchSnapshot = computed(() => workbenchSnapshotQuery.data.value ?? null)
+const projectEnvResolvedVariableNames = computed(() => {
+  const snapshot = workbenchSnapshot.value
+  if (!snapshot) return []
+
+  const seen = new Set<string>()
+  const names: string[] = []
+  snapshot.envRefs.forEach((envRef) => {
+    const variableName = envRef.variable.trim()
+    if (!variableName || seen.has(variableName)) return
+    seen.add(variableName)
+    names.push(variableName)
+  })
+  return names
+})
 const workbenchGraph = computed<WorkbenchDependencyGraph | null>(() => workbenchGraphQuery.data.value ?? null)
 const workbenchStatus = computed<WorkbenchRequestStatus>(() =>
   workbenchQueryStatus(
@@ -2086,7 +2100,7 @@ const runWorkbenchRemediationAction = async (action?: WorkbenchRemediationAction
 const copyRuntimePath = async (
   payload: string | null | undefined,
   label: string,
-  feedbackTarget?: 'source' | 'path' | 'env',
+  feedbackTarget?: 'path' | 'env',
 ) => {
   const value = payload?.trim() ?? ''
   if (!isCopyValueAllowed(value)) {
@@ -2280,34 +2294,17 @@ watch(projectName, () => {
             </div>
 
             <div class="flex min-w-[12rem] flex-1 basis-[14rem] items-start gap-2 p-2">
-              <CodeBracketsSquare class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--muted-2)]" />
-              <div class="min-w-0">
-                <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Source</p>
-                <UiCopyableValue
-                  class="mt-1"
-                  :value="detail.runtime.source || 'unknown'"
-                  :copyable="isCopyValueAllowed(detail.runtime.source || '')"
-                  :copied="runtimeCopyFeedbackTarget === 'source'"
-                  button-class="block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)] focus-visible:outline-none focus-visible:text-[color:var(--text)]"
-                  value-class="block"
-                  static-class="block max-w-[14rem] overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)]"
-                  @copy="copyRuntimePath(detail.runtime.source, 'Source path', 'source')"
-                />
-              </div>
-            </div>
-
-            <div class="flex min-w-[12rem] flex-1 basis-[14rem] items-start gap-2 p-2">
               <Folder class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--muted-2)]" />
               <div class="min-w-0">
                 <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Path</p>
                 <UiCopyableValue
-                  class="mt-1"
+                  class="mt-1 w-full min-w-0"
                   :value="detail.runtime.path || 'unknown'"
                   :copyable="isCopyValueAllowed(detail.runtime.path || '')"
                   :copied="runtimeCopyFeedbackTarget === 'path'"
-                  button-class="block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)] focus-visible:outline-none focus-visible:text-[color:var(--text)]"
-                  value-class="block"
-                  static-class="block max-w-[14rem] overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)]"
+                  button-class="block w-full max-w-full cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors duration-200 ease-out hover:text-[color:var(--text)] focus-visible:outline-none focus-visible:text-[color:var(--text)]"
+                  value-class="block w-full"
+                  static-class="block w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)]"
                   @copy="copyRuntimePath(detail.runtime.path, 'Runtime path', 'path')"
                 />
               </div>
@@ -2318,13 +2315,13 @@ watch(projectName, () => {
               <div class="min-w-0">
                 <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">.env File</p>
                 <UiCopyableValue
-                  class="mt-1"
+                  class="mt-1 w-full min-w-0"
                   :value="detail.runtime.envPath || 'unknown'"
                   :copyable="isCopyValueAllowed(detail.runtime.envPath || '')"
                   :copied="runtimeCopyFeedbackTarget === 'env'"
-                  button-class="block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)] focus-visible:outline-none focus-visible:text-[color:var(--text)]"
-                  value-class="block"
-                  static-class="block max-w-[14rem] overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)]"
+                  button-class="block w-full max-w-full cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors duration-200 ease-out hover:text-[color:var(--text)] focus-visible:outline-none focus-visible:text-[color:var(--text)]"
+                  value-class="block w-full"
+                  static-class="block w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)]"
                   @copy="copyRuntimePath(detail.runtime.envPath, '.env file path', 'env')"
                 />
               </div>
@@ -2336,12 +2333,12 @@ watch(projectName, () => {
                 <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Repository</p>
                 <UiTooltip
                   v-if="projectRepositoryUrl"
-                  class="mt-1"
+                  class="mt-1 w-full min-w-0"
                   text="Open repo on Github"
                 >
                   <button
                     type="button"
-                    class="block max-w-[14rem] cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors focus-visible:outline-none focus-visible:text-[color:var(--text)] duration-200 ease-out hover:max-w-[42rem] hover:text-[color:var(--text)]"
+                    class="block w-full max-w-full cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-normal leading-5 tracking-normal text-[color:var(--muted)] transition-colors duration-200 ease-out hover:text-[color:var(--text)] focus-visible:outline-none focus-visible:text-[color:var(--text)]"
                     @click="openProjectRepository"
                   >
                     {{ projectRepositoryUrl }}
@@ -2841,6 +2838,14 @@ watch(projectName, () => {
         :stack-restart-error="stackRestartError"
         @restart-stack="restartStack"
         @container-action-completed="refreshRuntimeContainers"
+      />
+      <ProjectEnvironmentVariablesSection
+        v-else-if="activeSectionTab === 'environment'"
+        :project-name="projectName"
+        :env-path="detail.runtime.envPath"
+        :env-exists="detail.runtime.envExists"
+        :is-admin="isAdmin"
+        :resolved-variable-names="projectEnvResolvedVariableNames"
       />
       <ProjectArchiveExecutionSection
         v-else-if="activeSectionTab === 'archive'"

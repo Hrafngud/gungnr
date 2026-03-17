@@ -344,6 +344,9 @@ func (r *Runner) handleComposeUpStack(ctx context.Context, intent contract.Inten
 	if payload.Build {
 		args = append(args, "--build")
 	}
+	if payload.ForceRecreate {
+		args = append(args, "--force-recreate")
+	}
 	args = append(args, "-d")
 
 	output, err := r.exec.Run(ctx, projectDir, "docker", args...)

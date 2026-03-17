@@ -200,6 +200,9 @@ func (c *Client) ComposeUpStack(ctx context.Context, requestID string, payload c
 	if payload.Build {
 		intentPayload["build"] = true
 	}
+	if payload.ForceRecreate {
+		intentPayload["force_recreate"] = true
+	}
 
 	return c.runTask(ctx, requestID, contract.TaskTypeComposeUpStack, intentPayload)
 }

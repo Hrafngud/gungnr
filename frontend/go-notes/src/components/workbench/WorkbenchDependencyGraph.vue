@@ -234,6 +234,7 @@ const statusCountRows = computed(() => {
         :edges="graphEdges"
         :focus-node-id="selectedServiceNode?.serviceName ?? serviceName"
         :aria-label="`Dependency graph for ${serviceName}`"
+        edge-flow
       />
 
       <p v-else-if="selectedServiceAvailable" class="dependency-graph__empty">

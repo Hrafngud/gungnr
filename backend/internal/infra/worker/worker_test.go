@@ -146,8 +146,9 @@ func TestProcessOnceHandlesComposeFailure(t *testing.T) {
 		RequestID: "req-compose",
 		TaskType:  contract.TaskTypeComposeUpStack,
 		Payload: map[string]any{
-			"project": "demo",
-			"build":   true,
+			"project":        "demo",
+			"build":          true,
+			"force_recreate": true,
 		},
 		CreatedAt: time.Now().UTC().Add(-time.Minute),
 	}
@@ -173,7 +174,7 @@ func TestProcessOnceHandlesComposeFailure(t *testing.T) {
 	require.Equal(t, contract.StatusFailed, result.Status)
 	require.NotNil(t, result.Error)
 	require.Equal(t, "INFRA-500-EXEC", result.Error.Code)
-	require.Contains(t, result.Error.Message, "docker compose up --build -d failed")
+	require.Contains(t, result.Error.Message, "docker compose up --build --force-recreate -d failed")
 }
 
 func TestProcessOnceSkipsUnsupportedTask(t *testing.T) {

@@ -42,11 +42,13 @@ const props = withDefaults(
     ariaLabel?: string
     focusNodeId?: string | null
     emptyMessage?: string
+    edgeFlow?: boolean
   }>(),
   {
     ariaLabel: 'Graph',
     focusNodeId: null,
     emptyMessage: 'No graph relationships are available.',
+    edgeFlow: false,
   },
 )
 
@@ -231,8 +233,12 @@ const layout = computed(() => {
   const minY = Math.min(...renderNodes.map((node) => node.y - node.height / 2))
   const maxY = Math.max(...renderNodes.map((node) => node.y + node.height / 2))
 
-  const shiftX = outerPadding - minX
-  const shiftY = outerPadding - minY
+  const contentWidth = maxX - minX
+  const contentHeight = maxY - minY
+  const canvasWidth = Math.max(290, contentWidth + outerPadding * 2)
+  const canvasHeight = Math.max(190, contentHeight + outerPadding * 2)
+  const shiftX = (canvasWidth - contentWidth) / 2 - minX
+  const shiftY = (canvasHeight - contentHeight) / 2 - minY
   for (const node of renderNodes) {
     node.x += shiftX
     node.y += shiftY
@@ -245,8 +251,8 @@ const layout = computed(() => {
   }
 
   return {
-    width: Math.max(290, maxX - minX + outerPadding * 2),
-    height: Math.max(190, maxY - minY + outerPadding * 2),
+    width: canvasWidth,
+    height: canvasHeight,
     nodes: renderNodes,
     edges: renderEdges,
   }
@@ -290,6 +296,15 @@ const layout = computed(() => {
       >
         <title>{{ edge.label || `${edge.from} -> ${edge.to}` }}</title>
       </path>
+      <path
+        v-for="(edge, edgeIndex) in layout.edges"
+        v-if="edgeFlow"
+        :key="`flow-${edge.id}`"
+        :d="edgePath(edge)"
+        :class="['node-edge-graph__edge-flow', `node-edge-graph__edge-flow--tone-${edge.tone || 'neutral'}`]"
+        :style="{ '--edge-delay': `${50 + edgeIndex * 35}ms` }"
+        fill="none"
+      />
 
       <g
         v-for="(node, nodeIndex) in layout.nodes"
@@ -348,6 +363,18 @@ const layout = computed(() => {
   animation-delay: var(--edge-delay, 0ms);
 }
 
+.node-edge-graph__edge-flow {
+  stroke-width: 1.9;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+  stroke-dasharray: 4 9;
+  opacity: 0;
+  animation:
+    edge-enter 360ms var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1)) forwards,
+    edge-flow 950ms linear infinite;
+  animation-delay: var(--edge-delay, 0ms), calc(var(--edge-delay, 0ms) + 360ms);
+}
+
 .node-edge-graph__node {
   opacity: 0;
   transform: translateY(3px) scale(0.98);
@@ -370,60 +397,75 @@ const layout = computed(() => {
   pointer-events: none;
 }
 
-.node-edge-graph__edge--tone-neutral {
+.node-edge-graph__edge--tone-neutral,
+.node-edge-graph__edge-flow--tone-neutral {
   stroke: oklch(76% 0.06 249 / 0.95);
 }
 
 .node-edge-graph__edge--tone-ok,
-.node-edge-graph__edge--tone-allow {
+.node-edge-graph__edge--tone-allow,
+.node-edge-graph__edge-flow--tone-ok,
+.node-edge-graph__edge-flow--tone-allow {
   stroke: oklch(78% 0.14 147 / 0.95);
 }
 
-.node-edge-graph__edge--tone-warn {
+.node-edge-graph__edge--tone-warn,
+.node-edge-graph__edge-flow--tone-warn {
   stroke: oklch(81% 0.13 86 / 0.95);
 }
 
-.node-edge-graph__edge--tone-error {
+.node-edge-graph__edge--tone-error,
+.node-edge-graph__edge-flow--tone-error {
   stroke: oklch(74% 0.16 30 / 0.95);
 }
 
-.node-edge-graph__edge--tone-inbound {
+.node-edge-graph__edge--tone-inbound,
+.node-edge-graph__edge-flow--tone-inbound {
   stroke: oklch(75% 0.11 196 / 0.95);
 }
 
-.node-edge-graph__edge--tone-outbound {
+.node-edge-graph__edge--tone-outbound,
+.node-edge-graph__edge-flow--tone-outbound {
   stroke: oklch(74% 0.1 242 / 0.95);
 }
 
-.node-edge-graph__edge--tone-running {
+.node-edge-graph__edge--tone-running,
+.node-edge-graph__edge-flow--tone-running {
   stroke: oklch(78% 0.14 147 / 0.95);
 }
 
-.node-edge-graph__edge--tone-degraded {
+.node-edge-graph__edge--tone-degraded,
+.node-edge-graph__edge-flow--tone-degraded {
   stroke: oklch(81% 0.13 86 / 0.95);
 }
 
-.node-edge-graph__edge--tone-failed {
+.node-edge-graph__edge--tone-failed,
+.node-edge-graph__edge-flow--tone-failed {
   stroke: oklch(74% 0.16 30 / 0.95);
 }
 
-.node-edge-graph__edge--tone-missing {
+.node-edge-graph__edge--tone-missing,
+.node-edge-graph__edge-flow--tone-missing {
   stroke: oklch(80% 0.14 56 / 0.95);
 }
 
-.node-edge-graph__edge--tone-unknown {
+.node-edge-graph__edge--tone-unknown,
+.node-edge-graph__edge-flow--tone-unknown {
   stroke: oklch(76% 0.03 252 / 0.95);
 }
 
-.node-edge-graph__edge--tone-group {
+.node-edge-graph__edge--tone-group,
+.node-edge-graph__edge-flow--tone-group {
   stroke: oklch(80% 0.11 176 / 0.95);
 }
 
-.node-edge-graph__edge--tone-service {
+.node-edge-graph__edge--tone-service,
+.node-edge-graph__edge-flow--tone-service {
   stroke: oklch(76% 0.08 242 / 0.95);
 }
 
-.node-edge-graph__edge--tone-project {
+.node-edge-graph__edge--tone-project,
+.node-edge-graph__edge-flow--tone-project {
   stroke: oklch(82% 0.13 84 / 0.95);
 }
 
@@ -577,6 +619,30 @@ const layout = computed(() => {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes edge-flow {
+  from {
+    stroke-dashoffset: 0;
+  }
+
+  to {
+    stroke-dashoffset: -26;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .node-edge-graph__edge,
+  .node-edge-graph__node {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .node-edge-graph__edge-flow {
+    display: none;
+    animation: none;
   }
 }
 </style>

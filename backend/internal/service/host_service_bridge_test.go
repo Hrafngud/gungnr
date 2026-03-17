@@ -177,6 +177,7 @@ func TestHostServiceRestartProjectStackBridgeSuccess(t *testing.T) {
 	require.Equal(t, "job-42", bridge.composeRequestID)
 	require.Equal(t, "my-project", bridge.composePayload.Project)
 	require.True(t, bridge.composePayload.Build)
+	require.True(t, bridge.composePayload.ForceRecreate)
 	require.NotEmpty(t, logger.lines)
 }
 
