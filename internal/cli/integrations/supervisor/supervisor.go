@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -15,9 +16,10 @@ import (
 type Kind string
 
 const (
-	SupervisorSystemd Kind = "systemd"
-	SupervisorCron    Kind = "cron"
-	SupervisorNone    Kind = "none"
+	SupervisorSystemdSystem Kind = "systemd-system"
+	SupervisorSystemd       Kind = "systemd"
+	SupervisorCron          Kind = "cron"
+	SupervisorNone          Kind = "none"
 )
 
 const (
@@ -30,6 +32,10 @@ const (
 
 	systemdServiceUnit = "gungnr-cloudflared-keepalive.service"
 	systemdTimerUnit   = "gungnr-cloudflared-keepalive.timer"
+
+	systemdSystemServiceUnit = "gungnr.service"
+	systemdSystemTimerUnit   = "gungnr-keepalive.timer"
+	systemdSystemUnitDir     = "/etc/systemd/system"
 )
 
 type SetupResult struct {
@@ -41,12 +47,15 @@ type SetupResult struct {
 }
 
 type TeardownResult struct {
-	Source                Kind
-	SystemdTimerRemoved   bool
-	SystemdServiceRemoved bool
-	CronRemoved           bool
-	RunScriptRemoved      bool
-	EnsureScriptRemoved   bool
+	Source                      Kind
+	SystemdSystemTimerRemoved   bool
+	SystemdSystemServiceRemoved bool
+	SystemdSystemDetail         string
+	SystemdTimerRemoved         bool
+	SystemdServiceRemoved       bool
+	CronRemoved                 bool
+	RunScriptRemoved            bool
+	EnsureScriptRemoved         bool
 }
 
 type StatusResult struct {
@@ -56,6 +65,7 @@ type StatusResult struct {
 	EnsureScript       string
 	RunScriptExists    bool
 	EnsureScriptExists bool
+	SystemdSystem      SystemdStatus
 	Systemd            SystemdStatus
 	Cron               CronStatus
 }
@@ -63,6 +73,8 @@ type StatusResult struct {
 type SystemdStatus struct {
 	Available         bool
 	UnavailableReason string
+	ServiceUnit       string
+	TimerUnit         string
 	ServicePath       string
 	TimerPath         string
 	ServiceFileExists bool
@@ -116,27 +128,63 @@ func Setup(configPath, stateDir string) (SetupResult, error) {
 		return SetupResult{}, err
 	}
 
-	systemdState, err := probeSystemdStatus()
+	systemdSystemState, err := probeSystemdSystemStatus()
 	if err != nil {
 		return SetupResult{}, err
 	}
-	if systemdState.Available {
-		if err := installSystemdTimer(systemdState, ensureScript); err == nil {
+
+	var systemdSystemErr error
+	if systemdSystemState.Available {
+		if installErr := installSystemdSystemTimer(systemdSystemState, ensureScript); installErr == nil {
+			if systemdUserState, userErr := probeSystemdStatus(); userErr == nil {
+				_, _ = teardownSystemd(systemdUserState)
+			}
 			_, _ = removeCronManagedEntries()
+			return SetupResult{
+				Supervisor:   SupervisorSystemdSystem,
+				RunScript:    runScript,
+				EnsureScript: ensureScript,
+				Installed:    true,
+				Detail:       "installed system-level systemd units (gungnr.service + gungnr-keepalive.timer) for keepalive recovery watchdog",
+			}, nil
+		} else {
+			systemdSystemErr = installErr
+			cleanupState := systemdSystemState
+			if refreshed, refreshErr := probeSystemdSystemStatus(); refreshErr == nil {
+				cleanupState = refreshed
+			}
+			_, _ = teardownSystemdSystemBestEffort(cleanupState)
+		}
+	}
+
+	systemdUserState, err := probeSystemdStatus()
+	if err != nil {
+		return SetupResult{}, err
+	}
+	if systemdUserState.Available {
+		if err := installSystemdTimer(systemdUserState, ensureScript); err == nil {
+			_, _ = removeCronManagedEntries()
+			detail := "installed user systemd timer for keepalive recovery watchdog"
+			if systemdSystemErr != nil {
+				detail = detailWithSystemdSystemFallback(detail, systemdSystemErr)
+			}
 			return SetupResult{
 				Supervisor:   SupervisorSystemd,
 				RunScript:    runScript,
 				EnsureScript: ensureScript,
 				Installed:    true,
-				Detail:       "installed user systemd timer for keepalive recovery watchdog",
+				Detail:       detail,
 			}, nil
 		}
-		_, _ = teardownSystemd(systemdState)
+		_, _ = teardownSystemd(systemdUserState)
 	}
 
 	cronInstalled, cronDetail, err := installCronWatchdog(ensureScript)
 	if err != nil {
 		return SetupResult{}, err
+	}
+	if systemdSystemErr != nil {
+		cronDetail = detailWithSystemdSystemFallback(cronDetail, systemdSystemErr)
 	}
 
 	return SetupResult{
@@ -184,12 +232,22 @@ func Teardown(stateDir string) (TeardownResult, error) {
 		Source: status.Source,
 	}
 	if statusErr != nil || result.Source == "" {
-		result.Source = SupervisorCron
+		result.Source = SupervisorNone
 	}
+
+	systemdSystemState, err := probeSystemdSystemStatus()
+	if err != nil {
+		return TeardownResult{}, err
+	}
+	systemdSystemResult, systemdSystemErr := teardownSystemdSystem(systemdSystemState)
+	if systemdSystemErr != nil {
+		return TeardownResult{}, systemdSystemErr
+	}
+	result.SystemdSystemServiceRemoved = systemdSystemResult.ServiceRemoved
+	result.SystemdSystemTimerRemoved = systemdSystemResult.TimerRemoved
 
 	runScript := filepath.Join(stateDir, runScriptName)
 	ensureScript := filepath.Join(stateDir, ensureScriptName)
-
 	runRemoved, err := removeFileIfExists(runScript)
 	if err != nil {
 		return TeardownResult{}, err
@@ -240,6 +298,10 @@ func Status(stateDir string) (StatusResult, error) {
 		return StatusResult{}, err
 	}
 
+	systemdSystemState, err := probeSystemdSystemStatus()
+	if err != nil {
+		return StatusResult{}, err
+	}
 	systemdState, err := probeSystemdStatus()
 	if err != nil {
 		return StatusResult{}, err
@@ -249,18 +311,11 @@ func Status(stateDir string) (StatusResult, error) {
 		return StatusResult{}, err
 	}
 
-	source := SupervisorCron
-	if systemdState.Available {
-		source = SupervisorSystemd
-	}
+	source := configuredSupervisorSource(systemdSystemState, systemdState, cronState)
+	active := activeSupervisorSource(systemdSystemState, systemdState, cronState)
 
-	active := SupervisorNone
-	if systemdIsActive(systemdState) {
-		active = SupervisorSystemd
-	} else if cronIsConfigured(cronState) {
-		active = SupervisorCron
-	} else if systemdHasArtifacts(systemdState) {
-		active = SupervisorSystemd
+	if source == SupervisorNone && active != SupervisorNone {
+		source = active
 	}
 
 	return StatusResult{
@@ -270,6 +325,7 @@ func Status(stateDir string) (StatusResult, error) {
 		EnsureScript:       ensureScript,
 		RunScriptExists:    runExists,
 		EnsureScriptExists: ensureExists,
+		SystemdSystem:      systemdSystemState,
 		Systemd:            systemdState,
 		Cron:               cronState,
 	}, nil
@@ -316,6 +372,9 @@ func installSystemdTimer(state SystemdStatus, ensureScript string) error {
 	if state.ServicePath == "" || state.TimerPath == "" {
 		return errors.New("systemd unit paths are unavailable")
 	}
+	if state.ServiceUnit == "" || state.TimerUnit == "" {
+		return errors.New("systemd unit names are unavailable")
+	}
 
 	if err := os.MkdirAll(filepath.Dir(state.ServicePath), 0o755); err != nil {
 		return fmt.Errorf("create systemd user unit directory: %w", err)
@@ -323,17 +382,54 @@ func installSystemdTimer(state SystemdStatus, ensureScript string) error {
 	if err := os.WriteFile(state.ServicePath, []byte(buildSystemdServiceUnit(ensureScript)), 0o644); err != nil {
 		return fmt.Errorf("write systemd service unit %s: %w", state.ServicePath, err)
 	}
-	if err := os.WriteFile(state.TimerPath, []byte(buildSystemdTimerUnit()), 0o644); err != nil {
+	if err := os.WriteFile(state.TimerPath, []byte(buildSystemdTimerUnit(state.ServiceUnit)), 0o644); err != nil {
 		return fmt.Errorf("write systemd timer unit %s: %w", state.TimerPath, err)
 	}
 
 	if _, err := runSystemctlUser("daemon-reload"); err != nil {
 		return err
 	}
-	if _, err := runSystemctlUser("enable", "--now", systemdTimerUnit); err != nil {
+	if _, err := runSystemctlUser("enable", "--now", state.TimerUnit); err != nil {
 		return err
 	}
-	if _, err := runSystemctlUser("start", systemdServiceUnit); err != nil {
+	if _, err := runSystemctlUser("start", state.ServiceUnit); err != nil {
+		return err
+	}
+	return nil
+}
+
+func installSystemdSystemTimer(state SystemdStatus, ensureScript string) error {
+	if state.ServicePath == "" || state.TimerPath == "" {
+		return errors.New("systemd-system unit paths are unavailable")
+	}
+	if state.ServiceUnit == "" || state.TimerUnit == "" {
+		return errors.New("systemd-system unit names are unavailable")
+	}
+
+	if err := ensureSystemPrivileges(); err != nil {
+		return err
+	}
+
+	serviceContent, err := buildSystemdSystemServiceUnit(ensureScript)
+	if err != nil {
+		return err
+	}
+	timerContent := buildSystemdTimerUnit(state.ServiceUnit)
+
+	if err := writeSystemUnitFile(state.ServicePath, serviceContent); err != nil {
+		return fmt.Errorf("write system-level service unit %s: %w", state.ServicePath, err)
+	}
+	if err := writeSystemUnitFile(state.TimerPath, timerContent); err != nil {
+		return fmt.Errorf("write system-level timer unit %s: %w", state.TimerPath, err)
+	}
+
+	if _, err := runSystemctlSystemPrivileged("daemon-reload"); err != nil {
+		return err
+	}
+	if _, err := runSystemctlSystemPrivileged("enable", "--now", state.TimerUnit); err != nil {
+		return err
+	}
+	if _, err := runSystemctlSystemPrivileged("start", state.ServiceUnit); err != nil {
 		return err
 	}
 	return nil
@@ -350,19 +446,50 @@ ExecStart=/usr/bin/env bash -lc %s
 `, strconv.Quote(ensureScript))
 }
 
-func buildSystemdTimerUnit() string {
-	return `[Unit]
+func buildSystemdSystemServiceUnit(ensureScript string) (string, error) {
+	var username, homeDir string
+	if current, err := user.Current(); err == nil {
+		username = strings.TrimSpace(current.Username)
+		homeDir = strings.TrimSpace(current.HomeDir)
+	}
+	if username == "" {
+		username = strings.TrimSpace(os.Getenv("USER"))
+	}
+	if homeDir == "" {
+		homeDir = strings.TrimSpace(os.Getenv("HOME"))
+	}
+	if username == "" {
+		return "", errors.New("resolve current user for system-level unit: username is empty")
+	}
+	if homeDir == "" {
+		return "", errors.New("resolve current user for system-level unit: home directory is empty")
+	}
+
+	return fmt.Sprintf(`[Unit]
+Description=Gungnr keepalive recovery check
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=%s
+Environment=HOME=%s
+ExecStart=/usr/bin/env bash -lc %s
+`, username, homeDir, strconv.Quote(ensureScript)), nil
+}
+
+func buildSystemdTimerUnit(serviceUnit string) string {
+	return fmt.Sprintf(`[Unit]
 Description=Gungnr keepalive recovery timer
 
 [Timer]
 OnBootSec=1min
 OnUnitActiveSec=5min
-Unit=gungnr-cloudflared-keepalive.service
+Unit=%s
 Persistent=true
 
 [Install]
 WantedBy=timers.target
-`
+`, serviceUnit)
 }
 
 type teardownSystemdResult struct {
@@ -387,9 +514,9 @@ func teardownSystemd(state SystemdStatus) (teardownSystemdResult, error) {
 		result.TimerRemoved = removed
 	}
 
-	if state.Available {
-		_ = runSystemctlUserBestEffort("disable", "--now", systemdTimerUnit)
-		_ = runSystemctlUserBestEffort("stop", systemdServiceUnit)
+	if state.Available && state.ServiceUnit != "" && state.TimerUnit != "" {
+		_ = runSystemctlUserBestEffort("disable", "--now", state.TimerUnit)
+		_ = runSystemctlUserBestEffort("stop", state.ServiceUnit)
 		if result.ServiceRemoved || result.TimerRemoved {
 			_ = runSystemctlUserBestEffort("daemon-reload")
 		}
@@ -398,8 +525,58 @@ func teardownSystemd(state SystemdStatus) (teardownSystemdResult, error) {
 	return result, nil
 }
 
+func teardownSystemdSystem(state SystemdStatus) (teardownSystemdResult, error) {
+	result := teardownSystemdResult{}
+	if !state.ServiceFileExists && !state.TimerFileExists && !systemdIsActive(state) {
+		return result, nil
+	}
+
+	if err := ensureSystemPrivileges(); err != nil {
+		return result, err
+	}
+
+	if state.Available && state.ServiceUnit != "" && state.TimerUnit != "" {
+		_ = runSystemctlSystemBestEffortPrivileged("disable", "--now", state.TimerUnit)
+		_ = runSystemctlSystemBestEffortPrivileged("stop", state.ServiceUnit)
+	}
+
+	if state.ServicePath != "" {
+		removed, err := removeSystemFileIfExists(state.ServicePath)
+		if err != nil {
+			return teardownSystemdResult{}, err
+		}
+		result.ServiceRemoved = removed
+	}
+	if state.TimerPath != "" {
+		removed, err := removeSystemFileIfExists(state.TimerPath)
+		if err != nil {
+			return teardownSystemdResult{}, err
+		}
+		result.TimerRemoved = removed
+	}
+
+	if state.Available && (result.ServiceRemoved || result.TimerRemoved) {
+		_ = runSystemctlSystemBestEffortPrivileged("daemon-reload")
+	}
+	return result, nil
+}
+
+func teardownSystemdSystemBestEffort(state SystemdStatus) (teardownSystemdResult, error) {
+	result, err := teardownSystemdSystem(state)
+	if err == nil {
+		return result, nil
+	}
+	if isElevationDeniedError(err) {
+		return result, nil
+	}
+	return teardownSystemdResult{}, err
+}
+
 func probeSystemdStatus() (SystemdStatus, error) {
-	state := SystemdStatus{}
+	state := SystemdStatus{
+		ServiceUnit: systemdServiceUnit,
+		TimerUnit:   systemdTimerUnit,
+	}
 
 	servicePath, timerPath, err := systemdUnitPaths()
 	if err == nil {
@@ -425,12 +602,51 @@ func probeSystemdStatus() (SystemdStatus, error) {
 		return state, nil
 	}
 
-	timerEnabled, err := systemdTimerEnabled()
+	timerEnabled, err := systemdTimerEnabled(state.TimerUnit)
 	if err == nil {
 		state.TimerEnabled = timerEnabled
 	}
 
-	timerActive, err := systemdTimerActive()
+	timerActive, err := systemdTimerActive(state.TimerUnit)
+	if err == nil {
+		state.TimerActive = timerActive
+	}
+
+	return state, nil
+}
+
+func probeSystemdSystemStatus() (SystemdStatus, error) {
+	state := SystemdStatus{
+		ServiceUnit: systemdSystemServiceUnit,
+		TimerUnit:   systemdSystemTimerUnit,
+	}
+
+	state.ServicePath, state.TimerPath = systemdSystemUnitPaths()
+
+	serviceExists, err := fileExists(state.ServicePath)
+	if err != nil {
+		return SystemdStatus{}, err
+	}
+	timerExists, err := fileExists(state.TimerPath)
+	if err != nil {
+		return SystemdStatus{}, err
+	}
+	state.ServiceFileExists = serviceExists
+	state.TimerFileExists = timerExists
+
+	available, reason := systemdSystemAvailable()
+	state.Available = available
+	state.UnavailableReason = reason
+	if !available {
+		return state, nil
+	}
+
+	timerEnabled, err := systemdTimerEnabledSystem(state.TimerUnit)
+	if err == nil {
+		state.TimerEnabled = timerEnabled
+	}
+
+	timerActive, err := systemdTimerActiveSystem(state.TimerUnit)
 	if err == nil {
 		state.TimerActive = timerActive
 	}
@@ -451,6 +667,10 @@ func systemdUnitPaths() (servicePath, timerPath string, err error) {
 	return filepath.Join(unitDir, systemdServiceUnit), filepath.Join(unitDir, systemdTimerUnit), nil
 }
 
+func systemdSystemUnitPaths() (servicePath, timerPath string) {
+	return filepath.Join(systemdSystemUnitDir, systemdSystemServiceUnit), filepath.Join(systemdSystemUnitDir, systemdSystemTimerUnit)
+}
+
 func systemdUserAvailable() (bool, string) {
 	if runtime.GOOS != "linux" {
 		return false, "non-linux host"
@@ -464,8 +684,19 @@ func systemdUserAvailable() (bool, string) {
 	return true, ""
 }
 
-func systemdTimerEnabled() (bool, error) {
-	output, err := runSystemctlUser("is-enabled", systemdTimerUnit)
+func systemdSystemAvailable() (bool, string) {
+	if runtime.GOOS != "linux" {
+		return false, "non-linux host"
+	}
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return false, "systemctl not found in PATH"
+	}
+	// system-level setup may require sudo privileges; availability only checks capability baseline.
+	return true, ""
+}
+
+func systemdTimerEnabled(unit string) (bool, error) {
+	output, err := runSystemctlUser("is-enabled", unit)
 	if err == nil {
 		return strings.TrimSpace(output) == "enabled", nil
 	}
@@ -481,8 +712,42 @@ func systemdTimerEnabled() (bool, error) {
 	return false, err
 }
 
-func systemdTimerActive() (bool, error) {
-	output, err := runSystemctlUser("is-active", systemdTimerUnit)
+func systemdTimerActive(unit string) (bool, error) {
+	output, err := runSystemctlUser("is-active", unit)
+	if err == nil {
+		return strings.TrimSpace(output) == "active", nil
+	}
+
+	trimmed := strings.ToLower(strings.TrimSpace(output))
+	switch trimmed {
+	case "inactive", "failed", "deactivating", "activating", "unknown":
+		return false, nil
+	}
+	if strings.Contains(trimmed, "could not be found") || strings.Contains(trimmed, "not loaded") {
+		return false, nil
+	}
+	return false, err
+}
+
+func systemdTimerEnabledSystem(unit string) (bool, error) {
+	output, err := runSystemctlSystem("is-enabled", unit)
+	if err == nil {
+		return strings.TrimSpace(output) == "enabled", nil
+	}
+
+	trimmed := strings.ToLower(strings.TrimSpace(output))
+	switch trimmed {
+	case "disabled", "static", "indirect", "generated", "transient", "masked":
+		return false, nil
+	}
+	if strings.Contains(trimmed, "not-found") || strings.Contains(trimmed, "no such file") {
+		return false, nil
+	}
+	return false, err
+}
+
+func systemdTimerActiveSystem(unit string) (bool, error) {
+	output, err := runSystemctlSystem("is-active", unit)
 	if err == nil {
 		return strings.TrimSpace(output) == "active", nil
 	}
@@ -514,6 +779,125 @@ func runSystemctlUser(args ...string) (string, error) {
 func runSystemctlUserBestEffort(args ...string) error {
 	_, err := runSystemctlUser(args...)
 	return err
+}
+
+func runSystemctlSystem(args ...string) (string, error) {
+	cmd := exec.Command("systemctl", args...)
+	output, err := cmd.CombinedOutput()
+	trimmed := strings.TrimSpace(string(output))
+	if err != nil {
+		if trimmed == "" {
+			return trimmed, fmt.Errorf("systemctl %s failed: %w", strings.Join(args, " "), err)
+		}
+		return trimmed, fmt.Errorf("systemctl %s failed: %s", strings.Join(args, " "), trimmed)
+	}
+	return trimmed, nil
+}
+
+func runSystemctlSystemPrivileged(args ...string) (string, error) {
+	if os.Geteuid() == 0 {
+		return runSystemctlSystem(args...)
+	}
+	cmd := exec.Command("sudo", append([]string{"systemctl"}, args...)...)
+	output, err := cmd.CombinedOutput()
+	trimmed := strings.TrimSpace(string(output))
+	if err != nil {
+		if trimmed == "" {
+			return trimmed, fmt.Errorf("sudo systemctl %s failed: %w", strings.Join(args, " "), err)
+		}
+		return trimmed, fmt.Errorf("sudo systemctl %s failed: %s", strings.Join(args, " "), trimmed)
+	}
+	return trimmed, nil
+}
+
+func runSystemctlSystemBestEffortPrivileged(args ...string) error {
+	_, err := runSystemctlSystemPrivileged(args...)
+	return err
+}
+
+func ensureSystemPrivileges() error {
+	if os.Geteuid() == 0 {
+		return nil
+	}
+
+	nonInteractive := exec.Command("sudo", "-n", "true")
+	if err := nonInteractive.Run(); err == nil {
+		return nil
+	}
+
+	cmd := exec.Command("sudo", "-v")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("system-level keepalive unit management requires sudo permission: %w", err)
+	}
+	return nil
+}
+
+func isElevationDeniedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	if msg == "" {
+		return false
+	}
+	return strings.Contains(msg, "requires sudo permission") ||
+		strings.Contains(msg, "a password is required") ||
+		strings.Contains(msg, "no tty present") ||
+		strings.Contains(msg, "permission denied") ||
+		strings.Contains(msg, "incorrect password") ||
+		strings.Contains(msg, "is not in the sudoers")
+}
+
+func detailWithSystemdSystemFallback(detail string, err error) string {
+	base := strings.TrimSpace(detail)
+	if base == "" {
+		base = "configured keepalive fallback"
+	}
+	if err == nil {
+		return base
+	}
+	return fmt.Sprintf("%s (system-level setup skipped: %s)", base, strings.TrimSpace(err.Error()))
+}
+
+func writeSystemUnitFile(path, content string) error {
+	if os.Geteuid() == 0 {
+		return os.WriteFile(path, []byte(content), 0o644)
+	}
+
+	cmd := exec.Command("sudo", "tee", path)
+	cmd.Stdin = strings.NewReader(content)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("sudo tee %s: %s", path, strings.TrimSpace(string(output)))
+	}
+	chmod := exec.Command("sudo", "chmod", "0644", path)
+	chmodOutput, chmodErr := chmod.CombinedOutput()
+	if chmodErr != nil {
+		return fmt.Errorf("sudo chmod %s: %s", path, strings.TrimSpace(string(chmodOutput)))
+	}
+	return nil
+}
+
+func removeSystemFileIfExists(path string) (bool, error) {
+	if os.Geteuid() == 0 {
+		return removeFileIfExists(path)
+	}
+	exists, err := fileExists(path)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, nil
+	}
+	cmd := exec.Command("sudo", "rm", "-f", path)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("remove %s via sudo rm: %s", path, strings.TrimSpace(string(output)))
+	}
+	return true, nil
 }
 
 func installCronWatchdog(ensureScript string) (bool, string, error) {
@@ -666,6 +1050,32 @@ func systemdHasArtifacts(state SystemdStatus) bool {
 
 func cronIsConfigured(state CronStatus) bool {
 	return state.HasBoot || state.HasWatch
+}
+
+func configuredSupervisorSource(systemdSystemState, systemdUserState SystemdStatus, cronState CronStatus) Kind {
+	switch {
+	case systemdHasArtifacts(systemdSystemState):
+		return SupervisorSystemdSystem
+	case systemdHasArtifacts(systemdUserState):
+		return SupervisorSystemd
+	case cronIsConfigured(cronState):
+		return SupervisorCron
+	default:
+		return SupervisorNone
+	}
+}
+
+func activeSupervisorSource(systemdSystemState, systemdUserState SystemdStatus, cronState CronStatus) Kind {
+	switch {
+	case systemdIsActive(systemdSystemState):
+		return SupervisorSystemdSystem
+	case systemdIsActive(systemdUserState):
+		return SupervisorSystemd
+	case cronIsConfigured(cronState):
+		return SupervisorCron
+	default:
+		return SupervisorNone
+	}
 }
 
 func fileExists(path string) (bool, error) {

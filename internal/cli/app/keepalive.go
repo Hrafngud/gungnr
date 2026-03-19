@@ -219,8 +219,8 @@ func KeepaliveDisable() (string, error) {
 	}
 
 	source := teardown.Source
-	if source == "" || source == supervisor.SupervisorNone {
-		source = supervisor.SupervisorCron
+	if source == "" {
+		source = supervisor.SupervisorNone
 	}
 
 	output := formatKeepaliveOutput("Keepalive Disable", []keepaliveSection{
@@ -234,8 +234,11 @@ func KeepaliveDisable() (string, error) {
 		{
 			Title: "Removed",
 			Lines: []string{
-				"Systemd timer: " + boolLabel(teardown.SystemdTimerRemoved),
-				"Systemd service: " + boolLabel(teardown.SystemdServiceRemoved),
+				"Systemd-system timer: " + boolLabel(teardown.SystemdSystemTimerRemoved),
+				"Systemd-system service: " + boolLabel(teardown.SystemdSystemServiceRemoved),
+				"Systemd-system detail: " + nonEmptyOrFallback(teardown.SystemdSystemDetail, "none"),
+				"Systemd user timer: " + boolLabel(teardown.SystemdTimerRemoved),
+				"Systemd user service: " + boolLabel(teardown.SystemdServiceRemoved),
 				"Crontab entries: " + boolLabel(teardown.CronRemoved),
 				"Run script: " + boolLabel(teardown.RunScriptRemoved),
 				"Ensure script: " + boolLabel(teardown.EnsureScriptRemoved),
@@ -267,8 +270,8 @@ func KeepaliveStatus() (string, error) {
 	}
 
 	source := supervisorStatus.Source
-	if source == "" || source == supervisor.SupervisorNone {
-		source = supervisor.SupervisorCron
+	if source == "" {
+		source = supervisor.SupervisorNone
 	}
 
 	composeFile := strings.TrimSpace(readSingleLineFile(ctx.ComposePath))
@@ -311,8 +314,10 @@ func KeepaliveStatus() (string, error) {
 				"Mode: " + mode,
 				"Supervisor source: " + string(source),
 				"Supervisor active: " + string(supervisorStatus.Active),
-				"Systemd available: " + boolLabel(supervisorStatus.Systemd.Available),
-				"Systemd reason: " + nonEmptyOrFallback(supervisorStatus.Systemd.UnavailableReason, "n/a"),
+				"Systemd-system available: " + boolLabel(supervisorStatus.SystemdSystem.Available),
+				"Systemd-system reason: " + nonEmptyOrFallback(supervisorStatus.SystemdSystem.UnavailableReason, "n/a"),
+				"Systemd user available: " + boolLabel(supervisorStatus.Systemd.Available),
+				"Systemd user reason: " + nonEmptyOrFallback(supervisorStatus.Systemd.UnavailableReason, "n/a"),
 				"Cron available: " + boolLabel(supervisorStatus.Cron.Available),
 			},
 		},
@@ -321,10 +326,14 @@ func KeepaliveStatus() (string, error) {
 			Lines: []string{
 				"Run script: " + boolLabel(supervisorStatus.RunScriptExists) + " (" + supervisorStatus.RunScript + ")",
 				"Ensure script: " + boolLabel(supervisorStatus.EnsureScriptExists) + " (" + supervisorStatus.EnsureScript + ")",
-				"Systemd timer file: " + boolLabel(supervisorStatus.Systemd.TimerFileExists),
-				"Systemd service file: " + boolLabel(supervisorStatus.Systemd.ServiceFileExists),
-				"Systemd timer enabled: " + boolLabel(supervisorStatus.Systemd.TimerEnabled),
-				"Systemd timer active: " + boolLabel(supervisorStatus.Systemd.TimerActive),
+				"Systemd-system timer file: " + boolLabel(supervisorStatus.SystemdSystem.TimerFileExists),
+				"Systemd-system service file: " + boolLabel(supervisorStatus.SystemdSystem.ServiceFileExists),
+				"Systemd-system timer enabled: " + boolLabel(supervisorStatus.SystemdSystem.TimerEnabled),
+				"Systemd-system timer active: " + boolLabel(supervisorStatus.SystemdSystem.TimerActive),
+				"Systemd user timer file: " + boolLabel(supervisorStatus.Systemd.TimerFileExists),
+				"Systemd user service file: " + boolLabel(supervisorStatus.Systemd.ServiceFileExists),
+				"Systemd user timer enabled: " + boolLabel(supervisorStatus.Systemd.TimerEnabled),
+				"Systemd user timer active: " + boolLabel(supervisorStatus.Systemd.TimerActive),
 				"Cron @reboot entry: " + boolLabel(supervisorStatus.Cron.HasBoot),
 				"Cron 5-minute entry: " + boolLabel(supervisorStatus.Cron.HasWatch),
 			},
@@ -823,6 +832,13 @@ func resolveComposePath(path string) (string, error) {
 
 func keepaliveStatus(supervisorStatus supervisor.StatusResult) string {
 	switch supervisorStatus.Active {
+	case supervisor.SupervisorSystemdSystem:
+		if supervisorStatus.RunScriptExists &&
+			supervisorStatus.EnsureScriptExists &&
+			supervisorStatus.SystemdSystem.TimerEnabled {
+			return "enabled"
+		}
+		return "partial"
 	case supervisor.SupervisorSystemd:
 		if supervisorStatus.RunScriptExists && supervisorStatus.EnsureScriptExists && supervisorStatus.Systemd.TimerEnabled {
 			return "enabled"
@@ -837,6 +853,8 @@ func keepaliveStatus(supervisorStatus supervisor.StatusResult) string {
 
 	if supervisorStatus.RunScriptExists ||
 		supervisorStatus.EnsureScriptExists ||
+		supervisorStatus.SystemdSystem.ServiceFileExists ||
+		supervisorStatus.SystemdSystem.TimerFileExists ||
 		supervisorStatus.Systemd.ServiceFileExists ||
 		supervisorStatus.Systemd.TimerFileExists ||
 		supervisorStatus.Cron.HasBoot ||
@@ -1128,12 +1146,21 @@ func formatTimestamp(value time.Time) string {
 
 func remediationHintsFromStatus(status supervisor.StatusResult) []string {
 	hints := []string{}
-	reason := strings.ToLower(strings.TrimSpace(status.Systemd.UnavailableReason))
-	if reason != "" {
-		if strings.Contains(reason, "failed to connect") ||
-			strings.Contains(reason, "dbus") ||
-			strings.Contains(reason, "no medium") ||
-			strings.Contains(reason, "session") {
+	systemdUserReason := strings.ToLower(strings.TrimSpace(status.Systemd.UnavailableReason))
+	systemdSystemReason := strings.ToLower(strings.TrimSpace(status.SystemdSystem.UnavailableReason))
+
+	if systemdSystemReason != "" {
+		if strings.Contains(systemdSystemReason, "permission denied") ||
+			strings.Contains(systemdSystemReason, "access denied") {
+			hints = append(hints, "System-level systemd checks are restricted. Re-run keepalive with sudo privileges to manage `/etc/systemd/system` units.")
+		}
+	}
+
+	if systemdUserReason != "" {
+		if strings.Contains(systemdUserReason, "failed to connect") ||
+			strings.Contains(systemdUserReason, "dbus") ||
+			strings.Contains(systemdUserReason, "no medium") ||
+			strings.Contains(systemdUserReason, "session") {
 			hints = append(hints, "Systemd user session is unavailable. Enable linger (`sudo loginctl enable-linger $USER`) or use cron fallback by re-running `gungnr keepalive enable`.")
 		}
 	}
@@ -1164,6 +1191,10 @@ func remediationHintsFromErrors(messages ...string) []string {
 			strings.Contains(msg, "failed to connect") ||
 			strings.Contains(msg, "session") {
 			hints = append(hints, "Systemd user services are unavailable. Enable linger (`sudo loginctl enable-linger $USER`) or rely on cron fallback.")
+		}
+		if strings.Contains(msg, "system-level keepalive unit management requires sudo permission") ||
+			(strings.Contains(msg, "sudo") && strings.Contains(msg, "system-level")) {
+			hints = append(hints, "System-level unit management needs sudo approval. Re-run `gungnr keepalive enable` and allow elevation to install `/etc/systemd/system/gungnr.service` + timer.")
 		}
 		if strings.Contains(msg, "bootstrap .env not found") {
 			hints = append(hints, "Bootstrap environment is missing. Run `gungnr bootstrap` before enabling keepalive recovery.")

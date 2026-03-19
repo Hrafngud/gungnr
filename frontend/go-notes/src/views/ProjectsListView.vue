@@ -5,6 +5,7 @@ import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
+import UiStatusToggleButton from '@/components/ui/UiStatusToggleButton.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
 import UiState from '@/components/ui/UiState.vue'
 import NavIcon from '@/components/NavIcon.vue'
@@ -14,10 +15,12 @@ import type { Project } from '@/types/projects'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 type SelectOption = { value: string; label: string }
+type ProjectsTab = 'running' | 'archived'
 
 const projectsStore = useProjectsStore()
 const pageLoading = usePageLoadingStore()
 const searchQuery = ref('')
+const activeTab = ref<ProjectsTab>('running')
 const statusFilter = ref('all')
 const currentPage = ref(1)
 const pageSize = 9
@@ -60,6 +63,12 @@ const isDegradedStatus = (status: string) => {
   )
 }
 
+const isRunningOrDegradedStatus = (status: string) => {
+  const normalized = normalizeStatus(status)
+  if (!normalized) return false
+  return isHealthyStatus(normalized) || isDegradedStatus(normalized)
+}
+
 const projectTone = (project: Project): BadgeTone => {
   const normalized = normalizeStatus(project.status)
   if (!normalized) return 'neutral'
@@ -77,9 +86,40 @@ const fmtDate = (value: string) => {
   return parsed.toLocaleString()
 }
 
+const runningProjects = computed(() =>
+  projectsStore.projects.filter((project) => isRunningOrDegradedStatus(project.status)),
+)
+
+const archivedProjects = computed(() =>
+  projectsStore.projects.filter((project) => !isRunningOrDegradedStatus(project.status)),
+)
+
+const scopedProjects = computed(() =>
+  activeTab.value === 'archived' ? archivedProjects.value : runningProjects.value,
+)
+
+const showArchived = computed<boolean>({
+  get: () => activeTab.value === 'archived',
+  set: (value) => {
+    activeTab.value = value ? 'archived' : 'running'
+  },
+})
+
+const archiveToggleLabel = computed(() =>
+  showArchived.value ? 'Show Running' : 'Show Archived',
+)
+
+const archiveToggleStateLabel = computed(() =>
+  showArchived.value ? 'Archived' : 'Running',
+)
+
+const archiveToggleTone = computed<BadgeTone>(() =>
+  showArchived.value ? 'warn' : 'ok',
+)
+
 const statusOptions = computed<SelectOption[]>(() => {
   const counts = new Map<string, { label: string; count: number }>()
-  projectsStore.projects.forEach((project) => {
+  scopedProjects.value.forEach((project) => {
     const label = project.status.trim() || 'unknown'
     const value = normalizeStatus(label)
     const existing = counts.get(value)
@@ -102,7 +142,7 @@ const statusOptions = computed<SelectOption[]>(() => {
 
 const filteredProjects = computed(() => {
   const needle = searchQuery.value.trim().toLowerCase()
-  return projectsStore.projects.filter((project) => {
+  return scopedProjects.value.filter((project) => {
     const normalizedStatus = normalizeStatus(project.status)
     if (statusFilter.value !== 'all' && normalizedStatus !== statusFilter.value) return false
     if (!needle) return true
@@ -154,9 +194,7 @@ const pageSummary = computed(() => {
   return `${start}-${end} of ${filteredProjects.value.length} projects`
 })
 
-const healthyCount = computed(() =>
-  projectsStore.projects.filter((project) => projectTone(project) === 'ok').length,
-)
+const runningCount = computed(() => runningProjects.value.length)
 
 const goToPage = (nextPage: number) => {
   if (nextPage < 1 || nextPage > totalPages.value) return
@@ -169,8 +207,12 @@ const load = async () => {
   pageLoading.stop()
 }
 
-watch([searchQuery, statusFilter], () => {
+watch([searchQuery, statusFilter, activeTab], () => {
   currentPage.value = 1
+})
+
+watch(activeTab, () => {
+  statusFilter.value = 'all'
 })
 
 watch(filteredProjects, () => {
@@ -206,19 +248,19 @@ onMounted(load)
         <p class="text-lg font-semibold">{{ projectsStore.projects.length }}</p>
       </UiPanel>
       <UiPanel variant="soft" class="space-y-2 p-4">
-        <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Healthy</p>
-        <p class="text-lg font-semibold text-[color:var(--success)]">{{ healthyCount }}</p>
+        <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Running/Degraded</p>
+        <p class="text-lg font-semibold text-[color:var(--success)]">{{ runningCount }}</p>
       </UiPanel>
       <UiPanel variant="soft" class="space-y-2 p-4">
-        <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Filtered</p>
-        <p class="text-lg font-semibold">{{ filteredProjects.length }}</p>
+        <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Archived</p>
+        <p class="text-lg font-semibold">{{ archivedProjects.length }}</p>
       </UiPanel>
     </div>
 
     <UiPanel class="space-y-5 p-6">
       <div class="w-full space-y-2">
         <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Filter</p>
-        <div class="grid grid-cols-1 items-center gap-2 sm:grid-cols-[4fr_1fr]">
+        <div class="projects-filter-grid grid grid-cols-1 items-center gap-2">
           <div class="relative">
             <NavIcon
               name="search"
@@ -230,6 +272,15 @@ onMounted(load)
               placeholder="Filter by name, status, repo, path, or port"
             />
           </div>
+          <UiStatusToggleButton
+            v-model="showArchived"
+            class="projects-filter-toggle"
+            :label="archiveToggleLabel"
+            :status-tone="archiveToggleTone"
+            :status-label="archiveToggleStateLabel"
+            :aria-label="archiveToggleLabel"
+            :disabled="projectsStore.loading || projectsStore.projects.length === 0"
+          />
           <UiSelect
             v-model="statusFilter"
             :options="statusOptions"
@@ -243,11 +294,15 @@ onMounted(load)
 
       <UiState v-if="projectsStore.error" tone="error">{{ projectsStore.error }}</UiState>
       <UiState v-else-if="!projectsStore.loading && filteredProjects.length === 0">
-        No projects matched the current filters.
+        No projects matched the current filters in this section.
       </UiState>
 
       <div v-else class="space-y-4">
-        <div class="stagger grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+        <TransitionGroup
+          name="project-list"
+          tag="div"
+          class="stagger grid gap-3 sm:grid-cols-2 2xl:grid-cols-3"
+        >
           <RouterLink
             v-for="project in paginatedProjects"
             :key="project.id"
@@ -289,7 +344,7 @@ onMounted(load)
               </div>
             </UiPanel>
           </RouterLink>
-        </div>
+        </TransitionGroup>
 
         <div
           v-if="totalPages > 1"
@@ -371,5 +426,69 @@ onMounted(load)
 .projects-search-input {
   background: var(--surface-inset);
   padding-left: 2.35rem;
+}
+
+.projects-filter-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.projects-filter-toggle {
+  transition:
+    transform 0.22s cubic-bezier(0.25, 1, 0.5, 1),
+    box-shadow 0.22s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.projects-filter-toggle:hover:not(:disabled),
+.projects-filter-toggle:focus-visible:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px color-mix(in oklab, var(--accent) 14%, transparent);
+}
+
+.project-list-enter-active,
+.project-list-leave-active {
+  transition:
+    transform 0.26s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.project-list-leave-active {
+  transition-duration: 0.18s;
+}
+
+.project-list-enter-from,
+.project-list-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.985);
+}
+
+.project-list-move {
+  transition: transform 0.26s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+@media (min-width: 640px) {
+  .projects-filter-grid {
+    grid-template-columns: minmax(0, 3.8fr) minmax(11rem, 1.6fr) minmax(0, 1.2fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .projects-filter-toggle,
+  .project-list-enter-active,
+  .project-list-leave-active,
+  .project-list-move {
+    transition: none !important;
+  }
+
+  .projects-filter-toggle:hover:not(:disabled),
+  .projects-filter-toggle:focus-visible:not(:disabled) {
+    transform: none;
+    box-shadow: none;
+  }
+
+  .project-list-enter-from,
+  .project-list-leave-to {
+    opacity: 1;
+    transform: none;
+  }
 }
 </style>

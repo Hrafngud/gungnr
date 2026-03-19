@@ -53,12 +53,20 @@ standard install.
 Reboot fallback is available via keepalive tooling and bootstrap-installed watchdog scripts.
 
 ### Tunnel auto-start watchdog
-Bootstrap installs a lightweight cron watchdog so `cloudflared` restarts after
-reboot and is re-checked every 5 minutes.
+`gungnr keepalive` now manages reboot persistence with a supervisor chain:
+- preferred: system-level systemd units (`/etc/systemd/system/gungnr.service` + `/etc/systemd/system/gungnr-keepalive.timer`)
+- fallback: user-level systemd units (`~/.config/systemd/user/gungnr-cloudflared-keepalive.service` + `.timer`)
+- fallback: crontab watchdog (`@reboot` + every 5 minutes)
 
 Scripts created under `~/gungnr/state`:
 - `~/gungnr/state/cloudflared-run.sh` (starts the tunnel using the generated config)
 - `~/gungnr/state/cloudflared-ensure.sh` (checks the process and relaunches if needed)
+
+Common keepalive commands:
+- `gungnr keepalive enable` (core mode: panel stack + tunnel)
+- `gungnr keepalive all` (core + managed project recovery)
+- `gungnr keepalive status`
+- `gungnr keepalive disable`
 
 
 ## Installation
@@ -131,14 +139,14 @@ Local source: `docs/index.html` (landing), `docs/docs.html` (docs), `docs/errors
   - Quick services: Pull Docker registry images and expose via tunnel for rapid testing.
 - **Cloudflare integration**: Locally managed tunnels with ingress routing and DNS management via Cloudflare API.
 - **Docker-based runtime**: Compose orchestration with container logs, job history, and audit trails in the UI.
+- **Daemon management for keepalive**: `gungnr keepalive` supports systemd integration (system-level first, with user-systemd/cron fallback) for cloudflared + stack recovery after reboot.
 - **Role-based access control (RBAC)**: SuperUsers manage everything; Admins have most privileges but can't assign roles; Users can deploy and run jobs but can't manage allowlist.
-- **CLI operations**: `gungnr restart`, `gungnr tunnel run`, and `gungnr uninstall` commands for panel and tunnel control.
+- **CLI operations**: `gungnr restart`, `gungnr tunnel run`, `gungnr keepalive <enable|disable|status|all|recover>`, and `gungnr uninstall` commands for panel and tunnel control.
 
 ### Planned Features
 - **Expanded RBAC**: Define clearer RBAC rules and presets for different case scenarios.
 - **Additional templates**: Support for different fullstack stacks beyond the current Vue + Go + PostgreSQL.
 - **Enhanced bootstrap**: Idempotent re-runs and safe upgrade paths.
-- **Daemon management**: Optional auto-restart for cloudflared with systemd integration.
 - **Additional CLI commands**: More panel and tunnel control operations.
 - **Interoperability**: Modern support for integration with external tools (API's, MCP's etc.).
 - **macOS support**: Compatibility layer for macOS (amd64/arm64) via native installer.
@@ -169,29 +177,6 @@ Host integration defaults:
 - `DOMAIN`, `CLOUDFLARED_TUNNEL_NAME` (name or UUID), `CLOUDFLARE_TUNNEL_ID` (ID fallback), `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID` (required for API-managed tunnels)
 - `VITE_API_BASE_URL=/` when building the web container so the UI uses same-origin HTTPS.
-
-Infra bridge runtime defaults:
-- `INFRA_QUEUE_ROOT` (host-visible queue root; default `/templates/.infra`)
-- `INFRA_POLL_INTERVAL_MS` (API-side bridge poll interval)
-- `INFRA_RESULT_TIMEOUT_SEC` (API wait timeout for terminal worker result)
-
-Infra retention controls:
-- `INFRA_RETENTION_INTENT_HOURS` (max age for stale intent files)
-- `INFRA_RETENTION_RESULT_HOURS` (max age for stale terminal result files)
-- `INFRA_RETENTION_CLAIM_MINUTES` (max age for stale claim locks)
-- Startup cleanup protects active bridge work and only prunes stale terminal/orphaned artifacts.
-
-Note: Host Settings are for inspection and minor adjustments only. Settings in
-the UI (domain, GitHub token, Cloudflare token, cloudflared tunnel ref,
-cloudflared config path) override env defaults.
-Cloudflare tokens should be API tokens (not global API keys) with
-Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit for the configured account and
-zone.
-
-If you are managing ingress via the Cloudflare API, ensure the tunnel is
-remote-managed (`config_src=cloudflare`) and `cloudflared` is running on the
-host as a user-managed process. This is an optional, non-primary path. Locally
-managed tunnels (`config_src=local`) cannot be updated via the Cloudflare API.
 
 ## Test token auth (optional)
 
