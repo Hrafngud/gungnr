@@ -169,11 +169,11 @@ func (s *WorkbenchService) PreviewComposeFromStoredSnapshot(
 		)
 	}
 
-	if err := validateWorkbenchSnapshotForCompose(snapshot); err != nil {
+	currentSource, err := s.ResolveComposeSource(ctx, normalizedProject)
+	if err != nil {
 		return WorkbenchComposePreviewResult{}, err
 	}
-
-	compose, err := generateWorkbenchCompose(snapshot)
+	compose, err := mergeWorkbenchSnapshotIntoComposeSource(snapshot, currentSource)
 	if err != nil {
 		return WorkbenchComposePreviewResult{}, err
 	}

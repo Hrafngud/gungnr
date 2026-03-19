@@ -218,6 +218,7 @@ func TestValidateTaskCoverageIncludesRestartTunnel(t *testing.T) {
 		contract.TaskTypeDockerRestartContainer,
 		contract.TaskTypeDockerRemoveContainer,
 		contract.TaskTypeComposeUpStack,
+		contract.TaskTypeHostRuntimeStats,
 	})
 	require.NoError(t, err)
 }

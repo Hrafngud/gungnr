@@ -20,6 +20,7 @@ const (
 	TaskTypeDockerStopContainer    TaskType = "docker_stop_container"
 	TaskTypeDockerRestartContainer TaskType = "docker_restart_container"
 	TaskTypeDockerRemoveContainer  TaskType = "docker_remove_container"
+	TaskTypeHostRuntimeStats       TaskType = "host_runtime_stats"
 	TaskTypeDockerRunQuickService  TaskType = "docker_run_quick_service"
 	TaskTypeHostPortScan           TaskType = "host_port_scan"
 	TaskTypeAPIHealthProbe         TaskType = "api_health_probe"
@@ -62,17 +63,18 @@ type Error struct {
 }
 
 type Result struct {
-	Version    string    `json:"version"`
-	IntentID   string    `json:"intent_id"`
-	RequestID  string    `json:"request_id"`
-	TaskType   TaskType  `json:"task_type"`
-	Status     Status    `json:"status"`
-	CreatedAt  time.Time `json:"created_at"`
-	StartedAt  time.Time `json:"started_at"`
-	FinishedAt time.Time `json:"finished_at"`
-	LogPath    string    `json:"log_path"`
-	LogTail    []string  `json:"log_tail,omitempty"`
-	Error      *Error    `json:"error,omitempty"`
+	Version    string         `json:"version"`
+	IntentID   string         `json:"intent_id"`
+	RequestID  string         `json:"request_id"`
+	TaskType   TaskType       `json:"task_type"`
+	Status     Status         `json:"status"`
+	CreatedAt  time.Time      `json:"created_at"`
+	StartedAt  time.Time      `json:"started_at"`
+	FinishedAt time.Time      `json:"finished_at"`
+	LogPath    string         `json:"log_path"`
+	LogTail    []string       `json:"log_tail,omitempty"`
+	Data       map[string]any `json:"data,omitempty"`
+	Error      *Error         `json:"error,omitempty"`
 }
 
 func (r Result) Terminal() bool {
@@ -103,6 +105,8 @@ type DockerRemoveContainerPayload struct {
 	Container     string `json:"container"`
 	RemoveVolumes bool   `json:"remove_volumes,omitempty"`
 }
+
+type HostRuntimeStatsPayload struct{}
 
 type DockerRunQuickServicePayload struct {
 	Image         string `json:"image"`

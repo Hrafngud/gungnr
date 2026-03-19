@@ -29,6 +29,10 @@ type stubHostInfraBridgeClient struct {
 	removeVolumes    bool
 	removeResult     contract.Result
 	removeErr        error
+	runtimeCalled    bool
+	runtimeRequestID string
+	runtimeResult    contract.Result
+	runtimeErr       error
 	composeCalled    bool
 	composeRequestID string
 	composePayload   contract.ComposeUpStackPayload
@@ -56,6 +60,12 @@ func (s *stubHostInfraBridgeClient) RemoveContainer(_ context.Context, requestID
 	s.removeContainer = container
 	s.removeVolumes = removeVolumes
 	return s.removeResult, s.removeErr
+}
+
+func (s *stubHostInfraBridgeClient) HostRuntimeStats(_ context.Context, requestID string) (contract.Result, error) {
+	s.runtimeCalled = true
+	s.runtimeRequestID = requestID
+	return s.runtimeResult, s.runtimeErr
 }
 
 func (s *stubHostInfraBridgeClient) ComposeUpStack(_ context.Context, requestID string, payload contract.ComposeUpStackPayload) (contract.Result, error) {
@@ -210,4 +220,61 @@ func TestHostServiceRestartProjectStackBridgeFailureMapping(t *testing.T) {
 	require.Equal(t, "my-project", details["target"])
 	require.Equal(t, "intent-compose-fail", details["intent_id"])
 	require.Equal(t, "COMPOSE-500", details["worker_error_code"])
+}
+
+func TestHostServiceRuntimeStatsBridgeSuccess(t *testing.T) {
+	t.Parallel()
+
+	bridge := &stubHostInfraBridgeClient{
+		runtimeResult: contract.Result{
+			Status: contract.StatusSucceeded,
+			Data: map[string]any{
+				"collectedAt": "2026-03-18T18:00:00Z",
+				"systemImage": "Ubuntu 24.04 LTS",
+				"cpu": map[string]any{
+					"model":   "AMD Ryzen",
+					"cores":   16,
+					"threads": 16,
+				},
+			},
+		},
+	}
+	svc := &HostService{infraClient: bridge}
+
+	stats, err := svc.RuntimeStats(context.Background())
+	require.NoError(t, err)
+	require.True(t, bridge.runtimeCalled)
+	require.Equal(t, "Ubuntu 24.04 LTS", stats.SystemImage)
+	require.Equal(t, "AMD Ryzen", stats.CPU.Model)
+	require.Equal(t, 16, stats.CPU.Cores)
+}
+
+func TestHostServiceRuntimeStatsBridgeFailureMapping(t *testing.T) {
+	t.Parallel()
+
+	bridge := &stubHostInfraBridgeClient{
+		runtimeResult: contract.Result{
+			Status:   contract.StatusFailed,
+			IntentID: "intent-runtime-fail",
+			LogPath:  "/tmp/infra-runtime.log",
+			Error: &contract.Error{
+				Code:    "HOST-500-WORKER",
+				Message: "runtime probe failed",
+			},
+		},
+	}
+	svc := &HostService{infraClient: bridge}
+
+	_, err := svc.RuntimeStats(context.Background())
+	require.Error(t, err)
+
+	typed, ok := errs.From(err)
+	require.True(t, ok)
+	require.Equal(t, errs.CodeHostStatsFailed, typed.Code)
+	require.Equal(t, "failed to load host runtime stats", typed.Message)
+	details, ok := typed.Details.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, contract.TaskTypeHostRuntimeStats, details["task_type"])
+	require.Equal(t, "host", details["target"])
+	require.Equal(t, "intent-runtime-fail", details["intent_id"])
 }

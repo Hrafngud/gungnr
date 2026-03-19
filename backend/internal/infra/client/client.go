@@ -181,6 +181,10 @@ func (c *Client) RemoveContainer(ctx context.Context, requestID, container strin
 	return c.runTask(ctx, requestID, contract.TaskTypeDockerRemoveContainer, payload)
 }
 
+func (c *Client) HostRuntimeStats(ctx context.Context, requestID string) (contract.Result, error) {
+	return c.runTask(ctx, requestID, contract.TaskTypeHostRuntimeStats, map[string]any{})
+}
+
 func (c *Client) ComposeUpStack(ctx context.Context, requestID string, payload contract.ComposeUpStackPayload) (contract.Result, error) {
 	payload.Project = strings.TrimSpace(payload.Project)
 	payload.ProjectDir = strings.TrimSpace(payload.ProjectDir)

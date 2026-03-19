@@ -520,22 +520,125 @@ func TestWorkbenchPreviewComposeFromStoredSnapshotSuccessReadOnly(t *testing.T) 
 	}
 }
 
+func TestWorkbenchPreviewComposeFromStoredSnapshotPreservesUnsupportedSourceSections(t *testing.T) {
+	t.Parallel()
+
+	templatesDir := t.TempDir()
+	projectDir := filepath.Join(templatesDir, "demo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+
+	composePath := filepath.Join(projectDir, "docker-compose.yml")
+	original := `
+services:
+  api:
+    image: nginx:1.25
+    env_file:
+      - .env
+    ports:
+      - "80:80"
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata: {}
+`
+	if err := os.WriteFile(composePath, []byte(original), 0o644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+
+	svc := NewWorkbenchServiceWithStorage(templatesDir, nil, &fakeSettingsRepo{}, "test-session-secret")
+	_, _, err := svc.ImportComposeSnapshot(context.Background(), "demo", "manual")
+	if err != nil {
+		t.Fatalf("import snapshot: %v", err)
+	}
+
+	mutated, _, err := svc.MutateStoredSnapshotPort(context.Background(), "demo", WorkbenchPortMutationRequest{
+		Selector: WorkbenchPortSelector{
+			ServiceName:   "api",
+			ContainerPort: 80,
+		},
+		Action:         workbenchPortMutationActionSetManual,
+		ManualHostPort: intPtr(8088),
+	})
+	if err != nil {
+		t.Fatalf("mutate snapshot port: %v", err)
+	}
+
+	expectedRevision := mutated.Revision
+	preview, err := svc.PreviewComposeFromStoredSnapshot(context.Background(), "demo", WorkbenchComposePreviewRequest{
+		ExpectedRevision: &expectedRevision,
+	})
+	if err != nil {
+		t.Fatalf("preview compose: %v", err)
+	}
+	if preview.Metadata.Revision != mutated.Revision {
+		t.Fatalf("expected preview revision %d, got %d", mutated.Revision, preview.Metadata.Revision)
+	}
+	if preview.Metadata.SourceFingerprint != mutated.SourceFingerprint {
+		t.Fatalf("expected preview fingerprint %q, got %q", mutated.SourceFingerprint, preview.Metadata.SourceFingerprint)
+	}
+
+	for _, want := range []string{
+		`8088:80`,
+		"env_file:",
+		"POSTGRES_PASSWORD: secret",
+		"pgdata:/var/lib/postgresql/data",
+		"volumes:",
+		"pgdata: {}",
+	} {
+		if !strings.Contains(preview.Compose, want) {
+			t.Fatalf("expected preview compose to contain %q, got:\n%s", want, preview.Compose)
+		}
+	}
+
+	stored, exists, loadErr := svc.loadStoredWorkbenchSnapshot(context.Background(), "demo")
+	if loadErr != nil {
+		t.Fatalf("load stored snapshot: %v", loadErr)
+	}
+	if !exists {
+		t.Fatal("expected stored snapshot to exist")
+	}
+	if stored.Revision != mutated.Revision {
+		t.Fatalf("expected read-only preview to keep revision %d, got %d", mutated.Revision, stored.Revision)
+	}
+}
+
 func TestWorkbenchPreviewComposeFromStoredSnapshotValidationBlocked(t *testing.T) {
 	t.Parallel()
 
-	svc := NewWorkbenchServiceWithStorage(t.TempDir(), nil, &fakeSettingsRepo{}, "test-session-secret")
-	invalid := WorkbenchStackSnapshot{
-		ProjectName: "demo",
-		ComposePath: "/tmp/demo/docker-compose.yml",
-		Services: []WorkbenchComposeService{
-			{ServiceName: "api"},
-		},
+	templatesDir := t.TempDir()
+	projectDir := filepath.Join(templatesDir, "demo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
 	}
+	composePath := filepath.Join(projectDir, "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte("services:\n  api:\n    image: nginx:stable\n"), 0o644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+
+	svc := NewWorkbenchServiceWithStorage(templatesDir, nil, &fakeSettingsRepo{}, "test-session-secret")
+	imported, _, err := svc.ImportComposeSnapshot(context.Background(), "demo", "manual")
+	if err != nil {
+		t.Fatalf("import snapshot: %v", err)
+	}
+
+	invalid := imported
+	invalid.Ports = append(invalid.Ports, WorkbenchComposePort{
+		ServiceName:   "missing",
+		ContainerPort: 8080,
+	})
 	if err := svc.saveWorkbenchSnapshot(context.Background(), "demo", invalid); err != nil {
 		t.Fatalf("save invalid snapshot: %v", err)
 	}
 
-	_, err := svc.PreviewComposeFromStoredSnapshot(context.Background(), "demo", WorkbenchComposePreviewRequest{})
+	_, err = svc.PreviewComposeFromStoredSnapshot(context.Background(), "demo", WorkbenchComposePreviewRequest{})
 	if err == nil {
 		t.Fatal("expected preview validation error for invalid snapshot")
 	}

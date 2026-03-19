@@ -88,6 +88,7 @@ func main() {
 		contract.TaskTypeDockerRestartContainer,
 		contract.TaskTypeDockerRemoveContainer,
 		contract.TaskTypeComposeUpStack,
+		contract.TaskTypeHostRuntimeStats,
 	}); err != nil {
 		log.Fatalf("infra worker readiness check failed: %v", err)
 	}

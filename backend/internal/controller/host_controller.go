@@ -47,6 +47,15 @@ func (c *HostController) DockerUsage(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"summary": usage})
 }
 
+func (c *HostController) RuntimeStats(ctx *gin.Context) {
+	stats, err := c.service.RuntimeStats(ctx.Request.Context())
+	if err != nil {
+		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeHostStatsFailed, "failed to load host runtime stats")
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"stats": stats})
+}
+
 func (c *HostController) StreamDockerLogs(ctx *gin.Context) {
 	container := strings.TrimSpace(ctx.Query("container"))
 	if container == "" {

@@ -99,6 +99,7 @@ const error = ref<string | null>(null)
 const detail = ref<ProjectDetail | null>(null)
 const stackRestarting = ref(false)
 const stackRestartError = ref<string | null>(null)
+const workbenchPreviewPanelOpen = ref(false)
 const workbenchRestorePanelOpen = ref(false)
 const workbenchRestoreSelectedBackupId = ref('')
 const workbenchRestoreConfirmInput = ref('')
@@ -416,6 +417,7 @@ const workbenchLatestComposeBackup = computed<WorkbenchComposeBackupMetadata | n
   const latestBackup = backups.length > 0 ? backups[backups.length - 1] : null
   return latestBackup ?? null
 })
+const workbenchPreviewComposeText = computed(() => workbenchLastPreviewResult.value?.compose ?? '')
 const workbenchSelectedComposeBackup = computed<WorkbenchComposeBackupMetadata | null>(() => {
   const selectedBackupId = workbenchRestoreSelectedBackupId.value.trim().toLowerCase()
   if (!selectedBackupId) return null
@@ -1979,6 +1981,7 @@ const previewWorkbenchCompose = async () => {
     return
   }
 
+  workbenchPreviewPanelOpen.value = true
   toastStore.success(`Compose preview generated from revision ${result.revision}.`, 'Workbench preview')
 }
 
@@ -2229,6 +2232,11 @@ watch(workbenchRestoreSelectedBackupId, () => {
   workbenchRestoreConfirmInput.value = ''
 })
 
+watch(workbenchLastPreviewResult, (preview) => {
+  if (preview?.compose) return
+  workbenchPreviewPanelOpen.value = false
+})
+
 watch(workbenchRestorePanelOpen, (isOpen) => {
   if (!isOpen || !isAdmin.value || workbenchBackupInventoryStatus.value === 'loading') return
   void refreshWorkbenchComposeBackups()
@@ -2244,6 +2252,7 @@ watch(projectName, () => {
   activeSectionTab.value = 'workbench'
   stackRestartError.value = null
   workbenchRestorePanelOpen.value = false
+  workbenchPreviewPanelOpen.value = false
   workbenchRestoreSelectedBackupId.value = ''
   workbenchRestoreConfirmInput.value = ''
   workbenchPortManualInputs.value = {}
@@ -2582,6 +2591,65 @@ watch(projectName, () => {
       </UiPanel>
 
       <UiFormSidePanel
+        v-if="
+          activeSectionTab === 'workbench' &&
+          workbenchComposeSupported &&
+          workbenchSnapshotReady &&
+          workbenchPreviewComposeText
+        "
+        v-model="workbenchPreviewPanelOpen"
+        title="Compose preview"
+        eyebrow="Workbench"
+      >
+        <div class="space-y-4 text-sm text-[color:var(--muted)]">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p class="text-xs uppercase tracking-[0.2em] text-[color:var(--muted-2)]">Generated from snapshot</p>
+              <h3 class="mt-2 text-base font-semibold text-[color:var(--text)]">Preview compose output</h3>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <UiBadge :tone="workbenchPreviewMatchesSnapshot ? 'ok' : 'warn'">
+                {{ workbenchPreviewMatchesSnapshot ? 'Current snapshot' : 'Snapshot changed' }}
+              </UiBadge>
+              <UiBadge :tone="'neutral'">
+                Rev {{ workbenchLastPreviewResult?.revision ?? '—' }}
+              </UiBadge>
+            </div>
+          </div>
+
+          <p class="text-xs text-[color:var(--muted)]">
+            This preview is read-only and reflects the current Workbench snapshot revision/fingerprint.
+          </p>
+
+          <UiPanel variant="raise" class="p-0">
+            <pre
+              class="max-h-[58vh] overflow-auto rounded-2xl p-4 text-xs leading-5 text-[color:var(--text)]"
+            ><code>{{ workbenchPreviewComposeText }}</code></pre>
+          </UiPanel>
+
+          <div class="flex flex-wrap items-center gap-3">
+            <UiButton
+              variant="ghost"
+              size="sm"
+              class="w-full justify-center sm:w-auto"
+              :disabled="!workbenchPreviewComposeText"
+              @click="copyWorkbenchPreviewCompose"
+            >
+              Copy preview
+            </UiButton>
+            <UiButton
+              variant="ghost"
+              size="sm"
+              class="w-full justify-center sm:w-auto"
+              @click="workbenchPreviewPanelOpen = false"
+            >
+              Close preview
+            </UiButton>
+          </div>
+        </div>
+      </UiFormSidePanel>
+
+      <UiFormSidePanel
         v-if="activeSectionTab === 'workbench' && workbenchComposeSupported && workbenchSnapshotReady"
         v-model="workbenchRestorePanelOpen"
         title="Compose restore"
@@ -2831,6 +2899,7 @@ watch(projectName, () => {
       <ProjectRuntimeUnitsSection
         v-else-if="activeSectionTab === 'runtime'"
         :project-name="projectName"
+        :project-runtime-key="detail.project.normalizedName"
         :containers="detail.containers"
         :project-status="detail.project.record?.status || ''"
         :is-admin="isAdmin"

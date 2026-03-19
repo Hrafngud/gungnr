@@ -39,3 +39,46 @@ export interface DockerUsageSummary {
   project?: string
   projectCounts?: DockerUsageProjectCounts
 }
+
+export interface HostRuntimeResource {
+  totalBytes: number
+  usedBytes: number
+  freeBytes: number
+  usedPercent: number
+}
+
+export interface HostRuntimeCPU {
+  model: string
+  cores: number
+  threads: number
+}
+
+export interface HostRuntimeGPU {
+  model: string
+}
+
+export interface HostRuntimeWorkloadUsage {
+  containers: number
+  runningContainers: number
+  cpuUsedPercent: number
+  memoryUsedBytes: number
+  diskUsedBytes: number
+  memorySharePercent: number
+  diskSharePercent: number
+}
+
+export interface HostRuntimeStats {
+  collectedAt: string
+  uptimeSeconds: number
+  uptimeHuman: string
+  systemImage: string
+  kernel: string
+  cpu: HostRuntimeCPU
+  gpu?: HostRuntimeGPU
+  memory: HostRuntimeResource
+  disk: HostRuntimeResource
+  panelUsage: HostRuntimeWorkloadUsage
+  projectsUsage: HostRuntimeWorkloadUsage
+  projectsByName?: Record<string, HostRuntimeWorkloadUsage>
+  warnings?: string[]
+}

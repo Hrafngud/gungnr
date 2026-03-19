@@ -120,6 +120,7 @@ const (
 	CodeHostAdminRequired     Code = "HOST-403-ADMIN"
 	CodeHostDockerFailed      Code = "HOST-500-DOCKER"
 	CodeHostUsageFailed       Code = "HOST-500-USAGE"
+	CodeHostStatsFailed       Code = "HOST-500-STATS"
 	CodeHostLogsFailed        Code = "HOST-500-LOGS"
 	CodeHostStreamUnsupported Code = "HOST-500-STREAM"
 

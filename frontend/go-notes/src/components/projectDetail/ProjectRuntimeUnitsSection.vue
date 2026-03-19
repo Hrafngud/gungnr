@@ -12,8 +12,10 @@ import UiState from '@/components/ui/UiState.vue'
 import NavIcon from '@/components/NavIcon.vue'
 import type { BadgeTone } from '@/components/workbench/projectDetailWorkbenchTypes'
 import { apiErrorMessage } from '@/services/api'
+import { hostApi } from '@/services/host'
 import { projectsApi } from '@/services/projects'
 import { useToastStore } from '@/stores/toasts'
+import type { HostRuntimeWorkloadUsage } from '@/types/host'
 import type { ProjectContainer } from '@/types/projects'
 
 type ContainerActionKind = 'stop' | 'restart' | 'remove'
@@ -27,6 +29,7 @@ type ContainerActionState = {
 
 const props = defineProps<{
   projectName: string
+  projectRuntimeKey: string
   containers: ProjectContainer[]
   projectStatus: string
   isAdmin: boolean
@@ -44,6 +47,47 @@ const actionStates = reactive<Record<string, ContainerActionState>>({})
 const lifecycleActionModalOpen = ref(false)
 const lifecycleActionTarget = ref<ProjectContainer | null>(null)
 const lifecycleActionKind = ref<ContainerActionKind | null>(null)
+const usageLoading = ref(false)
+const usageError = ref<string | null>(null)
+const projectUsage = ref<HostRuntimeWorkloadUsage | null>(null)
+const projectUsageWarnings = ref<string[]>([])
+
+const meterSegmentCount = 48
+
+const clampPercent = (value: number | null | undefined) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return 0
+  if (value < 0) return 0
+  if (value > 100) return 100
+  return value
+}
+
+const formatPercent = (value: number | null | undefined) => `${clampPercent(value).toFixed(1)}%`
+
+const formatBytes = (bytes: number | null | undefined) => {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+  let value = bytes
+  let index = 0
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024
+    index += 1
+  }
+  const rounded = value >= 10 ? value.toFixed(1) : value.toFixed(2)
+  return `${rounded} ${units[index]}`
+}
+
+const buildMeterSegments = (percent: number, key: string) => {
+  const normalized = clampPercent(percent)
+  return Array.from({ length: meterSegmentCount }, (_, index) => {
+    const threshold = ((index + 1) / meterSegmentCount) * 100
+    const tone = threshold <= 55 ? 'ok' : threshold <= 80 ? 'warn' : 'error'
+    return {
+      key: `${key}-${index}`,
+      active: threshold <= normalized,
+      tone,
+    }
+  })
+}
 
 function containerTone(container: ProjectContainer): BadgeTone {
   const normalized = container.status.trim().toLowerCase()
@@ -77,6 +121,62 @@ const actionStateFor = (container: ProjectContainer): ContainerActionState => {
     }
   }
   return actionStates[container.id] as ContainerActionState
+}
+
+const activeUsageProjectKey = computed(() => {
+  const runtimeKey = props.projectRuntimeKey.trim().toLowerCase()
+  if (runtimeKey) return runtimeKey
+  const containerProject = props.containers
+    .map((container) => container.project.trim().toLowerCase())
+    .find((value) => value.length > 0)
+  if (containerProject) return containerProject
+  return props.projectName.trim().toLowerCase()
+})
+
+const usageContainerSignature = computed(() =>
+  props.containers.map((container) => `${container.id}:${container.status}`).join('|'),
+)
+
+const usageIndicators = computed(() => {
+  const usage = projectUsage.value
+  if (!usage) return []
+  return [
+    {
+      key: 'cpu',
+      label: 'CPU usage',
+      value: formatPercent(usage.cpuUsedPercent),
+      percent: clampPercent(usage.cpuUsedPercent),
+      meta: 'Aggregated from docker stats for project containers.',
+      segments: buildMeterSegments(usage.cpuUsedPercent, 'project-cpu'),
+    },
+    {
+      key: 'memory',
+      label: 'RAM usage',
+      value: formatBytes(usage.memoryUsedBytes),
+      percent: clampPercent(usage.memorySharePercent),
+      meta: `${formatPercent(usage.memorySharePercent)} of host memory`,
+      segments: buildMeterSegments(usage.memorySharePercent, 'project-memory'),
+    },
+    {
+      key: 'disk',
+      label: 'Disk usage',
+      value: formatBytes(usage.diskUsedBytes),
+      percent: clampPercent(usage.diskSharePercent),
+      meta: `${formatPercent(usage.diskSharePercent)} of host disk`,
+      segments: buildMeterSegments(usage.diskSharePercent, 'project-disk'),
+    },
+  ]
+})
+
+const resolveProjectUsage = (projectsByName: Record<string, HostRuntimeWorkloadUsage> | undefined) => {
+  if (!projectsByName) return null
+  const key = activeUsageProjectKey.value
+  if (key && projectsByName[key]) return projectsByName[key]
+  const fallbackKey = Object.keys(projectsByName).find(
+    (projectKey) => projectKey.toLowerCase() === key,
+  )
+  if (fallbackKey) return projectsByName[fallbackKey] ?? null
+  return null
 }
 
 const lifecycleActionText = computed(() => {
@@ -186,10 +286,34 @@ const confirmLifecycleAction = async () => {
   }
 }
 
+const loadProjectUsage = async () => {
+  usageLoading.value = true
+  usageError.value = null
+  try {
+    const { data } = await hostApi.runtimeStats()
+    projectUsage.value = resolveProjectUsage(data.stats.projectsByName)
+    projectUsageWarnings.value = (data.stats.warnings ?? []).slice(0, 2)
+  } catch (err) {
+    usageError.value = apiErrorMessage(err)
+    projectUsage.value = null
+    projectUsageWarnings.value = []
+  } finally {
+    usageLoading.value = false
+  }
+}
+
 watch(lifecycleActionModalOpen, (open) => {
   if (open) return
   lifecycleActionTarget.value = null
   lifecycleActionKind.value = null
+})
+
+watch(activeUsageProjectKey, () => {
+  void loadProjectUsage()
+}, { immediate: true })
+
+watch(usageContainerSignature, () => {
+  void loadProjectUsage()
 })
 </script>
 
@@ -225,6 +349,107 @@ watch(lifecycleActionModalOpen, (open) => {
         </div>
       </UiPanel>
     </div>
+
+    <UiPanel variant="soft" class="space-y-4 p-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+            Usage
+          </p>
+          <h3 class="mt-2 text-lg font-semibold text-[color:var(--text)]">
+            Project footprint
+          </h3>
+          <p class="mt-1 text-xs text-[color:var(--muted)]">
+            Project-specific CPU, RAM, and disk usage from the host runtime telemetry path.
+          </p>
+        </div>
+        <UiButton
+          variant="ghost"
+          size="sm"
+          :disabled="usageLoading"
+          @click="loadProjectUsage"
+        >
+          <span class="inline-flex items-center gap-2">
+            <NavIcon name="refresh" class="h-3.5 w-3.5" />
+            <UiInlineSpinner v-if="usageLoading" />
+            Refresh usage
+          </span>
+        </UiButton>
+      </div>
+
+      <UiState v-if="usageError" tone="error">
+        {{ usageError }}
+      </UiState>
+      <UiState v-else-if="usageLoading" loading>
+        Loading project usage...
+      </UiState>
+      <UiState v-else-if="!projectUsage">
+        Usage metrics are not available for this project yet.
+      </UiState>
+      <template v-else>
+        <UiPanel variant="soft" class="grid gap-3 p-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div class="space-y-1">
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              Containers
+            </p>
+            <p class="text-base font-semibold text-[color:var(--text)]">
+              {{ projectUsage.runningContainers }}/{{ projectUsage.containers }} running
+            </p>
+          </div>
+          <div class="space-y-1">
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              Runtime key
+            </p>
+            <p class="break-all text-xs text-[color:var(--muted)]">
+              {{ activeUsageProjectKey || 'n/a' }}
+            </p>
+          </div>
+          <div class="space-y-1">
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              Source
+            </p>
+            <p class="text-xs text-[color:var(--muted)]">
+              Host worker runtime stats
+            </p>
+          </div>
+        </UiPanel>
+
+        <div class="grid gap-3 xl:grid-cols-3">
+          <article
+            v-for="indicator in usageIndicators"
+            :key="indicator.key"
+            class="space-y-2 rounded-md border border-[color:var(--border-soft)] bg-[color:var(--surface-inset)]/55 p-3"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                {{ indicator.label }}
+              </p>
+              <p class="text-sm font-semibold text-[color:var(--text)]">
+                {{ indicator.value }}
+              </p>
+            </div>
+            <div class="runtime-usage-led-bar" role="img" :aria-label="`${indicator.label} ${formatPercent(indicator.percent)}`">
+              <span
+                v-for="segment in indicator.segments"
+                :key="segment.key"
+                :class="[
+                  'runtime-usage-led-segment',
+                  segment.active ? `is-active tone-${segment.tone}` : 'is-idle',
+                ]"
+              />
+            </div>
+            <p class="text-xs text-[color:var(--muted)]">
+              {{ indicator.meta }}
+            </p>
+          </article>
+        </div>
+
+        <UiInlineFeedback v-if="projectUsageWarnings.length > 0" tone="warn">
+          {{ projectUsageWarnings.join(' · ') }}
+        </UiInlineFeedback>
+      </template>
+    </UiPanel>
+
     <UiInlineFeedback v-if="props.stackRestartError" tone="error">
       {{ props.stackRestartError }}
     </UiInlineFeedback>
@@ -363,3 +588,49 @@ watch(lifecycleActionModalOpen, (open) => {
     </UiModal>
   </UiPanel>
 </template>
+
+<style scoped>
+.runtime-usage-led-bar {
+  display: grid;
+  grid-template-columns: repeat(48, minmax(0, 1fr));
+  gap: 2px;
+  border: 1px solid color-mix(in oklch, var(--border-soft) 78%, black);
+  background: color-mix(in oklch, var(--surface-inset) 84%, black);
+  border-radius: 4px;
+  padding: 4px;
+}
+
+.runtime-usage-led-segment {
+  display: block;
+  height: 10px;
+  border-radius: 1px;
+  background: color-mix(in oklch, var(--surface-3) 82%, black);
+  transition: background-color 0.18s ease, opacity 0.18s ease;
+}
+
+.runtime-usage-led-segment.is-idle {
+  opacity: 0.38;
+}
+
+.runtime-usage-led-segment.is-active {
+  opacity: 1;
+}
+
+.runtime-usage-led-segment.is-active.tone-ok {
+  background: color-mix(in oklch, var(--success) 86%, #29bf12);
+}
+
+.runtime-usage-led-segment.is-active.tone-warn {
+  background: color-mix(in oklch, var(--warning) 88%, #ff7a00);
+}
+
+.runtime-usage-led-segment.is-active.tone-error {
+  background: color-mix(in oklch, var(--danger) 88%, #ff2d2d);
+}
+
+@media (max-width: 768px) {
+  .runtime-usage-led-segment {
+    height: 8px;
+  }
+}
+</style>

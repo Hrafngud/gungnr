@@ -25,7 +25,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useFieldGuidance } from '@/composables/useFieldGuidance'
 import { usePageLoadingStore } from '@/stores/pageLoading'
 import type { CloudflaredPreview, Settings, SettingsSources } from '@/types/settings'
-import type { DockerContainer, DockerUsageSummary } from '@/types/host'
+import type { DockerContainer, DockerUsageSummary, HostRuntimeStats } from '@/types/host'
 import type { LocalProject } from '@/types/projects'
 import type { DockerHealth, TunnelHealth } from '@/types/health'
 
@@ -75,6 +75,9 @@ const containersError = ref<string | null>(null)
 const usageSummary = ref<DockerUsageSummary | null>(null)
 const usageLoading = ref(false)
 const usageError = ref<string | null>(null)
+const runtimeStats = ref<HostRuntimeStats | null>(null)
+const runtimeStatsLoading = ref(false)
+const runtimeStatsError = ref<string | null>(null)
 const localProjects = ref<LocalProject[]>([])
 const localProjectsLoading = ref(false)
 const localProjectsError = ref<string | null>(null)
@@ -194,6 +197,106 @@ const usageCounts = computed(() => {
     images: summary.images?.count ?? 0,
     volumes: summary.volumes?.count ?? 0,
   }
+})
+
+const hostDataRefreshing = computed(() =>
+  containersLoading.value || usageLoading.value || localProjectsLoading.value || runtimeStatsLoading.value,
+)
+
+const meterSegmentCount = 48
+
+const clampPercent = (value: number | null | undefined) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return 0
+  if (value < 0) return 0
+  if (value > 100) return 100
+  return value
+}
+
+const formatPercent = (value: number | null | undefined) => `${clampPercent(value).toFixed(1)}%`
+
+const formatBytes = (bytes: number | null | undefined) => {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+  let value = bytes
+  let index = 0
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024
+    index++
+  }
+  const rounded = value >= 10 ? value.toFixed(1) : value.toFixed(2)
+  return `${rounded} ${units[index]}`
+}
+
+const buildMeterSegments = (percent: number, key: string) => {
+  const normalized = clampPercent(percent)
+  return Array.from({ length: meterSegmentCount }, (_, index) => {
+    const threshold = ((index + 1) / meterSegmentCount) * 100
+    const tone = threshold <= 55 ? 'ok' : threshold <= 80 ? 'warn' : 'error'
+    return {
+      key: `${key}-${index}`,
+      active: threshold <= normalized,
+      tone,
+    }
+  })
+}
+
+const runtimeHardwareIndicators = computed(() => {
+  const stats = runtimeStats.value
+  if (!stats) return []
+  return [
+    {
+      key: 'memory',
+      label: 'RAM usage',
+      value: formatBytes(stats.memory.usedBytes),
+      meta: `${formatPercent(stats.memory.usedPercent)} of ${formatBytes(stats.memory.totalBytes)}`,
+      percent: clampPercent(stats.memory.usedPercent),
+      segments: buildMeterSegments(stats.memory.usedPercent, 'memory'),
+    },
+    {
+      key: 'disk',
+      label: 'Disk usage',
+      value: formatBytes(stats.disk.usedBytes),
+      meta: `${formatPercent(stats.disk.usedPercent)} of ${formatBytes(stats.disk.totalBytes)}`,
+      percent: clampPercent(stats.disk.usedPercent),
+      segments: buildMeterSegments(stats.disk.usedPercent, 'disk'),
+    },
+  ]
+})
+
+const runtimeWorkloadIndicators = computed(() => {
+  const stats = runtimeStats.value
+  if (!stats) return []
+  return [
+    {
+      key: 'panel',
+      label: 'Gungnr panel',
+      containers: stats.panelUsage.containers,
+      runningContainers: stats.panelUsage.runningContainers,
+      memoryUsed: formatBytes(stats.panelUsage.memoryUsedBytes),
+      diskUsed: formatBytes(stats.panelUsage.diskUsedBytes),
+      memoryPercentLabel: formatPercent(stats.panelUsage.memorySharePercent),
+      diskPercentLabel: formatPercent(stats.panelUsage.diskSharePercent),
+      memorySegments: buildMeterSegments(stats.panelUsage.memorySharePercent, 'panel-memory'),
+      diskSegments: buildMeterSegments(stats.panelUsage.diskSharePercent, 'panel-disk'),
+    },
+    {
+      key: 'projects',
+      label: 'Projects',
+      containers: stats.projectsUsage.containers,
+      runningContainers: stats.projectsUsage.runningContainers,
+      memoryUsed: formatBytes(stats.projectsUsage.memoryUsedBytes),
+      diskUsed: formatBytes(stats.projectsUsage.diskUsedBytes),
+      memoryPercentLabel: formatPercent(stats.projectsUsage.memorySharePercent),
+      diskPercentLabel: formatPercent(stats.projectsUsage.diskSharePercent),
+      memorySegments: buildMeterSegments(stats.projectsUsage.memorySharePercent, 'projects-memory'),
+      diskSegments: buildMeterSegments(stats.projectsUsage.diskSharePercent, 'projects-disk'),
+    },
+  ]
+})
+
+const runtimeWarnings = computed(() => {
+  const warnings = runtimeStats.value?.warnings ?? []
+  return warnings.slice(0, 3)
 })
 
 const statusTone = (status: string): BadgeTone => {
@@ -336,6 +439,20 @@ const loadDockerUsage = async () => {
   }
 }
 
+const loadRuntimeStats = async () => {
+  runtimeStatsLoading.value = true
+  runtimeStatsError.value = null
+  try {
+    const { data } = await hostApi.runtimeStats()
+    runtimeStats.value = data.stats ?? null
+  } catch (err) {
+    runtimeStatsError.value = apiErrorMessage(err)
+    runtimeStats.value = null
+  } finally {
+    runtimeStatsLoading.value = false
+  }
+}
+
 const loadLocalProjects = async () => {
   localProjectsLoading.value = true
   localProjectsError.value = null
@@ -351,7 +468,7 @@ const loadLocalProjects = async () => {
 }
 
 const refreshHostData = async () => {
-  await Promise.allSettled([loadContainers(), loadLocalProjects(), loadDockerUsage()])
+  await Promise.allSettled([loadContainers(), loadLocalProjects(), loadDockerUsage(), loadRuntimeStats()])
 }
 
 const stopContainer = async (container: DockerContainer) => {
@@ -455,6 +572,7 @@ onMounted(async () => {
     loadContainers(),
     loadLocalProjects(),
     loadDockerUsage(),
+    loadRuntimeStats(),
   ])
   pageLoading.stop()
 })
@@ -489,12 +607,12 @@ watch(projectFilter, () => {
         <UiButton
           variant="ghost"
           size="sm"
-          :disabled="containersLoading"
+          :disabled="hostDataRefreshing"
           @click="refreshHostData"
         >
           <span class="flex items-center gap-2">
             <NavIcon name="refresh" class="h-3.5 w-3.5" />
-            <UiInlineSpinner v-if="containersLoading" />
+            <UiInlineSpinner v-if="hostDataRefreshing" />
             Refresh host data
           </span>
         </UiButton>
@@ -538,6 +656,190 @@ watch(projectFilter, () => {
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+              Host stats
+            </p>
+            <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">
+              Runtime signals
+            </h2>
+            <p class="mt-2 text-sm text-[color:var(--muted)]">
+              Live host runtime snapshot from worker with panel and project footprint indicators.
+            </p>
+          </div>
+          <UiButton
+            variant="ghost"
+            size="sm"
+            :disabled="runtimeStatsLoading"
+            @click="loadRuntimeStats"
+          >
+            <span class="flex items-center gap-2">
+              <NavIcon name="refresh" class="h-3.5 w-3.5" />
+              <UiInlineSpinner v-if="runtimeStatsLoading" />
+              Refresh stats
+            </span>
+          </UiButton>
+        </div>
+
+        <UiState v-if="runtimeStatsError" tone="error">
+          {{ runtimeStatsError }}
+        </UiState>
+
+        <UiState v-else-if="runtimeStatsLoading" loading>
+          Loading runtime stats...
+        </UiState>
+
+        <template v-else-if="runtimeStats">
+          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <UiPanel variant="soft" class="space-y-2 p-3">
+              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                Uptime
+              </p>
+              <p class="text-lg font-semibold text-[color:var(--text)]">
+                {{ runtimeStats.uptimeHuman || '—' }}
+              </p>
+              <p class="text-xs text-[color:var(--muted)]">
+                {{ runtimeStats.uptimeSeconds }} seconds
+              </p>
+            </UiPanel>
+            <UiPanel variant="soft" class="space-y-2 p-3">
+              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                System image
+              </p>
+              <p class="text-sm font-semibold text-[color:var(--text)] break-words">
+                {{ runtimeStats.systemImage || 'Unknown' }}
+              </p>
+              <p class="text-xs text-[color:var(--muted)] break-words">
+                {{ runtimeStats.kernel || 'Kernel unknown' }}
+              </p>
+            </UiPanel>
+            <UiPanel variant="soft" class="space-y-2 p-3">
+              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                CPU
+              </p>
+              <p class="text-sm font-semibold text-[color:var(--text)] break-words">
+                {{ runtimeStats.cpu.model || 'Unknown CPU' }}
+              </p>
+              <p class="text-xs text-[color:var(--muted)]">
+                {{ runtimeStats.cpu.cores }} cores
+              </p>
+            </UiPanel>
+            <UiPanel variant="soft" class="space-y-2 p-3">
+              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                GPU
+              </p>
+              <p class="text-sm font-semibold text-[color:var(--text)] break-words">
+                {{ runtimeStats.gpu?.model || 'Not detected' }}
+              </p>
+              <p class="text-xs text-[color:var(--muted)]">
+                Optional hardware probe
+              </p>
+            </UiPanel>
+          </div>
+
+          <div class="grid gap-6 xl:grid-cols-2">
+            <UiPanel variant="soft" class="space-y-4 p-4">
+              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                Host resources
+              </p>
+              <article
+                v-for="indicator in runtimeHardwareIndicators"
+                :key="indicator.key"
+                class="space-y-2 rounded-md border border-[color:var(--border-soft)] bg-[color:var(--surface-inset)]/55 p-3"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                    {{ indicator.label }}
+                  </p>
+                  <p class="text-sm font-semibold text-[color:var(--text)]">
+                    {{ indicator.value }}
+                  </p>
+                </div>
+                <div class="stats-led-bar" role="img" :aria-label="`${indicator.label} ${formatPercent(indicator.percent)}`">
+                  <span
+                    v-for="segment in indicator.segments"
+                    :key="segment.key"
+                    :class="[
+                      'stats-led-segment',
+                      segment.active ? `is-active tone-${segment.tone}` : 'is-idle',
+                    ]"
+                  />
+                </div>
+                <p class="text-xs text-[color:var(--muted)]">
+                  {{ indicator.meta }}
+                </p>
+              </article>
+            </UiPanel>
+
+            <UiPanel variant="soft" class="space-y-4 p-4">
+              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                Gungnr footprint
+              </p>
+              <article
+                v-for="indicator in runtimeWorkloadIndicators"
+                :key="indicator.key"
+                class="space-y-3 rounded-md border border-[color:var(--border-soft)] bg-[color:var(--surface-inset)]/55 p-3"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <p class="text-sm font-semibold text-[color:var(--text)]">
+                    {{ indicator.label }}
+                  </p>
+                  <p class="text-xs text-[color:var(--muted)]">
+                    {{ indicator.runningContainers }}/{{ indicator.containers }} running
+                  </p>
+                </div>
+                <div class="space-y-2">
+                  <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span class="text-[color:var(--muted)]">Memory</span>
+                    <span class="text-[color:var(--text)]">
+                      {{ indicator.memoryPercentLabel }} ({{ indicator.memoryUsed }})
+                    </span>
+                  </div>
+                  <div class="stats-led-bar" role="img" :aria-label="`${indicator.label} memory ${indicator.memoryPercentLabel}`">
+                    <span
+                      v-for="segment in indicator.memorySegments"
+                      :key="segment.key"
+                      :class="[
+                        'stats-led-segment',
+                        segment.active ? `is-active tone-${segment.tone}` : 'is-idle',
+                      ]"
+                    />
+                  </div>
+                </div>
+                <div class="space-y-2">
+                  <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span class="text-[color:var(--muted)]">Disk</span>
+                    <span class="text-[color:var(--text)]">
+                      {{ indicator.diskPercentLabel }} ({{ indicator.diskUsed }})
+                    </span>
+                  </div>
+                  <div class="stats-led-bar" role="img" :aria-label="`${indicator.label} disk ${indicator.diskPercentLabel}`">
+                    <span
+                      v-for="segment in indicator.diskSegments"
+                      :key="segment.key"
+                      :class="[
+                        'stats-led-segment',
+                        segment.active ? `is-active tone-${segment.tone}` : 'is-idle',
+                      ]"
+                    />
+                  </div>
+                </div>
+              </article>
+            </UiPanel>
+          </div>
+
+          <UiInlineFeedback v-if="runtimeWarnings.length > 0" tone="warn">
+            {{ runtimeWarnings.join(' · ') }}
+          </UiInlineFeedback>
+        </template>
+
+        <UiState v-else>
+          Runtime stats not loaded yet.
+        </UiState>
+      </UiPanel>
+
+      <UiPanel as="section" class="space-y-6 p-6">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
               Host integrations
             </p>
             <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">
@@ -550,12 +852,12 @@ watch(projectFilter, () => {
         <UiButton
           variant="ghost"
           size="sm"
-          :disabled="containersLoading"
+          :disabled="hostDataRefreshing"
           @click="refreshHostData"
         >
           <span class="flex items-center gap-2">
             <NavIcon name="refresh" class="h-3.5 w-3.5" />
-            <UiInlineSpinner v-if="containersLoading" />
+            <UiInlineSpinner v-if="hostDataRefreshing" />
             Refresh list
             </span>
           </UiButton>
@@ -1077,3 +1379,49 @@ watch(projectFilter, () => {
     />
   </section>
 </template>
+
+<style scoped>
+.stats-led-bar {
+  display: grid;
+  grid-template-columns: repeat(48, minmax(0, 1fr));
+  gap: 2px;
+  border: 1px solid color-mix(in oklch, var(--border-soft) 78%, black);
+  background: color-mix(in oklch, var(--surface-inset) 84%, black);
+  border-radius: 4px;
+  padding: 4px;
+}
+
+.stats-led-segment {
+  display: block;
+  height: 10px;
+  border-radius: 1px;
+  background: color-mix(in oklch, var(--surface-3) 82%, black);
+  transition: background-color 0.18s ease, opacity 0.18s ease;
+}
+
+.stats-led-segment.is-idle {
+  opacity: 0.38;
+}
+
+.stats-led-segment.is-active {
+  opacity: 1;
+}
+
+.stats-led-segment.is-active.tone-ok {
+  background: color-mix(in oklch, var(--success) 86%, #29bf12);
+}
+
+.stats-led-segment.is-active.tone-warn {
+  background: color-mix(in oklch, var(--warning) 88%, #ff7a00);
+}
+
+.stats-led-segment.is-active.tone-error {
+  background: color-mix(in oklch, var(--danger) 88%, #ff2d2d);
+}
+
+@media (max-width: 768px) {
+  .stats-led-segment {
+    height: 8px;
+  }
+}
+</style>

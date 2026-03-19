@@ -147,7 +147,7 @@ func (r *Runner) ProcessOnce(ctx context.Context) error {
 
 func (r *Runner) supportsTask(taskType contract.TaskType) bool {
 	switch taskType {
-	case contract.TaskTypeRestartTunnel, contract.TaskTypeDockerStopContainer, contract.TaskTypeDockerRestartContainer, contract.TaskTypeDockerRemoveContainer, contract.TaskTypeComposeUpStack:
+	case contract.TaskTypeRestartTunnel, contract.TaskTypeDockerStopContainer, contract.TaskTypeDockerRestartContainer, contract.TaskTypeDockerRemoveContainer, contract.TaskTypeComposeUpStack, contract.TaskTypeHostRuntimeStats:
 		return true
 	default:
 		return false
@@ -161,6 +161,7 @@ func (r *Runner) SupportedTasks() []contract.TaskType {
 		contract.TaskTypeDockerRestartContainer,
 		contract.TaskTypeDockerRemoveContainer,
 		contract.TaskTypeComposeUpStack,
+		contract.TaskTypeHostRuntimeStats,
 	}
 }
 
@@ -182,6 +183,7 @@ type taskOutcome struct {
 	err     error
 	logTail []string
 	logPath string
+	data    map[string]any
 }
 
 func (r *Runner) handleIntent(ctx context.Context, intent contract.Intent) error {
@@ -210,6 +212,8 @@ func (r *Runner) handleIntent(ctx context.Context, intent contract.Intent) error
 		outcome = r.handleDockerRemove(ctx, intent)
 	case contract.TaskTypeComposeUpStack:
 		outcome = r.handleComposeUpStack(ctx, intent)
+	case contract.TaskTypeHostRuntimeStats:
+		outcome = r.handleHostRuntimeStats(ctx, intent)
 	default:
 		outcome.err = fmt.Errorf("unsupported task type: %s", intent.TaskType)
 	}
@@ -225,6 +229,7 @@ func (r *Runner) handleIntent(ctx context.Context, intent contract.Intent) error
 		FinishedAt: time.Now().UTC(),
 		LogTail:    outcome.logTail,
 		LogPath:    outcome.logPath,
+		Data:       outcome.data,
 	}
 	if outcome.err != nil {
 		final.Status = contract.StatusFailed
