@@ -13,6 +13,7 @@ const updateBaseLinks = () => {
     { selector: '[data-home-link]', path: '/index.html' },
     { selector: '[data-docs-link]', path: '/docs.html' },
     { selector: '[data-errors-link]', path: '/errors.html' },
+    { selector: '[data-changelog-link]', path: '/changelog.html' },
     { selector: '[data-legal-notice-link]', path: '/legal-notice.html' },
   ];
 

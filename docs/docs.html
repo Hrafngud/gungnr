@@ -73,6 +73,7 @@
             <a class="nav-link" href="./index.html" data-home-link>Home</a>
             <a class="nav-link" href="./docs.html" data-docs-link data-active="true">Docs</a>
             <a class="nav-link" href="./errors.html" data-errors-link>Errors</a>
+            <a class="nav-link" href="./changelog.html" data-changelog-link>Changelog</a>
           </nav>
           <div class="header-search">
             <form class="search-form" role="search">
@@ -176,8 +177,11 @@
                 <div class="sidebar-sub">
                   <a data-nav-link href="#usage-first-login">First login</a>
                   <a data-nav-link href="#usage-deploy">Deploy flows</a>
+                  <a data-nav-link href="#usage-project-workspace">Project workspace</a>
                   <a data-nav-link href="#usage-workbench">Workbench</a>
+                  <a data-nav-link href="#usage-netbird">NetBird</a>
                   <a data-nav-link href="#usage-ops">Operations</a>
+                  <a data-nav-link href="#usage-changelog">Changelog</a>
                 </div>
               </div>
             </aside>
@@ -375,7 +379,7 @@
             >
               <h3 class="text-xl font-semibold">Compatibility</h3>
               <div class="mt-2 border-t border-[color:var(--muted)] pt-4">
-                <p class="text-sm text-[color:var(--muted)]">Currently, Gungnr is <b>only supported on Linux</b>, we are looking foward to introduce a compatibility layer for other OS soon:</p>
+                <p class="text-sm text-[color:var(--muted)]">Currently, Gungnr is <b>only supported on Linux</b>, and support for other OSes is planned for future releases:</p>
               </div>
               <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
                 <li>Linux (amd64/arm64) with <code>apt</code>, <code>dnf</code>, <code>yum</code>, <code>pacman</code>, <code>apk</code>, or <code>zypper</code>.</li>
@@ -608,7 +612,7 @@
                 </div>
               </div>
               <div class="step-card">
-                <p class="step-index">Step 03</p>
+                <p class="step-index">Step 04</p>
                 <h3 class="mt-2 text-lg font-semibold">Run bootstrap</h3>
                 <p class="mt-2 text-sm text-[color:var(--muted)]">
                   The CLI prompts for GitHub, Cloudflare, and DNS inputs.
@@ -682,28 +686,32 @@
               data-doc-section
               data-doc-title="Tunnel auto-start watchdog"
               data-doc-group="installation"
-              data-doc-tags="cloudflared cron watchdog"
+              data-doc-tags="cloudflared keepalive systemd cron watchdog"
             >
               <h3 class="text-xl font-semibold">Tunnel auto-start watchdog</h3>
               <p class="mt-2 text-sm text-[color:var(--muted)]">
-                Bootstrap installs a lightweight cron watchdog so the tunnel restarts on reboot and is checked
-                every 5 minutes. The scripts live under <code>~/gungnr/state</code>.
+                Reboot fallback is optional during bootstrap and is also manageable later with
+                <code>gungnr keepalive</code>. When enabled, Gungnr installs the supervisor chain in this order:
+                system-level systemd, then user-level systemd, then cron fallback.
               </p>
               <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                <li><code>/etc/systemd/system/gungnr.service</code> + <code>gungnr-keepalive.timer</code> (preferred)</li>
+                <li><code>~/.config/systemd/user/gungnr-cloudflared-keepalive.service</code> + <code>.timer</code> (fallback)</li>
+                <li><code>crontab</code> <code>@reboot</code> + 5-minute watch entry (last fallback)</li>
                 <li><code>~/gungnr/state/cloudflared-run.sh</code> (starts the tunnel with the generated config)</li>
                 <li><code>~/gungnr/state/cloudflared-ensure.sh</code> (verifies the process and relaunches if needed)</li>
               </ul>
               <div class="mt-4 code-block" id="cmd-watchdog-run">
                 <button class="copy-button" data-copy-target="#cmd-watchdog-run code">Copy</button>
-                <pre class="m-0 text-sm"><code>~/gungnr/state/cloudflared-ensure.sh</code></pre>
+                <pre class="m-0 text-sm"><code>gungnr keepalive enable</code></pre>
               </div>
               <div class="mt-4 code-block" id="cmd-watchdog-view">
                 <button class="copy-button" data-copy-target="#cmd-watchdog-view code">Copy</button>
-                <pre class="m-0 text-sm"><code>crontab -l | rg 'gungnr-cloudflared'</code></pre>
+                <pre class="m-0 text-sm"><code>gungnr keepalive status</code></pre>
               </div>
               <div class="mt-4 code-block" id="cmd-watchdog-remove">
                 <button class="copy-button" data-copy-target="#cmd-watchdog-remove code">Copy</button>
-                <pre class="m-0 text-sm"><code>crontab -l | rg -v 'gungnr-cloudflared' | crontab -</code></pre>
+                <pre class="m-0 text-sm"><code>gungnr keepalive disable</code></pre>
               </div>
             </div>
           </section>
@@ -757,7 +765,7 @@
                 <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
                   <li>Create from template: uses the GitHub App configuration to start a fresh project from a curated fullstack template. Currently we only feature a Vue + Go + PostgreSQL opinated template, but further, new templates will be added with different stacks.</li>
                   <li>Deploy existing: forwards a local application running on localhost:PORT to a subdomain. Useful to front-end quick view from multiple devices</li>
-                  <li>Quick services: Pulls a docker registry official image/compose and fowards to a tunnel. You can do some quite intresting setups quickly, test services</li>
+                  <li>Quick services: pulls a Docker image, runs it as a container with published host ports, and forwards it to a tunnel for fast service testing.</li>
                 </ul>
               </div>
               <div class="card-soft p-6">
@@ -771,73 +779,82 @@
             </div>
 
             <div
+              id="usage-project-workspace"
+              class="mt-6 card p-6"
+              data-doc-section
+              data-doc-title="Project workspace"
+              data-doc-group="usage"
+              data-doc-tags="projects runtime environment archive activity"
+            >
+              <h3 class="text-xl font-semibold">Project workspace</h3>
+              <p class="mt-2 text-sm text-[color:var(--muted)]">
+                The project detail page is now an operator workspace with tabs for Workbench, Runtime units, Environment,
+                Archive, and Activity timeline.
+              </p>
+              <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                <li>Runtime units includes per-project CPU, RAM, and disk usage indicators.</li>
+                <li>Environment tab edits project <code>.env</code> values from the UI.</li>
+                <li>Archive tab supports dry-run planning and explicit archive execution.</li>
+                <li>Activity timeline keeps project job history and logs in one place.</li>
+              </ul>
+              <p class="mt-4 text-sm text-[color:var(--muted)]">
+                Key APIs: <code>GET/PUT /api/v1/projects/:name/env</code>, <code>GET /api/v1/host/stats</code>,
+                <code>GET /api/v1/projects/:name/archive/plan</code>, <code>POST /api/v1/projects/:name/archive</code>.
+              </p>
+            </div>
+
+            <div
               id="usage-workbench"
               class="mt-6 card p-6"
               data-doc-section
               data-doc-title="Workbench operator flow"
               data-doc-group="usage"
-              data-doc-tags="workbench compose import preview apply restore jobs"
+              data-doc-tags="workbench compose import preview apply restore jobs catalog graph ports services"
             >
               <h3 class="text-xl font-semibold">Workbench compose workflow</h3>
               <p class="mt-2 text-sm text-[color:var(--muted)]">
-                The shipped Workbench backend is the compose authority for projects. The UI rollout is still pending,
-                but operators can already use the admin-only Workbench endpoints and rely on Jobs to consume
-                Workbench-generated compose artifacts.
+                Workbench backend and frontend are shipped. Project Detail now exposes snapshot, catalog-managed optional
+                services, ports/resources mutation controls, preview/apply, dependency graph, and backup restore flows.
               </p>
               <div class="mt-4 rounded-xl bg-[color:var(--surface-2)] p-5 text-sm text-[color:var(--muted)]">
                 <p class="font-semibold text-[color:var(--text)]">API surface</p>
                 <p class="mt-2">
+                  <code>GET /api/v1/projects/:name/workbench</code>,
+                  <code>GET /api/v1/projects/:name/workbench/graph</code>,
+                  <code>GET /api/v1/projects/:name/workbench/catalog</code>,
                   <code>POST /api/v1/projects/:name/workbench/import</code>,
+                  <code>POST /api/v1/projects/:name/workbench/ports/resolve</code>,
+                  <code>POST /api/v1/projects/:name/workbench/ports/mutate</code>,
+                  <code>POST /api/v1/projects/:name/workbench/ports/suggest</code>,
+                  <code>POST /api/v1/projects/:name/workbench/services</code>,
+                  <code>DELETE /api/v1/projects/:name/workbench/services/:serviceName</code>,
+                  <code>PATCH /api/v1/projects/:name/workbench/services/:serviceName/resources</code>,
                   <code>POST /api/v1/projects/:name/workbench/compose/preview</code>,
-                  <code>POST /api/v1/projects/:name/workbench/compose/apply</code>, and
+                  <code>POST /api/v1/projects/:name/workbench/compose/apply</code>,
+                  <code>GET /api/v1/projects/:name/workbench/compose/backups</code>,
                   <code>POST /api/v1/projects/:name/workbench/compose/restore</code>.
                 </p>
               </div>
-              <ol class="mt-6 flex flex-col gap-4 text-sm text-[color:var(--muted)] list-decimal pl-4">
-                <li>
-                  Import the current project compose with <code>reason=manual</code>. The import is idempotent when
-                  the compose fingerprint is unchanged, and it emits audit event
-                  <code>project.workbench.import</code>.
-                </li>
-                <li>
-                  Preview with <code>expectedRevision</code> before any write. Preview is read-only, returns the
-                  current revision and source fingerprint, and records
-                  <code>project.workbench.compose.preview</code>.
-                </li>
-                <li>
-                  Apply with both <code>expectedRevision</code> and
-                  <code>expectedSourceFingerprint</code>. Apply validates the stored snapshot, blocks stale revision
-                  and compose drift, writes the compose atomically, creates a backup, and records
-                  <code>project.workbench.compose.apply</code>.
-                </li>
-                <li>
-                  Restore with <code>backupId</code> when you need to roll back a generated compose. Backups are stored
-                  under <code>.gungnr/workbench/compose-backups</code> with deterministic IDs like
-                  <code>wbk-000001</code>, and retention keeps at most 10 backups or 30 days by default.
-                </li>
-                <li>
-                  After restore, check <code>requiresImport</code>. When it is <code>true</code>, the restored compose
-                  fingerprint no longer matches the stored snapshot, so the next safe path is
-                  <code>import -&gt; preview -&gt; apply</code>.
-                </li>
-              </ol>
-              <div class="mt-6 rounded-xl bg-[color:var(--surface-2)] p-5 text-sm text-[color:var(--muted)]">
-                <p class="font-semibold text-[color:var(--text)]">Jobs integration</p>
-                <ul class="mt-3 flex flex-col gap-2 list-disc pl-4">
-                  <li>
-                    Create-from-template now runs Workbench import, requested port sync, and compose apply before the
-                    stack deploy path continues.
-                  </li>
-                  <li>
-                    Deploy-existing now performs implicit Workbench bootstrap with <code>reason=auto_redeploy</code>
-                    whenever the stored snapshot is missing.
-                  </li>
-                  <li>
-                    Job logs preserve the underlying <code>WB-*</code> code for Workbench failures, and the older direct
-                    compose mutation fallback has been removed from Workbench-managed job paths.
-                  </li>
-                </ul>
-              </div>
+            </div>
+
+            <div
+              id="usage-netbird"
+              class="mt-6 card p-6"
+              data-doc-section
+              data-doc-title="NetBird isolation"
+              data-doc-group="usage"
+              data-doc-tags="netbird mode mode_a mode_b status acl graph plan apply"
+            >
+              <h3 class="text-xl font-semibold">NetBird isolation control plane</h3>
+              <p class="mt-2 text-sm text-[color:var(--muted)]">
+                NetBird is shipped with a dedicated panel page and backend policy orchestration for
+                <code>legacy</code>, <code>mode_a</code>, and <code>mode_b</code>.
+              </p>
+              <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                <li>UI route: <code>/netbird</code> with status, ACL graph, mode planning, and apply controls.</li>
+                <li>Backend APIs: status/config/graph, mode plan/apply, and policies reapply.</li>
+                <li>CLI operators can run <code>gungnr netbird status</code> and <code>gungnr netbird mode --set ...</code>.</li>
+              </ul>
             </div>
 
             <div
@@ -846,37 +863,46 @@
               data-doc-section
               data-doc-title="Operations commands"
               data-doc-group="usage"
-              data-doc-tags="ops commands"
+              data-doc-tags="ops cli keepalive netbird tunnel restart"
             >
               <h3 class="text-xl font-semibold">CLI commands</h3>
               <p class="mt-2 text-sm text-[color:var(--muted)]">
-                Gungnr has a few cli commands available, those can be used to controll the compose, tunnel and overall states
+                Current operational command surface:
               </p>
-              <span class="text-sm text-[color:var(--muted)]">Remove containers and restart compose:</span>
-              <div class="mt-4 p-0 code-block" id="cmd-ops">
-                <button class="copy-button" data-copy-target="#cmd-ops code">Copy</button>
-                <pre class="text-sm"><code>
-                  gungnr restart
-                </code></pre>
+              <div class="mt-4 code-block" id="cmd-ops-all">
+                <button class="copy-button" data-copy-target="#cmd-ops-all code">Copy</button>
+                <pre class="m-0 text-sm"><code>gungnr version
+gungnr bootstrap [--plain]
+gungnr restart
+gungnr tunnel run
+gungnr keepalive enable
+gungnr keepalive disable
+gungnr keepalive status
+gungnr keepalive all
+gungnr keepalive recover
+gungnr netbird status
+gungnr netbird mode --set &lt;legacy|mode_a|mode_b&gt; [--allow-localhost]
+gungnr uninstall [--yes]</code></pre>
               </div>
-                <span class="text-sm text-[color:var(--muted)]">Run the cloudflared tunnel:</span>
-              <div class="mt-4 p-0 code-block" id="cmd-ops">
-                <button class="copy-button" data-copy-target="#cmd-ops code">Copy</button>
-                <pre class="text-sm"><code>
-                  gungnr tunnel run
-                </code></pre>
-              </div>
-              <span class="text-sm text-[color:var(--muted)]">Uninstall</span>
-              <div class="mt-4 p-0 code-block" id="cmd-ops">
-                <button class="copy-button" data-copy-target="#cmd-ops code">Copy</button>
-                <pre class="text-sm"><code>
-                  gungnr uninstall
-                </code></pre>
-              </div>
+            </div>
 
-              <div class="mt-2 border-t border-[color:var(--muted)] pt-4">
-                <p> We are looking foward to introduce new CLI methods in the future</p>
-              </div>
+            <div
+              id="usage-changelog"
+              class="mt-6 card p-6"
+              data-doc-section
+              data-doc-title="Changelog"
+              data-doc-group="usage"
+              data-doc-tags="changelog releases history"
+            >
+              <h3 class="text-xl font-semibold">Changelog</h3>
+              <p class="mt-2 text-sm text-[color:var(--muted)]">
+                Release history lives on the dedicated changelog page.
+              </p>
+              <p class="mt-3">
+                <a class="text-[color:var(--accent-ink)] hover:underline" href="./changelog.html" data-changelog-link>
+                  Open changelog
+                </a>
+              </p>
             </div>
           </section>
 
@@ -906,6 +932,9 @@
             </a>
             <a class="text-[color:var(--accent-ink)] hover:underline" href="./errors.html" data-errors-link>
               Errors
+            </a>
+            <a class="text-[color:var(--accent-ink)] hover:underline" href="./changelog.html" data-changelog-link>
+              Changelog
             </a>
             <a
               class="text-[color:var(--accent-ink)] hover:underline"
