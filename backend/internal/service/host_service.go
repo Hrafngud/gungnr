@@ -155,20 +155,24 @@ type DockerUsageSummary struct {
 }
 
 type HostRuntimeResource struct {
-	TotalBytes  int64   `json:"totalBytes"`
-	UsedBytes   int64   `json:"usedBytes"`
-	FreeBytes   int64   `json:"freeBytes"`
-	UsedPercent float64 `json:"usedPercent"`
+	TotalBytes     int64   `json:"totalBytes"`
+	UsedBytes      int64   `json:"usedBytes"`
+	FreeBytes      int64   `json:"freeBytes"`
+	AvailableBytes int64   `json:"availableBytes,omitempty"`
+	UsedPercent    float64 `json:"usedPercent"`
+	SpeedMTs       int     `json:"speedMTs,omitempty"`
 }
 
 type HostRuntimeCPU struct {
-	Model   string `json:"model"`
-	Cores   int    `json:"cores"`
-	Threads int    `json:"threads"`
+	Model    string  `json:"model"`
+	Cores    int     `json:"cores"`
+	Threads  int     `json:"threads"`
+	SpeedMHz float64 `json:"speedMHz,omitempty"`
 }
 
 type HostRuntimeGPU struct {
-	Model string `json:"model"`
+	Model    string  `json:"model"`
+	SpeedMHz float64 `json:"speedMHz,omitempty"`
 }
 
 type HostRuntimeWorkloadUsage struct {
@@ -183,6 +187,7 @@ type HostRuntimeWorkloadUsage struct {
 
 type HostRuntimeStats struct {
 	CollectedAt    string                              `json:"collectedAt"`
+	Hostname       string                              `json:"hostname,omitempty"`
 	UptimeSeconds  int64                               `json:"uptimeSeconds"`
 	UptimeHuman    string                              `json:"uptimeHuman"`
 	SystemImage    string                              `json:"systemImage"`

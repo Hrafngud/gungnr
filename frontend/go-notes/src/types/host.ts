@@ -44,17 +44,21 @@ export interface HostRuntimeResource {
   totalBytes: number
   usedBytes: number
   freeBytes: number
+  availableBytes?: number
   usedPercent: number
+  speedMTs?: number
 }
 
 export interface HostRuntimeCPU {
   model: string
   cores: number
   threads: number
+  speedMHz?: number
 }
 
 export interface HostRuntimeGPU {
   model: string
+  speedMHz?: number
 }
 
 export interface HostRuntimeWorkloadUsage {
@@ -69,6 +73,7 @@ export interface HostRuntimeWorkloadUsage {
 
 export interface HostRuntimeStats {
   collectedAt: string
+  hostname?: string
   uptimeSeconds: number
   uptimeHuman: string
   systemImage: string

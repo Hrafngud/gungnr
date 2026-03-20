@@ -230,11 +230,13 @@ func TestHostServiceRuntimeStatsBridgeSuccess(t *testing.T) {
 			Status: contract.StatusSucceeded,
 			Data: map[string]any{
 				"collectedAt": "2026-03-18T18:00:00Z",
+				"hostname":    "runner-01",
 				"systemImage": "Ubuntu 24.04 LTS",
 				"cpu": map[string]any{
-					"model":   "AMD Ryzen",
-					"cores":   16,
-					"threads": 16,
+					"model":    "AMD Ryzen",
+					"cores":    16,
+					"threads":  32,
+					"speedMHz": 4250,
 				},
 			},
 		},
@@ -244,9 +246,12 @@ func TestHostServiceRuntimeStatsBridgeSuccess(t *testing.T) {
 	stats, err := svc.RuntimeStats(context.Background())
 	require.NoError(t, err)
 	require.True(t, bridge.runtimeCalled)
+	require.Equal(t, "runner-01", stats.Hostname)
 	require.Equal(t, "Ubuntu 24.04 LTS", stats.SystemImage)
 	require.Equal(t, "AMD Ryzen", stats.CPU.Model)
 	require.Equal(t, 16, stats.CPU.Cores)
+	require.Equal(t, 32, stats.CPU.Threads)
+	require.Equal(t, 4250.0, stats.CPU.SpeedMHz)
 }
 
 func TestHostServiceRuntimeStatsBridgeFailureMapping(t *testing.T) {

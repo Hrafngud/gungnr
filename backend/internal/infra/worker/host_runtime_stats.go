@@ -15,20 +15,24 @@ import (
 )
 
 type hostRuntimeResource struct {
-	TotalBytes  int64   `json:"totalBytes"`
-	UsedBytes   int64   `json:"usedBytes"`
-	FreeBytes   int64   `json:"freeBytes"`
-	UsedPercent float64 `json:"usedPercent"`
+	TotalBytes     int64   `json:"totalBytes"`
+	UsedBytes      int64   `json:"usedBytes"`
+	FreeBytes      int64   `json:"freeBytes"`
+	AvailableBytes int64   `json:"availableBytes,omitempty"`
+	UsedPercent    float64 `json:"usedPercent"`
+	SpeedMTs       int     `json:"speedMTs,omitempty"`
 }
 
 type hostRuntimeCPU struct {
-	Model   string `json:"model"`
-	Cores   int    `json:"cores"`
-	Threads int    `json:"threads"`
+	Model    string  `json:"model"`
+	Cores    int     `json:"cores"`
+	Threads  int     `json:"threads"`
+	SpeedMHz float64 `json:"speedMHz,omitempty"`
 }
 
 type hostRuntimeGPU struct {
-	Model string `json:"model"`
+	Model    string  `json:"model"`
+	SpeedMHz float64 `json:"speedMHz,omitempty"`
 }
 
 type hostRuntimeWorkloadUsage struct {
@@ -43,6 +47,7 @@ type hostRuntimeWorkloadUsage struct {
 
 type hostRuntimeStats struct {
 	CollectedAt    string                              `json:"collectedAt"`
+	Hostname       string                              `json:"hostname,omitempty"`
 	UptimeSeconds  int64                               `json:"uptimeSeconds"`
 	UptimeHuman    string                              `json:"uptimeHuman"`
 	SystemImage    string                              `json:"systemImage"`
@@ -119,6 +124,7 @@ func collectHostRuntimeStats(ctx context.Context, exec commandExecutor, template
 	now := time.Now().UTC()
 	stats := hostRuntimeStats{
 		CollectedAt: now.Format(time.RFC3339),
+		Hostname:    "Unknown host",
 		CPU: hostRuntimeCPU{
 			Model: "Unknown CPU",
 			Cores: runtime.NumCPU(),
@@ -140,6 +146,10 @@ func collectHostRuntimeStats(ctx context.Context, exec commandExecutor, template
 		appendWarning("uptime probe failed: %v", err)
 	}
 
+	if hostname := readHostName(ctx, exec); hostname != "" {
+		stats.Hostname = hostname
+	}
+
 	if image, kernel, err := readSystemImageAndKernel(exec, ctx); err == nil {
 		if image != "" {
 			stats.SystemImage = image
@@ -149,30 +159,44 @@ func collectHostRuntimeStats(ctx context.Context, exec commandExecutor, template
 		appendWarning("system image probe failed: %v", err)
 	}
 
-	if model, cores, err := readCPUInfo(); err == nil {
+	if model, cores, threads, speedMHz, err := readCPUInfo(); err == nil {
 		if model != "" {
 			stats.CPU.Model = model
 		}
 		if cores > 0 {
 			stats.CPU.Cores = cores
-			stats.CPU.Threads = cores
+		}
+		if threads > 0 {
+			stats.CPU.Threads = threads
+		}
+		if speedMHz > 0 {
+			stats.CPU.SpeedMHz = speedMHz
 		}
 	} else {
 		appendWarning("cpu probe failed: %v", err)
 	}
 
-	if model, ok := detectGPUModel(ctx, exec); ok {
-		stats.GPU = &hostRuntimeGPU{Model: model}
+	if stats.CPU.SpeedMHz <= 0 {
+		if speedMHz, err := readCPUFrequencyMHzFromSysfs(); err == nil && speedMHz > 0 {
+			stats.CPU.SpeedMHz = speedMHz
+		}
 	}
 
-	if totalMemory, usedMemory, err := readMemoryUsageBytes(); err == nil {
-		stats.Memory = buildResourceUsage(totalMemory, usedMemory)
+	if gpu, ok := detectGPUInfo(ctx, exec); ok {
+		stats.GPU = gpu
+	}
+
+	if totalMemory, usedMemory, availableMemory, err := readMemoryUsageBytes(); err == nil {
+		stats.Memory = buildResourceUsage(totalMemory, usedMemory, availableMemory)
+		if speedMTs, ok := readMemorySpeedMTs(ctx, exec); ok {
+			stats.Memory.SpeedMTs = speedMTs
+		}
 	} else {
 		appendWarning("memory probe failed: %v", err)
 	}
 
-	if totalDisk, usedDisk, err := readRootDiskUsageBytes(ctx, exec, templatesDir); err == nil {
-		stats.Disk = buildResourceUsage(totalDisk, usedDisk)
+	if totalDisk, usedDisk, availableDisk, err := readRootDiskUsageBytes(ctx, exec, templatesDir); err == nil {
+		stats.Disk = buildResourceUsage(totalDisk, usedDisk, availableDisk)
 	} else {
 		appendWarning("disk probe failed: %v", err)
 	}
@@ -251,6 +275,21 @@ func readSystemImageAndKernel(exec commandExecutor, ctx context.Context) (string
 	return image, kernel, nil
 }
 
+func readHostName(ctx context.Context, exec commandExecutor) string {
+	if exec != nil {
+		if output, err := exec.Run(ctx, "", "docker", "info", "--format", "{{.Name}}"); err == nil {
+			value := strings.TrimSpace(string(output))
+			if value != "" {
+				return value
+			}
+		}
+	}
+	if value, err := os.Hostname(); err == nil {
+		return strings.TrimSpace(value)
+	}
+	return ""
+}
+
 func readOSReleasePrettyName(path string) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -270,51 +309,142 @@ func readOSReleasePrettyName(path string) (string, error) {
 	return "", fmt.Errorf("pretty name unavailable")
 }
 
-func readCPUInfo() (string, int, error) {
+func readCPUInfo() (string, int, int, float64, error) {
 	raw, err := os.ReadFile("/proc/cpuinfo")
 	if err != nil {
-		return "", 0, err
+		return "", 0, 0, 0, err
 	}
 	model := ""
-	cores := 0
+	logicalThreads := 0
+	speedMHz := 0.0
+	fallbackCores := 0
+	coresBySocket := make(map[string]int)
+	currentSocket := ""
+
 	for _, line := range strings.Split(string(raw), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
+			currentSocket = ""
 			continue
 		}
-		if strings.HasPrefix(trimmed, "processor") {
-			cores++
+		key, value, ok := parseCPUInfoKeyValue(trimmed)
+		if !ok {
 			continue
 		}
-		if model == "" && strings.HasPrefix(trimmed, "model name") {
-			parts := strings.SplitN(trimmed, ":", 2)
-			if len(parts) == 2 {
-				model = strings.TrimSpace(parts[1])
+		switch key {
+		case "processor":
+			logicalThreads++
+		case "model name":
+			if model == "" {
+				model = value
+			}
+		case "physical id":
+			currentSocket = value
+		case "cpu cores":
+			if parsed, parseErr := strconv.Atoi(value); parseErr == nil && parsed > 0 {
+				if fallbackCores <= 0 {
+					fallbackCores = parsed
+				}
+				if currentSocket != "" {
+					coresBySocket[currentSocket] = parsed
+				}
+			}
+		case "cpu mhz":
+			if speedMHz <= 0 {
+				if parsed, parseErr := strconv.ParseFloat(value, 64); parseErr == nil && parsed > 0 {
+					speedMHz = parsed
+				}
 			}
 		}
 	}
-	if cores <= 0 {
-		cores = runtime.NumCPU()
+
+	if logicalThreads <= 0 {
+		logicalThreads = runtime.NumCPU()
 	}
-	if model == "" && cores == 0 {
-		return "", 0, fmt.Errorf("cpu metadata unavailable")
+
+	physicalCores := 0
+	for _, cores := range coresBySocket {
+		physicalCores += cores
 	}
-	return model, cores, nil
+	if physicalCores <= 0 {
+		physicalCores = fallbackCores
+	}
+	if physicalCores <= 0 {
+		physicalCores = logicalThreads
+	}
+
+	if speedMHz <= 0 {
+		if parsed, parseErr := readCPUFrequencyMHzFromSysfs(); parseErr == nil && parsed > 0 {
+			speedMHz = parsed
+		}
+	}
+
+	if model == "" && logicalThreads <= 0 {
+		return "", 0, 0, 0, fmt.Errorf("cpu metadata unavailable")
+	}
+	return model, physicalCores, logicalThreads, speedMHz, nil
 }
 
-func detectGPUModel(ctx context.Context, exec commandExecutor) (string, bool) {
+func parseCPUInfoKeyValue(raw string) (string, string, bool) {
+	parts := strings.SplitN(raw, ":", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	key := strings.ToLower(strings.TrimSpace(parts[0]))
+	value := strings.TrimSpace(parts[1])
+	if key == "" || value == "" {
+		return "", "", false
+	}
+	return key, value, true
+}
+
+func readCPUFrequencyMHzFromSysfs() (float64, error) {
+	paths := []string{
+		"/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq",
+		"/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq",
+	}
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		value, err := strconv.ParseFloat(strings.TrimSpace(string(raw)), 64)
+		if err != nil || value <= 0 {
+			continue
+		}
+		if value > 100000 {
+			return mathRound(value/1000, 2), nil
+		}
+		return mathRound(value, 2), nil
+	}
+	return 0, fmt.Errorf("cpu speed unavailable")
+}
+
+func detectGPUInfo(ctx context.Context, exec commandExecutor) (*hostRuntimeGPU, bool) {
 	if exec == nil {
-		return "", false
+		return nil, false
+	}
+	if output, err := exec.Run(ctx, "", "nvidia-smi", "--query-gpu=name,clocks.current.graphics", "--format=csv,noheader,nounits"); err == nil {
+		lines := parseOutputLines(output)
+		if len(lines) > 0 {
+			model, speedMHz := parseNvidiaGPUInfoLine(lines[0])
+			if model != "" {
+				return &hostRuntimeGPU{Model: model, SpeedMHz: speedMHz}, true
+			}
+		}
 	}
 	if output, err := exec.Run(ctx, "", "nvidia-smi", "--query-gpu=name", "--format=csv,noheader"); err == nil {
 		lines := parseOutputLines(output)
 		if len(lines) > 0 {
-			return strings.TrimSpace(lines[0]), true
+			model := strings.TrimSpace(lines[0])
+			if model != "" {
+				return &hostRuntimeGPU{Model: model}, true
+			}
 		}
 	}
 	output, err := exec.Run(ctx, "", "lspci")
 	if err != nil {
-		return "", false
+		return nil, false
 	}
 	re := regexp.MustCompile(`(?i)(vga compatible controller|3d controller|display controller):\s*(.+)$`)
 	for _, line := range parseOutputLines(output) {
@@ -322,17 +452,32 @@ func detectGPUModel(ctx context.Context, exec commandExecutor) (string, bool) {
 		if len(matches) >= 3 {
 			model := strings.TrimSpace(matches[2])
 			if model != "" {
-				return model, true
+				return &hostRuntimeGPU{Model: model}, true
 			}
 		}
 	}
-	return "", false
+	return nil, false
 }
 
-func readMemoryUsageBytes() (int64, int64, error) {
+func parseNvidiaGPUInfoLine(raw string) (string, float64) {
+	parts := strings.Split(raw, ",")
+	model := ""
+	if len(parts) > 0 {
+		model = strings.TrimSpace(parts[0])
+	}
+	speedMHz := 0.0
+	if len(parts) > 1 {
+		if parsed, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64); err == nil && parsed > 0 {
+			speedMHz = mathRound(parsed, 2)
+		}
+	}
+	return model, speedMHz
+}
+
+func readMemoryUsageBytes() (int64, int64, int64, error) {
 	raw, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	values := map[string]int64{}
 	for _, line := range strings.Split(string(raw), "\n") {
@@ -350,7 +495,7 @@ func readMemoryUsageBytes() (int64, int64, error) {
 	total := values["MemTotal"]
 	available := values["MemAvailable"]
 	if total <= 0 {
-		return 0, 0, fmt.Errorf("memory total unavailable")
+		return 0, 0, 0, fmt.Errorf("memory total unavailable")
 	}
 	if available < 0 {
 		available = 0
@@ -359,12 +504,42 @@ func readMemoryUsageBytes() (int64, int64, error) {
 	if used < 0 {
 		used = 0
 	}
-	return total, used, nil
+	return total, used, available, nil
 }
 
-func readRootDiskUsageBytes(ctx context.Context, exec commandExecutor, templatesDir string) (int64, int64, error) {
+var memorySpeedRegex = regexp.MustCompile(`(?i)(configured memory speed|speed):\s*([0-9]+)\s*(MT/s|MHz)`)
+
+func readMemorySpeedMTs(ctx context.Context, exec commandExecutor) (int, bool) {
 	if exec == nil {
-		return 0, 0, fmt.Errorf("executor unavailable")
+		return 0, false
+	}
+	output, err := exec.Run(ctx, "", "dmidecode", "-t", "memory")
+	if err != nil {
+		return 0, false
+	}
+	speedMTs := 0
+	for _, line := range parseOutputLines(output) {
+		matches := memorySpeedRegex.FindStringSubmatch(line)
+		if len(matches) < 3 {
+			continue
+		}
+		parsed, parseErr := strconv.Atoi(matches[2])
+		if parseErr != nil || parsed <= 0 {
+			continue
+		}
+		if parsed > speedMTs {
+			speedMTs = parsed
+		}
+	}
+	if speedMTs <= 0 {
+		return 0, false
+	}
+	return speedMTs, true
+}
+
+func readRootDiskUsageBytes(ctx context.Context, exec commandExecutor, templatesDir string) (int64, int64, int64, error) {
+	if exec == nil {
+		return 0, 0, 0, fmt.Errorf("executor unavailable")
 	}
 	probePath := resolveDiskProbePath(templatesDir)
 	output, err := exec.Run(ctx, "", "df", "-B1", probePath)
@@ -372,25 +547,31 @@ func readRootDiskUsageBytes(ctx context.Context, exec commandExecutor, templates
 		output, err = exec.Run(ctx, "", "df", "-B1", "/")
 	}
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	lines := parseOutputLines(output)
 	if len(lines) < 2 {
-		return 0, 0, fmt.Errorf("unexpected df output")
+		return 0, 0, 0, fmt.Errorf("unexpected df output")
 	}
 	fields := strings.Fields(lines[1])
 	if len(fields) < 4 {
-		return 0, 0, fmt.Errorf("unexpected df row format")
+		return 0, 0, 0, fmt.Errorf("unexpected df row format")
 	}
 	total, err := strconv.ParseInt(strings.TrimSpace(fields[1]), 10, 64)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	used, err := strconv.ParseInt(strings.TrimSpace(fields[2]), 10, 64)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
-	return total, used, nil
+	available := int64(0)
+	if len(fields) >= 4 {
+		if parsed, parseErr := strconv.ParseInt(strings.TrimSpace(fields[3]), 10, 64); parseErr == nil && parsed >= 0 {
+			available = parsed
+		}
+	}
+	return total, used, available, nil
 }
 
 func resolveDiskProbePath(templatesDir string) string {
@@ -728,7 +909,7 @@ func parseHumanSizeToBytes(raw string) (int64, bool) {
 	return int64(value * multiplier), true
 }
 
-func buildResourceUsage(total, used int64) hostRuntimeResource {
+func buildResourceUsage(total, used, available int64) hostRuntimeResource {
 	if total < 0 {
 		total = 0
 	}
@@ -742,11 +923,18 @@ func buildResourceUsage(total, used int64) hostRuntimeResource {
 	if free < 0 {
 		free = 0
 	}
+	if available < 0 || available > total {
+		available = 0
+	}
+	if available == 0 {
+		available = free
+	}
 	return hostRuntimeResource{
-		TotalBytes:  total,
-		UsedBytes:   used,
-		FreeBytes:   free,
-		UsedPercent: percentOf(used, total),
+		TotalBytes:     total,
+		UsedBytes:      used,
+		FreeBytes:      free,
+		AvailableBytes: available,
+		UsedPercent:    percentOf(used, total),
 	}
 }
 

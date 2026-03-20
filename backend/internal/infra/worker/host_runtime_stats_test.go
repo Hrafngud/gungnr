@@ -74,10 +74,11 @@ func TestReadRootDiskUsageBytesUsesTemplatesPath(t *testing.T) {
 		},
 	}
 
-	total, used, err := readRootDiskUsageBytes(context.Background(), exec, templatesDir)
+	total, used, available, err := readRootDiskUsageBytes(context.Background(), exec, templatesDir)
 	require.NoError(t, err)
 	require.Equal(t, int64(1000), total)
 	require.Equal(t, int64(400), used)
+	require.Equal(t, int64(600), available)
 	require.Len(t, exec.calls, 1)
 }
 
@@ -101,9 +102,10 @@ func TestReadRootDiskUsageBytesFallsBackToRoot(t *testing.T) {
 		},
 	}
 
-	total, used, err := readRootDiskUsageBytes(context.Background(), exec, templatesDir)
+	total, used, available, err := readRootDiskUsageBytes(context.Background(), exec, templatesDir)
 	require.NoError(t, err)
 	require.Equal(t, int64(9000), total)
 	require.Equal(t, int64(1000), used)
+	require.Equal(t, int64(8000), available)
 	require.Len(t, exec.calls, 2)
 }

@@ -11,6 +11,7 @@ import UiInput from '@/components/ui/UiInput.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
 import UiModal from '@/components/ui/UiModal.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
+import UiRuntimeLedMeter from '@/components/ui/UiRuntimeLedMeter.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiState from '@/components/ui/UiState.vue'
 import UiToggle from '@/components/ui/UiToggle.vue'
@@ -24,6 +25,7 @@ import { useToastStore } from '@/stores/toasts'
 import { useAuthStore } from '@/stores/auth'
 import { useFieldGuidance } from '@/composables/useFieldGuidance'
 import { usePageLoadingStore } from '@/stores/pageLoading'
+import { clampPercent, formatBytes, formatPercent } from '@/utils/runtimeMetrics'
 import type { CloudflaredPreview, Settings, SettingsSources } from '@/types/settings'
 import type { DockerContainer, DockerUsageSummary, HostRuntimeStats } from '@/types/host'
 import type { LocalProject } from '@/types/projects'
@@ -203,93 +205,119 @@ const hostDataRefreshing = computed(() =>
   containersLoading.value || usageLoading.value || localProjectsLoading.value || runtimeStatsLoading.value,
 )
 
-const meterSegmentCount = 48
-
-const clampPercent = (value: number | null | undefined) => {
-  if (typeof value !== 'number' || Number.isNaN(value)) return 0
-  if (value < 0) return 0
-  if (value > 100) return 100
-  return value
+const formatClockSpeed = (value: number | null | undefined) => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return 'Speed unavailable'
+  if (value >= 1000) return `${(value / 1000).toFixed(2)} GHz`
+  return `${value.toFixed(value >= 100 ? 0 : 1)} MHz`
 }
 
-const formatPercent = (value: number | null | undefined) => `${clampPercent(value).toFixed(1)}%`
-
-const formatBytes = (bytes: number | null | undefined) => {
-  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) return '0 B'
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  let value = bytes
-  let index = 0
-  while (value >= 1024 && index < units.length - 1) {
-    value /= 1024
-    index++
-  }
-  const rounded = value >= 10 ? value.toFixed(1) : value.toFixed(2)
-  return `${rounded} ${units[index]}`
+const formatMemorySpeed = (value: number | null | undefined) => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return 'Speed unavailable'
+  return `${Math.round(value)} MT/s`
 }
 
-const buildMeterSegments = (percent: number, key: string) => {
-  const normalized = clampPercent(percent)
-  return Array.from({ length: meterSegmentCount }, (_, index) => {
-    const threshold = ((index + 1) / meterSegmentCount) * 100
-    const tone = threshold <= 55 ? 'ok' : threshold <= 80 ? 'warn' : 'error'
-    return {
-      key: `${key}-${index}`,
-      active: threshold <= normalized,
-      tone,
-    }
-  })
-}
-
-const runtimeHardwareIndicators = computed(() => {
+const runtimeIdentityCards = computed(() => {
   const stats = runtimeStats.value
   if (!stats) return []
+  const diskAvailableBytes = stats.disk.availableBytes ?? stats.disk.freeBytes
   return [
     {
-      key: 'memory',
-      label: 'RAM usage',
-      value: formatBytes(stats.memory.usedBytes),
-      meta: `${formatPercent(stats.memory.usedPercent)} of ${formatBytes(stats.memory.totalBytes)}`,
-      percent: clampPercent(stats.memory.usedPercent),
-      segments: buildMeterSegments(stats.memory.usedPercent, 'memory'),
+      key: 'uptime',
+      label: 'Uptime',
+      value: stats.uptimeHuman || '—',
+      meta: `${stats.uptimeSeconds} seconds`,
     },
     {
-      key: 'disk',
-      label: 'Disk usage',
-      value: formatBytes(stats.disk.usedBytes),
-      meta: `${formatPercent(stats.disk.usedPercent)} of ${formatBytes(stats.disk.totalBytes)}`,
-      percent: clampPercent(stats.disk.usedPercent),
-      segments: buildMeterSegments(stats.disk.usedPercent, 'disk'),
+      key: 'system-image',
+      label: 'System image',
+      value: stats.systemImage || 'Unknown system image',
+      meta: stats.kernel || 'Kernel unknown',
+    },
+    {
+      key: 'cpu',
+      label: 'CPU',
+      value: stats.cpu.model || 'Unknown CPU',
+      meta: `${formatClockSpeed(stats.cpu.speedMHz)} · ${stats.cpu.threads} threads · ${stats.cpu.cores} cores`,
+    },
+    {
+      key: 'gpu',
+      label: 'GPU',
+      value: stats.gpu?.model || 'Not detected',
+      meta: stats.gpu ? `${formatClockSpeed(stats.gpu.speedMHz)} graphics clock` : 'Optional hardware probe',
+    },
+    {
+      key: 'hostname',
+      label: 'Hostname',
+      value: stats.hostname || 'Unknown host',
+      meta: 'Resolved from host runtime probe',
+    },
+    {
+      key: 'total-ram',
+      label: 'Total RAM',
+      value: formatBytes(stats.memory.totalBytes),
+      meta: `${formatMemorySpeed(stats.memory.speedMTs)} · ${formatBytes(stats.memory.freeBytes)} free`,
+    },
+    {
+      key: 'disk-capacity',
+      label: 'Disk capacity',
+      value: formatBytes(stats.disk.totalBytes),
+      meta: `${formatBytes(stats.disk.freeBytes)} free · ${formatBytes(diskAvailableBytes)} available`,
+      wide: true,
     },
   ]
 })
 
-const runtimeWorkloadIndicators = computed(() => {
+const runtimeSignalIndicators = computed(() => {
   const stats = runtimeStats.value
   if (!stats) return []
   return [
     {
-      key: 'panel',
-      label: 'Gungnr panel',
-      containers: stats.panelUsage.containers,
-      runningContainers: stats.panelUsage.runningContainers,
-      memoryUsed: formatBytes(stats.panelUsage.memoryUsedBytes),
-      diskUsed: formatBytes(stats.panelUsage.diskUsedBytes),
-      memoryPercentLabel: formatPercent(stats.panelUsage.memorySharePercent),
-      diskPercentLabel: formatPercent(stats.panelUsage.diskSharePercent),
-      memorySegments: buildMeterSegments(stats.panelUsage.memorySharePercent, 'panel-memory'),
-      diskSegments: buildMeterSegments(stats.panelUsage.diskSharePercent, 'panel-disk'),
+      key: 'host-memory',
+      scope: 'Host',
+      metric: 'RAM',
+      value: formatBytes(stats.memory.usedBytes),
+      meta: `${formatPercent(stats.memory.usedPercent)} of ${formatBytes(stats.memory.totalBytes)}`,
+      percent: clampPercent(stats.memory.usedPercent),
     },
     {
-      key: 'projects',
-      label: 'Projects',
-      containers: stats.projectsUsage.containers,
-      runningContainers: stats.projectsUsage.runningContainers,
-      memoryUsed: formatBytes(stats.projectsUsage.memoryUsedBytes),
-      diskUsed: formatBytes(stats.projectsUsage.diskUsedBytes),
-      memoryPercentLabel: formatPercent(stats.projectsUsage.memorySharePercent),
-      diskPercentLabel: formatPercent(stats.projectsUsage.diskSharePercent),
-      memorySegments: buildMeterSegments(stats.projectsUsage.memorySharePercent, 'projects-memory'),
-      diskSegments: buildMeterSegments(stats.projectsUsage.diskSharePercent, 'projects-disk'),
+      key: 'host-disk',
+      scope: 'Host',
+      metric: 'Disk',
+      value: formatBytes(stats.disk.usedBytes),
+      meta: `${formatPercent(stats.disk.usedPercent)} of ${formatBytes(stats.disk.totalBytes)}`,
+      percent: clampPercent(stats.disk.usedPercent),
+    },
+    {
+      key: 'panel-cpu',
+      scope: 'Gungnr panel',
+      metric: 'CPU',
+      value: formatPercent(stats.panelUsage.cpuUsedPercent),
+      meta: `${stats.panelUsage.runningContainers}/${stats.panelUsage.containers} running containers`,
+      percent: clampPercent(stats.panelUsage.cpuUsedPercent),
+    },
+    {
+      key: 'panel-memory',
+      scope: 'Gungnr panel',
+      metric: 'RAM',
+      value: formatBytes(stats.panelUsage.memoryUsedBytes),
+      meta: `${formatPercent(stats.panelUsage.memorySharePercent)} of host memory`,
+      percent: clampPercent(stats.panelUsage.memorySharePercent),
+    },
+    {
+      key: 'projects-cpu',
+      scope: 'Projects',
+      metric: 'CPU',
+      value: formatPercent(stats.projectsUsage.cpuUsedPercent),
+      meta: `${stats.projectsUsage.runningContainers}/${stats.projectsUsage.containers} running containers`,
+      percent: clampPercent(stats.projectsUsage.cpuUsedPercent),
+    },
+    {
+      key: 'projects-memory',
+      scope: 'Projects',
+      metric: 'RAM',
+      value: formatBytes(stats.projectsUsage.memoryUsedBytes),
+      meta: `${formatPercent(stats.projectsUsage.memorySharePercent)} of host memory`,
+      percent: clampPercent(stats.projectsUsage.memorySharePercent),
     },
   ]
 })
@@ -653,8 +681,8 @@ watch(projectFilter, () => {
 
     <div class="grid gap-6">
       <UiPanel as="section" class="space-y-6 p-6">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
+        <div class="w-full flex flex-wrap items-center justify-between gap-3">
+          <div class="w-full flex flex-col">
             <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
               Host stats
             </p>
@@ -688,148 +716,57 @@ watch(projectFilter, () => {
         </UiState>
 
         <template v-else-if="runtimeStats">
-          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <UiPanel variant="soft" class="space-y-2 p-3">
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Uptime
-              </p>
-              <p class="text-lg font-semibold text-[color:var(--text)]">
-                {{ runtimeStats.uptimeHuman || '—' }}
-              </p>
-              <p class="text-xs text-[color:var(--muted)]">
-                {{ runtimeStats.uptimeSeconds }} seconds
-              </p>
-            </UiPanel>
-            <UiPanel variant="soft" class="space-y-2 p-3">
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                System image
-              </p>
-              <p class="text-sm font-semibold text-[color:var(--text)] break-words">
-                {{ runtimeStats.systemImage || 'Unknown' }}
-              </p>
-              <p class="text-xs text-[color:var(--muted)] break-words">
-                {{ runtimeStats.kernel || 'Kernel unknown' }}
-              </p>
-            </UiPanel>
-            <UiPanel variant="soft" class="space-y-2 p-3">
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                CPU
-              </p>
-              <p class="text-sm font-semibold text-[color:var(--text)] break-words">
-                {{ runtimeStats.cpu.model || 'Unknown CPU' }}
-              </p>
-              <p class="text-xs text-[color:var(--muted)]">
-                {{ runtimeStats.cpu.cores }} cores
-              </p>
-            </UiPanel>
-            <UiPanel variant="soft" class="space-y-2 p-3">
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                GPU
-              </p>
-              <p class="text-sm font-semibold text-[color:var(--text)] break-words">
-                {{ runtimeStats.gpu?.model || 'Not detected' }}
-              </p>
-              <p class="text-xs text-[color:var(--muted)]">
-                Optional hardware probe
-              </p>
-            </UiPanel>
-          </div>
+          <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
+            <div class="grid gap-3 md:grid-cols-2 h-fit">
+              <UiPanel
+                v-for="card in runtimeIdentityCards"
+                :key="card.key"
+                variant="soft"
+                :class="['space-y-2 p-3', card.wide ? 'md:col-span-2' : '']"
+              >
+                <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
+                  {{ card.label }}
+                </p>
+                <p class="text-sm font-semibold text-[color:var(--text)] break-words">
+                  {{ card.value }}
+                </p>
+                <p class="text-xs text-[color:var(--muted)] break-words">
+                  {{ card.meta }}
+                </p>
+              </UiPanel>
+            </div>
 
-          <div class="grid gap-6 xl:grid-cols-2">
-            <UiPanel variant="soft" class="space-y-4 p-4">
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Host resources
-              </p>
+            <div class="grid gap-3 md:grid-cols-2 h-fit">
               <article
-                v-for="indicator in runtimeHardwareIndicators"
+                v-for="indicator in runtimeSignalIndicators"
                 :key="indicator.key"
-                class="space-y-2 rounded-md border border-[color:var(--border-soft)] bg-[color:var(--surface-inset)]/55 p-3"
+                class="space-y-2 rounded-md border border-[color:var(--border-soft)] bg-[color:var(--surface)]/70 p-3"
               >
                 <div class="flex flex-wrap items-center justify-between gap-2">
-                  <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                    {{ indicator.label }}
+                  <p class="text-xs uppercase tracking-[0.24em] text-[color:var(--muted-2)]">
+                    {{ indicator.scope }}
                   </p>
-                  <p class="text-sm font-semibold text-[color:var(--text)]">
-                    {{ indicator.value }}
+                  <p class="text-[11px] uppercase tracking-[0.24em] text-[color:var(--muted)]">
+                    {{ indicator.metric }}
                   </p>
                 </div>
-                <div class="stats-led-bar" role="img" :aria-label="`${indicator.label} ${formatPercent(indicator.percent)}`">
-                  <span
-                    v-for="segment in indicator.segments"
-                    :key="segment.key"
-                    :class="[
-                      'stats-led-segment',
-                      segment.active ? `is-active tone-${segment.tone}` : 'is-idle',
-                    ]"
-                  />
-                </div>
+                <p class="text-sm font-semibold text-[color:var(--text)]">
+                  {{ indicator.value }}
+                </p>
+                <UiRuntimeLedMeter
+                  :label="`${indicator.scope} ${indicator.metric}`"
+                  :percent="indicator.percent"
+                />
                 <p class="text-xs text-[color:var(--muted)]">
                   {{ indicator.meta }}
                 </p>
               </article>
-            </UiPanel>
-
-            <UiPanel variant="soft" class="space-y-4 p-4">
-              <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">
-                Gungnr footprint
-              </p>
-              <article
-                v-for="indicator in runtimeWorkloadIndicators"
-                :key="indicator.key"
-                class="space-y-3 rounded-md border border-[color:var(--border-soft)] bg-[color:var(--surface-inset)]/55 p-3"
-              >
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <p class="text-sm font-semibold text-[color:var(--text)]">
-                    {{ indicator.label }}
-                  </p>
-                  <p class="text-xs text-[color:var(--muted)]">
-                    {{ indicator.runningContainers }}/{{ indicator.containers }} running
-                  </p>
-                </div>
-                <div class="space-y-2">
-                  <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <span class="text-[color:var(--muted)]">Memory</span>
-                    <span class="text-[color:var(--text)]">
-                      {{ indicator.memoryPercentLabel }} ({{ indicator.memoryUsed }})
-                    </span>
-                  </div>
-                  <div class="stats-led-bar" role="img" :aria-label="`${indicator.label} memory ${indicator.memoryPercentLabel}`">
-                    <span
-                      v-for="segment in indicator.memorySegments"
-                      :key="segment.key"
-                      :class="[
-                        'stats-led-segment',
-                        segment.active ? `is-active tone-${segment.tone}` : 'is-idle',
-                      ]"
-                    />
-                  </div>
-                </div>
-                <div class="space-y-2">
-                  <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <span class="text-[color:var(--muted)]">Disk</span>
-                    <span class="text-[color:var(--text)]">
-                      {{ indicator.diskPercentLabel }} ({{ indicator.diskUsed }})
-                    </span>
-                  </div>
-                  <div class="stats-led-bar" role="img" :aria-label="`${indicator.label} disk ${indicator.diskPercentLabel}`">
-                    <span
-                      v-for="segment in indicator.diskSegments"
-                      :key="segment.key"
-                      :class="[
-                        'stats-led-segment',
-                        segment.active ? `is-active tone-${segment.tone}` : 'is-idle',
-                      ]"
-                    />
-                  </div>
-                </div>
-              </article>
-            </UiPanel>
+            </div>
           </div>
-
           <UiInlineFeedback v-if="runtimeWarnings.length > 0" tone="warn">
             {{ runtimeWarnings.join(' · ') }}
           </UiInlineFeedback>
-        </template>
+          </template>
 
         <UiState v-else>
           Runtime stats not loaded yet.
@@ -1379,49 +1316,3 @@ watch(projectFilter, () => {
     />
   </section>
 </template>
-
-<style scoped>
-.stats-led-bar {
-  display: grid;
-  grid-template-columns: repeat(48, minmax(0, 1fr));
-  gap: 2px;
-  border: 1px solid color-mix(in oklch, var(--border-soft) 78%, black);
-  background: color-mix(in oklch, var(--surface-inset) 84%, black);
-  border-radius: 4px;
-  padding: 4px;
-}
-
-.stats-led-segment {
-  display: block;
-  height: 10px;
-  border-radius: 1px;
-  background: color-mix(in oklch, var(--surface-3) 82%, black);
-  transition: background-color 0.18s ease, opacity 0.18s ease;
-}
-
-.stats-led-segment.is-idle {
-  opacity: 0.38;
-}
-
-.stats-led-segment.is-active {
-  opacity: 1;
-}
-
-.stats-led-segment.is-active.tone-ok {
-  background: color-mix(in oklch, var(--success) 86%, #29bf12);
-}
-
-.stats-led-segment.is-active.tone-warn {
-  background: color-mix(in oklch, var(--warning) 88%, #ff7a00);
-}
-
-.stats-led-segment.is-active.tone-error {
-  background: color-mix(in oklch, var(--danger) 88%, #ff2d2d);
-}
-
-@media (max-width: 768px) {
-  .stats-led-segment {
-    height: 8px;
-  }
-}
-</style>

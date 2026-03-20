@@ -1039,6 +1039,7 @@
   "GET /api/v1/host/stats": {
     "stats": {
       "collectedAt": "2026-03-19T13:30:00Z",
+      "hostname": "mock-host",
       "uptimeSeconds": 987654,
       "uptimeHuman": "11d 10h 20m",
       "systemImage": "Ubuntu 24.04 LTS",
@@ -1046,21 +1047,26 @@
       "cpu": {
         "model": "AMD Ryzen 7 5800X",
         "cores": 8,
-        "threads": 16
+        "threads": 16,
+        "speedMHz": 4550
       },
       "gpu": {
-        "model": "NVIDIA RTX 3070"
+        "model": "NVIDIA RTX 3070",
+        "speedMHz": 1730
       },
       "memory": {
         "totalBytes": 34359738368,
         "usedBytes": 15938355200,
         "freeBytes": 18421383168,
-        "usedPercent": 46.39
+        "availableBytes": 18421383168,
+        "usedPercent": 46.39,
+        "speedMTs": 3200
       },
       "disk": {
         "totalBytes": 536870912000,
         "usedBytes": 212600881152,
         "freeBytes": 324270030848,
+        "availableBytes": 312147001344,
         "usedPercent": 39.6
       },
       "panelUsage": {

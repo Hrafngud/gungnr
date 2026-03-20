@@ -8,6 +8,7 @@ import UiInlineSpinner from '@/components/ui/UiInlineSpinner.vue'
 import UiListRow from '@/components/ui/UiListRow.vue'
 import UiModal from '@/components/ui/UiModal.vue'
 import UiPanel from '@/components/ui/UiPanel.vue'
+import UiRuntimeLedMeter from '@/components/ui/UiRuntimeLedMeter.vue'
 import UiState from '@/components/ui/UiState.vue'
 import NavIcon from '@/components/NavIcon.vue'
 import type { BadgeTone } from '@/components/workbench/projectDetailWorkbenchTypes'
@@ -15,6 +16,7 @@ import { apiErrorMessage } from '@/services/api'
 import { hostApi } from '@/services/host'
 import { projectsApi } from '@/services/projects'
 import { useToastStore } from '@/stores/toasts'
+import { clampPercent, formatBytes, formatPercent } from '@/utils/runtimeMetrics'
 import type { HostRuntimeWorkloadUsage } from '@/types/host'
 import type { ProjectContainer } from '@/types/projects'
 
@@ -51,43 +53,6 @@ const usageLoading = ref(false)
 const usageError = ref<string | null>(null)
 const projectUsage = ref<HostRuntimeWorkloadUsage | null>(null)
 const projectUsageWarnings = ref<string[]>([])
-
-const meterSegmentCount = 48
-
-const clampPercent = (value: number | null | undefined) => {
-  if (typeof value !== 'number' || Number.isNaN(value)) return 0
-  if (value < 0) return 0
-  if (value > 100) return 100
-  return value
-}
-
-const formatPercent = (value: number | null | undefined) => `${clampPercent(value).toFixed(1)}%`
-
-const formatBytes = (bytes: number | null | undefined) => {
-  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) return '0 B'
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  let value = bytes
-  let index = 0
-  while (value >= 1024 && index < units.length - 1) {
-    value /= 1024
-    index += 1
-  }
-  const rounded = value >= 10 ? value.toFixed(1) : value.toFixed(2)
-  return `${rounded} ${units[index]}`
-}
-
-const buildMeterSegments = (percent: number, key: string) => {
-  const normalized = clampPercent(percent)
-  return Array.from({ length: meterSegmentCount }, (_, index) => {
-    const threshold = ((index + 1) / meterSegmentCount) * 100
-    const tone = threshold <= 55 ? 'ok' : threshold <= 80 ? 'warn' : 'error'
-    return {
-      key: `${key}-${index}`,
-      active: threshold <= normalized,
-      tone,
-    }
-  })
-}
 
 function containerTone(container: ProjectContainer): BadgeTone {
   const normalized = container.status.trim().toLowerCase()
@@ -147,7 +112,6 @@ const usageIndicators = computed(() => {
       value: formatPercent(usage.cpuUsedPercent),
       percent: clampPercent(usage.cpuUsedPercent),
       meta: 'Aggregated from docker stats for project containers.',
-      segments: buildMeterSegments(usage.cpuUsedPercent, 'project-cpu'),
     },
     {
       key: 'memory',
@@ -155,7 +119,6 @@ const usageIndicators = computed(() => {
       value: formatBytes(usage.memoryUsedBytes),
       percent: clampPercent(usage.memorySharePercent),
       meta: `${formatPercent(usage.memorySharePercent)} of host memory`,
-      segments: buildMeterSegments(usage.memorySharePercent, 'project-memory'),
     },
     {
       key: 'disk',
@@ -163,7 +126,6 @@ const usageIndicators = computed(() => {
       value: formatBytes(usage.diskUsedBytes),
       percent: clampPercent(usage.diskSharePercent),
       meta: `${formatPercent(usage.diskSharePercent)} of host disk`,
-      segments: buildMeterSegments(usage.diskSharePercent, 'project-disk'),
     },
   ]
 })
@@ -428,16 +390,7 @@ watch(usageContainerSignature, () => {
                 {{ indicator.value }}
               </p>
             </div>
-            <div class="runtime-usage-led-bar" role="img" :aria-label="`${indicator.label} ${formatPercent(indicator.percent)}`">
-              <span
-                v-for="segment in indicator.segments"
-                :key="segment.key"
-                :class="[
-                  'runtime-usage-led-segment',
-                  segment.active ? `is-active tone-${segment.tone}` : 'is-idle',
-                ]"
-              />
-            </div>
+            <UiRuntimeLedMeter :label="indicator.label" :percent="indicator.percent" />
             <p class="text-xs text-[color:var(--muted)]">
               {{ indicator.meta }}
             </p>
@@ -588,49 +541,3 @@ watch(usageContainerSignature, () => {
     </UiModal>
   </UiPanel>
 </template>
-
-<style scoped>
-.runtime-usage-led-bar {
-  display: grid;
-  grid-template-columns: repeat(48, minmax(0, 1fr));
-  gap: 2px;
-  border: 1px solid color-mix(in oklch, var(--border-soft) 78%, black);
-  background: color-mix(in oklch, var(--surface-inset) 84%, black);
-  border-radius: 4px;
-  padding: 4px;
-}
-
-.runtime-usage-led-segment {
-  display: block;
-  height: 10px;
-  border-radius: 1px;
-  background: color-mix(in oklch, var(--surface-3) 82%, black);
-  transition: background-color 0.18s ease, opacity 0.18s ease;
-}
-
-.runtime-usage-led-segment.is-idle {
-  opacity: 0.38;
-}
-
-.runtime-usage-led-segment.is-active {
-  opacity: 1;
-}
-
-.runtime-usage-led-segment.is-active.tone-ok {
-  background: color-mix(in oklch, var(--success) 86%, #29bf12);
-}
-
-.runtime-usage-led-segment.is-active.tone-warn {
-  background: color-mix(in oklch, var(--warning) 88%, #ff7a00);
-}
-
-.runtime-usage-led-segment.is-active.tone-error {
-  background: color-mix(in oklch, var(--danger) 88%, #ff2d2d);
-}
-
-@media (max-width: 768px) {
-  .runtime-usage-led-segment {
-    height: 8px;
-  }
-}
-</style>
