@@ -248,20 +248,6 @@ GUNGNR_VERSION=v1.2.3 docker compose -f docker-compose.release.yml up -d
   Excalidraw container on port 80).
 - Activity: review the audit timeline of user actions in the Activity view.
 
-## Workbench operator flow
-- Workbench is the shipped compose authority for project stacks under
-  `/api/v1/projects/:name/workbench/*`.
-- Admins can import the current compose, preview generated output, apply with
-  revision and fingerprint guards, and restore from deterministic backups under
-  `.gungnr/workbench/compose-backups`.
-- Apply is atomic and always creates a backup before replacing the compose file.
-- Restore may return `requiresImport=true` when the restored compose fingerprint
-  no longer matches the stored snapshot; the safe recovery path is
-  `import -> preview -> apply`.
-- Create-from-template and deploy-existing Jobs already consume Workbench-backed
-  compose apply behavior. Missing snapshots are bootstrapped implicitly during
-  those job paths, and typed `WB-*` failures are preserved in job logs.
-
 ## Local development (optional)
 - Backend: `cd backend && go run ./cmd/server`
 - Frontend: `cd frontend/go-notes && npm install && \
