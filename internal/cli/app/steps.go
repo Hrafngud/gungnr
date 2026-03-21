@@ -382,12 +382,12 @@ func runKeepaliveSetup(ctx context.Context, state *State, ui UI) error {
 		return errors.New("state directory missing before reboot fallback setup")
 	}
 
-	ui.StepProgress("keepalive_setup", "Installing reboot fallback scripts and watchdog")
+	ui.StepProgress("keepalive_setup", "Installing reboot recovery systemd units")
 	keepaliveCtx, err := resolveKeepaliveContext(true)
 	if err != nil {
 		return err
 	}
-	setupResult, err := configureKeepalive(keepaliveCtx, keepaliveModeCore)
+	setupResult, err := configureKeepalive(keepaliveCtx)
 	if err != nil {
 		return err
 	}
@@ -412,8 +412,8 @@ func runKeepaliveSetup(ctx context.Context, state *State, ui UI) error {
 		state.KeepaliveStatus = "enabled (" + detail + ")"
 		ui.Info("Reboot fallback: " + detail)
 		ui.Info("Recovery run script: " + setupResult.Supervisor.RunScript)
-		ui.Info("Tunnel ensure script: " + setupResult.Supervisor.EnsureScript)
-		ui.Info("Compose recovery path: " + setupResult.ComposeFile)
+		ui.Info("Recovery ensure script: " + setupResult.Supervisor.EnsureScript)
+		ui.Info("Panel compose recovery path: " + setupResult.ComposeFile)
 		return nil
 	}
 
