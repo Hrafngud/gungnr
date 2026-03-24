@@ -53,20 +53,22 @@ standard install.
 Reboot fallback is available via keepalive tooling and bootstrap-installed watchdog scripts.
 
 ### Tunnel auto-start watchdog
-`gungnr keepalive` now manages reboot persistence with a supervisor chain:
-- preferred: system-level systemd units (`/etc/systemd/system/gungnr.service` + `/etc/systemd/system/gungnr-keepalive.timer`)
-- fallback: user-level systemd units (`~/.config/systemd/user/gungnr-cloudflared-keepalive.service` + `.timer`)
-- fallback: crontab watchdog (`@reboot` + every 5 minutes)
+`gungnr keepalive` now manages reboot persistence with system-level systemd only:
+- `/etc/systemd/system/gungnr.service`
+- `/etc/systemd/system/gungnr-keepalive.timer`
+
+On reboot, keepalive runs a recovery lifecycle in order:
+- rebuild panel compose stack (`docker compose up --build --force-recreate -d`)
+- rerun tunnel startup (`gungnr tunnel run` equivalent)
+- wait for panel health (`/healthz`)
+- rebuild each detected project stack sequentially (`docker compose up --build --force-recreate -d`) with health checks between runs
 
 Scripts created under `~/gungnr/state`:
-- `~/gungnr/state/cloudflared-run.sh` (starts the tunnel using the generated config)
-- `~/gungnr/state/cloudflared-ensure.sh` (checks the process and relaunches if needed)
+- `~/gungnr/state/cloudflared-run.sh` (starts reboot recovery)
+- `~/gungnr/state/cloudflared-ensure.sh` (invokes the recovery run script)
 
-Common keepalive commands:
-- `gungnr keepalive enable` (core mode: panel stack + tunnel)
-- `gungnr keepalive all` (core + managed project recovery)
-- `gungnr keepalive status`
-- `gungnr keepalive disable`
+Keepalive command:
+- `gungnr keepalive` (toggle enable/disable)
 
 
 ## Installation
@@ -139,9 +141,9 @@ Local source: `docs/index.html` (landing), `docs/docs.html` (docs), `docs/errors
   - Quick services: Pull Docker registry images and expose via tunnel for rapid testing.
 - **Cloudflare integration**: Locally managed tunnels with ingress routing and DNS management via Cloudflare API.
 - **Docker-based runtime**: Compose orchestration with container logs, job history, and audit trails in the UI.
-- **Daemon management for keepalive**: `gungnr keepalive` supports systemd integration (system-level first, with user-systemd/cron fallback) for cloudflared + stack recovery after reboot.
+- **Daemon management for keepalive**: `gungnr keepalive` installs/removes system-level systemd reboot recovery (`gungnr.service` + `gungnr-keepalive.timer`) for panel + project stack regeneration.
 - **Role-based access control (RBAC)**: SuperUsers manage everything; Admins have most privileges but can't assign roles; Users can deploy and run jobs but can't manage allowlist.
-- **CLI operations**: `gungnr restart`, `gungnr tunnel run`, `gungnr keepalive <enable|disable|status|all|recover>`, and `gungnr uninstall` commands for panel and tunnel control.
+- **CLI operations**: `gungnr restart`, `gungnr tunnel run`, `gungnr keepalive`, and `gungnr uninstall` commands for panel and tunnel control.
 
 ### Planned Features
 - **Expanded RBAC**: Define clearer RBAC rules and presets for different case scenarios.
@@ -247,20 +249,6 @@ GUNGNR_VERSION=v1.2.3 docker compose -f docker-compose.release.yml up -d
 - Quick local service: provide a subdomain and host port (defaults to running an
   Excalidraw container on port 80).
 - Activity: review the audit timeline of user actions in the Activity view.
-
-## Workbench operator flow
-- Workbench is the shipped compose authority for project stacks under
-  `/api/v1/projects/:name/workbench/*`.
-- Admins can import the current compose, preview generated output, apply with
-  revision and fingerprint guards, and restore from deterministic backups under
-  `.gungnr/workbench/compose-backups`.
-- Apply is atomic and always creates a backup before replacing the compose file.
-- Restore may return `requiresImport=true` when the restored compose fingerprint
-  no longer matches the stored snapshot; the safe recovery path is
-  `import -> preview -> apply`.
-- Create-from-template and deploy-existing Jobs already consume Workbench-backed
-  compose apply behavior. Missing snapshots are bootstrapped implicitly during
-  those job paths, and typed `WB-*` failures are preserved in job logs.
 
 ## Local development (optional)
 - Backend: `cd backend && go run ./cmd/server`

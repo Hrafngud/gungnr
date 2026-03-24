@@ -132,67 +132,34 @@ func Setup(configPath, stateDir string) (SetupResult, error) {
 	if err != nil {
 		return SetupResult{}, err
 	}
-
-	var systemdSystemErr error
-	if systemdSystemState.Available {
-		if installErr := installSystemdSystemTimer(systemdSystemState, ensureScript); installErr == nil {
-			if systemdUserState, userErr := probeSystemdStatus(); userErr == nil {
-				_, _ = teardownSystemd(systemdUserState)
-			}
-			_, _ = removeCronManagedEntries()
-			return SetupResult{
-				Supervisor:   SupervisorSystemdSystem,
-				RunScript:    runScript,
-				EnsureScript: ensureScript,
-				Installed:    true,
-				Detail:       "installed system-level systemd units (gungnr.service + gungnr-keepalive.timer) for keepalive recovery watchdog",
-			}, nil
-		} else {
-			systemdSystemErr = installErr
-			cleanupState := systemdSystemState
-			if refreshed, refreshErr := probeSystemdSystemStatus(); refreshErr == nil {
-				cleanupState = refreshed
-			}
-			_, _ = teardownSystemdSystemBestEffort(cleanupState)
+	if !systemdSystemState.Available {
+		reason := strings.TrimSpace(systemdSystemState.UnavailableReason)
+		if reason == "" {
+			reason = "unknown reason"
 		}
+		return SetupResult{}, fmt.Errorf("system-level systemd is unavailable: %s", reason)
 	}
 
-	systemdUserState, err := probeSystemdStatus()
-	if err != nil {
+	if err := installSystemdSystemTimer(systemdSystemState, ensureScript); err != nil {
+		cleanupState := systemdSystemState
+		if refreshed, refreshErr := probeSystemdSystemStatus(); refreshErr == nil {
+			cleanupState = refreshed
+		}
+		_, _ = teardownSystemdSystemBestEffort(cleanupState)
 		return SetupResult{}, err
 	}
-	if systemdUserState.Available {
-		if err := installSystemdTimer(systemdUserState, ensureScript); err == nil {
-			_, _ = removeCronManagedEntries()
-			detail := "installed user systemd timer for keepalive recovery watchdog"
-			if systemdSystemErr != nil {
-				detail = detailWithSystemdSystemFallback(detail, systemdSystemErr)
-			}
-			return SetupResult{
-				Supervisor:   SupervisorSystemd,
-				RunScript:    runScript,
-				EnsureScript: ensureScript,
-				Installed:    true,
-				Detail:       detail,
-			}, nil
-		}
+
+	if systemdUserState, userErr := probeSystemdStatus(); userErr == nil {
 		_, _ = teardownSystemd(systemdUserState)
 	}
-
-	cronInstalled, cronDetail, err := installCronWatchdog(ensureScript)
-	if err != nil {
-		return SetupResult{}, err
-	}
-	if systemdSystemErr != nil {
-		cronDetail = detailWithSystemdSystemFallback(cronDetail, systemdSystemErr)
-	}
+	_, _ = removeCronManagedEntries()
 
 	return SetupResult{
-		Supervisor:   SupervisorCron,
+		Supervisor:   SupervisorSystemdSystem,
 		RunScript:    runScript,
 		EnsureScript: ensureScript,
-		Installed:    cronInstalled,
-		Detail:       cronDetail,
+		Installed:    true,
+		Detail:       "installed system-level systemd recovery units (boot + 5-minute keepalive timer)",
 	}, nil
 }
 
@@ -337,14 +304,23 @@ set -euo pipefail
 
 KEEPALIVE_EXECUTABLE=%s
 LOG_PATH=%s
+SYSTEM_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+export PATH="$SYSTEM_PATH:${PATH:-}"
 
 if [[ ! -x "$KEEPALIVE_EXECUTABLE" ]]; then
+  ts="$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)"
+  msg="keepalive executable not found at $KEEPALIVE_EXECUTABLE"
+  printf '%%s level=error phase=bootstrap msg="%%s"\n' "$ts" "$msg" >>"$LOG_PATH" 2>/dev/null || true
   echo "keepalive executable not found at $KEEPALIVE_EXECUTABLE" >&2
   exit 1
 fi
 
+ts="$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)"
+printf '%%s level=info phase=bootstrap msg="launching keepalive executable %%s"\n' "$ts" "$KEEPALIVE_EXECUTABLE" >>"$LOG_PATH" 2>/dev/null || true
+
 export GUNGNR_KEEPALIVE_TRIGGER=supervisor
-exec "$KEEPALIVE_EXECUTABLE" keepalive recover >>"$LOG_PATH" 2>&1
+exec "$KEEPALIVE_EXECUTABLE" keepalive >>"$LOG_PATH" 2>&1
 `, strconv.Quote(keepaliveExecutable), strconv.Quote(logPath))
 
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
@@ -359,7 +335,7 @@ set -euo pipefail
 
 RUN_SCRIPT=%s
 
-nohup "$RUN_SCRIPT" >/dev/null 2>&1 &
+exec "$RUN_SCRIPT"
 `, strconv.Quote(runScript))
 
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
@@ -390,9 +366,6 @@ func installSystemdTimer(state SystemdStatus, ensureScript string) error {
 		return err
 	}
 	if _, err := runSystemctlUser("enable", "--now", state.TimerUnit); err != nil {
-		return err
-	}
-	if _, err := runSystemctlUser("start", state.ServiceUnit); err != nil {
 		return err
 	}
 	return nil
@@ -429,9 +402,6 @@ func installSystemdSystemTimer(state SystemdStatus, ensureScript string) error {
 	if _, err := runSystemctlSystemPrivileged("enable", "--now", state.TimerUnit); err != nil {
 		return err
 	}
-	if _, err := runSystemctlSystemPrivileged("start", state.ServiceUnit); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -442,6 +412,8 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+TimeoutStartSec=0
 ExecStart=/usr/bin/env bash -lc %s
 `, strconv.Quote(ensureScript))
 }
@@ -473,17 +445,19 @@ After=network-online.target
 Type=oneshot
 User=%s
 Environment=HOME=%s
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+TimeoutStartSec=0
 ExecStart=/usr/bin/env bash -lc %s
 `, username, homeDir, strconv.Quote(ensureScript)), nil
 }
 
 func buildSystemdTimerUnit(serviceUnit string) string {
 	return fmt.Sprintf(`[Unit]
-Description=Gungnr keepalive recovery timer
+Description=Gungnr keepalive reboot recovery timer
 
 [Timer]
 OnBootSec=1min
-OnUnitActiveSec=5min
+OnUnitInactiveSec=5min
 Unit=%s
 Persistent=true
 

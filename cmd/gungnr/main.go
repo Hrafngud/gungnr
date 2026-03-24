@@ -54,7 +54,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  gungnr bootstrap [--plain]")
 	fmt.Fprintln(os.Stderr, "  gungnr restart")
 	fmt.Fprintln(os.Stderr, "  gungnr tunnel run")
-	fmt.Fprintln(os.Stderr, "  gungnr keepalive <enable|disable|status|all|recover>")
+	fmt.Fprintln(os.Stderr, "  gungnr keepalive")
 	fmt.Fprintln(os.Stderr, "  gungnr netbird mode --set <legacy|mode_a|mode_b> [--allow-localhost]")
 	fmt.Fprintln(os.Stderr, "  gungnr netbird status")
 	fmt.Fprintln(os.Stderr, "  gungnr uninstall [--yes]")
@@ -157,7 +157,7 @@ func runTunnel(args []string) {
 }
 
 func runKeepalive(args []string) {
-	if len(args) != 1 {
+	if len(args) != 0 {
 		printKeepaliveUsage()
 		os.Exit(2)
 	}
@@ -167,20 +167,11 @@ func runKeepalive(args []string) {
 		err    error
 	)
 
-	switch args[0] {
-	case "enable":
-		output, err = app.KeepaliveEnable()
-	case "disable":
-		output, err = app.KeepaliveDisable()
-	case "status":
-		output, err = app.KeepaliveStatus()
-	case "all":
-		output, err = app.KeepaliveAll()
-	case "recover":
-		output, err = app.KeepaliveRecover()
-	default:
-		printKeepaliveUsage()
-		os.Exit(2)
+	trigger := strings.TrimSpace(os.Getenv("GUNGNR_KEEPALIVE_TRIGGER"))
+	if trigger == "" {
+		output, err = app.KeepaliveToggle()
+	} else {
+		output, err = app.KeepaliveRecover(trigger)
 	}
 
 	if strings.TrimSpace(output) != "" {
@@ -195,11 +186,7 @@ func runKeepalive(args []string) {
 
 func printKeepaliveUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
-	fmt.Fprintln(os.Stderr, "  gungnr keepalive enable")
-	fmt.Fprintln(os.Stderr, "  gungnr keepalive disable")
-	fmt.Fprintln(os.Stderr, "  gungnr keepalive status")
-	fmt.Fprintln(os.Stderr, "  gungnr keepalive all")
-	fmt.Fprintln(os.Stderr, "  gungnr keepalive recover")
+	fmt.Fprintln(os.Stderr, "  gungnr keepalive")
 }
 
 func runNetBird(args []string) {

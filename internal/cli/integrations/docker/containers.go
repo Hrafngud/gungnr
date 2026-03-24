@@ -3,7 +3,11 @@ package docker
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,6 +20,13 @@ type ComposeContainer struct {
 	Status  string
 	Project string
 	Service string
+}
+
+type ComposeProject struct {
+	Name            string
+	WorkingDir      string
+	ConfigFiles     []string
+	SeedContainerID string
 }
 
 type dockerPSLine struct {
@@ -72,6 +83,72 @@ func ListComposeContainers(includeAll bool) ([]ComposeContainer, error) {
 	}
 
 	return containers, nil
+}
+
+func DiscoverComposeProjects(includeAll bool) ([]ComposeProject, error) {
+	containers, err := ListComposeContainers(includeAll)
+	if err != nil {
+		return nil, err
+	}
+	if len(containers) == 0 {
+		return []ComposeProject{}, nil
+	}
+
+	projectSeedContainer := make(map[string]string)
+	for _, container := range containers {
+		project := strings.TrimSpace(container.Project)
+		if project == "" {
+			continue
+		}
+		if _, exists := projectSeedContainer[project]; exists {
+			continue
+		}
+		projectSeedContainer[project] = strings.TrimSpace(container.ID)
+	}
+
+	projectNames := make([]string, 0, len(projectSeedContainer))
+	for name := range projectSeedContainer {
+		projectNames = append(projectNames, name)
+	}
+	sort.Strings(projectNames)
+
+	projects := make([]ComposeProject, 0, len(projectNames))
+	for _, name := range projectNames {
+		project, err := inspectComposeProject(projectSeedContainer[name], name)
+		if err != nil {
+			return nil, err
+		}
+		projects = append(projects, project)
+	}
+	return projects, nil
+}
+
+func RebuildComposeProject(project ComposeProject, logPath string) error {
+	if strings.TrimSpace(project.Name) == "" {
+		return errors.New("compose project name is empty")
+	}
+	if len(project.ConfigFiles) == 0 {
+		return fmt.Errorf("compose project %q has no compose config files", project.Name)
+	}
+
+	commandName, baseArgs, err := ResolveComposeCommand()
+	if err != nil {
+		return err
+	}
+
+	composeDir := strings.TrimSpace(project.WorkingDir)
+	if composeDir == "" {
+		composeDir = filepath.Dir(project.ConfigFiles[0])
+	}
+
+	args := append([]string{}, baseArgs...)
+	args = append(args, "-p", project.Name)
+	for _, configFile := range project.ConfigFiles {
+		args = append(args, "-f", configFile)
+	}
+	args = append(args, "up", "--build", "--force-recreate", "-d")
+
+	return command.RunLoggedInDir(composeDir, commandName, logPath, args...)
 }
 
 func StartContainers(containerIDs []string) error {
@@ -131,4 +208,101 @@ func parseDockerLabels(raw string) map[string]string {
 		labels[key] = value
 	}
 	return labels
+}
+
+func inspectComposeProject(containerID, fallbackProject string) (ComposeProject, error) {
+	containerID = strings.TrimSpace(containerID)
+	if containerID == "" {
+		return ComposeProject{}, fmt.Errorf("compose project %q has no seed container", fallbackProject)
+	}
+
+	output, err := command.Run("docker", "inspect", "--format", "{{json .Config.Labels}}", containerID)
+	if err != nil {
+		return ComposeProject{}, fmt.Errorf("inspect compose project %q: %w", fallbackProject, err)
+	}
+
+	labels := map[string]string{}
+	trimmed := strings.TrimSpace(output)
+	if trimmed != "" && trimmed != "<no value>" {
+		if err := json.Unmarshal([]byte(trimmed), &labels); err != nil {
+			return ComposeProject{}, fmt.Errorf("parse docker labels for project %q: %w", fallbackProject, err)
+		}
+	}
+
+	projectName := strings.TrimSpace(labels["com.docker.compose.project"])
+	if projectName == "" {
+		projectName = strings.TrimSpace(fallbackProject)
+	}
+	if projectName == "" {
+		return ComposeProject{}, errors.New("compose project name is empty")
+	}
+
+	workingDir := strings.TrimSpace(labels["com.docker.compose.project.working_dir"])
+	configFiles := resolveComposeConfigFiles(workingDir, labels["com.docker.compose.project.config_files"])
+	if len(configFiles) == 0 {
+		return ComposeProject{}, fmt.Errorf("unable to resolve compose config files for project %q", projectName)
+	}
+
+	return ComposeProject{
+		Name:            projectName,
+		WorkingDir:      workingDir,
+		ConfigFiles:     configFiles,
+		SeedContainerID: containerID,
+	}, nil
+}
+
+func resolveComposeConfigFiles(workingDir, raw string) []string {
+	candidates := splitComposeConfigFiles(raw)
+	if len(candidates) == 0 {
+		candidates = []string{"docker-compose.yml", "compose.yml", "compose.yaml"}
+	}
+
+	seen := make(map[string]struct{})
+	resolved := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		trimmed := strings.TrimSpace(candidate)
+		if trimmed == "" {
+			continue
+		}
+
+		path := trimmed
+		if !filepath.IsAbs(path) && strings.TrimSpace(workingDir) != "" {
+			path = filepath.Join(workingDir, path)
+		}
+
+		if absPath, err := filepath.Abs(path); err == nil {
+			path = absPath
+		}
+
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		resolved = append(resolved, path)
+	}
+
+	return resolved
+}
+
+func splitComposeConfigFiles(raw string) []string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(trimmed, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n'
+	})
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value == "" {
+			continue
+		}
+		result = append(result, value)
+	}
+	return result
 }

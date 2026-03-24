@@ -97,6 +97,18 @@ func StartCompose(composeFile, envFile, logPath string) error {
 	return command.RunLoggedInDir(composeDir, commandName, logPath, args...)
 }
 
+func RebuildCompose(composeFile, envFile, logPath string) error {
+	commandName, baseArgs, err := ResolveComposeCommand()
+	if err != nil {
+		return err
+	}
+
+	composeDir := filepath.Dir(composeFile)
+	args := append([]string{}, baseArgs...)
+	args = append(args, "--env-file", envFile, "-f", composeFile, "up", "--build", "--force-recreate", "-d")
+	return command.RunLoggedInDir(composeDir, commandName, logPath, args...)
+}
+
 func EnsureComposeRunning(composeFile, envFile, logPath string) error {
 	commandName, baseArgs, err := ResolveComposeCommand()
 	if err != nil {

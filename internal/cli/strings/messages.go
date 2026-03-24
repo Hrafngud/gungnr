@@ -24,12 +24,12 @@ func CloudflareTokenHelp() []string {
 }
 
 func CloudflaredPersistenceNote() string {
-	return "Note: keepalive runs as the current user; bootstrap prefers a user systemd timer and falls back to a crontab watchdog for core recovery after reboot."
+	return "Note: keepalive installs a system-level systemd reboot-recovery timer that rebuilds the panel stack, restarts the tunnel, and then rebuilds project stacks."
 }
 
 func KeepaliveBootstrapHelp() []string {
 	return []string{
-		"Reboot fallback keeps the tunnel running after reboots and checks it every 5 minutes.",
-		"Answer yes to install the watchdog during bootstrap, or no to skip it.",
+		"Reboot keepalive runs after host startup to recover panel and project stacks.",
+		"Answer yes to install system-level keepalive during bootstrap, or no to skip it.",
 	}
 }

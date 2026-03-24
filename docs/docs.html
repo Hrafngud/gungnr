@@ -686,32 +686,23 @@
               data-doc-section
               data-doc-title="Tunnel auto-start watchdog"
               data-doc-group="installation"
-              data-doc-tags="cloudflared keepalive systemd cron watchdog"
+              data-doc-tags="cloudflared keepalive systemd reboot recovery"
             >
               <h3 class="text-xl font-semibold">Tunnel auto-start watchdog</h3>
               <p class="mt-2 text-sm text-[color:var(--muted)]">
                 Reboot fallback is optional during bootstrap and is also manageable later with
-                <code>gungnr keepalive</code>. When enabled, Gungnr installs the supervisor chain in this order:
-                system-level systemd, then user-level systemd, then cron fallback.
+                <code>gungnr keepalive</code>. When enabled, Gungnr installs system-level systemd reboot recovery
+                and executes this lifecycle after host startup: panel compose rebuild, tunnel restart, panel
+                health check, then sequential project stack rebuilds with health checks between each restart.
               </p>
               <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
-                <li><code>/etc/systemd/system/gungnr.service</code> + <code>gungnr-keepalive.timer</code> (preferred)</li>
-                <li><code>~/.config/systemd/user/gungnr-cloudflared-keepalive.service</code> + <code>.timer</code> (fallback)</li>
-                <li><code>crontab</code> <code>@reboot</code> + 5-minute watch entry (last fallback)</li>
-                <li><code>~/gungnr/state/cloudflared-run.sh</code> (starts the tunnel with the generated config)</li>
-                <li><code>~/gungnr/state/cloudflared-ensure.sh</code> (verifies the process and relaunches if needed)</li>
+                <li><code>/etc/systemd/system/gungnr.service</code> + <code>/etc/systemd/system/gungnr-keepalive.timer</code></li>
+                <li><code>~/gungnr/state/cloudflared-run.sh</code> (starts keepalive recovery)</li>
+                <li><code>~/gungnr/state/cloudflared-ensure.sh</code> (invokes the recovery run script)</li>
               </ul>
               <div class="mt-4 code-block" id="cmd-watchdog-run">
                 <button class="copy-button" data-copy-target="#cmd-watchdog-run code">Copy</button>
-                <pre class="m-0 text-sm"><code>gungnr keepalive enable</code></pre>
-              </div>
-              <div class="mt-4 code-block" id="cmd-watchdog-view">
-                <button class="copy-button" data-copy-target="#cmd-watchdog-view code">Copy</button>
-                <pre class="m-0 text-sm"><code>gungnr keepalive status</code></pre>
-              </div>
-              <div class="mt-4 code-block" id="cmd-watchdog-remove">
-                <button class="copy-button" data-copy-target="#cmd-watchdog-remove code">Copy</button>
-                <pre class="m-0 text-sm"><code>gungnr keepalive disable</code></pre>
+                <pre class="m-0 text-sm"><code>gungnr keepalive</code></pre>
               </div>
             </div>
           </section>
@@ -875,11 +866,7 @@
 gungnr bootstrap [--plain]
 gungnr restart
 gungnr tunnel run
-gungnr keepalive enable
-gungnr keepalive disable
-gungnr keepalive status
-gungnr keepalive all
-gungnr keepalive recover
+gungnr keepalive
 gungnr netbird status
 gungnr netbird mode --set &lt;legacy|mode_a|mode_b&gt; [--allow-localhost]
 gungnr uninstall [--yes]</code></pre>
