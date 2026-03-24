@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"gungnr-cli/internal/cli/integrations/cloudflared"
 	"gungnr-cli/internal/cli/integrations/docker"
 	"gungnr-cli/internal/cli/integrations/filesystem"
 	"gungnr-cli/internal/cli/integrations/health"
@@ -26,6 +27,9 @@ const (
 	keepaliveHealthURL       = "http://localhost/healthz"
 
 	defaultAPIHealthTimeoutSeconds = 180
+	defaultProjectRetryCount       = 2
+	defaultProjectRetryBackoffSec  = 5
+	defaultProjectTimeoutSeconds   = 180
 )
 
 var errKeepaliveAlreadyRunning = errors.New("keepalive recovery already running")
@@ -43,8 +47,14 @@ type keepaliveContext struct {
 }
 
 type keepaliveRunControls struct {
-	APIHealthTimeout    time.Duration `json:"apiHealthTimeout"`
-	APIHealthTimeoutRaw string        `json:"apiHealthTimeoutRaw"`
+	APIHealthTimeout              time.Duration `json:"apiHealthTimeout"`
+	APIHealthTimeoutRaw           string        `json:"apiHealthTimeoutRaw"`
+	ProjectRetryCount             int           `json:"projectRetryCount"`
+	ProjectRetryBackoff           time.Duration `json:"projectRetryBackoff"`
+	ProjectRetryBackoffRaw        string        `json:"projectRetryBackoffRaw"`
+	ProjectTimeout                time.Duration `json:"projectTimeout"`
+	ProjectTimeoutRaw             string        `json:"projectTimeoutRaw"`
+	SupervisorFailOnProjectErrors bool          `json:"supervisorFailOnProjectErrors"`
 }
 
 type keepaliveRecovery struct {
@@ -335,13 +345,18 @@ func executeKeepaliveRecovery(ctx keepaliveContext, trigger string) (keepaliveLa
 	defer releaseKeepaliveLock(lockFile)
 
 	logger.Info("recovery", fmt.Sprintf("starting keepalive recovery (trigger=%s)", trigger))
-	recovery := runKeepaliveRecovery(ctx, controls, logger)
+	recovery := runKeepaliveRecovery(ctx, trigger, controls, logger)
 	result.Recovery = recovery
 
-	runErr := evaluateRecoveryError(recovery)
+	runErr := evaluateRecoveryError(trigger, recovery, controls)
 	if runErr == nil {
-		result.Result = "success"
-		logger.Info("recovery", "keepalive recovery completed successfully")
+		if recovery.ProjectsFailed > 0 || strings.TrimSpace(recovery.ProjectsError) != "" {
+			result.Result = "degraded"
+			logger.Warn("recovery", "keepalive recovery completed with project-level warnings")
+		} else {
+			result.Result = "success"
+			logger.Info("recovery", "keepalive recovery completed successfully")
+		}
 	} else {
 		result.Result = "failed"
 		logger.Error("recovery", runErr.Error())
@@ -369,7 +384,7 @@ func executeKeepaliveRecovery(ctx keepaliveContext, trigger string) (keepaliveLa
 	return result, runErr
 }
 
-func runKeepaliveRecovery(ctx keepaliveContext, controls keepaliveRunControls, logger *keepaliveLogger) keepaliveRecovery {
+func runKeepaliveRecovery(ctx keepaliveContext, trigger string, controls keepaliveRunControls, logger *keepaliveLogger) keepaliveRecovery {
 	result := keepaliveRecovery{}
 
 	composeFile, err := resolveComposeFileForRecovery(ctx)
@@ -409,12 +424,17 @@ func runKeepaliveRecovery(ctx keepaliveContext, controls keepaliveRunControls, l
 	}
 	result.PanelRecovered = true
 
-	logger.Info("tunnel", "restarting cloudflared tunnel")
-	tunnelLogPath, err := RunTunnel()
+	logger.Info("tunnel", fmt.Sprintf("ensuring cloudflared tunnel process from %s", ctx.ConfigPath))
+	startedTunnel, tunnelLogPath, err := cloudflared.EnsureTunnelRunning(ctx.ConfigPath)
 	if err != nil {
 		result.TunnelError = err.Error()
 		logger.Error("tunnel", result.TunnelError)
 		return result
+	}
+	if startedTunnel {
+		logger.Warn("tunnel", "cloudflared process was not running; started a new tunnel process")
+	} else {
+		logger.Info("tunnel", "cloudflared process already running; skipped restart")
 	}
 	result.TunnelRestarted = true
 	result.TunnelLogPath = tunnelLogPath
@@ -431,58 +451,72 @@ func runKeepaliveRecovery(ctx keepaliveContext, controls keepaliveRunControls, l
 	if err != nil {
 		result.ProjectsError = err.Error()
 		logger.Error("projects", result.ProjectsError)
-		return result
-	}
-
-	result.PanelProject = detectPanelProject(projects, composeFile)
-	if result.PanelProject == "" {
-		containers, listErr := docker.ListComposeContainers(true)
-		if listErr != nil {
-			logger.Warn("projects", fmt.Sprintf("unable to derive panel project from running containers: %v", listErr))
-		} else {
-			result.PanelProject = findCoreComposeProject(containers)
-		}
-	}
-	queue := buildProjectRecoveryQueue(projects, result.PanelProject)
-	if len(queue) == 0 {
-		logger.Info("projects", "no managed project stacks detected for recovery")
 	} else {
-		result.ProjectRecoveryAttempted = true
-		result.ProjectsQueued = len(queue)
-		result.FailedProjectErrors = make(map[string]string)
-
-		for _, project := range queue {
-			projectLogPath := filepath.Join(ctx.StateDir, "keepalive-project-"+sanitizeProjectName(project.Name)+".log")
-			logger.Info("projects", fmt.Sprintf("rebuilding project stack %s", project.Name))
-
-			if err := docker.RebuildComposeProject(project, projectLogPath); err != nil {
-				result.ProjectsFailed++
-				result.FailedProjects = append(result.FailedProjects, project.Name)
-				result.FailedProjectErrors[project.Name] = err.Error()
-				logger.Error("projects", fmt.Sprintf("project %s recovery failed: %v", project.Name, err))
-				continue
+		result.PanelProject = detectPanelProject(projects, composeFile)
+		if result.PanelProject == "" {
+			containers, listErr := docker.ListComposeContainers(true)
+			if listErr != nil {
+				logger.Warn("projects", fmt.Sprintf("unable to derive panel project from running containers: %v", listErr))
+			} else {
+				result.PanelProject = findCoreComposeProject(containers)
 			}
+		}
+		queue := buildProjectRecoveryQueue(projects, result.PanelProject)
+		if len(queue) == 0 {
+			logger.Info("projects", "no managed project stacks detected for recovery")
+		} else {
+			result.ProjectRecoveryAttempted = true
+			result.ProjectsQueued = len(queue)
+			result.FailedProjectErrors = make(map[string]string)
 
-			logger.Info("health", fmt.Sprintf("waiting for panel health after project %s", project.Name))
-			if err := health.WaitForHTTPHealth(keepaliveHealthURL, controls.APIHealthTimeout); err != nil {
-				result.ProjectsFailed++
-				result.FailedProjects = append(result.FailedProjects, project.Name)
-				result.FailedProjectErrors[project.Name] = err.Error()
-				logger.Error("health", fmt.Sprintf("project %s post-restart health check failed: %v", project.Name, err))
-				continue
+			for _, project := range queue {
+				projectLogPath := filepath.Join(ctx.StateDir, "keepalive-project-"+sanitizeProjectName(project.Name)+".log")
+
+				if err := recoverProjectStackWithRetry(project, projectLogPath, controls, logger); err != nil {
+					result.ProjectsFailed++
+					result.FailedProjects = append(result.FailedProjects, project.Name)
+					result.FailedProjectErrors[project.Name] = err.Error()
+					logger.Error("projects", fmt.Sprintf("project %s recovery failed: %v", project.Name, err))
+					continue
+				}
+
+				logger.Info("health", fmt.Sprintf("waiting for panel health after project %s", project.Name))
+				if err := health.WaitForHTTPHealth(keepaliveHealthURL, controls.APIHealthTimeout); err != nil {
+					result.ProjectsFailed++
+					result.FailedProjects = append(result.FailedProjects, project.Name)
+					result.FailedProjectErrors[project.Name] = err.Error()
+					logger.Error("health", fmt.Sprintf("project %s post-restart health check failed: %v", project.Name, err))
+					continue
+				}
+
+				result.ProjectsRecovered++
+				logger.Info("projects", fmt.Sprintf("project %s recovered", project.Name))
 			}
-
-			result.ProjectsRecovered++
-			logger.Info("projects", fmt.Sprintf("project %s recovered", project.Name))
 		}
 	}
 
 	sort.Strings(result.FailedProjects)
 	if result.ProjectsFailed > 0 {
-		result.ProjectsError = fmt.Sprintf("%d project stack(s) failed to recover", result.ProjectsFailed)
+		summary := fmt.Sprintf("%d project stack(s) failed to recover", result.ProjectsFailed)
+		if strings.TrimSpace(result.ProjectsError) != "" {
+			result.ProjectsError = result.ProjectsError + "; " + summary
+		} else {
+			result.ProjectsError = summary
+		}
 	}
 	if len(result.FailedProjectErrors) == 0 {
 		result.FailedProjectErrors = nil
+	}
+
+	if strings.EqualFold(strings.TrimSpace(trigger), "supervisor") &&
+		!controls.SupervisorFailOnProjectErrors &&
+		strings.TrimSpace(result.ProjectsError) != "" {
+		logger.Warn("projects", "project recovery reported failures; keeping tunnel recovery non-fatal for supervisor trigger")
+	}
+
+	if strings.TrimSpace(result.ProjectsError) != "" {
+		logger.Warn("tunnel", "skipping final tunnel restart because project recovery is degraded")
+		return result
 	}
 
 	logger.Info("tunnel", "restarting cloudflared tunnel (final pass)")
@@ -615,11 +649,68 @@ func sanitizeProjectName(name string) string {
 	return value
 }
 
+func recoverProjectStackWithRetry(project docker.ComposeProject, projectLogPath string, controls keepaliveRunControls, logger *keepaliveLogger) error {
+	attempts := controls.ProjectRetryCount
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	backoff := controls.ProjectRetryBackoff
+	if backoff <= 0 {
+		backoff = 1 * time.Second
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		logger.Info(
+			"projects",
+			fmt.Sprintf(
+				"rebuilding project stack %s (attempt %d/%d timeout=%s)",
+				project.Name,
+				attempt,
+				attempts,
+				controls.ProjectTimeoutRaw,
+			),
+		)
+
+		err := docker.RebuildComposeProjectWithTimeout(project, projectLogPath, controls.ProjectTimeout)
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+		logger.Warn("projects", fmt.Sprintf("project %s attempt %d failed: %v", project.Name, attempt, err))
+		if attempt == attempts {
+			break
+		}
+
+		sleep := backoff * time.Duration(attempt)
+		logger.Info("projects", fmt.Sprintf("retrying project %s in %s", project.Name, sleep))
+		time.Sleep(sleep)
+	}
+
+	if lastErr == nil {
+		return errors.New("project recovery failed")
+	}
+	return lastErr
+}
+
 func keepaliveControlsFromEnv(env map[string]string) keepaliveRunControls {
 	healthTimeoutSec := parsePositiveIntEnv(env, "KEEPALIVE_API_HEALTH_TIMEOUT_SECONDS", defaultAPIHealthTimeoutSeconds)
+	projectRetryCount := parsePositiveIntEnv(env, "KEEPALIVE_PROJECT_RETRY_COUNT", defaultProjectRetryCount)
+	projectRetryBackoffSec := parsePositiveIntEnv(env, "KEEPALIVE_PROJECT_RETRY_BACKOFF_SECONDS", defaultProjectRetryBackoffSec)
+	projectTimeoutSec := parsePositiveIntEnv(env, "KEEPALIVE_PROJECT_TIMEOUT_SECONDS", defaultProjectTimeoutSeconds)
+	supervisorFailOnProjectErrors := parseBoolEnv(env, "KEEPALIVE_SUPERVISOR_FAIL_ON_PROJECT_ERRORS", false)
+
 	return keepaliveRunControls{
-		APIHealthTimeout:    time.Duration(healthTimeoutSec) * time.Second,
-		APIHealthTimeoutRaw: fmt.Sprintf("%ds", healthTimeoutSec),
+		APIHealthTimeout:              time.Duration(healthTimeoutSec) * time.Second,
+		APIHealthTimeoutRaw:           fmt.Sprintf("%ds", healthTimeoutSec),
+		ProjectRetryCount:             projectRetryCount,
+		ProjectRetryBackoff:           time.Duration(projectRetryBackoffSec) * time.Second,
+		ProjectRetryBackoffRaw:        fmt.Sprintf("%ds", projectRetryBackoffSec),
+		ProjectTimeout:                time.Duration(projectTimeoutSec) * time.Second,
+		ProjectTimeoutRaw:             fmt.Sprintf("%ds", projectTimeoutSec),
+		SupervisorFailOnProjectErrors: supervisorFailOnProjectErrors,
 	}
 }
 
@@ -635,7 +726,23 @@ func parsePositiveIntEnv(env map[string]string, key string, fallback int) int {
 	return parsed
 }
 
-func evaluateRecoveryError(recovery keepaliveRecovery) error {
+func parseBoolEnv(env map[string]string, key string, fallback bool) bool {
+	value := strings.TrimSpace(strings.ToLower(env[key]))
+	if value == "" {
+		return fallback
+	}
+
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
+}
+
+func evaluateRecoveryError(trigger string, recovery keepaliveRecovery, controls keepaliveRunControls) error {
 	if recovery.PanelError != "" {
 		return errors.New(recovery.PanelError)
 	}
@@ -654,11 +761,19 @@ func evaluateRecoveryError(recovery keepaliveRecovery) error {
 	if !recovery.APIHealthy {
 		return errors.New("panel health did not become ready")
 	}
-	if recovery.ProjectsError != "" {
-		return errors.New(recovery.ProjectsError)
-	}
-	if recovery.ProjectsFailed > 0 {
-		return fmt.Errorf("%d project stack(s) failed to recover", recovery.ProjectsFailed)
+
+	projectFailures := strings.TrimSpace(recovery.ProjectsError) != "" || recovery.ProjectsFailed > 0
+	if projectFailures {
+		supervisorTrigger := strings.EqualFold(strings.TrimSpace(trigger), "supervisor")
+		if supervisorTrigger && !controls.SupervisorFailOnProjectErrors {
+			return nil
+		}
+		if recovery.ProjectsError != "" {
+			return errors.New(recovery.ProjectsError)
+		}
+		if recovery.ProjectsFailed > 0 {
+			return fmt.Errorf("%d project stack(s) failed to recover", recovery.ProjectsFailed)
+		}
 	}
 	return nil
 }
@@ -917,7 +1032,7 @@ func recoverySummaryLines(run keepaliveLastRun) []string {
 	lines := []string{
 		"Result: " + run.Result,
 		"Panel recovered: " + boolLabel(run.Recovery.PanelRecovered),
-		"Tunnel restarted: " + boolLabel(run.Recovery.TunnelRestarted),
+		"Tunnel ensured: " + boolLabel(run.Recovery.TunnelRestarted),
 		"Panel API healthy: " + boolLabel(run.Recovery.APIHealthy),
 		fmt.Sprintf("Project recovery attempted: %s", boolLabel(run.Recovery.ProjectRecoveryAttempted)),
 		fmt.Sprintf("Projects queued: %d", run.Recovery.ProjectsQueued),
@@ -989,6 +1104,9 @@ func remediationHintsFromErrors(messages ...string) []string {
 		}
 		if strings.Contains(msg, "timed out") && strings.Contains(msg, "health") {
 			hints = append(hints, "Panel health timed out. Inspect compose logs (`~/gungnr/state/docker-compose.log`) and service status before retrying.")
+		}
+		if strings.Contains(msg, "timed out") && strings.Contains(msg, "up --build --force-recreate -d") {
+			hints = append(hints, "A project compose rebuild timed out. Check the project log under `~/gungnr/state/keepalive-project-*.log` and retry after resolving slow pulls/builds.")
 		}
 	}
 	return uniqueNonEmpty(hints)

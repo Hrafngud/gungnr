@@ -124,6 +124,10 @@ func DiscoverComposeProjects(includeAll bool) ([]ComposeProject, error) {
 }
 
 func RebuildComposeProject(project ComposeProject, logPath string) error {
+	return RebuildComposeProjectWithTimeout(project, logPath, 0)
+}
+
+func RebuildComposeProjectWithTimeout(project ComposeProject, logPath string, timeout time.Duration) error {
 	if strings.TrimSpace(project.Name) == "" {
 		return errors.New("compose project name is empty")
 	}
@@ -148,7 +152,7 @@ func RebuildComposeProject(project ComposeProject, logPath string) error {
 	}
 	args = append(args, "up", "--build", "--force-recreate", "-d")
 
-	return command.RunLoggedInDir(composeDir, commandName, logPath, args...)
+	return command.RunLoggedInDirWithTimeout(composeDir, commandName, logPath, timeout, args...)
 }
 
 func StartContainers(containerIDs []string) error {
