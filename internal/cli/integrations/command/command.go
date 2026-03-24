@@ -64,13 +64,35 @@ func RunInteractiveInDir(dir, name string, args ...string) error {
 }
 
 func RunLoggedInDir(dir, name, logPath string, args ...string) error {
+	return RunLoggedInDirWithTimeout(dir, name, logPath, 0, args...)
+}
+
+func RunLoggedInDirWithTimeout(dir, name, logPath string, timeout time.Duration, args ...string) error {
 	logFile, err := os.Create(logPath)
 	if err != nil {
 		return fmt.Errorf("open log file %s: %w", logPath, err)
 	}
 	defer logFile.Close()
 
-	cmd := exec.Command(name, args...)
+	var cmd *exec.Cmd
+	if timeout > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		cmd = exec.CommandContext(ctx, name, args...)
+		cmd.Dir = dir
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return fmt.Errorf("%s %s timed out after %s", name, strings.Join(args, " "), timeout)
+			}
+			return fmt.Errorf("%s %s failed: %w", name, strings.Join(args, " "), err)
+		}
+		return nil
+	}
+
+	cmd = exec.Command(name, args...)
 	cmd.Dir = dir
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
