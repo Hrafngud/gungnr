@@ -29,12 +29,6 @@ I'm planning to expand the list of docker service presets avaliable in the futur
 - Host lifecycle execution is handled by the host worker through the filesystem bridge queue.
 - `deploy.sh` is reference-only; do not modify it. The UI must reproduce its CLI behavior before any advanced automation.
 
-## Host lifecycle bridge (current state)
-- Bridge cutover is complete: host lifecycle endpoints and async project restart run through bridge intents/results.
-- API responsibilities: validate request + RBAC, submit task intents, wait/load results, map outcomes to API/job logs.
-- Worker responsibilities: execute host lifecycle actions (`restart_tunnel`, container lifecycle, compose restart, host probes) and write structured task results.
-- Queue storage defaults to `INFRA_QUEUE_ROOT=/templates/.infra` with `intents/`, `claims/`, `results/`, and `logs/` subdirectories.
-
 ## Requirements
 - Cloudflared, Docker and Docker Compose on host machine.
 - GitHub account.
@@ -51,25 +45,6 @@ The bootstrap CLI configures and runs a locally managed tunnel with `cloudflared
 as a user-managed process. Manual tunnel setup is no longer required for a
 standard install.
 Reboot fallback is available via keepalive tooling and bootstrap-installed watchdog scripts.
-
-### Tunnel auto-start watchdog
-`gungnr keepalive` now manages reboot persistence with system-level systemd only:
-- `/etc/systemd/system/gungnr.service`
-- `/etc/systemd/system/gungnr-keepalive.timer`
-
-On reboot, keepalive runs a recovery lifecycle in order:
-- rebuild panel compose stack (`docker compose up --build --force-recreate -d`)
-- rerun tunnel startup (`gungnr tunnel run` equivalent)
-- wait for panel health (`/healthz`)
-- rebuild each detected project stack sequentially (`docker compose up --build --force-recreate -d`) with health checks between runs
-
-Scripts created under `~/gungnr/state`:
-- `~/gungnr/state/cloudflared-run.sh` (starts reboot recovery)
-- `~/gungnr/state/cloudflared-ensure.sh` (invokes the recovery run script)
-
-Keepalive command:
-- `gungnr keepalive` (toggle enable/disable)
-
 
 ## Installation
 
@@ -159,27 +134,6 @@ Local source: `docs/index.html` (landing), `docs/docs.html` (docs), `docs/errors
 - **Advanced Docker deployment**: For a broad compatibility with images that require custom setup before startup.
 - **More one click deployments**: Testing and validating more tools for quick deployment.
 
-## Environment configuration
-The bootstrap CLI generates a complete `.env`. Reference values:
-Required for login:
-- `SESSION_SECRET`
-- `GITHUB_CLIENT_ID`
-- `GITHUB_CLIENT_SECRET`
-- `GITHUB_CALLBACK_URL`
-Optional access control:
-Manage access via the Users allowlist in the panel (SuperUser/Admin only).
-Admin test token (optional):
-- `ADMIN_LOGIN`, `ADMIN_PASSWORD` to enable `POST /test-token` for a bearer token.
-
-Host integration defaults:
-- `TEMPLATES_DIR` (where template repos are cloned)
-- `CLOUDFLARED_DIR` (directory with cloudflared config and credentials)
-- `CLOUDFLARED_CONFIG` (path to config.yml inside the container, mounted from
-  host)
-- `DOMAIN`, `CLOUDFLARED_TUNNEL_NAME` (name or UUID), `CLOUDFLARE_TUNNEL_ID` (ID fallback), `CLOUDFLARE_API_TOKEN`
-- `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID` (required for API-managed tunnels)
-- `VITE_API_BASE_URL=/` when building the web container so the UI uses same-origin HTTPS.
-
 ## Test token auth (optional)
 
 Since only OAuth is supported, when you wish to hit the panel with curl, or give a token to an agent/test suite,
@@ -192,39 +146,6 @@ curl -sS http://localhost/test-token \
   -d '{"login":"admin","password":"secret"}'
 ```
 Use the returned token as `Authorization: Bearer <token>` for `/api/v1/*` routes.
-
-## Common commands
-- `make up` (foreground)
-- `make up-d` (detached)
-- `make build-cli`
-- `make logs`
-- `make down`
-- `make down-v`
-
-## CLI build metadata
-Build the CLI through the shared helper so `gungnr version` reports consistent
-ldflags-backed provenance:
-
-```bash
-make build-cli
-./dist/gungnr_$(go env GOOS)_$(go env GOARCH) version
-```
-
-The shared contract is:
-- `GUNGNR_VERSION`: defaults to the exact tag at `HEAD`, otherwise `dev`
-- `GUNGNR_COMMIT`: defaults to `git rev-parse HEAD`
-- `GUNGNR_BUILD_DATE`: defaults to `git log -1 --format=%cI HEAD`
-
-`release_local.sh` reuses the same contract for release artifacts and only
-overrides `GUNGNR_VERSION` explicitly.
-
-Pushing a SemVer tag like `v1.2.3` triggers
-`.github/workflows/release-cli.yml`, which rebuilds `gungnr` for
-`linux/amd64`, `linux/arm64`, `darwin/amd64`, and `darwin/arm64` through the
-same helper, uploads those binaries plus `checksums.txt` to the matching
-GitHub Release, and publishes the multi-arch container images
-`ghcr.io/hrafngud/gungnr-api` and `ghcr.io/hrafngud/gungnr-web` with tags
-`vX.Y.Z` and `latest`.
 
 ## Release compose (GHCR images)
 Use `docker-compose.release.yml` to run GHCR images instead of local builds.
@@ -249,15 +170,3 @@ GUNGNR_VERSION=v1.2.3 docker compose -f docker-compose.release.yml up -d
 - Quick local service: provide a subdomain and host port (defaults to running an
   Excalidraw container on port 80).
 - Activity: review the audit timeline of user actions in the Activity view.
-
-## Local development (optional)
-- Backend: `cd backend && go run ./cmd/server`
-- Frontend: `cd frontend/go-notes && npm install && \
-VITE_API_BASE_URL=http://localhost:8080 npm run dev`
-- Ensure `CORS_ALLOWED_ORIGINS` includes the dev origin (e.g.
-  `http://localhost:5173`).
-
-## Ports
-- The nginx proxy exposes port 80 by default.
-- The API and web ports are not exposed unless you uncomment them in
-  `docker-compose.yml` and set `API_PORT` / `WEB_PORT`.
