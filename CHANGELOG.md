@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.12] - 2026-03-24
+
+### Fixed
+- Init and healing services now follow the intended default hotfix behavior.
+- Keepalive/systemd locking flow was corrected to avoid lock contention during service healing.
+
 ## [1.0.1] - 2026-03-20
 
 ### Added
