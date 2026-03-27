@@ -242,6 +242,74 @@ func TestProcessOnceHandlesDockerContainerLogsSinceWithoutTail(t *testing.T) {
 	require.Equal(t, []string{"logs", "--since", "2026-03-27T16:00:00Z", "demo-api"}, exec.calls[0].args)
 }
 
+func TestProcessOnceHandlesHostListenTCPPorts(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	intent := contract.Intent{
+		Version:   contract.VersionV1,
+		IntentID:  "intent-host-listen",
+		RequestID: "req-host-listen",
+		TaskType:  contract.TaskTypeHostListenTCPPorts,
+		Payload:   map[string]any{},
+		CreatedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	_, err = q.WriteIntent(context.Background(), intent)
+	require.NoError(t, err)
+
+	exec := &fakeExecutor{output: []byte("LISTEN 0 128 0.0.0.0:80\nLISTEN 0 128 [::]:443\n")}
+	r := New(q, 10*time.Millisecond, "", nil)
+	r.exec = exec
+
+	err = r.ProcessOnce(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, exec.calls, 1)
+	require.Equal(t, "ss", exec.calls[0].name)
+	require.Equal(t, []string{"-ltnH"}, exec.calls[0].args)
+
+	result, err := q.ReadResult(context.Background(), intent.IntentID)
+	require.NoError(t, err)
+	require.Equal(t, contract.StatusSucceeded, result.Status)
+	require.Equal(t, []string{"LISTEN 0 128 0.0.0.0:80", "LISTEN 0 128 [::]:443"}, decodeDataLines(t, result.Data))
+}
+
+func TestProcessOnceHandlesDockerPublishedPorts(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	intent := contract.Intent{
+		Version:   contract.VersionV1,
+		IntentID:  "intent-docker-published",
+		RequestID: "req-docker-published",
+		TaskType:  contract.TaskTypeDockerPublishedPorts,
+		Payload:   map[string]any{},
+		CreatedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	_, err = q.WriteIntent(context.Background(), intent)
+	require.NoError(t, err)
+
+	exec := &fakeExecutor{output: []byte("0.0.0.0:8080->80/tcp\n")}
+	r := New(q, 10*time.Millisecond, "", nil)
+	r.exec = exec
+
+	err = r.ProcessOnce(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, exec.calls, 1)
+	require.Equal(t, "docker", exec.calls[0].name)
+	require.Equal(t, []string{"ps", "--format", "{{.Ports}}"}, exec.calls[0].args)
+
+	result, err := q.ReadResult(context.Background(), intent.IntentID)
+	require.NoError(t, err)
+	require.Equal(t, contract.StatusSucceeded, result.Status)
+	require.Equal(t, []string{"0.0.0.0:8080->80/tcp"}, decodeDataLines(t, result.Data))
+}
+
 func TestProcessOnceHandlesRestartTunnel(t *testing.T) {
 	t.Parallel()
 
@@ -372,6 +440,8 @@ func TestValidateTaskCoverageIncludesRestartTunnel(t *testing.T) {
 		contract.TaskTypeDockerSystemDF,
 		contract.TaskTypeDockerListVolumes,
 		contract.TaskTypeDockerContainerLogs,
+		contract.TaskTypeHostListenTCPPorts,
+		contract.TaskTypeDockerPublishedPorts,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
 	})

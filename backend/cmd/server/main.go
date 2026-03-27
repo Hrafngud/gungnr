@@ -58,7 +58,6 @@ func main() {
 	cloudflareService := service.NewCloudflareService(settingsService)
 	netBirdService := service.NewNetBirdService(cfg, settingsService, projectRepo, jobRepo)
 	auditService := service.NewAuditService(auditRepo)
-	dockerRunner := service.NewDockerRunner()
 
 	bridgeQueue, err := infraqueue.NewFilesystem(cfg.InfraQueueRoot)
 	if err != nil {
@@ -81,6 +80,7 @@ func main() {
 		)
 	}
 	bridgeClient := infraclient.New(bridgeQueue, cfg.InfraPollInterval, cfg.InfraResultTimeout)
+	dockerRunner := service.NewDockerRunner(bridgeClient)
 	bridgeWorker := infraworker.New(bridgeQueue, cfg.InfraPollInterval, cfg.TemplatesDir, log.Default())
 	if err := bridgeWorker.ValidateTaskCoverage([]contract.TaskType{
 		contract.TaskTypeRestartTunnel,
@@ -91,6 +91,8 @@ func main() {
 		contract.TaskTypeDockerSystemDF,
 		contract.TaskTypeDockerListVolumes,
 		contract.TaskTypeDockerContainerLogs,
+		contract.TaskTypeHostListenTCPPorts,
+		contract.TaskTypeDockerPublishedPorts,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
 	}); err != nil {
@@ -99,7 +101,7 @@ func main() {
 	go bridgeWorker.Run(context.Background())
 
 	hostService := service.NewHostService(cfg.TemplatesDir, projectRepo, bridgeClient)
-	projectService := service.NewProjectService(cfg, projectRepo, jobService, settingsService)
+	projectService := service.NewProjectService(cfg, projectRepo, jobService, settingsService, bridgeClient)
 	workbenchService := service.NewWorkbenchServiceWithStorage(cfg.TemplatesDir, projectRepo, settingsRepo, cfg.SessionSecret)
 	projectArchiveService := service.NewProjectArchiveService(cfg, projectRepo, settingsService, jobService, hostService)
 	projectRuntimeService := service.NewProjectRuntimeService(cfg.TemplatesDir, projectRepo, hostService)

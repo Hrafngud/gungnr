@@ -20,7 +20,9 @@ const (
 	defaultQuickServiceContainerPort = 80
 )
 
-type DockerRunner struct{}
+type DockerRunner struct {
+	infra infraPortProbeClient
+}
 
 type DockerRunRequest struct {
 	Image         string `json:"image"`
@@ -33,8 +35,8 @@ type DockerComposeRequest struct {
 	ProjectDir string `json:"projectDir"`
 }
 
-func NewDockerRunner() *DockerRunner {
-	return &DockerRunner{}
+func NewDockerRunner(infra infraPortProbeClient) *DockerRunner {
+	return &DockerRunner{infra: infra}
 }
 
 func (r *DockerRunner) RunContainer(ctx context.Context, logger jobs.Logger, req DockerRunRequest) error {
@@ -67,7 +69,7 @@ func (r *DockerRunner) RunContainer(ctx context.Context, logger jobs.Logger, req
 		return fmt.Errorf("container name is required")
 	}
 
-	if inUse, err := isPortInUse(ctx, req.HostPort); err != nil {
+	if inUse, err := r.isPortInUse(ctx, req.HostPort); err != nil {
 		return err
 	} else if inUse {
 		return fmt.Errorf("host port %d is already in use", req.HostPort)
@@ -148,12 +150,12 @@ func (r *DockerRunner) listContainerNames(ctx context.Context) (map[string]struc
 	return names, nil
 }
 
-func isPortInUse(ctx context.Context, port int) (bool, error) {
+func (r *DockerRunner) isPortInUse(ctx context.Context, port int) (bool, error) {
 	if err := ValidatePort(port); err != nil {
 		return false, err
 	}
 
-	if ports, err := listDockerPublishedPorts(ctx); err == nil {
+	if ports, err := listDockerPublishedPorts(ctx, r.infra); err == nil {
 		for _, published := range ports {
 			if published == port {
 				return true, nil

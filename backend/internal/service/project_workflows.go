@@ -45,9 +45,17 @@ type cloudflareWorkflowClient interface {
 	UpdateIngress(ctx context.Context, hostname string, port int) error
 }
 
+type infraPortProbeClient interface {
+	HostListenTCPPorts(ctx context.Context, requestID string) (contract.Result, error)
+	DockerPublishedPorts(ctx context.Context, requestID string) (contract.Result, error)
+}
+
 type infraBridgeClient interface {
+	infraPortProbeClient
 	RestartTunnel(ctx context.Context, requestID, configPath string) (contract.Result, error)
 }
+
+const bridgeProbeWaitTimeout = 2 * time.Second
 
 func NewProjectWorkflows(
 	cfg config.Config,
@@ -197,7 +205,7 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	proxyPort := req.ProxyPort
 	dbPort := req.DBPort
 	reserved := map[int]bool{}
-	addDockerReservedPorts(ctx, reserved)
+	addDockerReservedPorts(ctx, w.infraClient, reserved)
 	if proxyPort == 0 {
 		proxyPort, err = findFreePort(80, reserved)
 		if err != nil {
@@ -493,10 +501,10 @@ func workbenchRequestedPortMappingMissingError(
 		label = "requested"
 	}
 	issue := WorkbenchValidationIssue{
-		Class:   workbenchValidationClassSchema,
-		Code:    "WB-JOB-PORT-MAPPING-MISSING",
-		Path:    "$.ports",
-		Message: fmt.Sprintf("workbench snapshot does not contain a %s container port %d mapping", label, assignment.ContainerPort),
+		Class:    workbenchValidationClassSchema,
+		Code:     "WB-JOB-PORT-MAPPING-MISSING",
+		Path:     "$.ports",
+		Message:  fmt.Sprintf("workbench snapshot does not contain a %s container port %d mapping", label, assignment.ContainerPort),
 		HostPort: strconv.Itoa(assignment.ContainerPort),
 	}
 	return errs.WithDetails(
@@ -797,8 +805,8 @@ func findFreePort(start int, reserved map[int]bool) (int, error) {
 	return 0, fmt.Errorf("no free port available from %d", start)
 }
 
-func addDockerReservedPorts(ctx context.Context, reserved map[int]bool) {
-	ports, err := listDockerPublishedPorts(ctx)
+func addDockerReservedPorts(ctx context.Context, probeClient infraPortProbeClient, reserved map[int]bool) {
+	ports, err := listDockerPublishedPorts(ctx, probeClient)
 	if err != nil {
 		return
 	}
@@ -807,14 +815,14 @@ func addDockerReservedPorts(ctx context.Context, reserved map[int]bool) {
 	}
 }
 
-func ensureAvailableHostPort(ctx context.Context, requested int) (int, error) {
+func ensureAvailableHostPort(ctx context.Context, probeClient infraPortProbeClient, requested int) (int, error) {
 	if err := ValidatePort(requested); err != nil {
 		return 0, err
 	}
 
 	reserved := map[int]bool{}
-	addDockerReservedPorts(ctx, reserved)
-	addHostReservedPorts(ctx, reserved)
+	addDockerReservedPorts(ctx, probeClient, reserved)
+	addHostReservedPorts(ctx, probeClient, reserved)
 
 	if !reserved[requested] {
 		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", requested))
@@ -835,8 +843,8 @@ func ensureAvailableHostPort(ctx context.Context, requested int) (int, error) {
 	return port, nil
 }
 
-func addHostReservedPorts(ctx context.Context, reserved map[int]bool) {
-	ports, err := listHostListeningPorts(ctx)
+func addHostReservedPorts(ctx context.Context, probeClient infraPortProbeClient, reserved map[int]bool) {
+	ports, err := listHostListeningPorts(ctx, probeClient)
 	if err != nil {
 		return
 	}
@@ -864,7 +872,23 @@ func findFreePortNearby(start int, reserved map[int]bool) (int, error) {
 	return 0, fmt.Errorf("no free port available from %d", start)
 }
 
-func listHostListeningPorts(ctx context.Context) ([]int, error) {
+func listHostListeningPorts(ctx context.Context, probeClient infraPortProbeClient) ([]int, error) {
+	if probeClient != nil {
+		// Probe failures are non-fatal for callers, so keep bridge waits short.
+		probeCtx, cancel := context.WithTimeout(ctx, bridgeProbeWaitTimeout)
+		defer cancel()
+
+		result, err := probeClient.HostListenTCPPorts(probeCtx, "")
+		if err != nil {
+			return nil, err
+		}
+		lines, err := decodeBridgeLinesPayload(result)
+		if err != nil {
+			return nil, err
+		}
+		return parseHostListeningPorts(strings.Join(lines, "\n")), nil
+	}
+
 	cmd := exec.CommandContext(ctx, "ss", "-ltnH")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -904,7 +928,23 @@ func parseHostListeningPorts(raw string) []int {
 	return ports
 }
 
-func listDockerPublishedPorts(ctx context.Context) ([]int, error) {
+func listDockerPublishedPorts(ctx context.Context, probeClient infraPortProbeClient) ([]int, error) {
+	if probeClient != nil {
+		// Probe failures are non-fatal for callers, so keep bridge waits short.
+		probeCtx, cancel := context.WithTimeout(ctx, bridgeProbeWaitTimeout)
+		defer cancel()
+
+		result, err := probeClient.DockerPublishedPorts(probeCtx, "")
+		if err != nil {
+			return nil, err
+		}
+		lines, err := decodeBridgeLinesPayload(result)
+		if err != nil {
+			return nil, err
+		}
+		return parsePublishedPorts(strings.Join(lines, "\n")), nil
+	}
+
 	cmd := exec.CommandContext(ctx, "docker", "ps", "--format", "{{.Ports}}")
 	output, err := cmd.CombinedOutput()
 	if err != nil {

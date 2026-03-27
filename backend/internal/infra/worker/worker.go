@@ -155,6 +155,8 @@ func (r *Runner) supportsTask(taskType contract.TaskType) bool {
 		contract.TaskTypeDockerSystemDF,
 		contract.TaskTypeDockerListVolumes,
 		contract.TaskTypeDockerContainerLogs,
+		contract.TaskTypeHostListenTCPPorts,
+		contract.TaskTypeDockerPublishedPorts,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats:
 		return true
@@ -173,6 +175,8 @@ func (r *Runner) SupportedTasks() []contract.TaskType {
 		contract.TaskTypeDockerSystemDF,
 		contract.TaskTypeDockerListVolumes,
 		contract.TaskTypeDockerContainerLogs,
+		contract.TaskTypeHostListenTCPPorts,
+		contract.TaskTypeDockerPublishedPorts,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
 	}
@@ -231,6 +235,10 @@ func (r *Runner) handleIntent(ctx context.Context, intent contract.Intent) error
 		outcome = r.handleDockerListVolumes(ctx, intent)
 	case contract.TaskTypeDockerContainerLogs:
 		outcome = r.handleDockerContainerLogs(ctx, intent)
+	case contract.TaskTypeHostListenTCPPorts:
+		outcome = r.handleHostListenTCPPorts(ctx, intent)
+	case contract.TaskTypeDockerPublishedPorts:
+		outcome = r.handleDockerPublishedPorts(ctx, intent)
 	case contract.TaskTypeComposeUpStack:
 		outcome = r.handleComposeUpStack(ctx, intent)
 	case contract.TaskTypeHostRuntimeStats:
@@ -433,6 +441,30 @@ func (r *Runner) handleDockerContainerLogs(ctx context.Context, intent contract.
 		logTail: tailLines(output, 40),
 		data: map[string]any{
 			"lines": parseLinesPreserveWhitespace(output),
+		},
+	}
+}
+
+func (r *Runner) handleHostListenTCPPorts(ctx context.Context, _ contract.Intent) taskOutcome {
+	args := []string{"-ltnH"}
+	output, err := r.exec.Run(ctx, "", "ss", args...)
+	return taskOutcome{
+		err:     commandError(err, output, "ss %s", strings.Join(args, " ")),
+		logTail: tailLines(output, 25),
+		data: map[string]any{
+			"lines": parseLines(output),
+		},
+	}
+}
+
+func (r *Runner) handleDockerPublishedPorts(ctx context.Context, _ contract.Intent) taskOutcome {
+	args := []string{"ps", "--format", "{{.Ports}}"}
+	output, err := r.exec.Run(ctx, "", "docker", args...)
+	return taskOutcome{
+		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
+		logTail: tailLines(output, 25),
+		data: map[string]any{
+			"lines": parseLines(output),
 		},
 	}
 }

@@ -221,6 +221,14 @@ func (c *Client) DockerContainerLogs(ctx context.Context, requestID string, payl
 	return c.runTask(ctx, requestID, contract.TaskTypeDockerContainerLogs, intentPayload)
 }
 
+func (c *Client) HostListenTCPPorts(ctx context.Context, requestID string) (contract.Result, error) {
+	return c.runTask(ctx, requestID, contract.TaskTypeHostListenTCPPorts, map[string]any{})
+}
+
+func (c *Client) DockerPublishedPorts(ctx context.Context, requestID string) (contract.Result, error) {
+	return c.runTask(ctx, requestID, contract.TaskTypeDockerPublishedPorts, map[string]any{})
+}
+
 func (c *Client) HostRuntimeStats(ctx context.Context, requestID string) (contract.Result, error) {
 	return c.runTask(ctx, requestID, contract.TaskTypeHostRuntimeStats, map[string]any{})
 }

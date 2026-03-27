@@ -206,3 +206,84 @@ func TestDockerContainerLogsPayload(t *testing.T) {
 	require.Equal(t, true, intent.Payload["timestamps"])
 	require.Equal(t, "2026-03-27T16:00:00Z", intent.Payload["since"])
 }
+
+func TestProbeTaskPayloads(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	c := New(q, 10*time.Millisecond, time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	ack := make(chan struct{}, 2)
+	go func() {
+		for {
+			ids, listErr := q.ListIntentIDs(ctx)
+			if listErr != nil || len(ids) == 0 {
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			for _, id := range ids {
+				resultPath := q.ResultPath(id)
+				if _, statErr := os.Stat(resultPath); statErr == nil {
+					continue
+				}
+				intent, readErr := q.ReadIntent(ctx, id)
+				if readErr != nil {
+					continue
+				}
+				_, _ = q.WriteResult(ctx, contract.Result{
+					Version:    contract.VersionV1,
+					IntentID:   intent.IntentID,
+					RequestID:  intent.RequestID,
+					TaskType:   intent.TaskType,
+					Status:     contract.StatusSucceeded,
+					CreatedAt:  intent.CreatedAt,
+					StartedAt:  time.Now().UTC().Add(-10 * time.Millisecond),
+					FinishedAt: time.Now().UTC(),
+					Data: map[string]any{
+						"lines": []string{"ok"},
+					},
+				})
+				ack <- struct{}{}
+			}
+			if len(ack) >= 2 {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	_, err = c.HostListenTCPPorts(ctx, "req-host-listen")
+	require.NoError(t, err)
+	_, err = c.DockerPublishedPorts(ctx, "req-docker-published")
+	require.NoError(t, err)
+
+	<-ack
+	<-ack
+
+	ids, err := q.ListIntentIDs(context.Background())
+	require.NoError(t, err)
+	require.Len(t, ids, 2)
+
+	hostIntentFound := false
+	dockerIntentFound := false
+	for _, id := range ids {
+		intent, readErr := q.ReadIntent(context.Background(), id)
+		require.NoError(t, readErr)
+		switch intent.TaskType {
+		case contract.TaskTypeHostListenTCPPorts:
+			hostIntentFound = true
+			require.Equal(t, "req-host-listen", intent.RequestID)
+			require.Empty(t, intent.Payload)
+		case contract.TaskTypeDockerPublishedPorts:
+			dockerIntentFound = true
+			require.Equal(t, "req-docker-published", intent.RequestID)
+			require.Empty(t, intent.Payload)
+		}
+	}
+	require.True(t, hostIntentFound)
+	require.True(t, dockerIntentFound)
+}

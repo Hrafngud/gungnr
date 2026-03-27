@@ -19,10 +19,17 @@ type ProjectService struct {
 	repo     repository.ProjectRepository
 	jobs     *JobService
 	settings *SettingsService
+	infra    infraPortProbeClient
 }
 
-func NewProjectService(cfg config.Config, repo repository.ProjectRepository, jobs *JobService, settings *SettingsService) *ProjectService {
-	return &ProjectService{cfg: cfg, repo: repo, jobs: jobs, settings: settings}
+func NewProjectService(
+	cfg config.Config,
+	repo repository.ProjectRepository,
+	jobs *JobService,
+	settings *SettingsService,
+	infra infraPortProbeClient,
+) *ProjectService {
+	return &ProjectService{cfg: cfg, repo: repo, jobs: jobs, settings: settings, infra: infra}
 }
 
 func (s *ProjectService) List(ctx context.Context) ([]models.Project, error) {
@@ -206,7 +213,7 @@ func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceReque
 		}
 	}
 	requestedPort := req.Port
-	chosenPort, err := ensureAvailableHostPort(ctx, requestedPort)
+	chosenPort, err := ensureAvailableHostPort(ctx, s.infra, requestedPort)
 	if err != nil {
 		return nil, 0, err
 	}

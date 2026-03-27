@@ -74,11 +74,11 @@ type workbenchHostPortScanner func(ctx context.Context) (map[int]struct{}, error
 
 func workbenchScanOccupiedHostPorts(ctx context.Context) (map[int]struct{}, error) {
 	occupied := make(map[int]struct{})
-	hostPorts, hostErr := listHostListeningPorts(ctx)
+	hostPorts, hostErr := listHostListeningPorts(ctx, nil)
 	for _, port := range hostPorts {
 		occupied[port] = struct{}{}
 	}
-	dockerPorts, dockerErr := listDockerPublishedPorts(ctx)
+	dockerPorts, dockerErr := listDockerPublishedPorts(ctx, nil)
 	for _, port := range dockerPorts {
 		occupied[port] = struct{}{}
 	}
