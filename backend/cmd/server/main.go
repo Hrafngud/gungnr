@@ -91,6 +91,8 @@ func main() {
 		contract.TaskTypeDockerSystemDF,
 		contract.TaskTypeDockerListVolumes,
 		contract.TaskTypeDockerContainerLogs,
+		contract.TaskTypeDockerRuntimeCheck,
+		contract.TaskTypeDockerRunQuickService,
 		contract.TaskTypeHostListenTCPPorts,
 		contract.TaskTypeDockerPublishedPorts,
 		contract.TaskTypeComposeUpStack,

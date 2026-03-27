@@ -155,6 +155,8 @@ func (r *Runner) supportsTask(taskType contract.TaskType) bool {
 		contract.TaskTypeDockerSystemDF,
 		contract.TaskTypeDockerListVolumes,
 		contract.TaskTypeDockerContainerLogs,
+		contract.TaskTypeDockerRuntimeCheck,
+		contract.TaskTypeDockerRunQuickService,
 		contract.TaskTypeHostListenTCPPorts,
 		contract.TaskTypeDockerPublishedPorts,
 		contract.TaskTypeComposeUpStack,
@@ -175,6 +177,8 @@ func (r *Runner) SupportedTasks() []contract.TaskType {
 		contract.TaskTypeDockerSystemDF,
 		contract.TaskTypeDockerListVolumes,
 		contract.TaskTypeDockerContainerLogs,
+		contract.TaskTypeDockerRuntimeCheck,
+		contract.TaskTypeDockerRunQuickService,
 		contract.TaskTypeHostListenTCPPorts,
 		contract.TaskTypeDockerPublishedPorts,
 		contract.TaskTypeComposeUpStack,
@@ -235,6 +239,10 @@ func (r *Runner) handleIntent(ctx context.Context, intent contract.Intent) error
 		outcome = r.handleDockerListVolumes(ctx, intent)
 	case contract.TaskTypeDockerContainerLogs:
 		outcome = r.handleDockerContainerLogs(ctx, intent)
+	case contract.TaskTypeDockerRuntimeCheck:
+		outcome = r.handleDockerRuntimeCheck(ctx, intent)
+	case contract.TaskTypeDockerRunQuickService:
+		outcome = r.handleDockerRunQuickService(ctx, intent)
 	case contract.TaskTypeHostListenTCPPorts:
 		outcome = r.handleHostListenTCPPorts(ctx, intent)
 	case contract.TaskTypeDockerPublishedPorts:
@@ -441,6 +449,59 @@ func (r *Runner) handleDockerContainerLogs(ctx context.Context, intent contract.
 		logTail: tailLines(output, 40),
 		data: map[string]any{
 			"lines": parseLinesPreserveWhitespace(output),
+		},
+	}
+}
+
+func (r *Runner) handleDockerRuntimeCheck(ctx context.Context, _ contract.Intent) taskOutcome {
+	args := []string{"version", "--format", "{{.Server.Version}}"}
+	output, err := r.exec.Run(ctx, "", "docker", args...)
+	return taskOutcome{
+		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
+		logTail: tailLines(output, 25),
+		data: map[string]any{
+			"lines": parseLines(output),
+		},
+	}
+}
+
+func (r *Runner) handleDockerRunQuickService(ctx context.Context, intent contract.Intent) taskOutcome {
+	var payload contract.DockerRunQuickServicePayload
+	if err := decodePayload(intent.Payload, &payload); err != nil {
+		return taskOutcome{err: err}
+	}
+
+	payload.Image = strings.TrimSpace(payload.Image)
+	payload.ContainerName = strings.TrimSpace(payload.ContainerName)
+	if payload.Image == "" {
+		return taskOutcome{err: fmt.Errorf("image is required")}
+	}
+	if payload.HostPort < 1 || payload.HostPort > 65535 {
+		return taskOutcome{err: fmt.Errorf("host_port must be between 1 and 65535")}
+	}
+	if payload.ContainerPort < 1 || payload.ContainerPort > 65535 {
+		return taskOutcome{err: fmt.Errorf("container_port must be between 1 and 65535")}
+	}
+
+	args := []string{
+		"run",
+		"-d",
+		"--restart",
+		"unless-stopped",
+		"-p",
+		fmt.Sprintf("%d:%d", payload.HostPort, payload.ContainerPort),
+	}
+	if payload.ContainerName != "" {
+		args = append(args, "--name", payload.ContainerName)
+	}
+	args = append(args, payload.Image)
+
+	output, err := r.exec.Run(ctx, "", "docker", args...)
+	return taskOutcome{
+		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
+		logTail: tailLines(output, 40),
+		data: map[string]any{
+			"lines": parseLines(output),
 		},
 	}
 }

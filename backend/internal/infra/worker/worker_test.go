@@ -242,6 +242,89 @@ func TestProcessOnceHandlesDockerContainerLogsSinceWithoutTail(t *testing.T) {
 	require.Equal(t, []string{"logs", "--since", "2026-03-27T16:00:00Z", "demo-api"}, exec.calls[0].args)
 }
 
+func TestProcessOnceHandlesDockerRuntimeCheck(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	intent := contract.Intent{
+		Version:   contract.VersionV1,
+		IntentID:  "intent-runtime-check",
+		RequestID: "req-runtime-check",
+		TaskType:  contract.TaskTypeDockerRuntimeCheck,
+		Payload:   map[string]any{},
+		CreatedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	_, err = q.WriteIntent(context.Background(), intent)
+	require.NoError(t, err)
+
+	exec := &fakeExecutor{output: []byte("27.5.1\n")}
+	r := New(q, 10*time.Millisecond, "", nil)
+	r.exec = exec
+
+	err = r.ProcessOnce(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, exec.calls, 1)
+	require.Equal(t, "docker", exec.calls[0].name)
+	require.Equal(t, []string{"version", "--format", "{{.Server.Version}}"}, exec.calls[0].args)
+
+	result, err := q.ReadResult(context.Background(), intent.IntentID)
+	require.NoError(t, err)
+	require.Equal(t, contract.StatusSucceeded, result.Status)
+	require.Equal(t, []string{"27.5.1"}, decodeDataLines(t, result.Data))
+}
+
+func TestProcessOnceHandlesDockerRunQuickService(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	intent := contract.Intent{
+		Version:   contract.VersionV1,
+		IntentID:  "intent-quick-service",
+		RequestID: "req-quick-service",
+		TaskType:  contract.TaskTypeDockerRunQuickService,
+		Payload: map[string]any{
+			"image":          "excalidraw/excalidraw:latest",
+			"host_port":      19000,
+			"container_port": 80,
+			"container_name": "quick-excalidraw",
+		},
+		CreatedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	_, err = q.WriteIntent(context.Background(), intent)
+	require.NoError(t, err)
+
+	exec := &fakeExecutor{output: []byte("container-id-1\n")}
+	r := New(q, 10*time.Millisecond, "", nil)
+	r.exec = exec
+
+	err = r.ProcessOnce(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, exec.calls, 1)
+	require.Equal(t, "docker", exec.calls[0].name)
+	require.Equal(t, []string{
+		"run",
+		"-d",
+		"--restart",
+		"unless-stopped",
+		"-p",
+		"19000:80",
+		"--name",
+		"quick-excalidraw",
+		"excalidraw/excalidraw:latest",
+	}, exec.calls[0].args)
+
+	result, err := q.ReadResult(context.Background(), intent.IntentID)
+	require.NoError(t, err)
+	require.Equal(t, contract.StatusSucceeded, result.Status)
+	require.Equal(t, []string{"container-id-1"}, decodeDataLines(t, result.Data))
+}
+
 func TestProcessOnceHandlesHostListenTCPPorts(t *testing.T) {
 	t.Parallel()
 
@@ -406,11 +489,9 @@ func TestProcessOnceSkipsUnsupportedTask(t *testing.T) {
 		Version:   contract.VersionV1,
 		IntentID:  "intent-restart-tunnel",
 		RequestID: "req-restart-tunnel",
-		TaskType:  contract.TaskTypeDockerRunQuickService,
+		TaskType:  contract.TaskTypeTunnelRestart,
 		Payload: map[string]any{
-			"image":          "excalidraw/excalidraw:latest",
-			"host_port":      9000,
-			"container_port": 80,
+			"config_path": "/tmp/cloudflared.yml",
 		},
 		CreatedAt: time.Now().UTC().Add(-time.Minute),
 	}
@@ -440,6 +521,8 @@ func TestValidateTaskCoverageIncludesRestartTunnel(t *testing.T) {
 		contract.TaskTypeDockerSystemDF,
 		contract.TaskTypeDockerListVolumes,
 		contract.TaskTypeDockerContainerLogs,
+		contract.TaskTypeDockerRuntimeCheck,
+		contract.TaskTypeDockerRunQuickService,
 		contract.TaskTypeHostListenTCPPorts,
 		contract.TaskTypeDockerPublishedPorts,
 		contract.TaskTypeComposeUpStack,

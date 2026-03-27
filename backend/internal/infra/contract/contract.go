@@ -24,6 +24,7 @@ const (
 	TaskTypeDockerSystemDF         TaskType = "docker_system_df"
 	TaskTypeDockerListVolumes      TaskType = "docker_list_volumes"
 	TaskTypeDockerContainerLogs    TaskType = "docker_container_logs"
+	TaskTypeDockerRuntimeCheck     TaskType = "docker_runtime_check"
 	TaskTypeHostListenTCPPorts     TaskType = "host_listen_tcp_ports"
 	TaskTypeDockerPublishedPorts   TaskType = "docker_published_ports"
 	TaskTypeHostRuntimeStats       TaskType = "host_runtime_stats"
@@ -127,6 +128,8 @@ type DockerContainerLogsPayload struct {
 	Timestamps bool   `json:"timestamps,omitempty"`
 	Since      string `json:"since,omitempty"`
 }
+
+type DockerRuntimeCheckPayload struct{}
 
 type HostListenTCPPortsPayload struct{}
 

@@ -5,23 +5,34 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 
 	"go-notes/internal/errs"
+	"go-notes/internal/infra/contract"
 	"go-notes/internal/jobs"
 )
 
 const (
 	defaultQuickServiceImage         = "excalidraw/excalidraw:latest"
 	defaultQuickServiceContainerPort = 80
+	defaultComposeUpWaitTimeout      = 30 * time.Minute
 )
 
 type DockerRunner struct {
-	infra infraPortProbeClient
+	infra dockerRunnerInfraClient
+}
+
+type dockerRunnerInfraClient interface {
+	infraPortProbeClient
+	DockerRuntimeCheck(ctx context.Context, requestID string) (contract.Result, error)
+	DockerListContainers(ctx context.Context, requestID string, includeAll bool) (contract.Result, error)
+	DockerRunQuickService(ctx context.Context, requestID string, payload contract.DockerRunQuickServicePayload) (contract.Result, error)
+	ComposeUpStack(ctx context.Context, requestID string, payload contract.ComposeUpStackPayload) (contract.Result, error)
 }
 
 type DockerRunRequest struct {
@@ -35,7 +46,7 @@ type DockerComposeRequest struct {
 	ProjectDir string `json:"projectDir"`
 }
 
-func NewDockerRunner(infra infraPortProbeClient) *DockerRunner {
+func NewDockerRunner(infra dockerRunnerInfraClient) *DockerRunner {
 	return &DockerRunner{infra: infra}
 }
 
@@ -86,19 +97,20 @@ func (r *DockerRunner) RunContainer(ctx context.Context, logger jobs.Logger, req
 	}
 
 	logger.Logf("starting docker container %s (%s)", name, image)
-	args := []string{
-		"run",
-		"-d",
-		"--restart",
-		"unless-stopped",
-		"-p",
-		fmt.Sprintf("%d:%d", req.HostPort, containerPort),
-		"--name",
-		name,
-		image,
+	result, err := r.infra.DockerRunQuickService(ctx, "", contract.DockerRunQuickServicePayload{
+		Image:         image,
+		HostPort:      req.HostPort,
+		ContainerPort: containerPort,
+		ContainerName: name,
+	})
+	if err != nil {
+		return bridgeTaskError("failed to start docker container", contract.TaskTypeDockerRunQuickService, name, err)
 	}
-
-	return runLoggedCommand(ctx, logger, "", nil, "docker", args...)
+	if err := bridgeResultError("failed to start docker container", contract.TaskTypeDockerRunQuickService, name, result); err != nil {
+		return err
+	}
+	logBridgeResultTail(logger, result)
+	return nil
 }
 
 func (r *DockerRunner) ComposeUp(ctx context.Context, logger jobs.Logger, req DockerComposeRequest) error {
@@ -112,14 +124,39 @@ func (r *DockerRunner) ComposeUp(ctx context.Context, logger jobs.Logger, req Do
 	}
 
 	logger.Log("starting docker compose stack")
-	return runLoggedCommand(ctx, logger, dir, nil, "docker", "compose", "up", "--build", "-d")
+	project := strings.TrimSpace(filepath.Base(dir))
+	if project == "" || project == "." || project == string(filepath.Separator) {
+		project = "compose-stack"
+	}
+
+	composeCtx, cancel := withComposeUpWaitTimeout(ctx)
+	defer cancel()
+
+	result, err := r.infra.ComposeUpStack(composeCtx, "", contract.ComposeUpStackPayload{
+		Project:    project,
+		ProjectDir: dir,
+		Build:      true,
+	})
+	if err != nil {
+		return bridgeTaskError("failed to start docker compose stack", contract.TaskTypeComposeUpStack, project, err)
+	}
+	if err := bridgeResultError("failed to start docker compose stack", contract.TaskTypeComposeUpStack, project, result); err != nil {
+		return err
+	}
+	logBridgeResultTail(logger, result)
+	return nil
 }
 
 func (r *DockerRunner) ensureDocker(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "docker", "version", "--format", "{{.Server.Version}}")
-	output, err := cmd.CombinedOutput()
+	if r.infra == nil {
+		return fmt.Errorf("infra bridge client unavailable")
+	}
+	result, err := r.infra.DockerRuntimeCheck(ctx, "")
 	if err != nil {
-		return fmt.Errorf("docker unavailable: %w: %s", err, strings.TrimSpace(string(output)))
+		return bridgeTaskError("docker unavailable", contract.TaskTypeDockerRuntimeCheck, "docker", err)
+	}
+	if err := bridgeResultError("docker unavailable", contract.TaskTypeDockerRuntimeCheck, "docker", result); err != nil {
+		return err
 	}
 	return nil
 }
@@ -134,14 +171,28 @@ func (r *DockerRunner) containerExists(ctx context.Context, name string) (bool, 
 }
 
 func (r *DockerRunner) listContainerNames(ctx context.Context) (map[string]struct{}, error) {
-	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "--format", "{{.Names}}")
-	output, err := cmd.CombinedOutput()
+	if r.infra == nil {
+		return nil, fmt.Errorf("infra bridge client unavailable")
+	}
+	result, err := r.infra.DockerListContainers(ctx, "", true)
 	if err != nil {
-		return nil, fmt.Errorf("docker ps failed: %w: %s", err, strings.TrimSpace(string(output)))
+		return nil, bridgeTaskError("docker ps failed", contract.TaskTypeDockerListContainers, "docker", err)
+	}
+	if err := bridgeResultError("docker ps failed", contract.TaskTypeDockerListContainers, "docker", result); err != nil {
+		return nil, err
+	}
+
+	lines, err := decodeBridgeLinesPayload(result)
+	if err != nil {
+		return nil, fmt.Errorf("decode docker ps payload: %w", err)
+	}
+	containers, err := parseDockerPSLinesToContainers(lines)
+	if err != nil {
+		return nil, fmt.Errorf("parse docker ps payload: %w", err)
 	}
 	names := make(map[string]struct{})
-	for _, line := range strings.Split(string(output), "\n") {
-		trimmed := strings.TrimSpace(line)
+	for _, container := range containers {
+		trimmed := strings.TrimSpace(container.Name)
 		if trimmed == "" {
 			continue
 		}
@@ -248,4 +299,24 @@ func ensureUniqueContainerName(base string, existing map[string]struct{}) string
 			return candidate
 		}
 	}
+}
+
+func logBridgeResultTail(logger jobs.Logger, result contract.Result) {
+	if logger == nil {
+		return
+	}
+	for _, line := range result.LogTail {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		logger.Log(trimmed)
+	}
+}
+
+func withComposeUpWaitTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, hasDeadline := ctx.Deadline(); hasDeadline {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, defaultComposeUpWaitTimeout)
 }

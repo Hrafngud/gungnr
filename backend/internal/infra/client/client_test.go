@@ -62,6 +62,40 @@ func TestWaitResultTimeout(t *testing.T) {
 	require.Equal(t, "intent-timeout", timeoutErr.IntentID)
 }
 
+func TestWaitResultHonorsCallerDeadlineOverDefaultTimeout(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	c := New(q, 10*time.Millisecond, 50*time.Millisecond)
+	intent, err := c.SubmitIntent(context.Background(), "req-long", contract.TaskTypeRestartTunnel, map[string]any{
+		"config_path": "/tmp/cloudflared/config.yml",
+	})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	defer cancel()
+
+	go func() {
+		time.Sleep(120 * time.Millisecond)
+		_, _ = q.WriteResult(context.Background(), contract.Result{
+			Version:    contract.VersionV1,
+			IntentID:   intent.IntentID,
+			RequestID:  intent.RequestID,
+			TaskType:   contract.TaskTypeRestartTunnel,
+			Status:     contract.StatusSucceeded,
+			CreatedAt:  intent.CreatedAt,
+			StartedAt:  time.Now().UTC().Add(-10 * time.Millisecond),
+			FinishedAt: time.Now().UTC(),
+		})
+	}()
+
+	result, err := c.WaitResult(ctx, intent.IntentID)
+	require.NoError(t, err)
+	require.Equal(t, contract.StatusSucceeded, result.Status)
+}
+
 func TestWaitResultMalformedFile(t *testing.T) {
 	t.Parallel()
 
@@ -286,4 +320,93 @@ func TestProbeTaskPayloads(t *testing.T) {
 	}
 	require.True(t, hostIntentFound)
 	require.True(t, dockerIntentFound)
+}
+
+func TestDockerRunnerTaskPayloads(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	c := New(q, 10*time.Millisecond, time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	ack := make(chan struct{}, 2)
+	go func() {
+		for {
+			ids, listErr := q.ListIntentIDs(ctx)
+			if listErr != nil || len(ids) == 0 {
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			for _, id := range ids {
+				resultPath := q.ResultPath(id)
+				if _, statErr := os.Stat(resultPath); statErr == nil {
+					continue
+				}
+				intent, readErr := q.ReadIntent(ctx, id)
+				if readErr != nil {
+					continue
+				}
+				_, _ = q.WriteResult(ctx, contract.Result{
+					Version:    contract.VersionV1,
+					IntentID:   intent.IntentID,
+					RequestID:  intent.RequestID,
+					TaskType:   intent.TaskType,
+					Status:     contract.StatusSucceeded,
+					CreatedAt:  intent.CreatedAt,
+					StartedAt:  time.Now().UTC().Add(-10 * time.Millisecond),
+					FinishedAt: time.Now().UTC(),
+					Data: map[string]any{
+						"lines": []string{"ok"},
+					},
+				})
+				ack <- struct{}{}
+			}
+			if len(ack) >= 2 {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	_, err = c.DockerRuntimeCheck(ctx, "req-docker-runtime-check")
+	require.NoError(t, err)
+	_, err = c.DockerRunQuickService(ctx, "req-docker-run-quick-service", contract.DockerRunQuickServicePayload{
+		Image:         "excalidraw/excalidraw:latest",
+		HostPort:      19000,
+		ContainerPort: 80,
+		ContainerName: "quick-excalidraw",
+	})
+	require.NoError(t, err)
+
+	<-ack
+	<-ack
+
+	ids, err := q.ListIntentIDs(context.Background())
+	require.NoError(t, err)
+	require.Len(t, ids, 2)
+
+	runtimeIntentFound := false
+	quickRunIntentFound := false
+	for _, id := range ids {
+		intent, readErr := q.ReadIntent(context.Background(), id)
+		require.NoError(t, readErr)
+		switch intent.TaskType {
+		case contract.TaskTypeDockerRuntimeCheck:
+			runtimeIntentFound = true
+			require.Equal(t, "req-docker-runtime-check", intent.RequestID)
+			require.Empty(t, intent.Payload)
+		case contract.TaskTypeDockerRunQuickService:
+			quickRunIntentFound = true
+			require.Equal(t, "req-docker-run-quick-service", intent.RequestID)
+			require.Equal(t, "excalidraw/excalidraw:latest", intent.Payload["image"])
+			require.Equal(t, float64(19000), intent.Payload["host_port"])
+			require.Equal(t, float64(80), intent.Payload["container_port"])
+			require.Equal(t, "quick-excalidraw", intent.Payload["container_name"])
+		}
+	}
+	require.True(t, runtimeIntentFound)
+	require.True(t, quickRunIntentFound)
 }

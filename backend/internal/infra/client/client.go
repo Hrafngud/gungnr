@@ -95,7 +95,10 @@ func (c *Client) WaitResult(ctx context.Context, intentID string) (contract.Resu
 	waitCtx := ctx
 	cancel := func() {}
 	if c.waitTimeout > 0 {
-		waitCtx, cancel = context.WithTimeout(ctx, c.waitTimeout)
+		// Keep explicit caller deadlines; apply the client default only when none was provided.
+		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+			waitCtx, cancel = context.WithTimeout(ctx, c.waitTimeout)
+		}
 	}
 	defer cancel()
 
@@ -221,6 +224,34 @@ func (c *Client) DockerContainerLogs(ctx context.Context, requestID string, payl
 	return c.runTask(ctx, requestID, contract.TaskTypeDockerContainerLogs, intentPayload)
 }
 
+func (c *Client) DockerRuntimeCheck(ctx context.Context, requestID string) (contract.Result, error) {
+	return c.runTask(ctx, requestID, contract.TaskTypeDockerRuntimeCheck, map[string]any{})
+}
+
+func (c *Client) DockerRunQuickService(ctx context.Context, requestID string, payload contract.DockerRunQuickServicePayload) (contract.Result, error) {
+	payload.Image = strings.TrimSpace(payload.Image)
+	payload.ContainerName = strings.TrimSpace(payload.ContainerName)
+	if payload.Image == "" {
+		return contract.Result{}, fmt.Errorf("image is required")
+	}
+	if !isValidPort(payload.HostPort) {
+		return contract.Result{}, fmt.Errorf("host_port must be between 1 and 65535")
+	}
+	if !isValidPort(payload.ContainerPort) {
+		return contract.Result{}, fmt.Errorf("container_port must be between 1 and 65535")
+	}
+
+	intentPayload := map[string]any{
+		"image":          payload.Image,
+		"host_port":      payload.HostPort,
+		"container_port": payload.ContainerPort,
+	}
+	if payload.ContainerName != "" {
+		intentPayload["container_name"] = payload.ContainerName
+	}
+	return c.runTask(ctx, requestID, contract.TaskTypeDockerRunQuickService, intentPayload)
+}
+
 func (c *Client) HostListenTCPPorts(ctx context.Context, requestID string) (contract.Result, error) {
 	return c.runTask(ctx, requestID, contract.TaskTypeHostListenTCPPorts, map[string]any{})
 }
@@ -257,6 +288,10 @@ func (c *Client) ComposeUpStack(ctx context.Context, requestID string, payload c
 	}
 
 	return c.runTask(ctx, requestID, contract.TaskTypeComposeUpStack, intentPayload)
+}
+
+func isValidPort(port int) bool {
+	return port >= 1 && port <= 65535
 }
 
 func (c *Client) runTask(ctx context.Context, requestID string, taskType contract.TaskType, payload map[string]any) (contract.Result, error) {
