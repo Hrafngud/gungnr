@@ -171,6 +171,77 @@ func TestProcessOnceHandlesDockerSystemDF(t *testing.T) {
 	require.Equal(t, []string{"{\"Type\":\"Images\"}"}, decodeDataLines(t, result.Data))
 }
 
+func TestProcessOnceHandlesDockerContainerLogs(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	intent := contract.Intent{
+		Version:   contract.VersionV1,
+		IntentID:  "intent-container-logs",
+		RequestID: "req-container-logs",
+		TaskType:  contract.TaskTypeDockerContainerLogs,
+		Payload: map[string]any{
+			"container":  "demo-api",
+			"tail":       300,
+			"follow":     true,
+			"timestamps": true,
+		},
+		CreatedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	_, err = q.WriteIntent(context.Background(), intent)
+	require.NoError(t, err)
+
+	exec := &fakeExecutor{output: []byte("  line one  \nline two\t\n")}
+	r := New(q, 10*time.Millisecond, "", nil)
+	r.exec = exec
+
+	err = r.ProcessOnce(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, exec.calls, 1)
+	require.Equal(t, "docker", exec.calls[0].name)
+	require.Equal(t, []string{"logs", "-f", "--timestamps", "--tail", "300", "demo-api"}, exec.calls[0].args)
+
+	result, err := q.ReadResult(context.Background(), intent.IntentID)
+	require.NoError(t, err)
+	require.Equal(t, contract.StatusSucceeded, result.Status)
+	require.Equal(t, []string{"  line one  ", "line two\t"}, decodeDataLines(t, result.Data))
+}
+
+func TestProcessOnceHandlesDockerContainerLogsSinceWithoutTail(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	intent := contract.Intent{
+		Version:   contract.VersionV1,
+		IntentID:  "intent-container-logs-since",
+		RequestID: "req-container-logs-since",
+		TaskType:  contract.TaskTypeDockerContainerLogs,
+		Payload: map[string]any{
+			"container": "demo-api",
+			"since":     "2026-03-27T16:00:00Z",
+		},
+		CreatedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	_, err = q.WriteIntent(context.Background(), intent)
+	require.NoError(t, err)
+
+	exec := &fakeExecutor{output: []byte("line one\n")}
+	r := New(q, 10*time.Millisecond, "", nil)
+	r.exec = exec
+
+	err = r.ProcessOnce(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, exec.calls, 1)
+	require.Equal(t, "docker", exec.calls[0].name)
+	require.Equal(t, []string{"logs", "--since", "2026-03-27T16:00:00Z", "demo-api"}, exec.calls[0].args)
+}
+
 func TestProcessOnceHandlesRestartTunnel(t *testing.T) {
 	t.Parallel()
 
@@ -300,6 +371,7 @@ func TestValidateTaskCoverageIncludesRestartTunnel(t *testing.T) {
 		contract.TaskTypeDockerListContainers,
 		contract.TaskTypeDockerSystemDF,
 		contract.TaskTypeDockerListVolumes,
+		contract.TaskTypeDockerContainerLogs,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
 	})

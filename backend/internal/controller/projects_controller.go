@@ -1240,7 +1240,7 @@ func (c *ProjectsController) StreamLogs(ctx *gin.Context) {
 		return
 	}
 
-	cmd, stdout, err := c.host.StartContainerLogs(ctx.Request.Context(), container, opts)
+	waiter, stdout, err := c.host.StartContainerLogs(ctx.Request.Context(), container, opts)
 	if err != nil {
 		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeProjectLogsFailed, "failed to stream project container logs")
 		return
@@ -1263,7 +1263,7 @@ func (c *ProjectsController) StreamLogs(ctx *gin.Context) {
 		httpx.SendSSEEvent(ctx, flusher, "error", gin.H{"code": errs.CodeProjectLogsFailed, "message": err.Error()})
 		return
 	}
-	if err := cmd.Wait(); err != nil {
+	if err := waiter.Wait(); err != nil {
 		httpx.SendSSEEvent(ctx, flusher, "error", gin.H{"code": errs.CodeProjectLogsFailed, "message": err.Error()})
 		return
 	}

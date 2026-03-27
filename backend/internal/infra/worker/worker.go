@@ -154,6 +154,7 @@ func (r *Runner) supportsTask(taskType contract.TaskType) bool {
 		contract.TaskTypeDockerListContainers,
 		contract.TaskTypeDockerSystemDF,
 		contract.TaskTypeDockerListVolumes,
+		contract.TaskTypeDockerContainerLogs,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats:
 		return true
@@ -171,6 +172,7 @@ func (r *Runner) SupportedTasks() []contract.TaskType {
 		contract.TaskTypeDockerListContainers,
 		contract.TaskTypeDockerSystemDF,
 		contract.TaskTypeDockerListVolumes,
+		contract.TaskTypeDockerContainerLogs,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
 	}
@@ -227,6 +229,8 @@ func (r *Runner) handleIntent(ctx context.Context, intent contract.Intent) error
 		outcome = r.handleDockerSystemDF(ctx, intent)
 	case contract.TaskTypeDockerListVolumes:
 		outcome = r.handleDockerListVolumes(ctx, intent)
+	case contract.TaskTypeDockerContainerLogs:
+		outcome = r.handleDockerContainerLogs(ctx, intent)
 	case contract.TaskTypeComposeUpStack:
 		outcome = r.handleComposeUpStack(ctx, intent)
 	case contract.TaskTypeHostRuntimeStats:
@@ -384,6 +388,55 @@ func (r *Runner) handleDockerListVolumes(ctx context.Context, _ contract.Intent)
 	}
 }
 
+func (r *Runner) handleDockerContainerLogs(ctx context.Context, intent contract.Intent) taskOutcome {
+	var payload contract.DockerContainerLogsPayload
+	if err := decodePayload(intent.Payload, &payload); err != nil {
+		return taskOutcome{err: err}
+	}
+
+	container := strings.TrimSpace(payload.Container)
+	if container == "" {
+		return taskOutcome{err: fmt.Errorf("container is required")}
+	}
+
+	tail := payload.Tail
+	includeTail := true
+	if tail <= 0 {
+		if strings.TrimSpace(payload.Since) != "" {
+			includeTail = false
+		} else {
+			tail = 200
+		}
+	}
+	if tail > 5000 {
+		tail = 5000
+	}
+
+	args := []string{"logs"}
+	if payload.Follow {
+		args = append(args, "-f")
+	}
+	if payload.Timestamps {
+		args = append(args, "--timestamps")
+	}
+	if strings.TrimSpace(payload.Since) != "" {
+		args = append(args, "--since", strings.TrimSpace(payload.Since))
+	}
+	if includeTail {
+		args = append(args, "--tail", strconv.Itoa(tail))
+	}
+	args = append(args, container)
+
+	output, err := r.exec.Run(ctx, "", "docker", args...)
+	return taskOutcome{
+		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
+		logTail: tailLines(output, 40),
+		data: map[string]any{
+			"lines": parseLinesPreserveWhitespace(output),
+		},
+	}
+}
+
 func (r *Runner) handleComposeUpStack(ctx context.Context, intent contract.Intent) taskOutcome {
 	var payload contract.ComposeUpStackPayload
 	if err := decodePayload(intent.Payload, &payload); err != nil {
@@ -500,6 +553,19 @@ func parseLines(output []byte) []string {
 		}
 	}
 	return clean
+}
+
+func parseLinesPreserveWhitespace(output []byte) []string {
+	if len(output) == 0 {
+		return nil
+	}
+	raw := string(output)
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	lines := strings.Split(raw, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
 }
 
 func tailLines(output []byte, max int) []string {

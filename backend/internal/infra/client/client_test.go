@@ -141,3 +141,68 @@ func TestRestartTunnelOmitsLegacyHealthURL(t *testing.T) {
 	_, exists := intent.Payload["health_url"]
 	require.False(t, exists)
 }
+
+func TestDockerContainerLogsPayload(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	c := New(q, 10*time.Millisecond, time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			ids, listErr := q.ListIntentIDs(ctx)
+			if listErr != nil || len(ids) == 0 {
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			intent, readErr := q.ReadIntent(ctx, ids[0])
+			if readErr != nil {
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			_, _ = q.WriteResult(ctx, contract.Result{
+				Version:    contract.VersionV1,
+				IntentID:   intent.IntentID,
+				RequestID:  intent.RequestID,
+				TaskType:   intent.TaskType,
+				Status:     contract.StatusSucceeded,
+				CreatedAt:  intent.CreatedAt,
+				StartedAt:  time.Now().UTC().Add(-10 * time.Millisecond),
+				FinishedAt: time.Now().UTC(),
+				Data: map[string]any{
+					"lines": []string{"ok"},
+				},
+			})
+			return
+		}
+	}()
+
+	_, err = c.DockerContainerLogs(ctx, "req-logs", contract.DockerContainerLogsPayload{
+		Container:  "demo-api",
+		Tail:       300,
+		Follow:     true,
+		Timestamps: true,
+		Since:      "2026-03-27T16:00:00Z",
+	})
+	require.NoError(t, err)
+	<-done
+
+	ids, err := q.ListIntentIDs(context.Background())
+	require.NoError(t, err)
+	require.Len(t, ids, 1)
+
+	intent, err := q.ReadIntent(context.Background(), ids[0])
+	require.NoError(t, err)
+	require.Equal(t, contract.TaskTypeDockerContainerLogs, intent.TaskType)
+	require.Equal(t, "demo-api", intent.Payload["container"])
+	require.Equal(t, float64(300), intent.Payload["tail"])
+	require.Equal(t, true, intent.Payload["follow"])
+	require.Equal(t, true, intent.Payload["timestamps"])
+	require.Equal(t, "2026-03-27T16:00:00Z", intent.Payload["since"])
+}

@@ -90,6 +90,7 @@ func main() {
 		contract.TaskTypeDockerListContainers,
 		contract.TaskTypeDockerSystemDF,
 		contract.TaskTypeDockerListVolumes,
+		contract.TaskTypeDockerContainerLogs,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
 	}); err != nil {

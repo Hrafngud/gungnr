@@ -197,6 +197,30 @@ func (c *Client) DockerListVolumes(ctx context.Context, requestID string) (contr
 	return c.runTask(ctx, requestID, contract.TaskTypeDockerListVolumes, map[string]any{})
 }
 
+func (c *Client) DockerContainerLogs(ctx context.Context, requestID string, payload contract.DockerContainerLogsPayload) (contract.Result, error) {
+	payload.Container = strings.TrimSpace(payload.Container)
+	if payload.Container == "" {
+		return contract.Result{}, fmt.Errorf("container is required")
+	}
+
+	intentPayload := map[string]any{
+		"container": payload.Container,
+	}
+	if payload.Tail > 0 {
+		intentPayload["tail"] = payload.Tail
+	}
+	if payload.Follow {
+		intentPayload["follow"] = true
+	}
+	if payload.Timestamps {
+		intentPayload["timestamps"] = true
+	}
+	if strings.TrimSpace(payload.Since) != "" {
+		intentPayload["since"] = strings.TrimSpace(payload.Since)
+	}
+	return c.runTask(ctx, requestID, contract.TaskTypeDockerContainerLogs, intentPayload)
+}
+
 func (c *Client) HostRuntimeStats(ctx context.Context, requestID string) (contract.Result, error) {
 	return c.runTask(ctx, requestID, contract.TaskTypeHostRuntimeStats, map[string]any{})
 }

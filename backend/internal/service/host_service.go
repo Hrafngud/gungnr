@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"go-notes/internal/errs"
 	infraclient "go-notes/internal/infra/client"
@@ -53,6 +54,7 @@ type hostInfraBridgeClient interface {
 	DockerListContainers(ctx context.Context, requestID string, includeAll bool) (contract.Result, error)
 	DockerSystemDF(ctx context.Context, requestID string) (contract.Result, error)
 	DockerListVolumes(ctx context.Context, requestID string) (contract.Result, error)
+	DockerContainerLogs(ctx context.Context, requestID string, payload contract.DockerContainerLogsPayload) (contract.Result, error)
 	HostRuntimeStats(ctx context.Context, requestID string) (contract.Result, error)
 	ComposeUpStack(ctx context.Context, requestID string, payload contract.ComposeUpStackPayload) (contract.Result, error)
 }
@@ -69,6 +71,18 @@ type ContainerLogsOptions struct {
 	Tail       int
 	Follow     bool
 	Timestamps bool
+}
+
+type ContainerLogsWaiter interface {
+	Wait() error
+}
+
+type containerLogsBridgeWaiter struct {
+	done <-chan error
+}
+
+func (w containerLogsBridgeWaiter) Wait() error {
+	return <-w.done
 }
 
 func (s *HostService) ListContainers(ctx context.Context, includeAll bool) ([]DockerContainer, error) {
@@ -330,28 +344,96 @@ func (s *HostService) RuntimeStats(ctx context.Context) (HostRuntimeStats, error
 	return stats, nil
 }
 
-func (s *HostService) StartContainerLogs(ctx context.Context, container string, opts ContainerLogsOptions) (*exec.Cmd, io.ReadCloser, error) {
-	args := []string{"logs"}
-	if opts.Follow {
-		args = append(args, "-f")
+func (s *HostService) StartContainerLogs(ctx context.Context, container string, opts ContainerLogsOptions) (ContainerLogsWaiter, io.ReadCloser, error) {
+	container = strings.TrimSpace(container)
+	if container == "" {
+		return nil, nil, fmt.Errorf("container is required")
 	}
-	if opts.Timestamps {
-		args = append(args, "--timestamps")
+	if s.infraClient == nil {
+		return nil, nil, fmt.Errorf("infra bridge client unavailable")
 	}
-	if opts.Tail > 0 {
-		args = append(args, "--tail", strconv.Itoa(opts.Tail))
-	}
-	args = append(args, container)
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, nil, fmt.Errorf("attach docker logs: %w", err)
+	reader, writer := io.Pipe()
+	done := make(chan error, 1)
+
+	go func() {
+		err := s.streamContainerLogs(ctx, container, opts, func(line string) error {
+			_, writeErr := io.WriteString(writer, line+"\n")
+			return writeErr
+		})
+		if err != nil {
+			_ = writer.CloseWithError(err)
+		} else {
+			_ = writer.Close()
+		}
+		done <- err
+	}()
+
+	return containerLogsBridgeWaiter{done: done}, reader, nil
+}
+
+func (s *HostService) streamContainerLogs(ctx context.Context, container string, opts ContainerLogsOptions, emit func(string) error) error {
+	tail := opts.Tail
+	if tail <= 0 {
+		tail = 200
 	}
-	if err := cmd.Start(); err != nil {
-		return nil, nil, fmt.Errorf("start docker logs: %w", err)
+	if tail > 5000 {
+		tail = 5000
 	}
-	return cmd, stdout, nil
+
+	firstFetch := true
+	since := ""
+	pollInterval := 1 * time.Second
+
+	for {
+		// Use current time as the next since-cursor to avoid duplicates while following.
+		nextSince := time.Now().UTC().Format(time.RFC3339Nano)
+
+		requestTail := 0
+		if firstFetch {
+			requestTail = tail
+		}
+
+		result, err := s.infraClient.DockerContainerLogs(ctx, "", contract.DockerContainerLogsPayload{
+			Container:  container,
+			Tail:       requestTail,
+			Follow:     false,
+			Timestamps: opts.Timestamps,
+			Since:      since,
+		})
+		if err != nil {
+			return fmt.Errorf("fetch docker logs via infra bridge: %w", err)
+		}
+		if result.Status == contract.StatusFailed {
+			message := "host worker reported failure"
+			if result.Error != nil && strings.TrimSpace(result.Error.Message) != "" {
+				message = result.Error.Message
+			}
+			return fmt.Errorf("docker logs task failed: %s", message)
+		}
+
+		lines, err := decodeBridgeLinesPayload(result)
+		if err != nil {
+			return fmt.Errorf("decode docker logs payload: %w", err)
+		}
+		for _, line := range lines {
+			if emitErr := emit(line); emitErr != nil {
+				return emitErr
+			}
+		}
+
+		if !opts.Follow {
+			return nil
+		}
+
+		firstFetch = false
+		since = nextSince
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(pollInterval):
+		}
+	}
 }
 
 func (s *HostService) StopContainer(ctx context.Context, container string) error {

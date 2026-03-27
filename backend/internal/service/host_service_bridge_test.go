@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
@@ -42,6 +43,12 @@ type stubHostInfraBridgeClient struct {
 	listVolumesRequestID     string
 	listVolumesResult        contract.Result
 	listVolumesErr           error
+	containerLogsCalled      bool
+	containerLogsCalls       int
+	containerLogsRequestID   string
+	containerLogsPayload     contract.DockerContainerLogsPayload
+	containerLogsResult      contract.Result
+	containerLogsErr         error
 	runtimeCalled            bool
 	runtimeRequestID         string
 	runtimeResult            contract.Result
@@ -92,6 +99,14 @@ func (s *stubHostInfraBridgeClient) DockerListVolumes(_ context.Context, request
 	s.listVolumesCalled = true
 	s.listVolumesRequestID = requestID
 	return s.listVolumesResult, s.listVolumesErr
+}
+
+func (s *stubHostInfraBridgeClient) DockerContainerLogs(_ context.Context, requestID string, payload contract.DockerContainerLogsPayload) (contract.Result, error) {
+	s.containerLogsCalled = true
+	s.containerLogsCalls++
+	s.containerLogsRequestID = requestID
+	s.containerLogsPayload = payload
+	return s.containerLogsResult, s.containerLogsErr
 }
 
 func (s *stubHostInfraBridgeClient) HostRuntimeStats(_ context.Context, requestID string) (contract.Result, error) {
@@ -194,6 +209,89 @@ func TestHostServiceCountRunningContainersBridgeSuccess(t *testing.T) {
 	require.Equal(t, 3, count)
 	require.True(t, bridge.listContainersCalled)
 	require.False(t, bridge.listContainersIncludeAll)
+}
+
+func TestHostServiceStartContainerLogsBridgeSuccess(t *testing.T) {
+	t.Parallel()
+
+	bridge := &stubHostInfraBridgeClient{
+		containerLogsResult: contract.Result{
+			Status: contract.StatusSucceeded,
+			Data: map[string]any{
+				"lines": []string{
+					"2026-03-27T14:00:00Z service started",
+					"2026-03-27T14:00:01Z request ok",
+				},
+			},
+		},
+	}
+	svc := &HostService{infraClient: bridge}
+
+	waiter, reader, err := svc.StartContainerLogs(context.Background(), "demo-api", ContainerLogsOptions{
+		Tail:       250,
+		Follow:     false,
+		Timestamps: true,
+	})
+	require.NoError(t, err)
+	payload, readErr := io.ReadAll(reader)
+	require.NoError(t, readErr)
+	require.NoError(t, waiter.Wait())
+	require.True(t, bridge.containerLogsCalled)
+	require.Equal(t, "demo-api", bridge.containerLogsPayload.Container)
+	require.Equal(t, 250, bridge.containerLogsPayload.Tail)
+	require.False(t, bridge.containerLogsPayload.Follow)
+	require.True(t, bridge.containerLogsPayload.Timestamps)
+	require.Equal(t, "2026-03-27T14:00:00Z service started\n2026-03-27T14:00:01Z request ok\n", string(payload))
+}
+
+func TestHostServiceStartContainerLogsBridgeFailure(t *testing.T) {
+	t.Parallel()
+
+	bridge := &stubHostInfraBridgeClient{
+		containerLogsErr: fmt.Errorf("bridge unavailable"),
+	}
+	svc := &HostService{infraClient: bridge}
+
+	waiter, reader, err := svc.StartContainerLogs(context.Background(), "demo-api", ContainerLogsOptions{Tail: 100})
+	require.NoError(t, err)
+	_, readErr := io.ReadAll(reader)
+	require.Error(t, readErr)
+	waitErr := waiter.Wait()
+	require.Error(t, waitErr)
+	require.Contains(t, waitErr.Error(), "fetch docker logs via infra bridge")
+}
+
+func TestHostServiceStartContainerLogsFollowStreamUsesPolling(t *testing.T) {
+	t.Parallel()
+
+	bridge := &stubHostInfraBridgeClient{
+		containerLogsResult: contract.Result{
+			Status: contract.StatusSucceeded,
+			Data: map[string]any{
+				"lines": []string{
+					"line one",
+				},
+			},
+		},
+	}
+	svc := &HostService{infraClient: bridge}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+
+	waiter, reader, err := svc.StartContainerLogs(ctx, "demo-api", ContainerLogsOptions{
+		Tail:       10,
+		Follow:     true,
+		Timestamps: false,
+	})
+	require.NoError(t, err)
+	payload, readErr := io.ReadAll(reader)
+	require.NoError(t, readErr)
+	require.NoError(t, waiter.Wait())
+	require.True(t, bridge.containerLogsCalled)
+	require.GreaterOrEqual(t, bridge.containerLogsCalls, 1)
+	require.False(t, bridge.containerLogsPayload.Follow)
+	require.Equal(t, "line one\n", string(payload))
 }
 
 func TestHostServiceDockerUsageBridgeSuccess(t *testing.T) {

@@ -23,6 +23,7 @@ const (
 	TaskTypeDockerListContainers   TaskType = "docker_list_containers"
 	TaskTypeDockerSystemDF         TaskType = "docker_system_df"
 	TaskTypeDockerListVolumes      TaskType = "docker_list_volumes"
+	TaskTypeDockerContainerLogs    TaskType = "docker_container_logs"
 	TaskTypeHostRuntimeStats       TaskType = "host_runtime_stats"
 	TaskTypeDockerRunQuickService  TaskType = "docker_run_quick_service"
 	TaskTypeHostPortScan           TaskType = "host_port_scan"
@@ -116,6 +117,14 @@ type DockerListContainersPayload struct {
 type DockerSystemDFPayload struct{}
 
 type DockerListVolumesPayload struct{}
+
+type DockerContainerLogsPayload struct {
+	Container  string `json:"container"`
+	Tail       int    `json:"tail,omitempty"`
+	Follow     bool   `json:"follow,omitempty"`
+	Timestamps bool   `json:"timestamps,omitempty"`
+	Since      string `json:"since,omitempty"`
+}
 
 type HostRuntimeStatsPayload struct{}
 
