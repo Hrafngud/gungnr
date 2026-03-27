@@ -1,8 +1,6 @@
 package service
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -52,6 +50,9 @@ type hostInfraBridgeClient interface {
 	StopContainer(ctx context.Context, requestID, container string) (contract.Result, error)
 	RestartContainer(ctx context.Context, requestID, container string) (contract.Result, error)
 	RemoveContainer(ctx context.Context, requestID, container string, removeVolumes bool) (contract.Result, error)
+	DockerListContainers(ctx context.Context, requestID string, includeAll bool) (contract.Result, error)
+	DockerSystemDF(ctx context.Context, requestID string) (contract.Result, error)
+	DockerListVolumes(ctx context.Context, requestID string) (contract.Result, error)
 	HostRuntimeStats(ctx context.Context, requestID string) (contract.Result, error)
 	ComposeUpStack(ctx context.Context, requestID string, payload contract.ComposeUpStackPayload) (contract.Result, error)
 }
@@ -71,66 +72,19 @@ type ContainerLogsOptions struct {
 }
 
 func (s *HostService) ListContainers(ctx context.Context, includeAll bool) ([]DockerContainer, error) {
-	args := []string{"ps"}
-	if includeAll {
-		args = append(args, "-a")
-	}
-	args = append(args, "--format", "{{json .}}")
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	output, err := cmd.CombinedOutput()
+	lines, err := s.readDockerPSLines(ctx, includeAll, errs.CodeHostDockerFailed, "failed to list docker containers")
 	if err != nil {
-		return nil, fmt.Errorf("docker ps failed: %w: %s", err, strings.TrimSpace(string(output)))
+		return nil, err
 	}
-
-	scanner := bufio.NewScanner(bytes.NewReader(output))
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	var containers []DockerContainer
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var entry dockerPSLine
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			return nil, fmt.Errorf("parse docker output: %w", err)
-		}
-		labels := parseDockerLabels(entry.Labels)
-		containers = append(containers, DockerContainer{
-			ID:           entry.ID,
-			Name:         entry.Names,
-			Image:        entry.Image,
-			Status:       entry.Status,
-			Ports:        entry.Ports,
-			CreatedAt:    entry.CreatedAt,
-			RunningFor:   entry.RunningFor,
-			Service:      labels["com.docker.compose.service"],
-			Project:      labels["com.docker.compose.project"],
-			PortBindings: parseDockerPorts(entry.Ports),
-		})
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan docker output: %w", err)
-	}
-
-	return containers, nil
+	return parseDockerPSLinesToContainers(lines)
 }
 
 func (s *HostService) CountRunningContainers(ctx context.Context) (int, error) {
-	cmd := exec.CommandContext(ctx, "docker", "ps", "--format", "{{.ID}}")
-	output, err := cmd.CombinedOutput()
+	lines, err := s.readDockerPSLines(ctx, false, errs.CodeHostDockerFailed, "failed to count running containers")
 	if err != nil {
-		return 0, fmt.Errorf("docker ps failed: %w: %s", err, strings.TrimSpace(string(output)))
+		return 0, err
 	}
-
-	count := 0
-	for _, line := range strings.Split(string(output), "\n") {
-		if strings.TrimSpace(line) != "" {
-			count++
-		}
-	}
-	return count, nil
+	return len(lines), nil
 }
 
 type DockerUsageEntry struct {
@@ -228,7 +182,7 @@ func (s *HostService) DockerUsage(ctx context.Context, project string) (DockerUs
 		return summary, nil
 	}
 
-	containers, err := s.ListContainers(ctx, true)
+	containers, err := s.listContainersForUsage(ctx, true)
 	if err != nil {
 		return DockerUsageSummary{}, err
 	}
@@ -268,6 +222,79 @@ func (s *HostService) DockerUsage(ctx context.Context, project string) (DockerUs
 		Volumes:    volumeCount,
 	}
 	return summary, nil
+}
+
+func (s *HostService) listContainersForUsage(ctx context.Context, includeAll bool) ([]DockerContainer, error) {
+	lines, err := s.readDockerPSLines(ctx, includeAll, errs.CodeHostUsageFailed, "failed to load docker usage")
+	if err != nil {
+		return nil, err
+	}
+	return parseDockerPSLinesToContainers(lines)
+}
+
+func (s *HostService) readDockerPSLines(ctx context.Context, includeAll bool, code errs.Code, message string) ([]string, error) {
+	if s.infraClient == nil {
+		return nil, errs.WithDetails(
+			errs.New(code, "infra bridge client unavailable"),
+			map[string]any{"task_type": contract.TaskTypeDockerListContainers},
+		)
+	}
+
+	result, err := s.infraClient.DockerListContainers(ctx, "", includeAll)
+	if err != nil {
+		return nil, bridgeTaskErrorWithCode(code, message, contract.TaskTypeDockerListContainers, "docker", err)
+	}
+	if err := bridgeResultErrorWithCode(code, message, contract.TaskTypeDockerListContainers, "docker", result); err != nil {
+		return nil, err
+	}
+	return decodeBridgeLinesPayload(result)
+}
+
+func decodeBridgeLinesPayload(result contract.Result) ([]string, error) {
+	if len(result.Data) == 0 {
+		return []string{}, nil
+	}
+	rawLines, exists := result.Data["lines"]
+	if !exists || rawLines == nil {
+		return []string{}, nil
+	}
+	raw, err := json.Marshal(rawLines)
+	if err != nil {
+		return nil, fmt.Errorf("encode worker lines payload: %w", err)
+	}
+	var lines []string
+	if err := json.Unmarshal(raw, &lines); err != nil {
+		return nil, fmt.Errorf("decode worker lines payload: %w", err)
+	}
+	return lines, nil
+}
+
+func parseDockerPSLinesToContainers(lines []string) ([]DockerContainer, error) {
+	containers := make([]DockerContainer, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var entry dockerPSLine
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			return nil, fmt.Errorf("parse docker output: %w", err)
+		}
+		labels := parseDockerLabels(entry.Labels)
+		containers = append(containers, DockerContainer{
+			ID:           entry.ID,
+			Name:         entry.Names,
+			Image:        entry.Image,
+			Status:       entry.Status,
+			Ports:        entry.Ports,
+			CreatedAt:    entry.CreatedAt,
+			RunningFor:   entry.RunningFor,
+			Service:      labels["com.docker.compose.service"],
+			Project:      labels["com.docker.compose.project"],
+			PortBindings: parseDockerPorts(entry.Ports),
+		})
+	}
+	return containers, nil
 }
 
 func (s *HostService) RuntimeStats(ctx context.Context) (HostRuntimeStats, error) {
@@ -759,18 +786,37 @@ type dockerPSLine struct {
 }
 
 func (s *HostService) readDockerUsage(ctx context.Context) (DockerUsageSummary, int64, error) {
-	cmd := exec.CommandContext(ctx, "docker", "system", "df", "--format", "{{json .}}")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return DockerUsageSummary{}, 0, fmt.Errorf("docker system df failed: %w: %s", err, strings.TrimSpace(string(output)))
+	if s.infraClient == nil {
+		return DockerUsageSummary{}, 0, errs.WithDetails(
+			errs.New(errs.CodeHostUsageFailed, "infra bridge client unavailable"),
+			map[string]any{"task_type": contract.TaskTypeDockerSystemDF},
+		)
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(output))
+	result, err := s.infraClient.DockerSystemDF(ctx, "")
+	if err != nil {
+		return DockerUsageSummary{}, 0, bridgeTaskErrorWithCode(errs.CodeHostUsageFailed, "failed to load docker usage", contract.TaskTypeDockerSystemDF, "docker", err)
+	}
+	if err := bridgeResultErrorWithCode(errs.CodeHostUsageFailed, "failed to load docker usage", contract.TaskTypeDockerSystemDF, "docker", result); err != nil {
+		return DockerUsageSummary{}, 0, err
+	}
+
+	lines, err := decodeBridgeLinesPayload(result)
+	if err != nil {
+		return DockerUsageSummary{}, 0, errs.WithDetails(
+			errs.Wrap(errs.CodeHostUsageFailed, "failed to decode docker usage payload", err),
+			map[string]any{
+				"task_type": contract.TaskTypeDockerSystemDF,
+				"intent_id": result.IntentID,
+			},
+		)
+	}
+
 	var summary DockerUsageSummary
 	var totalBytes int64
 
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
@@ -795,24 +841,39 @@ func (s *HostService) readDockerUsage(ctx context.Context) (DockerUsageSummary, 
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return DockerUsageSummary{}, 0, fmt.Errorf("scan docker system df output: %w", err)
-	}
-
 	return summary, totalBytes, nil
 }
 
 func (s *HostService) listVolumes(ctx context.Context) ([]dockerVolumeLine, error) {
-	cmd := exec.CommandContext(ctx, "docker", "volume", "ls", "--format", "{{json .}}")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("docker volume ls failed: %w: %s", err, strings.TrimSpace(string(output)))
+	if s.infraClient == nil {
+		return nil, errs.WithDetails(
+			errs.New(errs.CodeHostUsageFailed, "infra bridge client unavailable"),
+			map[string]any{"task_type": contract.TaskTypeDockerListVolumes},
+		)
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(output))
-	volumes := make([]dockerVolumeLine, 0)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	result, err := s.infraClient.DockerListVolumes(ctx, "")
+	if err != nil {
+		return nil, bridgeTaskErrorWithCode(errs.CodeHostUsageFailed, "failed to load docker usage", contract.TaskTypeDockerListVolumes, "docker", err)
+	}
+	if err := bridgeResultErrorWithCode(errs.CodeHostUsageFailed, "failed to load docker usage", contract.TaskTypeDockerListVolumes, "docker", result); err != nil {
+		return nil, err
+	}
+
+	lines, err := decodeBridgeLinesPayload(result)
+	if err != nil {
+		return nil, errs.WithDetails(
+			errs.Wrap(errs.CodeHostUsageFailed, "failed to decode docker volume payload", err),
+			map[string]any{
+				"task_type": contract.TaskTypeDockerListVolumes,
+				"intent_id": result.IntentID,
+			},
+		)
+	}
+
+	volumes := make([]dockerVolumeLine, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
@@ -821,9 +882,6 @@ func (s *HostService) listVolumes(ctx context.Context) ([]dockerVolumeLine, erro
 			return nil, fmt.Errorf("parse docker volume output: %w", err)
 		}
 		volumes = append(volumes, entry)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan docker volume output: %w", err)
 	}
 	return volumes, nil
 }

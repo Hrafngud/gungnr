@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -16,6 +17,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+func decodeDataLines(t *testing.T, data map[string]any) []string {
+	t.Helper()
+	raw, err := json.Marshal(data["lines"])
+	require.NoError(t, err)
+	var lines []string
+	require.NoError(t, json.Unmarshal(raw, &lines))
+	return lines
+}
 
 type fakeExecCall struct {
 	dir  string
@@ -89,6 +99,76 @@ func TestProcessOnceHandlesDockerStop(t *testing.T) {
 	require.Equal(t, contract.StatusSucceeded, result.Status)
 	require.Equal(t, []string{"api"}, result.LogTail)
 	require.NoFileExists(t, q.ClaimPath(intent.IntentID))
+}
+
+func TestProcessOnceHandlesDockerListContainers(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	intent := contract.Intent{
+		Version:   contract.VersionV1,
+		IntentID:  "intent-list-containers",
+		RequestID: "req-list-containers",
+		TaskType:  contract.TaskTypeDockerListContainers,
+		Payload: map[string]any{
+			"include_all": true,
+		},
+		CreatedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	_, err = q.WriteIntent(context.Background(), intent)
+	require.NoError(t, err)
+
+	exec := &fakeExecutor{output: []byte("{\"ID\":\"abc\"}\n{\"ID\":\"def\"}\n")}
+	r := New(q, 10*time.Millisecond, "", nil)
+	r.exec = exec
+
+	err = r.ProcessOnce(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, exec.calls, 1)
+	require.Equal(t, "docker", exec.calls[0].name)
+	require.Equal(t, []string{"ps", "-a", "--format", "{{json .}}"}, exec.calls[0].args)
+
+	result, err := q.ReadResult(context.Background(), intent.IntentID)
+	require.NoError(t, err)
+	require.Equal(t, contract.StatusSucceeded, result.Status)
+	require.Equal(t, []string{"{\"ID\":\"abc\"}", "{\"ID\":\"def\"}"}, decodeDataLines(t, result.Data))
+}
+
+func TestProcessOnceHandlesDockerSystemDF(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	intent := contract.Intent{
+		Version:   contract.VersionV1,
+		IntentID:  "intent-system-df",
+		RequestID: "req-system-df",
+		TaskType:  contract.TaskTypeDockerSystemDF,
+		Payload:   map[string]any{},
+		CreatedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	_, err = q.WriteIntent(context.Background(), intent)
+	require.NoError(t, err)
+
+	exec := &fakeExecutor{output: []byte("{\"Type\":\"Images\"}\n")}
+	r := New(q, 10*time.Millisecond, "", nil)
+	r.exec = exec
+
+	err = r.ProcessOnce(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, exec.calls, 1)
+	require.Equal(t, "docker", exec.calls[0].name)
+	require.Equal(t, []string{"system", "df", "--format", "{{json .}}"}, exec.calls[0].args)
+
+	result, err := q.ReadResult(context.Background(), intent.IntentID)
+	require.NoError(t, err)
+	require.Equal(t, contract.StatusSucceeded, result.Status)
+	require.Equal(t, []string{"{\"Type\":\"Images\"}"}, decodeDataLines(t, result.Data))
 }
 
 func TestProcessOnceHandlesRestartTunnel(t *testing.T) {
@@ -217,6 +297,9 @@ func TestValidateTaskCoverageIncludesRestartTunnel(t *testing.T) {
 		contract.TaskTypeDockerStopContainer,
 		contract.TaskTypeDockerRestartContainer,
 		contract.TaskTypeDockerRemoveContainer,
+		contract.TaskTypeDockerListContainers,
+		contract.TaskTypeDockerSystemDF,
+		contract.TaskTypeDockerListVolumes,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
 	})

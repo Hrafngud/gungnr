@@ -181,6 +181,22 @@ func (c *Client) RemoveContainer(ctx context.Context, requestID, container strin
 	return c.runTask(ctx, requestID, contract.TaskTypeDockerRemoveContainer, payload)
 }
 
+func (c *Client) DockerListContainers(ctx context.Context, requestID string, includeAll bool) (contract.Result, error) {
+	payload := map[string]any{}
+	if includeAll {
+		payload["include_all"] = true
+	}
+	return c.runTask(ctx, requestID, contract.TaskTypeDockerListContainers, payload)
+}
+
+func (c *Client) DockerSystemDF(ctx context.Context, requestID string) (contract.Result, error) {
+	return c.runTask(ctx, requestID, contract.TaskTypeDockerSystemDF, map[string]any{})
+}
+
+func (c *Client) DockerListVolumes(ctx context.Context, requestID string) (contract.Result, error) {
+	return c.runTask(ctx, requestID, contract.TaskTypeDockerListVolumes, map[string]any{})
+}
+
 func (c *Client) HostRuntimeStats(ctx context.Context, requestID string) (contract.Result, error) {
 	return c.runTask(ctx, requestID, contract.TaskTypeHostRuntimeStats, map[string]any{})
 }

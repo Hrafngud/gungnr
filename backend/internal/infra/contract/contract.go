@@ -20,6 +20,9 @@ const (
 	TaskTypeDockerStopContainer    TaskType = "docker_stop_container"
 	TaskTypeDockerRestartContainer TaskType = "docker_restart_container"
 	TaskTypeDockerRemoveContainer  TaskType = "docker_remove_container"
+	TaskTypeDockerListContainers   TaskType = "docker_list_containers"
+	TaskTypeDockerSystemDF         TaskType = "docker_system_df"
+	TaskTypeDockerListVolumes      TaskType = "docker_list_volumes"
 	TaskTypeHostRuntimeStats       TaskType = "host_runtime_stats"
 	TaskTypeDockerRunQuickService  TaskType = "docker_run_quick_service"
 	TaskTypeHostPortScan           TaskType = "host_port_scan"
@@ -105,6 +108,14 @@ type DockerRemoveContainerPayload struct {
 	Container     string `json:"container"`
 	RemoveVolumes bool   `json:"remove_volumes,omitempty"`
 }
+
+type DockerListContainersPayload struct {
+	IncludeAll bool `json:"include_all,omitempty"`
+}
+
+type DockerSystemDFPayload struct{}
+
+type DockerListVolumesPayload struct{}
 
 type HostRuntimeStatsPayload struct{}
 

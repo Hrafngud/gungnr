@@ -87,6 +87,9 @@ func main() {
 		contract.TaskTypeDockerStopContainer,
 		contract.TaskTypeDockerRestartContainer,
 		contract.TaskTypeDockerRemoveContainer,
+		contract.TaskTypeDockerListContainers,
+		contract.TaskTypeDockerSystemDF,
+		contract.TaskTypeDockerListVolumes,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
 	}); err != nil {

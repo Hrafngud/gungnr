@@ -13,31 +13,44 @@ import (
 )
 
 type stubHostInfraBridgeClient struct {
-	stopCalled       bool
-	stopRequestID    string
-	stopContainer    string
-	stopResult       contract.Result
-	stopErr          error
-	restartCalled    bool
-	restartRequestID string
-	restartContainer string
-	restartResult    contract.Result
-	restartErr       error
-	removeCalled     bool
-	removeRequestID  string
-	removeContainer  string
-	removeVolumes    bool
-	removeResult     contract.Result
-	removeErr        error
-	runtimeCalled    bool
-	runtimeRequestID string
-	runtimeResult    contract.Result
-	runtimeErr       error
-	composeCalled    bool
-	composeRequestID string
-	composePayload   contract.ComposeUpStackPayload
-	composeResult    contract.Result
-	composeErr       error
+	stopCalled               bool
+	stopRequestID            string
+	stopContainer            string
+	stopResult               contract.Result
+	stopErr                  error
+	restartCalled            bool
+	restartRequestID         string
+	restartContainer         string
+	restartResult            contract.Result
+	restartErr               error
+	removeCalled             bool
+	removeRequestID          string
+	removeContainer          string
+	removeVolumes            bool
+	removeResult             contract.Result
+	removeErr                error
+	listContainersCalled     bool
+	listContainersRequestID  string
+	listContainersIncludeAll bool
+	listContainersResult     contract.Result
+	listContainersErr        error
+	systemDFCalled           bool
+	systemDFRequestID        string
+	systemDFResult           contract.Result
+	systemDFErr              error
+	listVolumesCalled        bool
+	listVolumesRequestID     string
+	listVolumesResult        contract.Result
+	listVolumesErr           error
+	runtimeCalled            bool
+	runtimeRequestID         string
+	runtimeResult            contract.Result
+	runtimeErr               error
+	composeCalled            bool
+	composeRequestID         string
+	composePayload           contract.ComposeUpStackPayload
+	composeResult            contract.Result
+	composeErr               error
 }
 
 func (s *stubHostInfraBridgeClient) StopContainer(_ context.Context, requestID, container string) (contract.Result, error) {
@@ -60,6 +73,25 @@ func (s *stubHostInfraBridgeClient) RemoveContainer(_ context.Context, requestID
 	s.removeContainer = container
 	s.removeVolumes = removeVolumes
 	return s.removeResult, s.removeErr
+}
+
+func (s *stubHostInfraBridgeClient) DockerListContainers(_ context.Context, requestID string, includeAll bool) (contract.Result, error) {
+	s.listContainersCalled = true
+	s.listContainersRequestID = requestID
+	s.listContainersIncludeAll = includeAll
+	return s.listContainersResult, s.listContainersErr
+}
+
+func (s *stubHostInfraBridgeClient) DockerSystemDF(_ context.Context, requestID string) (contract.Result, error) {
+	s.systemDFCalled = true
+	s.systemDFRequestID = requestID
+	return s.systemDFResult, s.systemDFErr
+}
+
+func (s *stubHostInfraBridgeClient) DockerListVolumes(_ context.Context, requestID string) (contract.Result, error) {
+	s.listVolumesCalled = true
+	s.listVolumesRequestID = requestID
+	return s.listVolumesResult, s.listVolumesErr
 }
 
 func (s *stubHostInfraBridgeClient) HostRuntimeStats(_ context.Context, requestID string) (contract.Result, error) {
@@ -114,6 +146,108 @@ func TestHostServiceContainerActionsBridgeSuccess(t *testing.T) {
 	require.True(t, bridge.removeVolumes)
 }
 
+func TestHostServiceListContainersBridgeSuccess(t *testing.T) {
+	t.Parallel()
+
+	bridge := &stubHostInfraBridgeClient{
+		listContainersResult: contract.Result{
+			Status: contract.StatusSucceeded,
+			Data: map[string]any{
+				"lines": []string{
+					`{"ID":"abc123","Image":"nginx:alpine","Names":"demo-web","Status":"Up 2 minutes","Ports":"0.0.0.0:8080->80/tcp, 443/tcp","CreatedAt":"2026-03-21 10:00:00 +0000 UTC","RunningFor":"2 minutes","Labels":"com.docker.compose.project=demo,com.docker.compose.service=web"}`,
+				},
+			},
+		},
+	}
+	svc := &HostService{infraClient: bridge}
+
+	containers, err := svc.ListContainers(context.Background(), true)
+	require.NoError(t, err)
+	require.True(t, bridge.listContainersCalled)
+	require.True(t, bridge.listContainersIncludeAll)
+	require.Len(t, containers, 1)
+	require.Equal(t, "demo-web", containers[0].Name)
+	require.Equal(t, "demo", containers[0].Project)
+	require.Equal(t, "web", containers[0].Service)
+	require.Len(t, containers[0].PortBindings, 2)
+}
+
+func TestHostServiceCountRunningContainersBridgeSuccess(t *testing.T) {
+	t.Parallel()
+
+	bridge := &stubHostInfraBridgeClient{
+		listContainersResult: contract.Result{
+			Status: contract.StatusSucceeded,
+			Data: map[string]any{
+				"lines": []string{
+					`{"ID":"a1","Names":"one"}`,
+					`{"ID":"a2","Names":"two"}`,
+					`{"ID":"a3","Names":"three"}`,
+				},
+			},
+		},
+	}
+	svc := &HostService{infraClient: bridge}
+
+	count, err := svc.CountRunningContainers(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 3, count)
+	require.True(t, bridge.listContainersCalled)
+	require.False(t, bridge.listContainersIncludeAll)
+}
+
+func TestHostServiceDockerUsageBridgeSuccess(t *testing.T) {
+	t.Parallel()
+
+	bridge := &stubHostInfraBridgeClient{
+		systemDFResult: contract.Result{
+			Status: contract.StatusSucceeded,
+			Data: map[string]any{
+				"lines": []string{
+					`{"Type":"Images","TotalCount":"8","Active":"2","Size":"3.2GB","Reclaimable":"1.1GB (34%)"}`,
+					`{"Type":"Containers","TotalCount":"6","Active":"3","Size":"512MB","Reclaimable":"0B (0%)"}`,
+					`{"Type":"Local Volumes","TotalCount":"5","Active":"4","Size":"1.5GB","Reclaimable":"0B (0%)"}`,
+					`{"Type":"Build Cache","TotalCount":"2","Active":"0","Size":"120MB","Reclaimable":"120MB (100%)"}`,
+				},
+			},
+		},
+		listContainersResult: contract.Result{
+			Status: contract.StatusSucceeded,
+			Data: map[string]any{
+				"lines": []string{
+					`{"ID":"c1","Image":"nginx:alpine","Names":"demo-web","Status":"Up","Ports":"","CreatedAt":"","RunningFor":"","Labels":"com.docker.compose.project=demo,com.docker.compose.service=web"}`,
+					`{"ID":"c2","Image":"redis:7","Names":"demo-redis","Status":"Up","Ports":"","CreatedAt":"","RunningFor":"","Labels":"com.docker.compose.project=demo,com.docker.compose.service=redis"}`,
+					`{"ID":"c3","Image":"nginx:alpine","Names":"other-web","Status":"Up","Ports":"","CreatedAt":"","RunningFor":"","Labels":"com.docker.compose.project=other,com.docker.compose.service=web"}`,
+				},
+			},
+		},
+		listVolumesResult: contract.Result{
+			Status: contract.StatusSucceeded,
+			Data: map[string]any{
+				"lines": []string{
+					`{"Name":"demo_data","Driver":"local","Labels":"com.docker.compose.project=demo"}`,
+					`{"Name":"other_data","Driver":"local","Labels":"com.docker.compose.project=other"}`,
+				},
+			},
+		},
+	}
+	svc := &HostService{infraClient: bridge}
+
+	summary, err := svc.DockerUsage(context.Background(), "demo")
+	require.NoError(t, err)
+	require.True(t, bridge.systemDFCalled)
+	require.True(t, bridge.listContainersCalled)
+	require.True(t, bridge.listVolumesCalled)
+	require.Equal(t, "demo", summary.Project)
+	require.NotNil(t, summary.ProjectCounts)
+	require.Equal(t, 2, summary.ProjectCounts.Containers)
+	require.Equal(t, 2, summary.ProjectCounts.Images)
+	require.Equal(t, 1, summary.ProjectCounts.Volumes)
+	require.Equal(t, 8, summary.Images.Count)
+	require.Equal(t, 6, summary.Containers.Count)
+	require.Equal(t, 5, summary.Volumes.Count)
+}
+
 func TestHostServiceContainerActionsBridgeFailureMapping(t *testing.T) {
 	t.Parallel()
 
@@ -133,6 +267,59 @@ func TestHostServiceContainerActionsBridgeFailureMapping(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, contract.TaskTypeDockerStopContainer, details["task_type"])
 	require.Equal(t, "api", details["target"])
+}
+
+func TestHostServiceListContainersBridgeFailureMapping(t *testing.T) {
+	t.Parallel()
+
+	bridge := &stubHostInfraBridgeClient{
+		listContainersErr: fmt.Errorf("bridge unavailable"),
+	}
+	svc := &HostService{infraClient: bridge}
+
+	_, err := svc.ListContainers(context.Background(), true)
+	require.Error(t, err)
+
+	typed, ok := errs.From(err)
+	require.True(t, ok)
+	require.Equal(t, errs.CodeHostDockerFailed, typed.Code)
+	require.Equal(t, "failed to list docker containers", typed.Message)
+	details, ok := typed.Details.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, contract.TaskTypeDockerListContainers, details["task_type"])
+	require.Equal(t, "docker", details["target"])
+}
+
+func TestHostServiceDockerUsageBridgeFailureMapping(t *testing.T) {
+	t.Parallel()
+
+	bridge := &stubHostInfraBridgeClient{
+		systemDFResult: contract.Result{
+			Status:   contract.StatusFailed,
+			IntentID: "intent-df-fail",
+			LogPath:  "/tmp/infra-df.log",
+			Error: &contract.Error{
+				Code:    "DOCKER-500",
+				Message: "docker system df failed",
+			},
+		},
+	}
+	svc := &HostService{infraClient: bridge}
+
+	_, err := svc.DockerUsage(context.Background(), "")
+	require.Error(t, err)
+
+	typed, ok := errs.From(err)
+	require.True(t, ok)
+	require.Equal(t, errs.CodeHostUsageFailed, typed.Code)
+	require.Equal(t, "failed to load docker usage", typed.Message)
+	details, ok := typed.Details.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, contract.TaskTypeDockerSystemDF, details["task_type"])
+	require.Equal(t, "docker", details["target"])
+	require.Equal(t, "intent-df-fail", details["intent_id"])
+	require.Equal(t, "DOCKER-500", details["worker_error_code"])
+	require.Equal(t, "/tmp/infra-df.log", details["log_path"])
 }
 
 func TestHostServiceContainerActionsFailedResultMapping(t *testing.T) {

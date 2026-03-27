@@ -147,7 +147,15 @@ func (r *Runner) ProcessOnce(ctx context.Context) error {
 
 func (r *Runner) supportsTask(taskType contract.TaskType) bool {
 	switch taskType {
-	case contract.TaskTypeRestartTunnel, contract.TaskTypeDockerStopContainer, contract.TaskTypeDockerRestartContainer, contract.TaskTypeDockerRemoveContainer, contract.TaskTypeComposeUpStack, contract.TaskTypeHostRuntimeStats:
+	case contract.TaskTypeRestartTunnel,
+		contract.TaskTypeDockerStopContainer,
+		contract.TaskTypeDockerRestartContainer,
+		contract.TaskTypeDockerRemoveContainer,
+		contract.TaskTypeDockerListContainers,
+		contract.TaskTypeDockerSystemDF,
+		contract.TaskTypeDockerListVolumes,
+		contract.TaskTypeComposeUpStack,
+		contract.TaskTypeHostRuntimeStats:
 		return true
 	default:
 		return false
@@ -160,6 +168,9 @@ func (r *Runner) SupportedTasks() []contract.TaskType {
 		contract.TaskTypeDockerStopContainer,
 		contract.TaskTypeDockerRestartContainer,
 		contract.TaskTypeDockerRemoveContainer,
+		contract.TaskTypeDockerListContainers,
+		contract.TaskTypeDockerSystemDF,
+		contract.TaskTypeDockerListVolumes,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
 	}
@@ -210,6 +221,12 @@ func (r *Runner) handleIntent(ctx context.Context, intent contract.Intent) error
 		outcome = r.handleDockerRestart(ctx, intent)
 	case contract.TaskTypeDockerRemoveContainer:
 		outcome = r.handleDockerRemove(ctx, intent)
+	case contract.TaskTypeDockerListContainers:
+		outcome = r.handleDockerListContainers(ctx, intent)
+	case contract.TaskTypeDockerSystemDF:
+		outcome = r.handleDockerSystemDF(ctx, intent)
+	case contract.TaskTypeDockerListVolumes:
+		outcome = r.handleDockerListVolumes(ctx, intent)
 	case contract.TaskTypeComposeUpStack:
 		outcome = r.handleComposeUpStack(ctx, intent)
 	case contract.TaskTypeHostRuntimeStats:
@@ -321,6 +338,52 @@ func (r *Runner) handleDockerRemove(ctx context.Context, intent contract.Intent)
 	}
 }
 
+func (r *Runner) handleDockerListContainers(ctx context.Context, intent contract.Intent) taskOutcome {
+	var payload contract.DockerListContainersPayload
+	if err := decodePayload(intent.Payload, &payload); err != nil {
+		return taskOutcome{err: err}
+	}
+
+	args := []string{"ps"}
+	if payload.IncludeAll {
+		args = append(args, "-a")
+	}
+	args = append(args, "--format", "{{json .}}")
+
+	output, err := r.exec.Run(ctx, "", "docker", args...)
+	return taskOutcome{
+		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
+		logTail: tailLines(output, 25),
+		data: map[string]any{
+			"lines": parseLines(output),
+		},
+	}
+}
+
+func (r *Runner) handleDockerSystemDF(ctx context.Context, _ contract.Intent) taskOutcome {
+	args := []string{"system", "df", "--format", "{{json .}}"}
+	output, err := r.exec.Run(ctx, "", "docker", args...)
+	return taskOutcome{
+		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
+		logTail: tailLines(output, 25),
+		data: map[string]any{
+			"lines": parseLines(output),
+		},
+	}
+}
+
+func (r *Runner) handleDockerListVolumes(ctx context.Context, _ contract.Intent) taskOutcome {
+	args := []string{"volume", "ls", "--format", "{{json .}}"}
+	output, err := r.exec.Run(ctx, "", "docker", args...)
+	return taskOutcome{
+		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
+		logTail: tailLines(output, 25),
+		data: map[string]any{
+			"lines": parseLines(output),
+		},
+	}
+}
+
 func (r *Runner) handleComposeUpStack(ctx context.Context, intent contract.Intent) taskOutcome {
 	var payload contract.ComposeUpStackPayload
 	if err := decodePayload(intent.Payload, &payload); err != nil {
@@ -423,10 +486,7 @@ func commandError(runErr error, output []byte, format string, args ...any) error
 	return fmt.Errorf("%s failed: %w: %s", command, runErr, text)
 }
 
-func tailLines(output []byte, max int) []string {
-	if max <= 0 {
-		return nil
-	}
+func parseLines(output []byte) []string {
 	raw := strings.TrimSpace(string(output))
 	if raw == "" {
 		return nil
@@ -438,6 +498,17 @@ func tailLines(output []byte, max int) []string {
 		if trimmed != "" {
 			clean = append(clean, trimmed)
 		}
+	}
+	return clean
+}
+
+func tailLines(output []byte, max int) []string {
+	if max <= 0 {
+		return nil
+	}
+	clean := parseLines(output)
+	if len(clean) == 0 {
+		return nil
 	}
 	if len(clean) <= max {
 		return clean
