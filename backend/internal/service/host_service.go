@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -659,29 +658,52 @@ type composeProjectMeta struct {
 	ConfigFiles []string
 }
 
-func (s *HostService) readComposeProjectMeta(ctx context.Context, project string) (composeProjectMeta, error) {
-	return readComposeProjectMeta(ctx, project)
-}
+func readComposeProjectMeta(ctx context.Context, runtimeMetaClient infraDockerMetadataClient, project string) (composeProjectMeta, error) {
+	project = strings.TrimSpace(project)
+	if project == "" {
+		return composeProjectMeta{}, fmt.Errorf("compose project is required")
+	}
+	if runtimeMetaClient == nil {
+		return composeProjectMeta{}, fmt.Errorf("infra bridge client unavailable")
+	}
 
-func readComposeProjectMeta(ctx context.Context, project string) (composeProjectMeta, error) {
-	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "-q", "--filter", "label=com.docker.compose.project="+project)
-	output, err := cmd.CombinedOutput()
+	result, err := runtimeMetaClient.DockerListContainers(ctx, "", true)
 	if err != nil {
-		return composeProjectMeta{}, fmt.Errorf("docker ps compose metadata failed: %w: %s", err, strings.TrimSpace(string(output)))
+		return composeProjectMeta{}, fmt.Errorf("docker list containers for compose metadata failed: %w", err)
+	}
+	if result.Status == contract.StatusFailed {
+		message := "host worker reported failure"
+		if result.Error != nil && strings.TrimSpace(result.Error.Message) != "" {
+			message = result.Error.Message
+		}
+		return composeProjectMeta{}, fmt.Errorf("docker list containers for compose metadata failed: %s", message)
 	}
 
-	containerIDs := parseLines(output)
-	if len(containerIDs) == 0 {
-		return composeProjectMeta{}, fmt.Errorf("compose project not found: %q", project)
+	lines, err := decodeBridgeLinesPayload(result)
+	if err != nil {
+		return composeProjectMeta{}, fmt.Errorf("decode compose metadata payload: %w", err)
 	}
 
-	var lastErr error
-	for _, containerID := range containerIDs {
-		labels, err := inspectContainerLabels(ctx, containerID)
-		if err != nil {
-			lastErr = err
+	foundProjectContainer := false
+	var parseErr error
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
+
+		var entry dockerPSLine
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			parseErr = err
+			continue
+		}
+
+		labels := parseDockerLabels(entry.Labels)
+		if !strings.EqualFold(strings.TrimSpace(labels["com.docker.compose.project"]), project) {
+			continue
+		}
+		foundProjectContainer = true
+
 		workingDir := strings.TrimSpace(labels["com.docker.compose.project.working_dir"])
 		configFilesRaw := strings.TrimSpace(labels["com.docker.compose.project.config_files"])
 		if workingDir == "" && configFilesRaw == "" {
@@ -692,27 +714,14 @@ func readComposeProjectMeta(ctx context.Context, project string) (composeProject
 			ConfigFiles: splitComposeConfigFiles(configFilesRaw),
 		}, nil
 	}
-	if lastErr != nil {
-		return composeProjectMeta{}, fmt.Errorf("inspect compose metadata failed: %w", lastErr)
+
+	if parseErr != nil {
+		return composeProjectMeta{}, fmt.Errorf("parse compose metadata payload: %w", parseErr)
+	}
+	if !foundProjectContainer {
+		return composeProjectMeta{}, fmt.Errorf("compose project not found: %q", project)
 	}
 	return composeProjectMeta{}, fmt.Errorf("compose metadata labels unavailable for project %q", project)
-}
-
-func inspectContainerLabels(ctx context.Context, containerID string) (map[string]string, error) {
-	cmd := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{json .Config.Labels}}", containerID)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("docker inspect labels failed for %s: %w: %s", containerID, err, strings.TrimSpace(string(output)))
-	}
-	trimmed := strings.TrimSpace(string(output))
-	if trimmed == "" || trimmed == "null" {
-		return map[string]string{}, nil
-	}
-	labels := map[string]string{}
-	if err := json.Unmarshal([]byte(trimmed), &labels); err != nil {
-		return nil, fmt.Errorf("parse docker inspect labels for %s: %w", containerID, err)
-	}
-	return labels, nil
 }
 
 func resolveComposeProjectDir(baseDir, project, workingDir string, configFiles []string) (string, error) {
@@ -822,38 +831,11 @@ func parseLines(raw []byte) []string {
 	return items
 }
 
-func (s *HostService) composeUp(ctx context.Context, projectDir string, configFiles []string, logger jobs.Logger) error {
-	args := []string{"compose"}
-	for _, configFile := range configFiles {
-		args = append(args, "-f", configFile)
-	}
-	args = append(args, "up", "--build", "-d")
-
-	hostLogf(logger, "running command in %s: docker %s", projectDir, strings.Join(args, " "))
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Dir = projectDir
-	output, err := cmd.CombinedOutput()
-	logCommandOutput(logger, output)
-	if err != nil {
-		return fmt.Errorf("docker %s failed: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
 func hostLogf(logger jobs.Logger, format string, args ...any) {
 	if logger == nil {
 		return
 	}
 	logger.Logf(format, args...)
-}
-
-func logCommandOutput(logger jobs.Logger, output []byte) {
-	if logger == nil {
-		return
-	}
-	for _, line := range parseLines(output) {
-		logger.Log(line)
-	}
 }
 
 type dockerPSLine struct {
@@ -970,21 +952,61 @@ func (s *HostService) listVolumes(ctx context.Context) ([]dockerVolumeLine, erro
 
 func parseDockerLabels(raw string) map[string]string {
 	labels := make(map[string]string)
+	currentKey := ""
 	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
 		if entry == "" {
 			continue
 		}
-		parts := strings.SplitN(entry, "=", 2)
-		if len(parts) != 2 {
+
+		if key, value, ok := parseDockerLabelEntry(entry); ok {
+			currentKey = key
+			labels[key] = value
 			continue
 		}
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-		if key != "" {
-			labels[key] = value
+
+		if currentKey != "" {
+			labels[currentKey] = labels[currentKey] + "," + entry
 		}
 	}
 	return labels
+}
+
+func parseDockerLabelEntry(entry string) (string, string, bool) {
+	keyRaw, valueRaw, ok := strings.Cut(entry, "=")
+	if !ok {
+		return "", "", false
+	}
+	key := strings.TrimSpace(keyRaw)
+	if !isLikelyDockerLabelKey(key) {
+		return "", "", false
+	}
+	return key, strings.TrimSpace(valueRaw), true
+}
+
+func isLikelyDockerLabelKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for idx, r := range key {
+		if idx == 0 && !isASCIIAlphaNum(r) {
+			return false
+		}
+		if isASCIIAlphaNum(r) {
+			continue
+		}
+		switch r {
+		case '.', '_', '-', '/':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIIAlphaNum(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }
 
 func parseDockerPorts(raw string) []DockerPortBinding {

@@ -296,6 +296,22 @@ func TestListDockerPublishedPortsBridgeSuccess(t *testing.T) {
 	require.ElementsMatch(t, []int{18080, 19090}, ports)
 }
 
+func TestListHostListeningPortsRequiresBridgeClient(t *testing.T) {
+	t.Parallel()
+
+	_, err := listHostListeningPorts(context.Background(), nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "infra bridge probe client unavailable")
+}
+
+func TestListDockerPublishedPortsRequiresBridgeClient(t *testing.T) {
+	t.Parallel()
+
+	_, err := listDockerPublishedPorts(context.Background(), nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "infra bridge probe client unavailable")
+}
+
 func TestListHostListeningPortsBridgeUsesShortTimeout(t *testing.T) {
 	t.Parallel()
 

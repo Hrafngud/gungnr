@@ -141,7 +141,7 @@ func (s *ProjectArchiveService) Plan(ctx context.Context, projectName string) (P
 		return ProjectArchivePlan{}, err
 	}
 
-	resolved, err := resolveProjectPath(ctx, s.projects, runtimeCfg.TemplatesDir, projectName)
+	resolved, err := resolveProjectPath(ctx, s.projects, runtimeCfg.TemplatesDir, projectName, s.runtimeMetaClient())
 	if err != nil {
 		return ProjectArchivePlan{}, err
 	}
@@ -182,6 +182,13 @@ func (s *ProjectArchiveService) Plan(ctx context.Context, projectName string) (P
 	plan.DNSRecords = s.planDNSRecords(ctx, runtimeCfg, cfClient, plan.Hostnames, warnings)
 	plan.Warnings = sortedArchiveWarnings(warnings)
 	return plan, nil
+}
+
+func (s *ProjectArchiveService) runtimeMetaClient() infraDockerMetadataClient {
+	if s.host == nil {
+		return nil
+	}
+	return s.host.infraClient
 }
 
 func (s *ProjectArchiveService) Queue(

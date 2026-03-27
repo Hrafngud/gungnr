@@ -873,28 +873,23 @@ func findFreePortNearby(start int, reserved map[int]bool) (int, error) {
 }
 
 func listHostListeningPorts(ctx context.Context, probeClient infraPortProbeClient) ([]int, error) {
-	if probeClient != nil {
-		// Probe failures are non-fatal for callers, so keep bridge waits short.
-		probeCtx, cancel := context.WithTimeout(ctx, bridgeProbeWaitTimeout)
-		defer cancel()
-
-		result, err := probeClient.HostListenTCPPorts(probeCtx, "")
-		if err != nil {
-			return nil, err
-		}
-		lines, err := decodeBridgeLinesPayload(result)
-		if err != nil {
-			return nil, err
-		}
-		return parseHostListeningPorts(strings.Join(lines, "\n")), nil
+	if probeClient == nil {
+		return nil, fmt.Errorf("infra bridge probe client unavailable")
 	}
 
-	cmd := exec.CommandContext(ctx, "ss", "-ltnH")
-	output, err := cmd.CombinedOutput()
+	// Probe failures are non-fatal for callers, so keep bridge waits short.
+	probeCtx, cancel := context.WithTimeout(ctx, bridgeProbeWaitTimeout)
+	defer cancel()
+
+	result, err := probeClient.HostListenTCPPorts(probeCtx, "")
 	if err != nil {
 		return nil, err
 	}
-	return parseHostListeningPorts(string(output)), nil
+	lines, err := decodeBridgeLinesPayload(result)
+	if err != nil {
+		return nil, err
+	}
+	return parseHostListeningPorts(strings.Join(lines, "\n")), nil
 }
 
 var hostPortSuffixPattern = regexp.MustCompile(`(?:\]|:)(\d+)$`)
@@ -929,28 +924,23 @@ func parseHostListeningPorts(raw string) []int {
 }
 
 func listDockerPublishedPorts(ctx context.Context, probeClient infraPortProbeClient) ([]int, error) {
-	if probeClient != nil {
-		// Probe failures are non-fatal for callers, so keep bridge waits short.
-		probeCtx, cancel := context.WithTimeout(ctx, bridgeProbeWaitTimeout)
-		defer cancel()
-
-		result, err := probeClient.DockerPublishedPorts(probeCtx, "")
-		if err != nil {
-			return nil, err
-		}
-		lines, err := decodeBridgeLinesPayload(result)
-		if err != nil {
-			return nil, err
-		}
-		return parsePublishedPorts(strings.Join(lines, "\n")), nil
+	if probeClient == nil {
+		return nil, fmt.Errorf("infra bridge probe client unavailable")
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", "ps", "--format", "{{.Ports}}")
-	output, err := cmd.CombinedOutput()
+	// Probe failures are non-fatal for callers, so keep bridge waits short.
+	probeCtx, cancel := context.WithTimeout(ctx, bridgeProbeWaitTimeout)
+	defer cancel()
+
+	result, err := probeClient.DockerPublishedPorts(probeCtx, "")
 	if err != nil {
 		return nil, err
 	}
-	return parsePublishedPorts(string(output)), nil
+	lines, err := decodeBridgeLinesPayload(result)
+	if err != nil {
+		return nil, err
+	}
+	return parsePublishedPorts(strings.Join(lines, "\n")), nil
 }
 
 func parsePublishedPorts(raw string) []int {

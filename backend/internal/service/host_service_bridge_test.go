@@ -211,6 +211,55 @@ func TestHostServiceCountRunningContainersBridgeSuccess(t *testing.T) {
 	require.False(t, bridge.listContainersIncludeAll)
 }
 
+func TestReadComposeProjectMetaBridgeSuccess(t *testing.T) {
+	t.Parallel()
+
+	bridge := &stubHostInfraBridgeClient{
+		listContainersResult: contract.Result{
+			Status: contract.StatusSucceeded,
+			Data: map[string]any{
+				"lines": []string{
+					`{"ID":"abc123","Names":"demo-api","Labels":"com.docker.compose.project=demo,com.docker.compose.project.working_dir=/templates/demo,com.docker.compose.project.config_files=/templates/demo/docker-compose.yml,com.docker.compose.service=api"}`,
+				},
+			},
+		},
+	}
+
+	meta, err := readComposeProjectMeta(context.Background(), bridge, "demo")
+	require.NoError(t, err)
+	require.True(t, bridge.listContainersCalled)
+	require.True(t, bridge.listContainersIncludeAll)
+	require.Equal(t, "/templates/demo", meta.WorkingDir)
+	require.Equal(t, []string{"/templates/demo/docker-compose.yml"}, meta.ConfigFiles)
+}
+
+func TestReadComposeProjectMetaPreservesMultiConfigFilesLabel(t *testing.T) {
+	t.Parallel()
+
+	bridge := &stubHostInfraBridgeClient{
+		listContainersResult: contract.Result{
+			Status: contract.StatusSucceeded,
+			Data: map[string]any{
+				"lines": []string{
+					`{"ID":"abc123","Names":"demo-api","Labels":"com.docker.compose.project=demo,com.docker.compose.project.config_files=/templates/demo/base.yml,/templates/demo/override.yml,com.example.flag=true"}`,
+				},
+			},
+		},
+	}
+
+	meta, err := readComposeProjectMeta(context.Background(), bridge, "demo")
+	require.NoError(t, err)
+	require.Equal(t, []string{"/templates/demo/base.yml", "/templates/demo/override.yml"}, meta.ConfigFiles)
+}
+
+func TestReadComposeProjectMetaRequiresBridgeClient(t *testing.T) {
+	t.Parallel()
+
+	_, err := readComposeProjectMeta(context.Background(), nil, "demo")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "infra bridge client unavailable")
+}
+
 func TestHostServiceStartContainerLogsBridgeSuccess(t *testing.T) {
 	t.Parallel()
 

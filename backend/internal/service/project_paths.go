@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"go-notes/internal/errs"
+	"go-notes/internal/infra/contract"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
 )
@@ -32,11 +33,16 @@ type projectPathResolution struct {
 	ProjectRecord  *models.Project
 }
 
+type infraDockerMetadataClient interface {
+	DockerListContainers(ctx context.Context, requestID string, includeAll bool) (contract.Result, error)
+}
+
 func resolveProjectPath(
 	ctx context.Context,
 	repo repository.ProjectRepository,
 	templatesDir string,
 	projectName string,
+	runtimeMetaClient infraDockerMetadataClient,
 ) (projectPathResolution, error) {
 	requested := strings.TrimSpace(projectName)
 	normalized := strings.ToLower(requested)
@@ -64,7 +70,7 @@ func resolveProjectPath(
 			resolution.ProjectDir = templateDir
 			resolution.Source = "templates_scan"
 		} else {
-			runtimeDir, runtimeComposeFiles, runtimeErr := resolveDirFromRuntimeCompose(ctx, templatesDir, normalized)
+			runtimeDir, runtimeComposeFiles, runtimeErr := resolveDirFromRuntimeCompose(ctx, templatesDir, normalized, runtimeMetaClient)
 			if runtimeErr != nil {
 				return projectPathResolution{}, templateErr
 			}
@@ -86,8 +92,9 @@ func resolveDirFromRuntimeCompose(
 	ctx context.Context,
 	templatesDir string,
 	normalizedName string,
+	runtimeMetaClient infraDockerMetadataClient,
 ) (string, []string, error) {
-	meta, err := readComposeProjectMeta(ctx, normalizedName)
+	meta, err := readComposeProjectMeta(ctx, runtimeMetaClient, normalizedName)
 	if err != nil {
 		return "", nil, err
 	}

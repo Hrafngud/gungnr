@@ -80,7 +80,7 @@ func NewProjectRuntimeService(
 }
 
 func (s *ProjectRuntimeService) Resolve(ctx context.Context, projectName string) (projectPathResolution, error) {
-	return resolveProjectPath(ctx, s.projects, s.templatesDir, projectName)
+	return resolveProjectPath(ctx, s.projects, s.templatesDir, projectName, s.runtimeMetaClient())
 }
 
 func (s *ProjectRuntimeService) ListSummaries(ctx context.Context) ([]ProjectSummary, error) {
@@ -118,7 +118,7 @@ func (s *ProjectRuntimeService) ListSummaries(ctx context.Context) ([]ProjectSum
 		}
 
 		if runtimeAvailable && strings.TrimSpace(summary.Path) == "" {
-			if runtimeDir, _, runtimeErr := resolveDirFromRuntimeCompose(ctx, s.templatesDir, key); runtimeErr == nil {
+			if runtimeDir, _, runtimeErr := resolveDirFromRuntimeCompose(ctx, s.templatesDir, key, s.runtimeMetaClient()); runtimeErr == nil {
 				summary.Path = runtimeDir
 			}
 		}
@@ -127,6 +127,13 @@ func (s *ProjectRuntimeService) ListSummaries(ctx context.Context) ([]ProjectSum
 	}
 
 	return summaries, nil
+}
+
+func (s *ProjectRuntimeService) runtimeMetaClient() infraDockerMetadataClient {
+	if s.host == nil {
+		return nil
+	}
+	return s.host.infraClient
 }
 
 func (s *ProjectRuntimeService) Detail(ctx context.Context, projectName string) (ProjectDetail, error) {
@@ -391,7 +398,7 @@ func (s *ProjectRuntimeService) syncRuntimeProjects(
 		status := deriveProjectRuntimeStatus(containers)
 		proxyPort, dbPort := deriveProjectRuntimePorts(containers)
 		path := ""
-		if runtimeDir, _, runtimeErr := resolveDirFromRuntimeCompose(ctx, s.templatesDir, normalized); runtimeErr == nil {
+		if runtimeDir, _, runtimeErr := resolveDirFromRuntimeCompose(ctx, s.templatesDir, normalized, s.runtimeMetaClient()); runtimeErr == nil {
 			path = runtimeDir
 		}
 

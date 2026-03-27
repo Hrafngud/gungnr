@@ -30,21 +30,27 @@ type ProjectEnvWrite struct {
 }
 
 type ProjectEnvService struct {
-	templatesDir string
-	projects     repository.ProjectRepository
-	maxBytes     int64
+	templatesDir      string
+	projects          repository.ProjectRepository
+	maxBytes          int64
+	runtimeMetaClient infraDockerMetadataClient
 }
 
 func NewProjectEnvService(templatesDir string, projects repository.ProjectRepository) *ProjectEnvService {
 	return &ProjectEnvService{
-		templatesDir: strings.TrimSpace(templatesDir),
-		projects:     projects,
-		maxBytes:     defaultProjectEnvMaxBytes,
+		templatesDir:      strings.TrimSpace(templatesDir),
+		projects:          projects,
+		maxBytes:          defaultProjectEnvMaxBytes,
+		runtimeMetaClient: nil,
 	}
 }
 
+func (s *ProjectEnvService) SetRuntimeMetaClient(runtimeMetaClient infraDockerMetadataClient) {
+	s.runtimeMetaClient = runtimeMetaClient
+}
+
 func (s *ProjectEnvService) Load(ctx context.Context, projectName string) (ProjectEnvRead, error) {
-	resolved, err := resolveProjectPath(ctx, s.projects, s.templatesDir, projectName)
+	resolved, err := resolveProjectPath(ctx, s.projects, s.templatesDir, projectName, s.runtimeMetaClient)
 	if err != nil {
 		return ProjectEnvRead{}, err
 	}
@@ -92,7 +98,7 @@ func (s *ProjectEnvService) Save(
 		)
 	}
 
-	resolved, err := resolveProjectPath(ctx, s.projects, s.templatesDir, projectName)
+	resolved, err := resolveProjectPath(ctx, s.projects, s.templatesDir, projectName, s.runtimeMetaClient)
 	if err != nil {
 		return ProjectEnvWrite{}, err
 	}

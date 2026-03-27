@@ -76,7 +76,7 @@ func (s *WorkbenchService) ListComposeBackups(
 		return nil, err
 	}
 
-	resolution, err := resolveProjectPath(ctx, s.projects, s.templatesDir, normalizedProject)
+	resolution, err := resolveProjectPath(ctx, s.projects, s.templatesDir, normalizedProject, s.runtimeMetaClient)
 	if err != nil {
 		return nil, err
 	}
