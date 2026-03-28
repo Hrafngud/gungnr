@@ -106,3 +106,51 @@ func TestNormalizeDockerNetworkGuardrailsMode(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeDockerDaemonIsolationMode(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "defaults to disabled",
+			raw:  "",
+			want: "disabled",
+		},
+		{
+			name: "rootless accepted",
+			raw:  "rootless",
+			want: "rootless",
+		},
+		{
+			name: "userns remap accepted",
+			raw:  "userns-remap",
+			want: "userns-remap",
+		},
+		{
+			name: "userns alias accepted",
+			raw:  " UserNS ",
+			want: "userns-remap",
+		},
+		{
+			name: "underscored alias accepted",
+			raw:  "userns_remap",
+			want: "userns-remap",
+		},
+		{
+			name: "invalid values fail closed",
+			raw:  "socket-proxy",
+			want: "disabled",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizeDockerDaemonIsolationMode(tc.raw); got != tc.want {
+				t.Fatalf("expected daemon isolation mode %q, got %q", tc.want, got)
+			}
+		})
+	}
+}

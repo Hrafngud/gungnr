@@ -60,6 +60,8 @@ func TestComposeFilesDisableDBHostPublishByDefault(t *testing.T) {
 		require.Contains(t, content, "DB_HOST_PUBLISH_MODE: ${DB_HOST_PUBLISH_MODE:-disabled}", "%s must default DB host publish mode to disabled", filepath.Base(path))
 		require.Contains(t, content, "DB_HOST_PUBLISH_HOST: ${DB_HOST_PUBLISH_HOST:-127.0.0.1}", "%s must keep loopback-only host publish bind default", filepath.Base(path))
 		require.Contains(t, content, "DB_HOST_PUBLISH_PORT: ${DB_HOST_PUBLISH_PORT:-5432}", "%s must keep deterministic DB host publish port diagnostics", filepath.Base(path))
+		require.Contains(t, content, "DOCKER_DAEMON_ISOLATION_MODE: ${DOCKER_DAEMON_ISOLATION_MODE:-disabled}", "%s must default daemon isolation selection to disabled", filepath.Base(path))
+		require.Contains(t, content, "rollback is always DOCKER_DAEMON_ISOLATION_MODE=disabled", "%s must document deterministic daemon isolation rollback selection", filepath.Base(path))
 	}
 }
 

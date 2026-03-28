@@ -79,6 +79,7 @@ services:
       DB_HOST_PUBLISH_HOST: ${DB_HOST_PUBLISH_HOST:-127.0.0.1}
       DB_HOST_PUBLISH_PORT: ${DB_HOST_PUBLISH_PORT:-5432}
       DOCKER_NETWORK_GUARDRAILS_MODE: ${DOCKER_NETWORK_GUARDRAILS_MODE:-enforced}
+      DOCKER_DAEMON_ISOLATION_MODE: ${DOCKER_DAEMON_ISOLATION_MODE:-disabled}
     depends_on:
       db:
         condition: service_healthy
@@ -103,6 +104,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${TEMPLATES_DIR:-/templates}:${TEMPLATES_DIR:-/templates}
       - ${CLOUDFLARED_DIR:-/home/user/.cloudflared}:${CLOUDFLARED_DIR:-/home/user/.cloudflared}
+    # Daemon isolation rollout selection is preflight-gated in backend diagnostics.
+    # Select rootless or userns-remap only after the host daemon has been reconfigured.
+    # Deterministic rollback is always DOCKER_DAEMON_ISOLATION_MODE=disabled before restarting the panel after daemon revert.
     # Port mapping removed for production exposure; keep if needed for local debugging
     # ports:
     #   - "${API_PORT:-8080}:8080"

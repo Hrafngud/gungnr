@@ -40,6 +40,15 @@ type DockerContainer struct {
 	PortBindings []DockerPortBinding `json:"portBindings"`
 }
 
+type DockerRuntimeInfo struct {
+	ServerVersion   string   `json:"serverVersion,omitempty"`
+	DockerRootDir   string   `json:"dockerRootDir,omitempty"`
+	SecurityOptions []string `json:"securityOptions,omitempty"`
+	Warnings        []string `json:"warnings,omitempty"`
+	Rootless        bool     `json:"rootless"`
+	UsernsRemap     bool     `json:"usernsRemap"`
+}
+
 type HostService struct {
 	templatesDir string
 	projects     repository.ProjectRepository
@@ -54,6 +63,7 @@ type hostInfraBridgeClient interface {
 	DockerSystemDF(ctx context.Context, requestID string) (contract.Result, error)
 	DockerListVolumes(ctx context.Context, requestID string) (contract.Result, error)
 	DockerContainerLogs(ctx context.Context, requestID string, payload contract.DockerContainerLogsPayload) (contract.Result, error)
+	DockerRuntimeCheck(ctx context.Context, requestID string) (contract.Result, error)
 	HostRuntimeStats(ctx context.Context, requestID string) (contract.Result, error)
 	ComposeUpStack(ctx context.Context, requestID string, payload contract.ComposeUpStackPayload) (contract.Result, error)
 }
@@ -341,6 +351,61 @@ func (s *HostService) RuntimeStats(ctx context.Context) (HostRuntimeStats, error
 		return HostRuntimeStats{}, errs.Wrap(errs.CodeHostStatsFailed, "failed to decode host runtime stats payload", err)
 	}
 	return stats, nil
+}
+
+func (s *HostService) DockerRuntime(ctx context.Context) (DockerRuntimeInfo, error) {
+	if s.infraClient == nil {
+		return DockerRuntimeInfo{}, errs.WithDetails(
+			errs.New(errs.CodeHostDockerFailed, "infra bridge client unavailable"),
+			map[string]any{"task_type": contract.TaskTypeDockerRuntimeCheck},
+		)
+	}
+
+	result, err := s.infraClient.DockerRuntimeCheck(ctx, "")
+	if err != nil {
+		return DockerRuntimeInfo{}, bridgeTaskError("failed to inspect docker runtime", contract.TaskTypeDockerRuntimeCheck, "docker", err)
+	}
+	if err := bridgeResultError("failed to inspect docker runtime", contract.TaskTypeDockerRuntimeCheck, "docker", result); err != nil {
+		return DockerRuntimeInfo{}, err
+	}
+
+	var payload struct {
+		ServerVersion   string   `json:"server_version"`
+		DockerRootDir   string   `json:"docker_root_dir"`
+		SecurityOptions []string `json:"security_options"`
+		Warnings        []string `json:"warnings"`
+		Rootless        bool     `json:"rootless"`
+		UsernsRemap     bool     `json:"userns_remap"`
+	}
+	if len(result.Data) > 0 {
+		raw, marshalErr := json.Marshal(result.Data)
+		if marshalErr != nil {
+			return DockerRuntimeInfo{}, fmt.Errorf("encode docker runtime payload: %w", marshalErr)
+		}
+		if unmarshalErr := json.Unmarshal(raw, &payload); unmarshalErr != nil {
+			return DockerRuntimeInfo{}, fmt.Errorf("decode docker runtime payload: %w", unmarshalErr)
+		}
+	}
+
+	serverVersion := strings.TrimSpace(payload.ServerVersion)
+	if serverVersion == "" {
+		lines, linesErr := decodeBridgeLinesPayload(result)
+		if linesErr != nil {
+			return DockerRuntimeInfo{}, fmt.Errorf("decode docker runtime version payload: %w", linesErr)
+		}
+		if len(lines) > 0 {
+			serverVersion = strings.TrimSpace(lines[0])
+		}
+	}
+
+	return DockerRuntimeInfo{
+		ServerVersion:   serverVersion,
+		DockerRootDir:   strings.TrimSpace(payload.DockerRootDir),
+		SecurityOptions: payload.SecurityOptions,
+		Warnings:        payload.Warnings,
+		Rootless:        payload.Rootless,
+		UsernsRemap:     payload.UsernsRemap,
+	}, nil
 }
 
 func (s *HostService) StartContainerLogs(ctx context.Context, container string, opts ContainerLogsOptions) (ContainerLogsWaiter, io.ReadCloser, error) {

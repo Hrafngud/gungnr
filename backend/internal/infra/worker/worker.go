@@ -38,6 +38,13 @@ type tunnelLifecycle interface {
 
 type defaultCommandExecutor struct{}
 
+type dockerRuntimeInfo struct {
+	DockerRootDir   string   `json:"DockerRootDir"`
+	SecurityOptions []string `json:"SecurityOptions"`
+	Warnings        []string `json:"Warnings"`
+	Rootless        bool     `json:"Rootless"`
+}
+
 func (defaultCommandExecutor) Run(ctx context.Context, dir string, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {
@@ -466,15 +473,103 @@ func (r *Runner) handleDockerContainerLogs(ctx context.Context, intent contract.
 }
 
 func (r *Runner) handleDockerRuntimeCheck(ctx context.Context, _ contract.Intent) taskOutcome {
-	args := []string{"version", "--format", "{{.Server.Version}}"}
-	output, err := r.exec.Run(ctx, "", "docker", args...)
+	versionArgs := []string{"version", "--format", "{{.Server.Version}}"}
+	versionOutput, err := r.exec.Run(ctx, "", "docker", versionArgs...)
+	if err != nil {
+		return taskOutcome{
+			err:     commandError(err, versionOutput, "docker %s", strings.Join(versionArgs, " ")),
+			logTail: tailLines(versionOutput, 25),
+		}
+	}
+
+	infoArgs := []string{"info", "--format", "{{json .}}"}
+	infoOutput, err := r.exec.Run(ctx, "", "docker", infoArgs...)
+	if err != nil {
+		return taskOutcome{
+			err:     commandError(err, infoOutput, "docker %s", strings.Join(infoArgs, " ")),
+			logTail: tailLines(infoOutput, 25),
+		}
+	}
+
+	runtimeInfo, parseErr := parseDockerRuntimeInfo(infoOutput)
+	if parseErr != nil {
+		return taskOutcome{
+			err:     fmt.Errorf("parse docker info runtime payload: %w", parseErr),
+			logTail: tailLines(infoOutput, 25),
+		}
+	}
+
+	serverVersion := strings.TrimSpace(string(versionOutput))
 	return taskOutcome{
-		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
-		logTail: tailLines(output, 25),
+		logTail: tailLines(versionOutput, 25),
 		data: map[string]any{
-			"lines": parseLines(output),
+			"lines":            parseLines(versionOutput),
+			"server_version":   serverVersion,
+			"docker_root_dir":  strings.TrimSpace(runtimeInfo.DockerRootDir),
+			"security_options": runtimeInfo.SecurityOptions,
+			"warnings":         runtimeInfo.Warnings,
+			"rootless":         dockerRuntimeUsesRootless(runtimeInfo),
+			"userns_remap":     dockerRuntimeUsesUsernsRemap(runtimeInfo),
 		},
 	}
+}
+
+func parseDockerRuntimeInfo(output []byte) (dockerRuntimeInfo, error) {
+	jsonOutput, externalWarnings, err := extractDockerInfoJSONPayload(output)
+	if err != nil {
+		return dockerRuntimeInfo{}, err
+	}
+
+	var payload dockerRuntimeInfo
+	if err := json.Unmarshal(jsonOutput, &payload); err != nil {
+		return dockerRuntimeInfo{}, err
+	}
+	payload.Warnings = append(externalWarnings, payload.Warnings...)
+	return payload, nil
+}
+
+func extractDockerInfoJSONPayload(output []byte) ([]byte, []string, error) {
+	raw := strings.TrimSpace(string(output))
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+	if start == -1 || end == -1 || end < start {
+		return nil, nil, fmt.Errorf("docker info output did not contain a JSON payload")
+	}
+
+	var warnings []string
+	if prefix := strings.TrimSpace(raw[:start]); prefix != "" {
+		warnings = append(warnings, parseLinesPreserveWhitespace([]byte(prefix))...)
+	}
+	if suffix := strings.TrimSpace(raw[end+1:]); suffix != "" {
+		warnings = append(warnings, parseLinesPreserveWhitespace([]byte(suffix))...)
+	}
+
+	return []byte(raw[start : end+1]), warnings, nil
+}
+
+func dockerRuntimeUsesRootless(info dockerRuntimeInfo) bool {
+	if info.Rootless {
+		return true
+	}
+	return dockerSecurityOptionPresent(info.SecurityOptions, "rootless")
+}
+
+func dockerRuntimeUsesUsernsRemap(info dockerRuntimeInfo) bool {
+	return dockerSecurityOptionPresent(info.SecurityOptions, "name=userns") || dockerSecurityOptionPresent(info.SecurityOptions, "userns")
+}
+
+func dockerSecurityOptionPresent(options []string, needle string) bool {
+	needle = strings.ToLower(strings.TrimSpace(needle))
+	if needle == "" {
+		return false
+	}
+	for _, option := range options {
+		normalized := strings.ToLower(strings.TrimSpace(option))
+		if strings.Contains(normalized, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Runner) handleDockerRunQuickService(ctx context.Context, intent contract.Intent) taskOutcome {

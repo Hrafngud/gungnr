@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"go-notes/internal/auth"
@@ -157,6 +158,24 @@ func main() {
 		log.Printf("docker network guardrails mode=compat edge=edge core=core icc_enforced=false")
 	} else {
 		log.Printf("docker network guardrails mode=enforced edge=edge core=core icc_enforced=true")
+	}
+	startupDockerCtx, startupDockerCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	startupDockerHealth := healthService.Docker(startupDockerCtx)
+	startupDockerCancel()
+	log.Printf(
+		"docker daemon isolation mode=%s active=%s preflight=%s supported=%t socket=%s server=%s",
+		startupDockerHealth.DaemonIsolation.Mode,
+		startupDockerHealth.DaemonIsolation.ActiveMode,
+		startupDockerHealth.DaemonIsolation.PreflightStatus,
+		startupDockerHealth.DaemonIsolation.Supported,
+		startupDockerHealth.DaemonIsolation.SocketPath,
+		startupDockerHealth.DaemonIsolation.ServerVersion,
+	)
+	if len(startupDockerHealth.DaemonIsolation.Blockers) > 0 {
+		log.Printf("docker daemon isolation blockers=%s", strings.Join(startupDockerHealth.DaemonIsolation.Blockers, " | "))
+	}
+	if len(startupDockerHealth.DaemonIsolation.Warnings) > 0 {
+		log.Printf("docker daemon isolation warnings=%s", strings.Join(startupDockerHealth.DaemonIsolation.Warnings, " | "))
 	}
 	log.Printf("server starting on %s", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {

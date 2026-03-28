@@ -49,6 +49,10 @@ type stubHostInfraBridgeClient struct {
 	containerLogsPayload     contract.DockerContainerLogsPayload
 	containerLogsResult      contract.Result
 	containerLogsErr         error
+	dockerRuntimeCalled      bool
+	dockerRuntimeRequestID   string
+	dockerRuntimeResult      contract.Result
+	dockerRuntimeErr         error
 	runtimeCalled            bool
 	runtimeRequestID         string
 	runtimeResult            contract.Result
@@ -107,6 +111,12 @@ func (s *stubHostInfraBridgeClient) DockerContainerLogs(_ context.Context, reque
 	s.containerLogsRequestID = requestID
 	s.containerLogsPayload = payload
 	return s.containerLogsResult, s.containerLogsErr
+}
+
+func (s *stubHostInfraBridgeClient) DockerRuntimeCheck(_ context.Context, requestID string) (contract.Result, error) {
+	s.dockerRuntimeCalled = true
+	s.dockerRuntimeRequestID = requestID
+	return s.dockerRuntimeResult, s.dockerRuntimeErr
 }
 
 func (s *stubHostInfraBridgeClient) HostRuntimeStats(_ context.Context, requestID string) (contract.Result, error) {
@@ -395,6 +405,34 @@ func TestHostServiceDockerUsageBridgeSuccess(t *testing.T) {
 	require.Equal(t, 5, summary.Volumes.Count)
 }
 
+func TestHostServiceDockerRuntimeBridgeSuccess(t *testing.T) {
+	t.Parallel()
+
+	bridge := &stubHostInfraBridgeClient{
+		dockerRuntimeResult: contract.Result{
+			Status: contract.StatusSucceeded,
+			Data: map[string]any{
+				"server_version":   "27.5.1",
+				"docker_root_dir":  "/var/lib/docker/231072.231072",
+				"security_options": []string{"name=seccomp,profile=default", "name=userns"},
+				"warnings":         []string{"cgroup v1 in use"},
+				"rootless":         false,
+				"userns_remap":     true,
+			},
+		},
+	}
+	svc := &HostService{infraClient: bridge}
+
+	info, err := svc.DockerRuntime(context.Background())
+	require.NoError(t, err)
+	require.True(t, bridge.dockerRuntimeCalled)
+	require.Equal(t, "27.5.1", info.ServerVersion)
+	require.Equal(t, "/var/lib/docker/231072.231072", info.DockerRootDir)
+	require.True(t, info.UsernsRemap)
+	require.False(t, info.Rootless)
+	require.Equal(t, []string{"cgroup v1 in use"}, info.Warnings)
+}
+
 func TestHostServiceContainerActionsBridgeFailureMapping(t *testing.T) {
 	t.Parallel()
 
@@ -467,6 +505,38 @@ func TestHostServiceDockerUsageBridgeFailureMapping(t *testing.T) {
 	require.Equal(t, "intent-df-fail", details["intent_id"])
 	require.Equal(t, "DOCKER-500", details["worker_error_code"])
 	require.Equal(t, "/tmp/infra-df.log", details["log_path"])
+}
+
+func TestHostServiceDockerRuntimeBridgeFailureMapping(t *testing.T) {
+	t.Parallel()
+
+	bridge := &stubHostInfraBridgeClient{
+		dockerRuntimeResult: contract.Result{
+			Status:   contract.StatusFailed,
+			IntentID: "intent-runtime-fail",
+			LogPath:  "/tmp/infra-runtime.log",
+			Error: &contract.Error{
+				Code:    "DOCKER-500",
+				Message: "docker info failed",
+			},
+		},
+	}
+	svc := &HostService{infraClient: bridge}
+
+	_, err := svc.DockerRuntime(context.Background())
+	require.Error(t, err)
+
+	typed, ok := errs.From(err)
+	require.True(t, ok)
+	require.Equal(t, errs.CodeHostDockerFailed, typed.Code)
+	require.Equal(t, "failed to inspect docker runtime", typed.Message)
+	details, ok := typed.Details.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, contract.TaskTypeDockerRuntimeCheck, details["task_type"])
+	require.Equal(t, "docker", details["target"])
+	require.Equal(t, "intent-runtime-fail", details["intent_id"])
+	require.Equal(t, "DOCKER-500", details["worker_error_code"])
+	require.Equal(t, "/tmp/infra-runtime.log", details["log_path"])
 }
 
 func TestHostServiceContainerActionsFailedResultMapping(t *testing.T) {

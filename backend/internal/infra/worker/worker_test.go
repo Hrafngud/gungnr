@@ -270,21 +270,73 @@ func TestProcessOnceHandlesDockerRuntimeCheck(t *testing.T) {
 	_, err = q.WriteIntent(context.Background(), intent)
 	require.NoError(t, err)
 
-	exec := &fakeExecutor{output: []byte("27.5.1\n")}
+	exec := &fakeExecutor{
+		outputs: [][]byte{
+			[]byte("27.5.1\n"),
+			[]byte(`{"DockerRootDir":"/var/lib/docker","SecurityOptions":["name=seccomp,profile=default","name=userns"],"Warnings":["cgroup v1 in use"]}` + "\n"),
+		},
+	}
 	r := New(q, 10*time.Millisecond, "", nil)
 	r.exec = exec
 
 	err = r.ProcessOnce(context.Background())
 	require.NoError(t, err)
 
-	require.Len(t, exec.calls, 1)
+	require.Len(t, exec.calls, 2)
 	require.Equal(t, "docker", exec.calls[0].name)
 	require.Equal(t, []string{"version", "--format", "{{.Server.Version}}"}, exec.calls[0].args)
+	require.Equal(t, "docker", exec.calls[1].name)
+	require.Equal(t, []string{"info", "--format", "{{json .}}"}, exec.calls[1].args)
 
 	result, err := q.ReadResult(context.Background(), intent.IntentID)
 	require.NoError(t, err)
 	require.Equal(t, contract.StatusSucceeded, result.Status)
 	require.Equal(t, []string{"27.5.1"}, decodeDataLines(t, result.Data))
+	require.Equal(t, "27.5.1", result.Data["server_version"])
+	require.Equal(t, "/var/lib/docker", result.Data["docker_root_dir"])
+	require.Equal(t, true, result.Data["userns_remap"])
+	require.Equal(t, false, result.Data["rootless"])
+}
+
+func TestProcessOnceHandlesDockerRuntimeCheckWithMergedWarningText(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	intent := contract.Intent{
+		Version:   contract.VersionV1,
+		IntentID:  "intent-runtime-check-warnings",
+		RequestID: "req-runtime-check-warnings",
+		TaskType:  contract.TaskTypeDockerRuntimeCheck,
+		Payload:   map[string]any{},
+		CreatedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	_, err = q.WriteIntent(context.Background(), intent)
+	require.NoError(t, err)
+
+	exec := &fakeExecutor{
+		outputs: [][]byte{
+			[]byte("27.5.1\n"),
+			[]byte("WARNING: No swap limit support\n" + `{"DockerRootDir":"/var/lib/docker","SecurityOptions":["name=seccomp,profile=default","name=rootless"],"Warnings":["cgroup v1 in use"]}` + "\n"),
+		},
+	}
+	r := New(q, 10*time.Millisecond, "", nil)
+	r.exec = exec
+
+	err = r.ProcessOnce(context.Background())
+	require.NoError(t, err)
+
+	result, err := q.ReadResult(context.Background(), intent.IntentID)
+	require.NoError(t, err)
+	require.Equal(t, contract.StatusSucceeded, result.Status)
+	require.Equal(t, true, result.Data["rootless"])
+
+	rawWarnings, marshalErr := json.Marshal(result.Data["warnings"])
+	require.NoError(t, marshalErr)
+	var warnings []string
+	require.NoError(t, json.Unmarshal(rawWarnings, &warnings))
+	require.Equal(t, []string{"WARNING: No swap limit support", "cgroup v1 in use"}, warnings)
 }
 
 func TestProcessOnceHandlesDockerRunQuickService(t *testing.T) {
