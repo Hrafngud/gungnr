@@ -36,6 +36,7 @@ type WorkbenchService struct {
 	sessionSecret     string
 	hostPortScanner   workbenchHostPortScanner
 	runtimeMetaClient infraDockerMetadataClient
+	fileClient        infraProjectFileMutationClient
 	lockManager       *workbenchProjectLockManager
 	lockWaitTimeout   time.Duration
 	backupMaxCount    int
@@ -60,6 +61,7 @@ func NewWorkbenchServiceWithStorage(
 		sessionSecret:     strings.TrimSpace(sessionSecret),
 		hostPortScanner:   workbenchScanOccupiedHostPortsWithProbeClient(nil),
 		runtimeMetaClient: nil,
+		fileClient:        nil,
 		lockManager:       newWorkbenchProjectLockManager(),
 		lockWaitTimeout:   defaultWorkbenchLockWaitTimeout,
 		backupMaxCount:    defaultWorkbenchBackupMaxCount,
@@ -74,6 +76,10 @@ func (s *WorkbenchService) SetPortProbeClient(probeClient infraPortProbeClient) 
 
 func (s *WorkbenchService) SetRuntimeMetaClient(runtimeMetaClient infraDockerMetadataClient) {
 	s.runtimeMetaClient = runtimeMetaClient
+}
+
+func (s *WorkbenchService) SetFileMutationClient(fileClient infraProjectFileMutationClient) {
+	s.fileClient = fileClient
 }
 
 func (s *WorkbenchService) AcquireProjectLock(ctx context.Context, projectName string) (func(), error) {

@@ -410,3 +410,119 @@ func TestDockerRunnerTaskPayloads(t *testing.T) {
 	require.True(t, runtimeIntentFound)
 	require.True(t, quickRunIntentFound)
 }
+
+func TestProjectFileTaskPayloads(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	c := New(q, 10*time.Millisecond, time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	ack := make(chan struct{}, 3)
+	go func() {
+		for {
+			ids, listErr := q.ListIntentIDs(ctx)
+			if listErr != nil || len(ids) == 0 {
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			for _, id := range ids {
+				resultPath := q.ResultPath(id)
+				if _, statErr := os.Stat(resultPath); statErr == nil {
+					continue
+				}
+				intent, readErr := q.ReadIntent(ctx, id)
+				if readErr != nil {
+					continue
+				}
+				_, _ = q.WriteResult(ctx, contract.Result{
+					Version:    contract.VersionV1,
+					IntentID:   intent.IntentID,
+					RequestID:  intent.RequestID,
+					TaskType:   intent.TaskType,
+					Status:     contract.StatusSucceeded,
+					CreatedAt:  intent.CreatedAt,
+					StartedAt:  time.Now().UTC().Add(-10 * time.Millisecond),
+					FinishedAt: time.Now().UTC(),
+				})
+				ack <- struct{}{}
+			}
+			if len(ack) >= 3 {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	_, err = c.ProjectFileWriteAtomic(ctx, "req-file-write", contract.ProjectFileWriteAtomicPayload{
+		BasePath:      "/templates/demo",
+		Path:          "/templates/demo/.env",
+		Content:       "A=1\n",
+		Mode:          0o600,
+		PreserveMode:  false,
+		CreateParents: true,
+	})
+	require.NoError(t, err)
+
+	_, err = c.ProjectFileCopy(ctx, "req-file-copy", contract.ProjectFileCopyPayload{
+		BasePath:        "/templates/demo",
+		SourcePath:      "/templates/demo/.env",
+		DestinationPath: "/templates/demo/.env.backup",
+		Mode:            0o600,
+		CreateParents:   true,
+	})
+	require.NoError(t, err)
+
+	_, err = c.ProjectFileRemove(ctx, "req-file-remove", contract.ProjectFileRemovePayload{
+		BasePath:       "/templates/demo",
+		Path:           "/templates/demo/.env.backup",
+		IgnoreNotExist: true,
+	})
+	require.NoError(t, err)
+
+	<-ack
+	<-ack
+	<-ack
+
+	ids, err := q.ListIntentIDs(context.Background())
+	require.NoError(t, err)
+	require.Len(t, ids, 3)
+
+	writeFound := false
+	copyFound := false
+	removeFound := false
+	for _, id := range ids {
+		intent, readErr := q.ReadIntent(context.Background(), id)
+		require.NoError(t, readErr)
+		switch intent.TaskType {
+		case contract.TaskTypeProjectFileWriteAtomic:
+			writeFound = true
+			require.Equal(t, "req-file-write", intent.RequestID)
+			require.Equal(t, "/templates/demo", intent.Payload["base_path"])
+			require.Equal(t, "/templates/demo/.env", intent.Payload["path"])
+			require.Equal(t, "A=1\n", intent.Payload["content"])
+			require.Equal(t, float64(0o600), intent.Payload["mode"])
+			require.Equal(t, true, intent.Payload["create_parents"])
+		case contract.TaskTypeProjectFileCopy:
+			copyFound = true
+			require.Equal(t, "req-file-copy", intent.RequestID)
+			require.Equal(t, "/templates/demo", intent.Payload["base_path"])
+			require.Equal(t, "/templates/demo/.env", intent.Payload["source_path"])
+			require.Equal(t, "/templates/demo/.env.backup", intent.Payload["destination_path"])
+			require.Equal(t, float64(0o600), intent.Payload["mode"])
+			require.Equal(t, true, intent.Payload["create_parents"])
+		case contract.TaskTypeProjectFileRemove:
+			removeFound = true
+			require.Equal(t, "req-file-remove", intent.RequestID)
+			require.Equal(t, "/templates/demo", intent.Payload["base_path"])
+			require.Equal(t, "/templates/demo/.env.backup", intent.Payload["path"])
+			require.Equal(t, true, intent.Payload["ignore_not_exist"])
+		}
+	}
+	require.True(t, writeFound)
+	require.True(t, copyFound)
+	require.True(t, removeFound)
+}

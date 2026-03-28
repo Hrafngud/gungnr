@@ -21,7 +21,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    user: root
     environment:
       APP_ENV: ${APP_ENV:-local}
       PORT: 8080

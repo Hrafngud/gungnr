@@ -37,6 +37,12 @@ type infraDockerMetadataClient interface {
 	DockerListContainers(ctx context.Context, requestID string, includeAll bool) (contract.Result, error)
 }
 
+type infraProjectFileMutationClient interface {
+	ProjectFileWriteAtomic(ctx context.Context, requestID string, payload contract.ProjectFileWriteAtomicPayload) (contract.Result, error)
+	ProjectFileCopy(ctx context.Context, requestID string, payload contract.ProjectFileCopyPayload) (contract.Result, error)
+	ProjectFileRemove(ctx context.Context, requestID string, payload contract.ProjectFileRemovePayload) (contract.Result, error)
+}
+
 func resolveProjectPath(
 	ctx context.Context,
 	repo repository.ProjectRepository,

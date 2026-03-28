@@ -160,7 +160,10 @@ func (r *Runner) supportsTask(taskType contract.TaskType) bool {
 		contract.TaskTypeHostListenTCPPorts,
 		contract.TaskTypeDockerPublishedPorts,
 		contract.TaskTypeComposeUpStack,
-		contract.TaskTypeHostRuntimeStats:
+		contract.TaskTypeHostRuntimeStats,
+		contract.TaskTypeProjectFileWriteAtomic,
+		contract.TaskTypeProjectFileCopy,
+		contract.TaskTypeProjectFileRemove:
 		return true
 	default:
 		return false
@@ -183,6 +186,9 @@ func (r *Runner) SupportedTasks() []contract.TaskType {
 		contract.TaskTypeDockerPublishedPorts,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
+		contract.TaskTypeProjectFileWriteAtomic,
+		contract.TaskTypeProjectFileCopy,
+		contract.TaskTypeProjectFileRemove,
 	}
 }
 
@@ -251,6 +257,12 @@ func (r *Runner) handleIntent(ctx context.Context, intent contract.Intent) error
 		outcome = r.handleComposeUpStack(ctx, intent)
 	case contract.TaskTypeHostRuntimeStats:
 		outcome = r.handleHostRuntimeStats(ctx, intent)
+	case contract.TaskTypeProjectFileWriteAtomic:
+		outcome = r.handleProjectFileWriteAtomic(ctx, intent)
+	case contract.TaskTypeProjectFileCopy:
+		outcome = r.handleProjectFileCopy(ctx, intent)
+	case contract.TaskTypeProjectFileRemove:
+		outcome = r.handleProjectFileRemove(ctx, intent)
 	default:
 		outcome.err = fmt.Errorf("unsupported task type: %s", intent.TaskType)
 	}
@@ -506,6 +518,161 @@ func (r *Runner) handleDockerRunQuickService(ctx context.Context, intent contrac
 	}
 }
 
+func (r *Runner) handleProjectFileWriteAtomic(_ context.Context, intent contract.Intent) taskOutcome {
+	var payload contract.ProjectFileWriteAtomicPayload
+	if err := decodePayload(intent.Payload, &payload); err != nil {
+		return taskOutcome{err: err}
+	}
+
+	basePath, err := r.resolveProjectMutationBase(payload.BasePath)
+	if err != nil {
+		return taskOutcome{err: err}
+	}
+	targetPath, err := resolveProjectMutationPath(basePath, payload.Path)
+	if err != nil {
+		return taskOutcome{err: err}
+	}
+
+	mode := os.FileMode(payload.Mode & 0o777)
+	if mode == 0 {
+		mode = 0o600
+	}
+	if info, statErr := os.Lstat(targetPath); statErr == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return taskOutcome{err: fmt.Errorf("refusing to write through symlinked file")}
+		}
+		if info.IsDir() {
+			return taskOutcome{err: fmt.Errorf("target path points to a directory")}
+		}
+		if payload.PreserveMode || payload.Mode == 0 {
+			mode = info.Mode().Perm()
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return taskOutcome{err: fmt.Errorf("stat target path: %w", statErr)}
+	}
+
+	info, err := writeFileAtomically(targetPath, []byte(payload.Content), mode, payload.CreateParents)
+	if err != nil {
+		return taskOutcome{err: err}
+	}
+	return taskOutcome{
+		data: map[string]any{
+			"path":       targetPath,
+			"size_bytes": info.Size(),
+			"updated_at": info.ModTime().UTC().Format(time.RFC3339Nano),
+		},
+	}
+}
+
+func (r *Runner) handleProjectFileCopy(_ context.Context, intent contract.Intent) taskOutcome {
+	var payload contract.ProjectFileCopyPayload
+	if err := decodePayload(intent.Payload, &payload); err != nil {
+		return taskOutcome{err: err}
+	}
+
+	basePath, err := r.resolveProjectMutationBase(payload.BasePath)
+	if err != nil {
+		return taskOutcome{err: err}
+	}
+	sourcePath, err := resolveProjectMutationPath(basePath, payload.SourcePath)
+	if err != nil {
+		return taskOutcome{err: err}
+	}
+	targetPath, err := resolveProjectMutationPath(basePath, payload.DestinationPath)
+	if err != nil {
+		return taskOutcome{err: err}
+	}
+
+	sourceInfo, err := os.Lstat(sourcePath)
+	if err != nil {
+		return taskOutcome{err: fmt.Errorf("stat source path: %w", err)}
+	}
+	if sourceInfo.Mode()&os.ModeSymlink != 0 {
+		return taskOutcome{err: fmt.Errorf("refusing to copy symlinked source file")}
+	}
+	if sourceInfo.IsDir() {
+		return taskOutcome{err: fmt.Errorf("source path points to a directory")}
+	}
+
+	if targetInfo, statErr := os.Lstat(targetPath); statErr == nil {
+		if targetInfo.Mode()&os.ModeSymlink != 0 {
+			return taskOutcome{err: fmt.Errorf("refusing to write through symlinked destination file")}
+		}
+		if targetInfo.IsDir() {
+			return taskOutcome{err: fmt.Errorf("destination path points to a directory")}
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return taskOutcome{err: fmt.Errorf("stat destination path: %w", statErr)}
+	}
+
+	raw, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return taskOutcome{err: fmt.Errorf("read source file: %w", err)}
+	}
+
+	mode := sourceInfo.Mode().Perm()
+	if payload.Mode > 0 {
+		mode = os.FileMode(payload.Mode & 0o777)
+		if mode == 0 {
+			mode = sourceInfo.Mode().Perm()
+		}
+	}
+
+	info, err := writeFileAtomically(targetPath, raw, mode, payload.CreateParents)
+	if err != nil {
+		return taskOutcome{err: err}
+	}
+	return taskOutcome{
+		data: map[string]any{
+			"path":       targetPath,
+			"size_bytes": info.Size(),
+			"updated_at": info.ModTime().UTC().Format(time.RFC3339Nano),
+		},
+	}
+}
+
+func (r *Runner) handleProjectFileRemove(_ context.Context, intent contract.Intent) taskOutcome {
+	var payload contract.ProjectFileRemovePayload
+	if err := decodePayload(intent.Payload, &payload); err != nil {
+		return taskOutcome{err: err}
+	}
+
+	basePath, err := r.resolveProjectMutationBase(payload.BasePath)
+	if err != nil {
+		return taskOutcome{err: err}
+	}
+	targetPath, err := resolveProjectMutationPath(basePath, payload.Path)
+	if err != nil {
+		return taskOutcome{err: err}
+	}
+
+	if targetInfo, statErr := os.Lstat(targetPath); statErr == nil {
+		if targetInfo.Mode()&os.ModeSymlink != 0 {
+			return taskOutcome{err: fmt.Errorf("refusing to remove symlinked path")}
+		}
+	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return taskOutcome{err: fmt.Errorf("stat target path: %w", statErr)}
+	}
+
+	if err := os.Remove(targetPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) && payload.IgnoreNotExist {
+			return taskOutcome{
+				data: map[string]any{
+					"path":    targetPath,
+					"removed": false,
+				},
+			}
+		}
+		return taskOutcome{err: fmt.Errorf("remove target path: %w", err)}
+	}
+	return taskOutcome{
+		data: map[string]any{
+			"path":    targetPath,
+			"removed": true,
+		},
+	}
+}
+
 func (r *Runner) handleHostListenTCPPorts(ctx context.Context, _ contract.Intent) taskOutcome {
 	args := []string{"-ltnH"}
 	output, err := r.exec.Run(ctx, "", "ss", args...)
@@ -607,6 +774,143 @@ func (r *Runner) resolveProjectDir(project, projectDir string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("project directory missing: %s", project)
+}
+
+func (r *Runner) resolveProjectMutationBase(rawBasePath string) (string, error) {
+	basePath := strings.TrimSpace(rawBasePath)
+	if basePath == "" {
+		return "", fmt.Errorf("base_path is required")
+	}
+	if !filepath.IsAbs(basePath) {
+		templatesRoot := strings.TrimSpace(r.templatesDir)
+		if templatesRoot == "" {
+			return "", fmt.Errorf("templates directory is not configured")
+		}
+		basePath = filepath.Join(templatesRoot, basePath)
+	}
+	basePath = filepath.Clean(basePath)
+
+	if resolved, err := filepath.EvalSymlinks(basePath); err == nil {
+		basePath = filepath.Clean(resolved)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("resolve base path: %w", err)
+	}
+
+	info, err := os.Stat(basePath)
+	if err != nil {
+		return "", fmt.Errorf("base path missing: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("base path is not a directory")
+	}
+	return basePath, nil
+}
+
+func resolveProjectMutationPath(basePath, rawPath string) (string, error) {
+	path := strings.TrimSpace(rawPath)
+	if path == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(basePath, path)
+	}
+	path = filepath.Clean(path)
+	if !pathWithinBase(basePath, path) {
+		return "", fmt.Errorf("path resolves outside base path")
+	}
+
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = filepath.Clean(resolved)
+		if !pathWithinBase(basePath, path) {
+			return "", fmt.Errorf("path resolves outside base path")
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("resolve path: %w", err)
+	} else {
+		parent := filepath.Dir(path)
+		if resolvedParent, parentErr := filepath.EvalSymlinks(parent); parentErr == nil {
+			candidate := filepath.Clean(filepath.Join(resolvedParent, filepath.Base(path)))
+			if !pathWithinBase(basePath, candidate) {
+				return "", fmt.Errorf("path resolves outside base path")
+			}
+			path = candidate
+		} else if !errors.Is(parentErr, os.ErrNotExist) {
+			return "", fmt.Errorf("resolve parent path: %w", parentErr)
+		}
+	}
+	return path, nil
+}
+
+func pathWithinBase(basePath, targetPath string) bool {
+	base := filepath.Clean(strings.TrimSpace(basePath))
+	target := filepath.Clean(strings.TrimSpace(targetPath))
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (!strings.HasPrefix(rel, "..") && rel != "")
+}
+
+func writeFileAtomically(targetPath string, content []byte, mode os.FileMode, createParents bool) (os.FileInfo, error) {
+	if strings.TrimSpace(targetPath) == "" {
+		return nil, fmt.Errorf("target path is empty")
+	}
+	if mode == 0 {
+		mode = 0o600
+	}
+
+	dir := filepath.Dir(targetPath)
+	if createParents {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("create parent directory: %w", err)
+		}
+	} else {
+		dirInfo, err := os.Stat(dir)
+		if err != nil {
+			return nil, fmt.Errorf("stat parent directory: %w", err)
+		}
+		if !dirInfo.IsDir() {
+			return nil, fmt.Errorf("parent path is not a directory")
+		}
+	}
+
+	tempFile, err := os.CreateTemp(dir, ".infra-file-*")
+	if err != nil {
+		return nil, fmt.Errorf("create temp file: %w", err)
+	}
+	tempPath := tempFile.Name()
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	if err := tempFile.Chmod(mode); err != nil {
+		_ = tempFile.Close()
+		return nil, fmt.Errorf("chmod temp file: %w", err)
+	}
+	if _, err := tempFile.Write(content); err != nil {
+		_ = tempFile.Close()
+		return nil, fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tempFile.Sync(); err != nil {
+		_ = tempFile.Close()
+		return nil, fmt.Errorf("sync temp file: %w", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return nil, fmt.Errorf("close temp file: %w", err)
+	}
+	if err := os.Rename(tempPath, targetPath); err != nil {
+		return nil, fmt.Errorf("replace target file: %w", err)
+	}
+	cleanupTemp = false
+
+	info, err := os.Stat(targetPath)
+	if err != nil {
+		return nil, fmt.Errorf("stat target file: %w", err)
+	}
+	return info, nil
 }
 
 func decodePayload(payload map[string]any, out any) error {

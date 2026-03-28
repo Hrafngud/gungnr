@@ -202,7 +202,7 @@ func (s *WorkbenchService) GetOptionalServiceCatalog(
 			MutationPath:         legacyPath,
 			Records:              legacyRecords,
 			Notes: []string{
-				"Legacy /workbench/modules mutations remain available during the transition.",
+				"Legacy /workbench/modules is compatibility-only; canonical optional-service mutations run through /workbench/services.",
 				"Legacy module records are surfaced separately so callers do not mistake them for catalog-managed optional services.",
 			},
 		},
@@ -219,6 +219,7 @@ func (s *WorkbenchService) GetOptionalServiceCatalog(
 			"Catalog add/remove mutations are available against the stored snapshot.",
 			"Compose preview/apply now renders catalog-managed services from frozen backend catalog definitions.",
 			"Port resolution now includes baseline container-port planning for catalog-managed services.",
+			"Legacy /workbench/modules is compatibility-only and maps to catalog-managed mutations for supported legacy module types.",
 		}
 		currentState := workbenchOptionalServiceCurrentStateUnmanaged
 		legacyModuleType := ""
@@ -333,6 +334,16 @@ func workbenchOptionalServiceDefinitionByServiceName(serviceName string) (workbe
 	normalizedServiceName := strings.ToLower(strings.TrimSpace(serviceName))
 	for _, definition := range workbenchOptionalServiceDefinitions {
 		if strings.ToLower(strings.TrimSpace(definition.defaultServiceName)) == normalizedServiceName {
+			return definition, true
+		}
+	}
+	return workbenchOptionalServiceDefinition{}, false
+}
+
+func workbenchOptionalServiceDefinitionByLegacyModuleType(moduleType string) (workbenchOptionalServiceDefinition, bool) {
+	normalizedModuleType := strings.ToLower(strings.TrimSpace(moduleType))
+	for _, definition := range workbenchOptionalServiceDefinitions {
+		if strings.ToLower(strings.TrimSpace(definition.legacyModuleType)) == normalizedModuleType {
 			return definition, true
 		}
 	}

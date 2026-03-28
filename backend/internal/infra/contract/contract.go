@@ -29,6 +29,9 @@ const (
 	TaskTypeDockerPublishedPorts   TaskType = "docker_published_ports"
 	TaskTypeHostRuntimeStats       TaskType = "host_runtime_stats"
 	TaskTypeDockerRunQuickService  TaskType = "docker_run_quick_service"
+	TaskTypeProjectFileWriteAtomic TaskType = "project_file_write_atomic"
+	TaskTypeProjectFileCopy        TaskType = "project_file_copy"
+	TaskTypeProjectFileRemove      TaskType = "project_file_remove"
 	TaskTypeHostPortScan           TaskType = "host_port_scan"
 	TaskTypeAPIHealthProbe         TaskType = "api_health_probe"
 )
@@ -142,6 +145,29 @@ type DockerRunQuickServicePayload struct {
 	HostPort      int    `json:"host_port"`
 	ContainerPort int    `json:"container_port"`
 	ContainerName string `json:"container_name,omitempty"`
+}
+
+type ProjectFileWriteAtomicPayload struct {
+	BasePath      string `json:"base_path"`
+	Path          string `json:"path"`
+	Content       string `json:"content"`
+	Mode          uint32 `json:"mode,omitempty"`
+	PreserveMode  bool   `json:"preserve_mode,omitempty"`
+	CreateParents bool   `json:"create_parents,omitempty"`
+}
+
+type ProjectFileCopyPayload struct {
+	BasePath        string `json:"base_path"`
+	SourcePath      string `json:"source_path"`
+	DestinationPath string `json:"destination_path"`
+	Mode            uint32 `json:"mode,omitempty"`
+	CreateParents   bool   `json:"create_parents,omitempty"`
+}
+
+type ProjectFileRemovePayload struct {
+	BasePath       string `json:"base_path"`
+	Path           string `json:"path"`
+	IgnoreNotExist bool   `json:"ignore_not_exist,omitempty"`
 }
 
 type HostPortScanPayload struct {

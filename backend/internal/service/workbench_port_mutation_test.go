@@ -281,9 +281,6 @@ func TestWorkbenchSuggestStoredSnapshotHostPortsDeterministic(t *testing.T) {
 				Protocol:      "tcp",
 			},
 		},
-		Modules: []WorkbenchStackModule{
-			{ModuleType: "redis", ServiceName: "cache"},
-		},
 	}
 	if err := svc.saveWorkbenchSnapshot(context.Background(), "demo", initial); err != nil {
 		t.Fatalf("save snapshot: %v", err)

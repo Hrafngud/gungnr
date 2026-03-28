@@ -508,6 +508,142 @@ func TestProcessOnceSkipsUnsupportedTask(t *testing.T) {
 	require.NoFileExists(t, q.ClaimPath(intent.IntentID))
 }
 
+func TestProcessOnceHandlesProjectFileWriteAtomic(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	baseDir := t.TempDir()
+	targetPath := filepath.Join(baseDir, ".env")
+	intent := contract.Intent{
+		Version:   contract.VersionV1,
+		IntentID:  "intent-project-file-write",
+		RequestID: "req-project-file-write",
+		TaskType:  contract.TaskTypeProjectFileWriteAtomic,
+		Payload: map[string]any{
+			"base_path":      baseDir,
+			"path":           targetPath,
+			"content":        "APP_ENV=prod\n",
+			"mode":           0o600,
+			"create_parents": true,
+		},
+		CreatedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	_, err = q.WriteIntent(context.Background(), intent)
+	require.NoError(t, err)
+
+	r := New(q, 10*time.Millisecond, "", nil)
+	err = r.ProcessOnce(context.Background())
+	require.NoError(t, err)
+
+	result, err := q.ReadResult(context.Background(), intent.IntentID)
+	require.NoError(t, err)
+	require.Equal(t, contract.StatusSucceeded, result.Status)
+	require.Equal(t, targetPath, result.Data["path"])
+
+	raw, err := os.ReadFile(targetPath)
+	require.NoError(t, err)
+	require.Equal(t, "APP_ENV=prod\n", string(raw))
+}
+
+func TestProcessOnceRejectsProjectFileWriteOutsideBase(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	baseDir := t.TempDir()
+	intent := contract.Intent{
+		Version:   contract.VersionV1,
+		IntentID:  "intent-project-file-write-outside",
+		RequestID: "req-project-file-write-outside",
+		TaskType:  contract.TaskTypeProjectFileWriteAtomic,
+		Payload: map[string]any{
+			"base_path": baseDir,
+			"path":      filepath.Join(baseDir, "..", "outside.env"),
+			"content":   "X=1\n",
+			"mode":      0o600,
+		},
+		CreatedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	_, err = q.WriteIntent(context.Background(), intent)
+	require.NoError(t, err)
+
+	r := New(q, 10*time.Millisecond, "", nil)
+	err = r.ProcessOnce(context.Background())
+	require.NoError(t, err)
+
+	result, err := q.ReadResult(context.Background(), intent.IntentID)
+	require.NoError(t, err)
+	require.Equal(t, contract.StatusFailed, result.Status)
+	require.NotNil(t, result.Error)
+	require.Contains(t, result.Error.Message, "outside base path")
+}
+
+func TestProcessOnceHandlesProjectFileCopyAndRemove(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	baseDir := t.TempDir()
+	sourcePath := filepath.Join(baseDir, ".env")
+	copyPath := filepath.Join(baseDir, ".env.backup")
+	require.NoError(t, os.WriteFile(sourcePath, []byte("TOKEN=abc\n"), 0o600))
+
+	copyIntent := contract.Intent{
+		Version:   contract.VersionV1,
+		IntentID:  "intent-project-file-copy",
+		RequestID: "req-project-file-copy",
+		TaskType:  contract.TaskTypeProjectFileCopy,
+		Payload: map[string]any{
+			"base_path":        baseDir,
+			"source_path":      sourcePath,
+			"destination_path": copyPath,
+			"mode":             0o600,
+		},
+		CreatedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	_, err = q.WriteIntent(context.Background(), copyIntent)
+	require.NoError(t, err)
+
+	r := New(q, 10*time.Millisecond, "", nil)
+	err = r.ProcessOnce(context.Background())
+	require.NoError(t, err)
+
+	copyResult, err := q.ReadResult(context.Background(), copyIntent.IntentID)
+	require.NoError(t, err)
+	require.Equal(t, contract.StatusSucceeded, copyResult.Status)
+	raw, err := os.ReadFile(copyPath)
+	require.NoError(t, err)
+	require.Equal(t, "TOKEN=abc\n", string(raw))
+
+	removeIntent := contract.Intent{
+		Version:   contract.VersionV1,
+		IntentID:  "intent-project-file-remove",
+		RequestID: "req-project-file-remove",
+		TaskType:  contract.TaskTypeProjectFileRemove,
+		Payload: map[string]any{
+			"base_path":        baseDir,
+			"path":             copyPath,
+			"ignore_not_exist": true,
+		},
+		CreatedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	_, err = q.WriteIntent(context.Background(), removeIntent)
+	require.NoError(t, err)
+
+	err = r.ProcessOnce(context.Background())
+	require.NoError(t, err)
+
+	removeResult, err := q.ReadResult(context.Background(), removeIntent.IntentID)
+	require.NoError(t, err)
+	require.Equal(t, contract.StatusSucceeded, removeResult.Status)
+	_, err = os.Stat(copyPath)
+	require.True(t, errors.Is(err, os.ErrNotExist))
+}
+
 func TestValidateTaskCoverageIncludesRestartTunnel(t *testing.T) {
 	t.Parallel()
 
@@ -527,6 +663,9 @@ func TestValidateTaskCoverageIncludesRestartTunnel(t *testing.T) {
 		contract.TaskTypeDockerPublishedPorts,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
+		contract.TaskTypeProjectFileWriteAtomic,
+		contract.TaskTypeProjectFileCopy,
+		contract.TaskTypeProjectFileRemove,
 	})
 	require.NoError(t, err)
 }

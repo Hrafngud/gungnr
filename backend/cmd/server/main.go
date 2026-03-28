@@ -97,6 +97,9 @@ func main() {
 		contract.TaskTypeDockerPublishedPorts,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
+		contract.TaskTypeProjectFileWriteAtomic,
+		contract.TaskTypeProjectFileCopy,
+		contract.TaskTypeProjectFileRemove,
 	}); err != nil {
 		log.Fatalf("infra worker readiness check failed: %v", err)
 	}
@@ -107,10 +110,12 @@ func main() {
 	workbenchService := service.NewWorkbenchServiceWithStorage(cfg.TemplatesDir, projectRepo, settingsRepo, cfg.SessionSecret)
 	workbenchService.SetPortProbeClient(bridgeClient)
 	workbenchService.SetRuntimeMetaClient(bridgeClient)
+	workbenchService.SetFileMutationClient(bridgeClient)
 	projectArchiveService := service.NewProjectArchiveService(cfg, projectRepo, settingsService, jobService, hostService)
 	projectRuntimeService := service.NewProjectRuntimeService(cfg.TemplatesDir, projectRepo, hostService)
 	projectEnvService := service.NewProjectEnvService(cfg.TemplatesDir, projectRepo)
 	projectEnvService.SetRuntimeMetaClient(bridgeClient)
+	projectEnvService.SetFileMutationClient(bridgeClient)
 	healthService := service.NewHealthService(hostService, settingsService)
 
 	workflows := service.NewProjectWorkflows(cfg, projectRepo, settingsService, hostService, auditService, workbenchService, dockerRunner, bridgeClient)

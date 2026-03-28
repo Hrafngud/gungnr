@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"go-notes/internal/errs"
+	"go-notes/internal/infra/contract"
 )
 
 const (
@@ -173,7 +174,7 @@ func (s *WorkbenchService) RestoreComposeFromBackup(
 		)
 	}
 
-	if err := replaceWorkbenchComposeAtomically(currentSource.ComposePath, raw); err != nil {
+	if err := s.replaceWorkbenchComposeAtomically(ctx, currentSource.ProjectDir, currentSource.ComposePath, raw); err != nil {
 		return WorkbenchComposeRestoreResult{}, workbenchComposeRestoreError(snapshot, currentSource, target, "failed to restore workbench compose backup", err)
 	}
 
@@ -228,10 +229,7 @@ func (s *WorkbenchService) createComposeBackup(
 		return WorkbenchComposeBackupMetadata{}, WorkbenchComposeBackupRetentionInfo{}, workbenchComposeBackupWriteError(snapshot, source, backupID, "failed to resolve workbench compose backup artifact path", err, nil)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o755); err != nil {
-		return WorkbenchComposeBackupMetadata{}, WorkbenchComposeBackupRetentionInfo{}, workbenchComposeBackupWriteError(snapshot, source, backupID, "failed to create workbench compose backup directory", err, nil)
-	}
-	if err := writeWorkbenchFileAtomically(artifactPath, source.Raw, 0o600); err != nil {
+	if err := s.writeWorkbenchFileAtomically(ctx, source.ProjectDir, artifactPath, source.Raw, 0o600, true); err != nil {
 		return WorkbenchComposeBackupMetadata{}, WorkbenchComposeBackupRetentionInfo{}, workbenchComposeBackupWriteError(snapshot, source, backupID, "failed to write workbench compose backup artifact", err, nil)
 	}
 
@@ -246,12 +244,12 @@ func (s *WorkbenchService) createComposeBackup(
 	})
 
 	retained, pruned := pruneWorkbenchComposeBackups(append(backups, created), now, s.backupMaxCount, s.backupMaxAge)
-	if err := writeWorkbenchComposeBackupIndex(source.ProjectDir, retained); err != nil {
-		cleanupErr := os.Remove(artifactPath)
+	if err := s.writeWorkbenchComposeBackupIndex(ctx, source.ProjectDir, retained); err != nil {
+		cleanupErr := s.removeWorkbenchPath(ctx, source.ProjectDir, artifactPath, true)
 		return WorkbenchComposeBackupMetadata{}, WorkbenchComposeBackupRetentionInfo{}, workbenchComposeBackupWriteError(snapshot, source, backupID, "failed to persist workbench compose backup history", err, cleanupErr)
 	}
 
-	if err := removeWorkbenchComposeBackupArtifacts(source.ProjectDir, pruned); err != nil {
+	if err := s.removeWorkbenchComposeBackupArtifacts(ctx, source.ProjectDir, pruned); err != nil {
 		return WorkbenchComposeBackupMetadata{}, WorkbenchComposeBackupRetentionInfo{}, workbenchComposeBackupRetentionError(snapshot, source, backupID, "failed to prune retained workbench compose backup artifacts", err, len(pruned))
 	}
 
@@ -283,12 +281,13 @@ func loadWorkbenchComposeBackupIndex(projectDir string) ([]workbenchStoredCompos
 	return normalizeWorkbenchComposeBackupIndex(index).Backups, nil
 }
 
-func writeWorkbenchComposeBackupIndex(projectDir string, backups []workbenchStoredComposeBackup) error {
+func (s *WorkbenchService) writeWorkbenchComposeBackupIndex(
+	ctx context.Context,
+	projectDir string,
+	backups []workbenchStoredComposeBackup,
+) error {
 	indexPath, err := resolveWorkbenchComposeBackupIndexPath(projectDir)
 	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
 		return err
 	}
 
@@ -300,7 +299,7 @@ func writeWorkbenchComposeBackupIndex(projectDir string, backups []workbenchStor
 	if err != nil {
 		return err
 	}
-	return writeWorkbenchFileAtomically(indexPath, encoded, 0o600)
+	return s.writeWorkbenchFileAtomically(ctx, projectDir, indexPath, encoded, 0o600, true)
 }
 
 func normalizeWorkbenchComposeBackupIndex(index workbenchComposeBackupIndex) workbenchComposeBackupIndex {
@@ -387,13 +386,17 @@ func pruneWorkbenchComposeBackups(
 	return kept, pruned
 }
 
-func removeWorkbenchComposeBackupArtifacts(projectDir string, backups []workbenchStoredComposeBackup) error {
+func (s *WorkbenchService) removeWorkbenchComposeBackupArtifacts(
+	ctx context.Context,
+	projectDir string,
+	backups []workbenchStoredComposeBackup,
+) error {
 	for _, backup := range backups {
 		artifactPath, err := resolveWorkbenchComposeBackupArtifactPath(projectDir, backup.ArtifactPath)
 		if err != nil {
 			return err
 		}
-		if err := os.Remove(artifactPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := s.removeWorkbenchPath(ctx, projectDir, artifactPath, true); err != nil {
 			return err
 		}
 	}
@@ -427,13 +430,66 @@ func resolveWorkbenchComposeBackupArtifactPath(projectDir, relativePath string) 
 	return candidate, nil
 }
 
-func writeWorkbenchFileAtomically(path string, content []byte, mode os.FileMode) error {
+func (s *WorkbenchService) writeWorkbenchFileAtomically(
+	ctx context.Context,
+	projectDir string,
+	path string,
+	content []byte,
+	mode os.FileMode,
+	createParents bool,
+) error {
+	if s != nil && s.fileClient != nil {
+		_, err := s.fileClient.ProjectFileWriteAtomic(ctx, "", contract.ProjectFileWriteAtomicPayload{
+			BasePath:      strings.TrimSpace(projectDir),
+			Path:          strings.TrimSpace(path),
+			Content:       string(content),
+			Mode:          uint32(mode.Perm()),
+			PreserveMode:  false,
+			CreateParents: createParents,
+		})
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	return writeWorkbenchFileAtomicallyLocal(path, content, mode, createParents)
+}
+
+func (s *WorkbenchService) removeWorkbenchPath(
+	ctx context.Context,
+	projectDir string,
+	path string,
+	ignoreNotExist bool,
+) error {
+	if s != nil && s.fileClient != nil {
+		_, err := s.fileClient.ProjectFileRemove(ctx, "", contract.ProjectFileRemovePayload{
+			BasePath:       strings.TrimSpace(projectDir),
+			Path:           strings.TrimSpace(path),
+			IgnoreNotExist: ignoreNotExist,
+		})
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		if ignoreNotExist && errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func writeWorkbenchFileAtomicallyLocal(path string, content []byte, mode os.FileMode, createParents bool) error {
 	trimmedPath := strings.TrimSpace(path)
 	if trimmedPath == "" {
 		return fmt.Errorf("path is empty")
 	}
 
 	dir := filepath.Dir(trimmedPath)
+	if createParents {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
 	tempFile, err := os.CreateTemp(dir, ".workbench-*")
 	if err != nil {
 		return err

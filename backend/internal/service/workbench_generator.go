@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"go-notes/internal/errs"
+	"go-notes/internal/infra/contract"
 	"gopkg.in/yaml.v3"
 )
 
@@ -238,7 +239,7 @@ func (s *WorkbenchService) ApplyComposeFromStoredSnapshot(
 	}
 
 	normalizedCompose, appliedFingerprint := WorkbenchSourceFingerprint([]byte(compose))
-	if err := replaceWorkbenchComposeAtomically(currentSource.ComposePath, []byte(normalizedCompose)); err != nil {
+	if err := s.replaceWorkbenchComposeAtomically(ctx, currentSource.ProjectDir, currentSource.ComposePath, []byte(normalizedCompose)); err != nil {
 		return WorkbenchComposeApplyResult{}, workbenchComposeApplySourceInvalidError(
 			snapshot,
 			currentSource,
@@ -253,7 +254,7 @@ func (s *WorkbenchService) ApplyComposeFromStoredSnapshot(
 	updatedSnapshot.ComposePath = currentSource.ComposePath
 	updatedSnapshot.SourceFingerprint = appliedFingerprint
 	if err := s.saveWorkbenchSnapshot(ctx, normalizedProject, updatedSnapshot); err != nil {
-		restoreErr := replaceWorkbenchComposeAtomically(currentSource.ComposePath, currentSource.Raw)
+		restoreErr := s.replaceWorkbenchComposeAtomically(ctx, currentSource.ProjectDir, currentSource.ComposePath, currentSource.Raw)
 		return WorkbenchComposeApplyResult{}, workbenchComposeApplyStorageError(
 			updatedSnapshot,
 			currentSource,
@@ -1104,7 +1105,24 @@ func workbenchApplyDriftCheck(
 	)
 }
 
-func replaceWorkbenchComposeAtomically(composePath string, content []byte) error {
+func (s *WorkbenchService) replaceWorkbenchComposeAtomically(ctx context.Context, projectDir, composePath string, content []byte) error {
+	if s != nil && s.fileClient != nil {
+		_, err := s.fileClient.ProjectFileWriteAtomic(ctx, "", contract.ProjectFileWriteAtomicPayload{
+			BasePath:      strings.TrimSpace(projectDir),
+			Path:          strings.TrimSpace(composePath),
+			Content:       string(content),
+			PreserveMode:  true,
+			CreateParents: false,
+		})
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	return replaceWorkbenchComposeAtomicallyLocal(composePath, content)
+}
+
+func replaceWorkbenchComposeAtomicallyLocal(composePath string, content []byte) error {
 	trimmedPath := strings.TrimSpace(composePath)
 	if trimmedPath == "" {
 		return fmt.Errorf("compose path is empty")

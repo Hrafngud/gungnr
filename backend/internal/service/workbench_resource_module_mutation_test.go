@@ -239,6 +239,184 @@ func TestWorkbenchMutateStoredSnapshotModuleUnsupportedTargetValidation(t *testi
 	}
 }
 
+func TestWorkbenchMutateLegacyModuleCompatibilityAddsManagedService(t *testing.T) {
+	t.Parallel()
+
+	svc := NewWorkbenchServiceWithStorage(t.TempDir(), nil, &fakeSettingsRepo{}, "test-session-secret")
+	initial := WorkbenchStackSnapshot{
+		ProjectName: "demo",
+		Revision:    3,
+		Services: []WorkbenchComposeService{
+			{ServiceName: "api", Image: "nginx:stable"},
+		},
+	}
+	if err := svc.saveWorkbenchSnapshot(context.Background(), "demo", initial); err != nil {
+		t.Fatalf("save snapshot: %v", err)
+	}
+
+	snapshot, summary, err := svc.MutateLegacyModuleCompatibility(context.Background(), "demo", WorkbenchModuleMutationRequest{
+		Selector: WorkbenchModuleSelector{
+			ServiceName: "redis",
+			ModuleType:  "redis",
+		},
+		Action: workbenchModuleMutationActionAdd,
+	})
+	if err != nil {
+		t.Fatalf("MutateLegacyModuleCompatibility add: %v", err)
+	}
+	if !summary.Changed {
+		t.Fatal("expected changed=true when adding redis through legacy compatibility path")
+	}
+	if summary.PreviousCount != 0 || summary.CurrentCount != 1 {
+		t.Fatalf("unexpected count summary: %#v", summary)
+	}
+	if snapshot.Revision != 4 {
+		t.Fatalf("expected revision=4 after compatibility add, got %d", snapshot.Revision)
+	}
+	if got, want := len(snapshot.ManagedServices), 1; got != want {
+		t.Fatalf("expected %d managed service after compatibility add, got %d", want, got)
+	}
+	if snapshot.ManagedServices[0] != (WorkbenchManagedService{EntryKey: "redis", ServiceName: "redis"}) {
+		t.Fatalf("unexpected managed service record: %#v", snapshot.ManagedServices[0])
+	}
+	if got := len(snapshot.Modules); got != 0 {
+		t.Fatalf("expected legacy modules to stay unchanged, got %d entries", got)
+	}
+}
+
+func TestWorkbenchMutateLegacyModuleCompatibilityAcceptsLegacySelectorAlias(t *testing.T) {
+	t.Parallel()
+
+	svc := NewWorkbenchServiceWithStorage(t.TempDir(), nil, &fakeSettingsRepo{}, "test-session-secret")
+	initial := WorkbenchStackSnapshot{
+		ProjectName: "demo",
+		Revision:    5,
+		Services: []WorkbenchComposeService{
+			{ServiceName: "cache", Image: "redis:7"},
+		},
+	}
+	if err := svc.saveWorkbenchSnapshot(context.Background(), "demo", initial); err != nil {
+		t.Fatalf("save snapshot: %v", err)
+	}
+
+	snapshot, summary, err := svc.MutateLegacyModuleCompatibility(context.Background(), "demo", WorkbenchModuleMutationRequest{
+		Selector: WorkbenchModuleSelector{
+			ServiceName: "cache",
+			ModuleType:  "redis",
+		},
+		Action: workbenchModuleMutationActionAdd,
+	})
+	if err != nil {
+		t.Fatalf("MutateLegacyModuleCompatibility add with legacy alias: %v", err)
+	}
+	if !summary.Changed {
+		t.Fatal("expected changed=true when adding redis through legacy compatibility alias")
+	}
+	if summary.PreviousCount != 0 || summary.CurrentCount != 1 {
+		t.Fatalf("unexpected count summary: %#v", summary)
+	}
+	if snapshot.Revision != 6 {
+		t.Fatalf("expected revision=6 after compatibility add with legacy alias, got %d", snapshot.Revision)
+	}
+	if got, want := len(snapshot.ManagedServices), 1; got != want {
+		t.Fatalf("expected %d managed service after compatibility add, got %d", want, got)
+	}
+	if snapshot.ManagedServices[0] != (WorkbenchManagedService{EntryKey: "redis", ServiceName: "redis"}) {
+		t.Fatalf("unexpected managed service record: %#v", snapshot.ManagedServices[0])
+	}
+}
+
+func TestWorkbenchMutateLegacyModuleCompatibilityRemoveNoOpWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	svc := NewWorkbenchServiceWithStorage(t.TempDir(), nil, &fakeSettingsRepo{}, "test-session-secret")
+	initial := WorkbenchStackSnapshot{
+		ProjectName: "demo",
+		Revision:    9,
+		Services: []WorkbenchComposeService{
+			{ServiceName: "redis", Image: "redis:7"},
+		},
+	}
+	if err := svc.saveWorkbenchSnapshot(context.Background(), "demo", initial); err != nil {
+		t.Fatalf("save snapshot: %v", err)
+	}
+
+	snapshot, summary, err := svc.MutateLegacyModuleCompatibility(context.Background(), "demo", WorkbenchModuleMutationRequest{
+		Selector: WorkbenchModuleSelector{
+			ServiceName: "redis",
+			ModuleType:  "redis",
+		},
+		Action: workbenchModuleMutationActionRemove,
+	})
+	if err != nil {
+		t.Fatalf("MutateLegacyModuleCompatibility remove: %v", err)
+	}
+	if summary.Changed {
+		t.Fatal("expected changed=false when removing missing redis managed service")
+	}
+	if summary.PreviousCount != 0 || summary.CurrentCount != 0 {
+		t.Fatalf("unexpected count summary: %#v", summary)
+	}
+	if snapshot.Revision != 9 {
+		t.Fatalf("expected unchanged revision on no-op remove, got %d", snapshot.Revision)
+	}
+	if got := len(snapshot.ManagedServices); got != 0 {
+		t.Fatalf("expected no managed services, got %d", got)
+	}
+}
+
+func TestWorkbenchMutateLegacyModuleCompatibilityRejectsTargetMismatch(t *testing.T) {
+	t.Parallel()
+
+	svc := NewWorkbenchServiceWithStorage(t.TempDir(), nil, &fakeSettingsRepo{}, "test-session-secret")
+	initial := WorkbenchStackSnapshot{
+		ProjectName: "demo",
+		Revision:    1,
+		Services: []WorkbenchComposeService{
+			{ServiceName: "api", Image: "nginx:stable"},
+		},
+	}
+	if err := svc.saveWorkbenchSnapshot(context.Background(), "demo", initial); err != nil {
+		t.Fatalf("save snapshot: %v", err)
+	}
+
+	_, summary, err := svc.MutateLegacyModuleCompatibility(context.Background(), "demo", WorkbenchModuleMutationRequest{
+		Selector: WorkbenchModuleSelector{
+			ServiceName: "api",
+			ModuleType:  "redis",
+		},
+		Action: workbenchModuleMutationActionAdd,
+	})
+	if err == nil {
+		t.Fatal("expected target mismatch validation error")
+	}
+	if summary.Changed {
+		t.Fatal("expected changed=false on target mismatch")
+	}
+	typed, ok := errs.From(err)
+	if !ok {
+		t.Fatalf("expected typed error, got %T", err)
+	}
+	if typed.Code != errs.CodeWorkbenchValidationFailed {
+		t.Fatalf("expected code %q, got %q", errs.CodeWorkbenchValidationFailed, typed.Code)
+	}
+	details, ok := typed.Details.(map[string]any)
+	if !ok {
+		t.Fatalf("expected details map, got %T", typed.Details)
+	}
+	issuesAny, ok := details["issues"]
+	if !ok {
+		t.Fatalf("expected issues in details: %#v", details)
+	}
+	issues, ok := issuesAny.([]WorkbenchMutationIssue)
+	if !ok {
+		t.Fatalf("expected []WorkbenchMutationIssue, got %T", issuesAny)
+	}
+	if len(issues) != 1 || issues[0].Code != "WB-MODULE-TARGET-UNSUPPORTED" {
+		t.Fatalf("expected WB-MODULE-TARGET-UNSUPPORTED issue, got %#v", issues)
+	}
+}
+
 func TestWorkbenchMutateStoredSnapshotResourceInvalidValueValidationPayload(t *testing.T) {
 	t.Parallel()
 

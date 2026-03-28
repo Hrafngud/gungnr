@@ -441,7 +441,7 @@ func workbenchResolveSuggestionPortCandidate(
 		}, nil
 	}
 
-	if moduleDefault, ok := workbenchResolveModuleDefaultPort(snapshot.Modules, serviceName); ok {
+	if moduleDefault, ok := workbenchResolveManagedServiceDefaultPort(snapshot.ManagedServices, serviceName); ok {
 		return workbenchPortResolveCandidate{
 			port:   moduleDefault,
 			source: workbenchPortSourceModuleDefault,

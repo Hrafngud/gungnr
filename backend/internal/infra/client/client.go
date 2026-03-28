@@ -252,6 +252,81 @@ func (c *Client) DockerRunQuickService(ctx context.Context, requestID string, pa
 	return c.runTask(ctx, requestID, contract.TaskTypeDockerRunQuickService, intentPayload)
 }
 
+func (c *Client) ProjectFileWriteAtomic(ctx context.Context, requestID string, payload contract.ProjectFileWriteAtomicPayload) (contract.Result, error) {
+	payload.BasePath = strings.TrimSpace(payload.BasePath)
+	payload.Path = strings.TrimSpace(payload.Path)
+	if payload.BasePath == "" {
+		return contract.Result{}, fmt.Errorf("base_path is required")
+	}
+	if payload.Path == "" {
+		return contract.Result{}, fmt.Errorf("path is required")
+	}
+
+	intentPayload := map[string]any{
+		"base_path": payload.BasePath,
+		"path":      payload.Path,
+		"content":   payload.Content,
+	}
+	if payload.Mode > 0 {
+		intentPayload["mode"] = payload.Mode
+	}
+	if payload.PreserveMode {
+		intentPayload["preserve_mode"] = true
+	}
+	if payload.CreateParents {
+		intentPayload["create_parents"] = true
+	}
+	return c.runTask(ctx, requestID, contract.TaskTypeProjectFileWriteAtomic, intentPayload)
+}
+
+func (c *Client) ProjectFileCopy(ctx context.Context, requestID string, payload contract.ProjectFileCopyPayload) (contract.Result, error) {
+	payload.BasePath = strings.TrimSpace(payload.BasePath)
+	payload.SourcePath = strings.TrimSpace(payload.SourcePath)
+	payload.DestinationPath = strings.TrimSpace(payload.DestinationPath)
+	if payload.BasePath == "" {
+		return contract.Result{}, fmt.Errorf("base_path is required")
+	}
+	if payload.SourcePath == "" {
+		return contract.Result{}, fmt.Errorf("source_path is required")
+	}
+	if payload.DestinationPath == "" {
+		return contract.Result{}, fmt.Errorf("destination_path is required")
+	}
+
+	intentPayload := map[string]any{
+		"base_path":        payload.BasePath,
+		"source_path":      payload.SourcePath,
+		"destination_path": payload.DestinationPath,
+	}
+	if payload.Mode > 0 {
+		intentPayload["mode"] = payload.Mode
+	}
+	if payload.CreateParents {
+		intentPayload["create_parents"] = true
+	}
+	return c.runTask(ctx, requestID, contract.TaskTypeProjectFileCopy, intentPayload)
+}
+
+func (c *Client) ProjectFileRemove(ctx context.Context, requestID string, payload contract.ProjectFileRemovePayload) (contract.Result, error) {
+	payload.BasePath = strings.TrimSpace(payload.BasePath)
+	payload.Path = strings.TrimSpace(payload.Path)
+	if payload.BasePath == "" {
+		return contract.Result{}, fmt.Errorf("base_path is required")
+	}
+	if payload.Path == "" {
+		return contract.Result{}, fmt.Errorf("path is required")
+	}
+
+	intentPayload := map[string]any{
+		"base_path": payload.BasePath,
+		"path":      payload.Path,
+	}
+	if payload.IgnoreNotExist {
+		intentPayload["ignore_not_exist"] = true
+	}
+	return c.runTask(ctx, requestID, contract.TaskTypeProjectFileRemove, intentPayload)
+}
+
 func (c *Client) HostListenTCPPorts(ctx context.Context, requestID string) (contract.Result, error) {
 	return c.runTask(ctx, requestID, contract.TaskTypeHostListenTCPPorts, map[string]any{})
 }

@@ -891,7 +891,7 @@ func (c *ProjectsController) WorkbenchMutateModule(ctx *gin.Context) {
 		return
 	}
 
-	stack, summary, err := c.workbench.MutateStoredSnapshotModule(
+	stack, summary, err := c.workbench.MutateLegacyModuleCompatibility(
 		ctx.Request.Context(),
 		project,
 		service.WorkbenchModuleMutationRequest{
@@ -914,6 +914,7 @@ func (c *ProjectsController) WorkbenchMutateModule(ctx *gin.Context) {
 			"sourceFingerprint": "",
 			"issueCount":        issueCount,
 			"errorCode":         errorCode,
+			"compatibilityPath": true,
 		})
 		apierror.RespondWithError(ctx, status, err, errs.CodeProjectWorkbenchModuleMutateFailed, "failed to mutate workbench modules")
 		return
@@ -931,6 +932,7 @@ func (c *ProjectsController) WorkbenchMutateModule(ctx *gin.Context) {
 		"sourceFingerprint": stack.SourceFingerprint,
 		"issueCount":        0,
 		"errorCode":         "",
+		"compatibilityPath": true,
 	})
 	ctx.JSON(http.StatusOK, gin.H{
 		"stack":    stack,

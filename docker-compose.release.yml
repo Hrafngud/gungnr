@@ -21,7 +21,6 @@ services:
 
   api:
     image: ghcr.io/hrafngud/gungnr-api:${GUNGNR_VERSION:-latest}
-    user: root
     environment:
       APP_ENV: ${APP_ENV:-local}
       PORT: 8080
