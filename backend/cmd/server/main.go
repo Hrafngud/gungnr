@@ -116,7 +116,7 @@ func main() {
 	projectEnvService := service.NewProjectEnvService(cfg.TemplatesDir, projectRepo)
 	projectEnvService.SetRuntimeMetaClient(bridgeClient)
 	projectEnvService.SetFileMutationClient(bridgeClient)
-	healthService := service.NewHealthService(hostService, settingsService)
+	healthService := service.NewHealthService(hostService, settingsService, cfg)
 
 	workflows := service.NewProjectWorkflows(cfg, projectRepo, settingsService, hostService, auditService, workbenchService, dockerRunner, bridgeClient)
 	workflows.Register(jobRunner)
@@ -148,6 +148,11 @@ func main() {
 		UsersMiddleware: middleware.RequireAdmin(sessionManager),
 	})
 
+	if cfg.DBHostPublishMode == "loopback" {
+		log.Printf("db host publish mode=%s bind=%s:%d", cfg.DBHostPublishMode, cfg.DBHostPublishHost, cfg.DBHostPublishPort)
+	} else {
+		log.Printf("db host publish mode=%s", cfg.DBHostPublishMode)
+	}
 	log.Printf("server starting on %s", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {
 		log.Fatalf("server exited: %v", err)

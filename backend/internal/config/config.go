@@ -14,6 +14,9 @@ type Config struct {
 	AppEnv                string
 	Port                  string
 	DatabaseURL           string
+	DBHostPublishMode     string
+	DBHostPublishHost     string
+	DBHostPublishPort     int
 	DBMaxOpenConns        int
 	DBMaxIdleConns        int
 	DBConnMaxLifetime     time.Duration
@@ -62,6 +65,9 @@ func Load() (Config, error) {
 	v.SetDefault("APP_ENV", "local")
 	v.SetDefault("PORT", "8080")
 	v.SetDefault("DATABASE_URL", "")
+	v.SetDefault("DB_HOST_PUBLISH_MODE", "disabled")
+	v.SetDefault("DB_HOST_PUBLISH_HOST", "127.0.0.1")
+	v.SetDefault("DB_HOST_PUBLISH_PORT", 5432)
 	v.SetDefault("DB_MAX_OPEN_CONNS", 20)
 	v.SetDefault("DB_MAX_IDLE_CONNS", 10)
 	v.SetDefault("DB_CONN_MAX_LIFETIME_MIN", 30)
@@ -103,6 +109,9 @@ func Load() (Config, error) {
 		AppEnv:                v.GetString("APP_ENV"),
 		Port:                  v.GetString("PORT"),
 		DatabaseURL:           v.GetString("DATABASE_URL"),
+		DBHostPublishMode:     normalizeDBHostPublishMode(v.GetString("DB_HOST_PUBLISH_MODE")),
+		DBHostPublishHost:     normalizeDBHostPublishHost(v.GetString("DB_HOST_PUBLISH_HOST")),
+		DBHostPublishPort:     normalizeDBHostPublishPort(v.GetInt("DB_HOST_PUBLISH_PORT")),
 		DBMaxOpenConns:        v.GetInt("DB_MAX_OPEN_CONNS"),
 		DBMaxIdleConns:        v.GetInt("DB_MAX_IDLE_CONNS"),
 		DBConnMaxLifetime:     time.Duration(v.GetInt("DB_CONN_MAX_LIFETIME_MIN")) * time.Minute,
@@ -205,4 +214,31 @@ func clampDuration(value, min, max, fallback time.Duration) time.Duration {
 		return max
 	}
 	return value
+}
+
+func normalizeDBHostPublishMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "disabled":
+		return "disabled"
+	case "loopback":
+		return "loopback"
+	default:
+		return "disabled"
+	}
+}
+
+func normalizeDBHostPublishHost(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "127.0.0.1", "localhost":
+		return "127.0.0.1"
+	default:
+		return "127.0.0.1"
+	}
+}
+
+func normalizeDBHostPublishPort(raw int) int {
+	if raw < 1 || raw > 65535 {
+		return 5432
+	}
+	return raw
 }

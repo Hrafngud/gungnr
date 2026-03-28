@@ -13,13 +13,22 @@ import (
 	"strings"
 	"time"
 
+	"go-notes/internal/config"
 	"go-notes/internal/integrations/cloudflare"
 )
 
 type DockerHealth struct {
-	Status     string `json:"status"`
-	Detail     string `json:"detail,omitempty"`
-	Containers int    `json:"containers"`
+	Status        string                 `json:"status"`
+	Detail        string                 `json:"detail,omitempty"`
+	Containers    int                    `json:"containers"`
+	DBHostPublish DBHostPublishHealthRef `json:"dbHostPublish"`
+}
+
+type DBHostPublishHealthRef struct {
+	Mode    string `json:"mode"`
+	Enabled bool   `json:"enabled"`
+	Host    string `json:"host,omitempty"`
+	Port    int    `json:"port,omitempty"`
 }
 
 type TunnelHealth struct {
@@ -43,17 +52,41 @@ type TunnelDiagnostics struct {
 }
 
 type HealthService struct {
-	host     *HostService
-	settings *SettingsService
+	host          *HostService
+	settings      *SettingsService
+	dbPublishMode string
+	dbPublishHost string
+	dbPublishPort int
 }
 
-func NewHealthService(host *HostService, settings *SettingsService) *HealthService {
-	return &HealthService{host: host, settings: settings}
+func NewHealthService(host *HostService, settings *SettingsService, cfg config.Config) *HealthService {
+	return &HealthService{
+		host:          host,
+		settings:      settings,
+		dbPublishMode: strings.TrimSpace(cfg.DBHostPublishMode),
+		dbPublishHost: strings.TrimSpace(cfg.DBHostPublishHost),
+		dbPublishPort: cfg.DBHostPublishPort,
+	}
 }
 
 func (s *HealthService) Docker(ctx context.Context) DockerHealth {
+	dbPublish := DBHostPublishHealthRef{
+		Mode:    "disabled",
+		Enabled: false,
+	}
+	if strings.EqualFold(strings.TrimSpace(s.dbPublishMode), "loopback") {
+		dbPublish.Mode = "loopback"
+		dbPublish.Enabled = true
+		dbPublish.Host = strings.TrimSpace(s.dbPublishHost)
+		dbPublish.Port = s.dbPublishPort
+	}
+
 	if s.host == nil {
-		return DockerHealth{Status: "error", Detail: "host service unavailable"}
+		return DockerHealth{
+			Status:        "error",
+			Detail:        "host service unavailable",
+			DBHostPublish: dbPublish,
+		}
 	}
 
 	// Keep host probe execution independent from request-context cancellation.
@@ -64,14 +97,19 @@ func (s *HealthService) Docker(ctx context.Context) DockerHealth {
 
 	count, err := s.host.CountRunningContainers(checkCtx)
 	if err != nil {
-		return DockerHealth{Status: "error", Detail: err.Error()}
+		return DockerHealth{
+			Status:        "error",
+			Detail:        err.Error(),
+			DBHostPublish: dbPublish,
+		}
 	}
 
 	detail := fmt.Sprintf("%d containers running", count)
 	return DockerHealth{
-		Status:     "ok",
-		Detail:     detail,
-		Containers: count,
+		Status:        "ok",
+		Detail:        detail,
+		Containers:    count,
+		DBHostPublish: dbPublish,
 	}
 }
 

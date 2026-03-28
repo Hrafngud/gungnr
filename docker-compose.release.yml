@@ -14,8 +14,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    ports:
-      - "5432:5432"  # Keep for local database access if needed
+    # DB host publishing is disabled by default.
+    # Enable loopback-only publish with:
+    #   docker compose -f docker-compose.release.yml -f docker-compose.db-host-loopback.yml up -d
     networks:
       - app-network
 
@@ -58,6 +59,9 @@ services:
       INFRA_RETENTION_INTENT_HOURS: ${INFRA_RETENTION_INTENT_HOURS:-168}
       INFRA_RETENTION_RESULT_HOURS: ${INFRA_RETENTION_RESULT_HOURS:-168}
       INFRA_RETENTION_CLAIM_MINUTES: ${INFRA_RETENTION_CLAIM_MINUTES:-60}
+      DB_HOST_PUBLISH_MODE: ${DB_HOST_PUBLISH_MODE:-disabled}
+      DB_HOST_PUBLISH_HOST: ${DB_HOST_PUBLISH_HOST:-127.0.0.1}
+      DB_HOST_PUBLISH_PORT: ${DB_HOST_PUBLISH_PORT:-5432}
     depends_on:
       db:
         condition: service_healthy

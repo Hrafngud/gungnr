@@ -44,6 +44,38 @@ func TestComposeFilesNarrowAPIMountScope(t *testing.T) {
 	}
 }
 
+func TestComposeFilesDisableDBHostPublishByDefault(t *testing.T) {
+	repoRoot := repoRootFromServiceTest(t)
+	composeFiles := []string{
+		filepath.Join(repoRoot, "docker-compose.yml"),
+		filepath.Join(repoRoot, "docker-compose.release.yml"),
+	}
+
+	for _, path := range composeFiles {
+		contentBytes, err := os.ReadFile(path)
+		require.NoError(t, err)
+		content := string(contentBytes)
+
+		require.NotContains(t, content, "\"5432:5432\"", "%s should not publish postgres on host by default", filepath.Base(path))
+		require.Contains(t, content, "DB_HOST_PUBLISH_MODE: ${DB_HOST_PUBLISH_MODE:-disabled}", "%s must default DB host publish mode to disabled", filepath.Base(path))
+		require.Contains(t, content, "DB_HOST_PUBLISH_HOST: ${DB_HOST_PUBLISH_HOST:-127.0.0.1}", "%s must keep loopback-only host publish bind default", filepath.Base(path))
+		require.Contains(t, content, "DB_HOST_PUBLISH_PORT: ${DB_HOST_PUBLISH_PORT:-5432}", "%s must keep deterministic DB host publish port diagnostics", filepath.Base(path))
+	}
+}
+
+func TestComposeLoopbackDBPublishOverrideIsLoopbackOnly(t *testing.T) {
+	repoRoot := repoRootFromServiceTest(t)
+	path := filepath.Join(repoRoot, "docker-compose.db-host-loopback.yml")
+
+	contentBytes, err := os.ReadFile(path)
+	require.NoError(t, err)
+	content := string(contentBytes)
+
+	require.Contains(t, content, "127.0.0.1:${DB_HOST_PUBLISH_PORT:-5432}:5432", "DB host publish override must bind loopback only")
+	require.Contains(t, content, "DB_HOST_PUBLISH_MODE: loopback", "override must surface loopback mode in runtime diagnostics")
+	require.Contains(t, content, "DB_HOST_PUBLISH_HOST: 127.0.0.1", "override must surface loopback host in runtime diagnostics")
+}
+
 func findDirectDockerExecViolations(t *testing.T, dir string) []string {
 	t.Helper()
 

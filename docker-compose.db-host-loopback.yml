@@ -1,0 +1,10 @@
+services:
+  db:
+    ports:
+      - "127.0.0.1:${DB_HOST_PUBLISH_PORT:-5432}:5432"
+
+  api:
+    environment:
+      DB_HOST_PUBLISH_MODE: loopback
+      DB_HOST_PUBLISH_HOST: 127.0.0.1
+      DB_HOST_PUBLISH_PORT: ${DB_HOST_PUBLISH_PORT:-5432}
