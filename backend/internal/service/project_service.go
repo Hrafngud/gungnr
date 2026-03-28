@@ -68,10 +68,11 @@ type QuickServiceRequest struct {
 	Subdomain     string `json:"subdomain"`
 	Domain        string `json:"domain,omitempty"`
 	RequestedPort int    `json:"requestedPort,omitempty"`
-	Port          int    `json:"port"`
+	Port          int    `json:"port,omitempty"`
 	Image         string `json:"image,omitempty"`
 	ContainerPort int    `json:"containerPort,omitempty"`
 	ContainerName string `json:"containerName,omitempty"`
+	ExposureMode  string `json:"exposureMode,omitempty"`
 }
 
 func (s *ProjectService) ListLocal(ctx context.Context) ([]LocalProject, error) {
@@ -188,14 +189,11 @@ func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceReque
 	if err := ValidateSubdomain(req.Subdomain); err != nil {
 		return nil, 0, err
 	}
-	domain, err := s.resolveDomain(ctx, req.Domain)
+	exposureMode, err := normalizeQuickServiceExposureRequest(req.ExposureMode, req.Port)
 	if err != nil {
 		return nil, 0, err
 	}
-	req.Domain = domain
-	if err := ValidatePort(req.Port); err != nil {
-		return nil, 0, err
-	}
+	req.ExposureMode = exposureMode
 	req.Image = strings.TrimSpace(req.Image)
 	req.ContainerName = strings.TrimSpace(req.ContainerName)
 	if req.Image == "" {
@@ -213,17 +211,37 @@ func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceReque
 		}
 	}
 	requestedPort := req.Port
+	if requestedPort == 0 {
+		requestedPort = req.ContainerPort
+	}
 	chosenPort, err := ensureAvailableHostPort(ctx, s.infra, requestedPort)
 	if err != nil {
 		return nil, 0, err
 	}
 	req.RequestedPort = requestedPort
 	req.Port = chosenPort
+	if quickServiceRequiresPublishedPort(exposureMode) {
+		domain, err := s.resolveDomain(ctx, req.Domain)
+		if err != nil {
+			return nil, 0, err
+		}
+		req.Domain = domain
+	} else {
+		if strings.TrimSpace(req.Domain) != "" {
+			domain, err := s.resolveDomain(ctx, req.Domain)
+			if err != nil {
+				return nil, 0, err
+			}
+			req.Domain = domain
+		} else {
+			req.Domain = ""
+		}
+	}
 	job, err := s.jobs.Create(ctx, JobTypeQuickService, req)
 	if err != nil {
 		return nil, 0, err
 	}
-	return job, chosenPort, nil
+	return job, req.Port, nil
 }
 
 func (s *ProjectService) resolveDomain(ctx context.Context, requested string) (string, error) {

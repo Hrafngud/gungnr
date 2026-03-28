@@ -485,14 +485,29 @@ func (r *Runner) handleDockerRunQuickService(ctx context.Context, intent contrac
 
 	payload.Image = strings.TrimSpace(payload.Image)
 	payload.ContainerName = strings.TrimSpace(payload.ContainerName)
+	payload.ExposureMode = contract.NormalizeQuickServiceExposureMode(payload.ExposureMode)
+	payload.PublishHost = contract.NormalizeQuickServicePublishHost(payload.PublishHost)
+	payload.NetworkName = strings.TrimSpace(payload.NetworkName)
 	if payload.Image == "" {
 		return taskOutcome{err: fmt.Errorf("image is required")}
+	}
+	if payload.ExposureMode == "" {
+		return taskOutcome{err: fmt.Errorf("exposure_mode must be internal or host_published")}
+	}
+	if payload.NetworkName == "" {
+		return taskOutcome{err: fmt.Errorf("network_name is required")}
 	}
 	if payload.HostPort < 1 || payload.HostPort > 65535 {
 		return taskOutcome{err: fmt.Errorf("host_port must be between 1 and 65535")}
 	}
+	if payload.PublishHost == "" {
+		return taskOutcome{err: fmt.Errorf("publish_host must be loopback-only")}
+	}
 	if payload.ContainerPort < 1 || payload.ContainerPort > 65535 {
 		return taskOutcome{err: fmt.Errorf("container_port must be between 1 and 65535")}
+	}
+	if err := r.ensureQuickServiceNetwork(ctx, payload.NetworkName); err != nil {
+		return taskOutcome{err: err}
 	}
 
 	args := []string{
@@ -500,9 +515,32 @@ func (r *Runner) handleDockerRunQuickService(ctx context.Context, intent contrac
 		"-d",
 		"--restart",
 		"unless-stopped",
-		"-p",
-		fmt.Sprintf("%d:%d", payload.HostPort, payload.ContainerPort),
+		"--network",
+		payload.NetworkName,
+		"--security-opt",
+		"no-new-privileges:true",
+		"--cap-drop",
+		"ALL",
 	}
+	if payload.ContainerPort < 1024 {
+		args = append(args, "--cap-add", "NET_BIND_SERVICE")
+	}
+	args = append(args,
+		"--pids-limit",
+		strconv.Itoa(contract.QuickServiceDefaultPIDsLimit),
+		"--memory",
+		contract.QuickServiceDefaultMemory,
+		"--memory-swap",
+		contract.QuickServiceDefaultMemory,
+		"--cpus",
+		contract.QuickServiceDefaultCPUs,
+		"--label",
+		contract.QuickServiceManagedLabelKey+"="+contract.QuickServiceManagedLabelValue,
+		"--label",
+		contract.QuickServiceExposureLabelKey+"="+payload.ExposureMode,
+		"-p",
+		fmt.Sprintf("%s:%d:%d", payload.PublishHost, payload.HostPort, payload.ContainerPort),
+	)
 	if payload.ContainerName != "" {
 		args = append(args, "--name", payload.ContainerName)
 	}
@@ -516,6 +554,53 @@ func (r *Runner) handleDockerRunQuickService(ctx context.Context, intent contrac
 			"lines": parseLines(output),
 		},
 	}
+}
+
+func (r *Runner) ensureQuickServiceNetwork(ctx context.Context, networkName string) error {
+	inspectOutput, inspectErr := r.exec.Run(ctx, "", "docker", "network", "inspect", networkName)
+	if inspectErr == nil {
+		return nil
+	}
+	if !dockerNetworkMissing(inspectErr, inspectOutput) {
+		return commandError(inspectErr, inspectOutput, "docker %s", strings.Join([]string{"network", "inspect", networkName}, " "))
+	}
+
+	createArgs := []string{
+		"network",
+		"create",
+		"--driver",
+		"bridge",
+		"--internal",
+		"--label",
+		contract.QuickServiceManagedLabelKey + "=" + contract.QuickServiceManagedLabelValue,
+		"--label",
+		contract.QuickServiceNetworkLabelKey + "=" + contract.QuickServiceNetworkLabelValue,
+		networkName,
+	}
+	createOutput, createErr := r.exec.Run(ctx, "", "docker", createArgs...)
+	if createErr != nil {
+		if dockerNetworkAlreadyExists(createErr, createOutput) {
+			return nil
+		}
+		return commandError(createErr, createOutput, "docker %s", strings.Join(createArgs, " "))
+	}
+	return nil
+}
+
+func dockerNetworkMissing(err error, output []byte) bool {
+	if err == nil {
+		return false
+	}
+	combined := strings.ToLower(strings.TrimSpace(string(output) + " " + err.Error()))
+	return strings.Contains(combined, "no such network") || strings.Contains(combined, "not found")
+}
+
+func dockerNetworkAlreadyExists(err error, output []byte) bool {
+	if err == nil {
+		return false
+	}
+	combined := strings.ToLower(strings.TrimSpace(string(output) + " " + err.Error()))
+	return strings.Contains(combined, "already exists")
 }
 
 func (r *Runner) handleProjectFileWriteAtomic(_ context.Context, intent contract.Intent) taskOutcome {

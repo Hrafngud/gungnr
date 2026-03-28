@@ -231,11 +231,23 @@ func (c *Client) DockerRuntimeCheck(ctx context.Context, requestID string) (cont
 func (c *Client) DockerRunQuickService(ctx context.Context, requestID string, payload contract.DockerRunQuickServicePayload) (contract.Result, error) {
 	payload.Image = strings.TrimSpace(payload.Image)
 	payload.ContainerName = strings.TrimSpace(payload.ContainerName)
+	payload.ExposureMode = contract.NormalizeQuickServiceExposureMode(payload.ExposureMode)
+	payload.PublishHost = contract.NormalizeQuickServicePublishHost(payload.PublishHost)
+	payload.NetworkName = strings.TrimSpace(payload.NetworkName)
 	if payload.Image == "" {
 		return contract.Result{}, fmt.Errorf("image is required")
 	}
+	if payload.ExposureMode == "" {
+		return contract.Result{}, fmt.Errorf("exposure_mode must be internal or host_published")
+	}
+	if payload.NetworkName == "" {
+		return contract.Result{}, fmt.Errorf("network_name is required")
+	}
 	if !isValidPort(payload.HostPort) {
 		return contract.Result{}, fmt.Errorf("host_port must be between 1 and 65535")
+	}
+	if payload.PublishHost == "" {
+		return contract.Result{}, fmt.Errorf("publish_host must be loopback-only")
 	}
 	if !isValidPort(payload.ContainerPort) {
 		return contract.Result{}, fmt.Errorf("container_port must be between 1 and 65535")
@@ -245,6 +257,9 @@ func (c *Client) DockerRunQuickService(ctx context.Context, requestID string, pa
 		"image":          payload.Image,
 		"host_port":      payload.HostPort,
 		"container_port": payload.ContainerPort,
+		"exposure_mode":  payload.ExposureMode,
+		"network_name":   payload.NetworkName,
+		"publish_host":   payload.PublishHost,
 	}
 	if payload.ContainerName != "" {
 		intentPayload["container_name"] = payload.ContainerName

@@ -514,6 +514,14 @@ func resolveQuickServiceExposure(
 
 	project = strings.ToLower(strings.TrimSpace(project))
 	subdomain := strings.ToLower(strings.TrimSpace(payload.Subdomain))
+	exposureMode, err := normalizeQuickServiceExposureRequest(payload.ExposureMode, payload.Port)
+	if err != nil {
+		addArchiveWarning(
+			warnings,
+			fmt.Sprintf("unresolved quick_service ownership for job %d: %v", job.ID, err),
+		)
+		return ProjectArchivePlanServiceCleanup{}, false
+	}
 
 	resolution := ""
 	switch {
@@ -535,23 +543,31 @@ func resolveQuickServiceExposure(
 		return ProjectArchivePlanServiceCleanup{}, false
 	}
 
-	hostname, hostErr := resolveExposureHostname(subdomain, payload.Domain, baseDomain)
-	if hostErr != "" {
-		addArchiveWarning(
-			warnings,
-			fmt.Sprintf("unresolved quick_service ownership for job %d: %s", job.ID, hostErr),
-		)
-		return ProjectArchivePlanServiceCleanup{}, false
+	hostname := ""
+	if quickServiceRequiresPublishedPort(exposureMode) {
+		resolvedHostname, hostErr := resolveExposureHostname(subdomain, payload.Domain, baseDomain)
+		if hostErr != "" {
+			addArchiveWarning(
+				warnings,
+				fmt.Sprintf("unresolved quick_service ownership for job %d: %s", job.ID, hostErr),
+			)
+			return ProjectArchivePlanServiceCleanup{}, false
+		}
+		hostname = resolvedHostname
 	}
 
 	container := quickServiceContainerFromLogs(job.LogLines)
 	if container == "" {
+		targetName := hostname
+		if targetName == "" {
+			targetName = subdomain
+		}
 		addArchiveWarning(
 			warnings,
 			fmt.Sprintf(
 				"quick_service job %d resolved to %s but container ownership is unresolved; container cleanup will be skipped for this exposure",
 				job.ID,
-				hostname,
+				targetName,
 			),
 		)
 	}
@@ -561,7 +577,7 @@ func resolveQuickServiceExposure(
 		Type:       JobTypeQuickService,
 		Hostname:   hostname,
 		Container:  container,
-		Resolution: resolution,
+		Resolution: resolution + ".exposure." + exposureMode,
 	}, true
 }
 

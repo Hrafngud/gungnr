@@ -1,11 +1,27 @@
 package contract
 
 import (
+	"strings"
 	"time"
 )
 
 const (
 	VersionV1 = "v1"
+)
+
+const (
+	QuickServiceExposureInternal      = "internal"
+	QuickServiceExposureHostPublished = "host_published"
+	QuickServicePublishLoopbackHost   = "127.0.0.1"
+	QuickServiceDefaultNetwork        = "gungnr_quick_internal"
+	QuickServiceDefaultPIDsLimit      = 128
+	QuickServiceDefaultMemory         = "512m"
+	QuickServiceDefaultCPUs           = "1.0"
+	QuickServiceManagedLabelKey       = "io.gungnr.quick_service"
+	QuickServiceManagedLabelValue     = "true"
+	QuickServiceExposureLabelKey      = "io.gungnr.quick_service.exposure"
+	QuickServiceNetworkLabelKey       = "io.gungnr.quick_service.network"
+	QuickServiceNetworkLabelValue     = "true"
 )
 
 type TaskType string
@@ -145,6 +161,9 @@ type DockerRunQuickServicePayload struct {
 	HostPort      int    `json:"host_port"`
 	ContainerPort int    `json:"container_port"`
 	ContainerName string `json:"container_name,omitempty"`
+	ExposureMode  string `json:"exposure_mode,omitempty"`
+	PublishHost   string `json:"publish_host,omitempty"`
+	NetworkName   string `json:"network_name,omitempty"`
 }
 
 type ProjectFileWriteAtomicPayload struct {
@@ -178,4 +197,28 @@ type HostPortScanPayload struct {
 type APIHealthProbePayload struct {
 	URL            string `json:"url"`
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
+}
+
+func NormalizeQuickServiceExposureMode(raw string) string {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	normalized = strings.NewReplacer("-", "_", " ", "_").Replace(normalized)
+	switch normalized {
+	case QuickServiceExposureInternal, "internal_only":
+		return QuickServiceExposureInternal
+	case QuickServiceExposureHostPublished, "published", "publish":
+		return QuickServiceExposureHostPublished
+	default:
+		return ""
+	}
+}
+
+func NormalizeQuickServicePublishHost(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", QuickServicePublishLoopbackHost:
+		return QuickServicePublishLoopbackHost
+	case "localhost":
+		return QuickServicePublishLoopbackHost
+	default:
+		return ""
+	}
 }

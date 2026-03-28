@@ -172,6 +172,29 @@ func TestComposeFilesSplitNetworkPlanesWithDeterministicCompatFallback(t *testin
 	}
 }
 
+func TestQuickServiceWorkerPolicyRemainsHardenedAndLoopbackPublished(t *testing.T) {
+	repoRoot := repoRootFromServiceTest(t)
+	path := filepath.Join(repoRoot, "backend", "internal", "infra", "worker", "worker.go")
+
+	contentBytes, err := os.ReadFile(path)
+	require.NoError(t, err)
+	content := string(contentBytes)
+
+	require.Contains(t, content, `"network", "inspect", networkName`, "quick-service worker must resolve the managed runtime network before starting containers")
+	require.Contains(t, content, `func (r *Runner) ensureQuickServiceNetwork`, "quick-service worker must keep managed-network creation logic in a dedicated helper")
+	require.Contains(t, content, `"--network"`, "quick-service worker must attach containers to an explicit managed network")
+	require.Contains(t, content, `"--security-opt"`, "quick-service worker must keep no-new-privileges enabled")
+	require.Contains(t, content, `"no-new-privileges:true"`, "quick-service worker must pin no-new-privileges")
+	require.Contains(t, content, `"--cap-drop"`, "quick-service worker must drop default capabilities")
+	require.Contains(t, content, `"--cap-add", "NET_BIND_SERVICE"`, "quick-service worker must retain NET_BIND_SERVICE for privileged container ports")
+	require.Contains(t, content, `"--pids-limit"`, "quick-service worker must keep deterministic PID bounds")
+	require.Contains(t, content, `"--memory"`, "quick-service worker must keep deterministic memory bounds")
+	require.Contains(t, content, `"--cpus"`, "quick-service worker must keep deterministic CPU bounds")
+	require.Contains(t, content, `contract.QuickServiceNetworkLabelKey`, "quick-service worker must label managed runtime networks explicitly")
+	require.Contains(t, content, `fmt.Sprintf("%s:%d:%d", payload.PublishHost, payload.HostPort, payload.ContainerPort)`, "quick-service worker must keep host publish formatting explicit")
+	require.Contains(t, content, `contract.NormalizeQuickServicePublishHost`, "quick-service worker must normalize publish host through the shared loopback-only guard")
+}
+
 func findDirectDockerExecViolations(t *testing.T, dir string) []string {
 	t.Helper()
 

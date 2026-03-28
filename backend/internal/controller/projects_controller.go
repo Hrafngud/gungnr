@@ -1454,13 +1454,18 @@ func (c *ProjectsController) QuickService(ctx *gin.Context) {
 		apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeProjectQuickFailed, err.Error())
 		return
 	}
+	exposureMode, exposureErr := service.NormalizeQuickServiceExposureMode(req.ExposureMode, req.Port)
+	if exposureErr != nil {
+		exposureMode = req.ExposureMode
+	}
 
 	c.logAudit(ctx, "project.quick_service", req.Subdomain, map[string]any{
 		"domain":        req.Domain,
 		"requestedPort": req.Port,
 		"port":          hostPort,
 		"jobId":         job.ID,
-		"portAuto":      hostPort != req.Port,
+		"portAuto":      hostPort != 0 && hostPort != req.Port,
+		"exposureMode":  exposureMode,
 	})
 
 	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job), "hostPort": hostPort})

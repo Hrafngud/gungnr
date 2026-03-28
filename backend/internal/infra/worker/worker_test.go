@@ -34,20 +34,31 @@ type fakeExecCall struct {
 }
 
 type fakeExecutor struct {
-	calls  []fakeExecCall
-	output []byte
-	err    error
+	calls   []fakeExecCall
+	output  []byte
+	err     error
+	outputs [][]byte
+	errs    []error
 }
 
 func (f *fakeExecutor) Run(_ context.Context, dir string, name string, args ...string) ([]byte, error) {
 	copiedArgs := make([]string, len(args))
 	copy(copiedArgs, args)
+	callIndex := len(f.calls)
 	f.calls = append(f.calls, fakeExecCall{
 		dir:  dir,
 		name: name,
 		args: copiedArgs,
 	})
-	return f.output, f.err
+	output := f.output
+	err := f.err
+	if callIndex < len(f.outputs) {
+		output = f.outputs[callIndex]
+	}
+	if callIndex < len(f.errs) {
+		err = f.errs[callIndex]
+	}
+	return output, err
 }
 
 type fakeTunnelLifecycle struct {
@@ -292,37 +303,207 @@ func TestProcessOnceHandlesDockerRunQuickService(t *testing.T) {
 			"host_port":      19000,
 			"container_port": 80,
 			"container_name": "quick-excalidraw",
+			"exposure_mode":  contract.QuickServiceExposureHostPublished,
+			"publish_host":   contract.QuickServicePublishLoopbackHost,
+			"network_name":   "warp-panel_quick_internal",
 		},
 		CreatedAt: time.Now().UTC().Add(-time.Minute),
 	}
 	_, err = q.WriteIntent(context.Background(), intent)
 	require.NoError(t, err)
 
-	exec := &fakeExecutor{output: []byte("container-id-1\n")}
+	exec := &fakeExecutor{
+		outputs: [][]byte{
+			[]byte(`[{"Name":"warp-panel_quick_internal"}]` + "\n"),
+			[]byte("container-id-1\n"),
+		},
+	}
 	r := New(q, 10*time.Millisecond, "", nil)
 	r.exec = exec
 
 	err = r.ProcessOnce(context.Background())
 	require.NoError(t, err)
 
-	require.Len(t, exec.calls, 1)
+	require.Len(t, exec.calls, 2)
 	require.Equal(t, "docker", exec.calls[0].name)
+	require.Equal(t, []string{"network", "inspect", "warp-panel_quick_internal"}, exec.calls[0].args)
+	require.Equal(t, "docker", exec.calls[1].name)
 	require.Equal(t, []string{
 		"run",
 		"-d",
 		"--restart",
 		"unless-stopped",
+		"--network",
+		"warp-panel_quick_internal",
+		"--security-opt",
+		"no-new-privileges:true",
+		"--cap-drop",
+		"ALL",
+		"--cap-add",
+		"NET_BIND_SERVICE",
+		"--pids-limit",
+		strconv.Itoa(contract.QuickServiceDefaultPIDsLimit),
+		"--memory",
+		contract.QuickServiceDefaultMemory,
+		"--memory-swap",
+		contract.QuickServiceDefaultMemory,
+		"--cpus",
+		contract.QuickServiceDefaultCPUs,
+		"--label",
+		contract.QuickServiceManagedLabelKey + "=" + contract.QuickServiceManagedLabelValue,
+		"--label",
+		contract.QuickServiceExposureLabelKey + "=" + contract.QuickServiceExposureHostPublished,
 		"-p",
-		"19000:80",
+		"127.0.0.1:19000:80",
 		"--name",
 		"quick-excalidraw",
 		"excalidraw/excalidraw:latest",
-	}, exec.calls[0].args)
+	}, exec.calls[1].args)
 
 	result, err := q.ReadResult(context.Background(), intent.IntentID)
 	require.NoError(t, err)
 	require.Equal(t, contract.StatusSucceeded, result.Status)
 	require.Equal(t, []string{"container-id-1"}, decodeDataLines(t, result.Data))
+}
+
+func TestProcessOnceHandlesDockerRunQuickServiceInternalOnlyCreatesManagedNetwork(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	intent := contract.Intent{
+		Version:   contract.VersionV1,
+		IntentID:  "intent-quick-service-internal",
+		RequestID: "req-quick-service-internal",
+		TaskType:  contract.TaskTypeDockerRunQuickService,
+		Payload: map[string]any{
+			"image":          "excalidraw/excalidraw:latest",
+			"host_port":      18080,
+			"container_port": 80,
+			"container_name": "quick-excalidraw-internal",
+			"exposure_mode":  contract.QuickServiceExposureInternal,
+			"publish_host":   contract.QuickServicePublishLoopbackHost,
+			"network_name":   "warp-panel_quick_internal",
+		},
+		CreatedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	_, err = q.WriteIntent(context.Background(), intent)
+	require.NoError(t, err)
+
+	exec := &fakeExecutor{
+		outputs: [][]byte{
+			[]byte(""),
+			[]byte("warp-panel_quick_internal\n"),
+			[]byte("container-id-2\n"),
+		},
+		errs: []error{
+			errors.New("Error response from daemon: network warp-panel_quick_internal not found"),
+			nil,
+			nil,
+		},
+	}
+	r := New(q, 10*time.Millisecond, "", nil)
+	r.exec = exec
+
+	err = r.ProcessOnce(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, exec.calls, 3)
+	require.Equal(t, []string{"network", "inspect", "warp-panel_quick_internal"}, exec.calls[0].args)
+	require.Equal(t, []string{
+		"network",
+		"create",
+		"--driver",
+		"bridge",
+		"--internal",
+		"--label",
+		contract.QuickServiceManagedLabelKey + "=" + contract.QuickServiceManagedLabelValue,
+		"--label",
+		contract.QuickServiceNetworkLabelKey + "=" + contract.QuickServiceNetworkLabelValue,
+		"warp-panel_quick_internal",
+	}, exec.calls[1].args)
+	require.Equal(t, []string{
+		"run",
+		"-d",
+		"--restart",
+		"unless-stopped",
+		"--network",
+		"warp-panel_quick_internal",
+		"--security-opt",
+		"no-new-privileges:true",
+		"--cap-drop",
+		"ALL",
+		"--cap-add",
+		"NET_BIND_SERVICE",
+		"--pids-limit",
+		strconv.Itoa(contract.QuickServiceDefaultPIDsLimit),
+		"--memory",
+		contract.QuickServiceDefaultMemory,
+		"--memory-swap",
+		contract.QuickServiceDefaultMemory,
+		"--cpus",
+		contract.QuickServiceDefaultCPUs,
+		"--label",
+		contract.QuickServiceManagedLabelKey + "=" + contract.QuickServiceManagedLabelValue,
+		"--label",
+		contract.QuickServiceExposureLabelKey + "=" + contract.QuickServiceExposureInternal,
+		"-p",
+		"127.0.0.1:18080:80",
+		"--name",
+		"quick-excalidraw-internal",
+		"excalidraw/excalidraw:latest",
+	}, exec.calls[2].args)
+}
+
+func TestProcessOnceHandlesDockerRunQuickServiceIgnoresConcurrentNetworkCreate(t *testing.T) {
+	t.Parallel()
+
+	q, err := queue.NewFilesystem(t.TempDir())
+	require.NoError(t, err)
+
+	intent := contract.Intent{
+		Version:   contract.VersionV1,
+		IntentID:  "intent-quick-service-network-race",
+		RequestID: "req-quick-service-network-race",
+		TaskType:  contract.TaskTypeDockerRunQuickService,
+		Payload: map[string]any{
+			"image":          "excalidraw/excalidraw:latest",
+			"host_port":      18081,
+			"container_port": 80,
+			"container_name": "quick-excalidraw-race",
+			"exposure_mode":  contract.QuickServiceExposureInternal,
+			"publish_host":   contract.QuickServicePublishLoopbackHost,
+			"network_name":   "warp-panel_quick_internal",
+		},
+		CreatedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	_, err = q.WriteIntent(context.Background(), intent)
+	require.NoError(t, err)
+
+	exec := &fakeExecutor{
+		outputs: [][]byte{
+			[]byte(""),
+			[]byte("Error response from daemon: network with name warp-panel_quick_internal already exists\n"),
+			[]byte("container-id-3\n"),
+		},
+		errs: []error{
+			errors.New("Error response from daemon: network warp-panel_quick_internal not found"),
+			errors.New("Error response from daemon: network with name warp-panel_quick_internal already exists"),
+			nil,
+		},
+	}
+	r := New(q, 10*time.Millisecond, "", nil)
+	r.exec = exec
+
+	err = r.ProcessOnce(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, exec.calls, 3)
+	result, err := q.ReadResult(context.Background(), intent.IntentID)
+	require.NoError(t, err)
+	require.Equal(t, contract.StatusSucceeded, result.Status)
+	require.Equal(t, []string{"container-id-3"}, decodeDataLines(t, result.Data))
 }
 
 func TestProcessOnceHandlesHostListenTCPPorts(t *testing.T) {

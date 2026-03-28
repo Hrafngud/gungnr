@@ -378,6 +378,9 @@ func TestDockerRunnerTaskPayloads(t *testing.T) {
 		HostPort:      19000,
 		ContainerPort: 80,
 		ContainerName: "quick-excalidraw",
+		ExposureMode:  contract.QuickServiceExposureHostPublished,
+		PublishHost:   contract.QuickServicePublishLoopbackHost,
+		NetworkName:   "warp-panel_quick_internal",
 	})
 	require.NoError(t, err)
 
@@ -405,6 +408,9 @@ func TestDockerRunnerTaskPayloads(t *testing.T) {
 			require.Equal(t, float64(19000), intent.Payload["host_port"])
 			require.Equal(t, float64(80), intent.Payload["container_port"])
 			require.Equal(t, "quick-excalidraw", intent.Payload["container_name"])
+			require.Equal(t, contract.QuickServiceExposureHostPublished, intent.Payload["exposure_mode"])
+			require.Equal(t, contract.QuickServicePublishLoopbackHost, intent.Payload["publish_host"])
+			require.Equal(t, "warp-panel_quick_internal", intent.Payload["network_name"])
 		}
 	}
 	require.True(t, runtimeIntentFound)

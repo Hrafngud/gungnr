@@ -587,16 +587,15 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 		return fmt.Errorf("parse quick service request: %w", err)
 	}
 	requestedPort := req.RequestedPort
-	if requestedPort == 0 {
-		requestedPort = req.Port
-	}
 	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
 	if err := ValidateSubdomain(req.Subdomain); err != nil {
 		return err
 	}
-	if err := ValidatePort(req.Port); err != nil {
+	exposureMode, err := normalizeQuickServiceExposureRequest(req.ExposureMode, req.Port)
+	if err != nil {
 		return err
 	}
+	req.ExposureMode = exposureMode
 	req.Image = strings.TrimSpace(req.Image)
 	req.ContainerName = strings.TrimSpace(req.ContainerName)
 	if req.Image == "" {
@@ -613,6 +612,42 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 			return err
 		}
 	}
+	if quickServiceRequiresPublishedPort(exposureMode) {
+		if requestedPort == 0 {
+			requestedPort = req.Port
+		}
+		if err := ValidatePort(req.Port); err != nil {
+			return err
+		}
+		if requestedPort != req.Port {
+			logger.Logf("requested host port %d was unavailable at queue time; using host port %d for quick service", requestedPort, req.Port)
+		} else {
+			logger.Logf("using host port %d for quick service", req.Port)
+		}
+	} else {
+		if requestedPort == 0 {
+			requestedPort = req.Port
+		}
+		if err := ValidatePort(req.Port); err != nil {
+			return err
+		}
+		if requestedPort != req.Port {
+			logger.Logf("requested local host port %d was unavailable at queue time; using loopback host port %d for internal quick service", requestedPort, req.Port)
+		} else {
+			logger.Logf("using loopback host port %d for internal quick service", req.Port)
+		}
+		logger.Log("using internal-only quick-service exposure; DNS and tunnel ingress will be skipped")
+	}
+
+	if err := w.runContainer(ctx, logger, req); err != nil {
+		return err
+	}
+
+	if !quickServiceRequiresPublishedPort(exposureMode) {
+		logger.Logf("quick service kept internal-only on %s:%d; skipping tunnel ingress and DNS configuration", contract.QuickServicePublishLoopbackHost, req.Port)
+		return nil
+	}
+
 	runtimeCfg, err := w.settings.ResolveConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
@@ -621,16 +656,6 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 	if err != nil {
 		return err
 	}
-	if requestedPort != req.Port {
-		logger.Logf("requested host port %d was unavailable at queue time; using host port %d for quick service", requestedPort, req.Port)
-	} else {
-		logger.Logf("using host port %d for quick service", req.Port)
-	}
-
-	if err := w.runContainer(ctx, logger, req); err != nil {
-		return err
-	}
-
 	hostname := fmt.Sprintf("%s.%s", req.Subdomain, selection.Domain)
 	logger.Logf("configuring tunnel ingress for %s", hostname)
 	cloudflareClient := cloudflare.NewClient(runtimeCfg)
@@ -658,6 +683,7 @@ func (w *ProjectWorkflows) runContainer(ctx context.Context, logger jobs.Logger,
 		HostPort:      req.Port,
 		ContainerPort: req.ContainerPort,
 		ContainerName: req.ContainerName,
+		ExposureMode:  req.ExposureMode,
 	}
 	return w.dockerRunner.RunContainer(ctx, logger, dockerReq)
 }

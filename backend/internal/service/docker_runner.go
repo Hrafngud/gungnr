@@ -40,6 +40,7 @@ type DockerRunRequest struct {
 	HostPort      int    `json:"hostPort"`
 	ContainerPort int    `json:"containerPort"`
 	ContainerName string `json:"containerName,omitempty"`
+	ExposureMode  string `json:"exposureMode,omitempty"`
 }
 
 type DockerComposeRequest struct {
@@ -55,12 +56,14 @@ func (r *DockerRunner) RunContainer(ctx context.Context, logger jobs.Logger, req
 		return err
 	}
 
+	exposureMode, err := normalizeQuickServiceExposureRequest(req.ExposureMode, req.HostPort)
+	if err != nil {
+		return err
+	}
+
 	image := strings.TrimSpace(req.Image)
 	if image == "" {
 		return fmt.Errorf("docker image is required")
-	}
-	if err := ValidatePort(req.HostPort); err != nil {
-		return err
 	}
 	containerPort := req.ContainerPort
 	if containerPort == 0 {
@@ -80,15 +83,26 @@ func (r *DockerRunner) RunContainer(ctx context.Context, logger jobs.Logger, req
 		return fmt.Errorf("container name is required")
 	}
 
+	if err := ValidatePort(req.HostPort); err != nil {
+		return err
+	}
 	if inUse, err := r.isPortInUse(ctx, req.HostPort); err != nil {
 		return err
 	} else if inUse {
 		return fmt.Errorf("host port %d is already in use", req.HostPort)
 	}
 
-	names, err := r.listContainerNames(ctx)
+	containers, err := r.listContainers(ctx)
 	if err != nil {
 		return err
+	}
+	names := make(map[string]struct{}, len(containers))
+	for _, container := range containers {
+		trimmed := strings.TrimSpace(container.Name)
+		if trimmed == "" {
+			continue
+		}
+		names[trimmed] = struct{}{}
 	}
 	uniqueName := ensureUniqueContainerName(name, names)
 	if uniqueName != name {
@@ -96,12 +110,32 @@ func (r *DockerRunner) RunContainer(ctx context.Context, logger jobs.Logger, req
 		name = uniqueName
 	}
 
+	networkName := inferQuickServiceNetworkName(containers)
+	capabilityProfile := "none"
+	if containerPort < 1024 {
+		capabilityProfile = "NET_BIND_SERVICE"
+	}
+	logger.Logf(
+		"quick-service policy: exposure=%s network=%s publish=%s:%d restart=unless-stopped no-new-privileges=true cap-drop=ALL cap-add=%s pids-limit=%d memory=%s cpus=%s",
+		exposureMode,
+		networkName,
+		contract.QuickServicePublishLoopbackHost,
+		req.HostPort,
+		capabilityProfile,
+		contract.QuickServiceDefaultPIDsLimit,
+		contract.QuickServiceDefaultMemory,
+		contract.QuickServiceDefaultCPUs,
+	)
+	logger.Logf("quick-service publish: %s:%d -> %d/tcp", contract.QuickServicePublishLoopbackHost, req.HostPort, containerPort)
 	logger.Logf("starting docker container %s (%s)", name, image)
 	result, err := r.infra.DockerRunQuickService(ctx, "", contract.DockerRunQuickServicePayload{
 		Image:         image,
 		HostPort:      req.HostPort,
 		ContainerPort: containerPort,
 		ContainerName: name,
+		ExposureMode:  exposureMode,
+		NetworkName:   networkName,
+		PublishHost:   contract.QuickServicePublishLoopbackHost,
 	})
 	if err != nil {
 		return bridgeTaskError("failed to start docker container", contract.TaskTypeDockerRunQuickService, name, err)
@@ -171,6 +205,22 @@ func (r *DockerRunner) containerExists(ctx context.Context, name string) (bool, 
 }
 
 func (r *DockerRunner) listContainerNames(ctx context.Context) (map[string]struct{}, error) {
+	containers, err := r.listContainers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[string]struct{})
+	for _, container := range containers {
+		trimmed := strings.TrimSpace(container.Name)
+		if trimmed == "" {
+			continue
+		}
+		names[trimmed] = struct{}{}
+	}
+	return names, nil
+}
+
+func (r *DockerRunner) listContainers(ctx context.Context) ([]DockerContainer, error) {
 	if r.infra == nil {
 		return nil, fmt.Errorf("infra bridge client unavailable")
 	}
@@ -190,15 +240,7 @@ func (r *DockerRunner) listContainerNames(ctx context.Context) (map[string]struc
 	if err != nil {
 		return nil, fmt.Errorf("parse docker ps payload: %w", err)
 	}
-	names := make(map[string]struct{})
-	for _, container := range containers {
-		trimmed := strings.TrimSpace(container.Name)
-		if trimmed == "" {
-			continue
-		}
-		names[trimmed] = struct{}{}
-	}
-	return names, nil
+	return containers, nil
 }
 
 func (r *DockerRunner) isPortInUse(ctx context.Context, port int) (bool, error) {
