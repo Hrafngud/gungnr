@@ -153,6 +153,11 @@ func main() {
 	} else {
 		log.Printf("db host publish mode=%s", cfg.DBHostPublishMode)
 	}
+	if cfg.DockerNetworkMode == "compat" {
+		log.Printf("docker network guardrails mode=compat edge=edge core=core icc_enforced=false")
+	} else {
+		log.Printf("docker network guardrails mode=enforced edge=edge core=core icc_enforced=true")
+	}
 	log.Printf("server starting on %s", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {
 		log.Fatalf("server exited: %v", err)

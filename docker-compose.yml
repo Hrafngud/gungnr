@@ -16,7 +16,7 @@ services:
     # Enable loopback-only publish with:
     #   docker compose -f docker-compose.yml -f docker-compose.db-host-loopback.yml up -d
     networks:
-      - app-network
+      - core
 
   api:
     build:
@@ -62,6 +62,7 @@ services:
       DB_HOST_PUBLISH_MODE: ${DB_HOST_PUBLISH_MODE:-disabled}
       DB_HOST_PUBLISH_HOST: ${DB_HOST_PUBLISH_HOST:-127.0.0.1}
       DB_HOST_PUBLISH_PORT: ${DB_HOST_PUBLISH_PORT:-5432}
+      DOCKER_NETWORK_GUARDRAILS_MODE: ${DOCKER_NETWORK_GUARDRAILS_MODE:-enforced}
     depends_on:
       db:
         condition: service_healthy
@@ -72,7 +73,7 @@ services:
       retries: 5
     restart: unless-stopped
     networks:
-      - app-network
+      - core
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${TEMPLATES_DIR:-/templates}:${TEMPLATES_DIR:-/templates}
@@ -98,7 +99,7 @@ services:
       retries: 5
     restart: unless-stopped
     networks:
-      - app-network
+      - core
     # Port mapping removed for production; keep if needed locally
     # ports:
     #   - "${WEB_PORT:-4173}:80"
@@ -113,11 +114,22 @@ services:
       - web
       - api
     networks:
-      - app-network
+      - edge
+      - core
 
 networks:
-  app-network:
+  # Hardened default: deny inter-container communication on bridge networks.
+  # Compatibility fallback for engines/drivers that reject this option:
+  #   docker compose -f docker-compose.yml -f docker-compose.network-compat.yml up -d
+  edge:
     driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+  core:
+    driver: bridge
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
 
 volumes:
   pgdata:

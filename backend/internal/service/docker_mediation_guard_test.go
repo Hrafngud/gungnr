@@ -76,6 +76,48 @@ func TestComposeLoopbackDBPublishOverrideIsLoopbackOnly(t *testing.T) {
 	require.Contains(t, content, "DB_HOST_PUBLISH_HOST: 127.0.0.1", "override must surface loopback host in runtime diagnostics")
 }
 
+func TestComposeNetworkCompatOverrideDisablesICCGuardrailsWithoutChangingPlaneNames(t *testing.T) {
+	repoRoot := repoRootFromServiceTest(t)
+	path := filepath.Join(repoRoot, "docker-compose.network-compat.yml")
+
+	contentBytes, err := os.ReadFile(path)
+	require.NoError(t, err)
+	content := string(contentBytes)
+
+	require.Contains(t, content, "DOCKER_NETWORK_GUARDRAILS_MODE: compat", "compat override must align runtime diagnostics with effective network mode")
+	require.Contains(t, content, "edge:\n    driver: bridge", "compat override must redefine edge network without hardened driver opts")
+	require.Contains(t, content, "core:\n    driver: bridge\n    internal: true", "compat override must keep core internal while removing hardened driver opts")
+	require.NotContains(t, content, "com.docker.network.bridge.enable_icc", "compat override must remove ICC driver opts for unsupported engines")
+	require.NotContains(t, content, "edge_compat", "compat override must keep canonical plane names to avoid topology/reporting drift")
+	require.NotContains(t, content, "core_compat", "compat override must keep canonical plane names to avoid topology/reporting drift")
+}
+
+func TestComposeFilesSplitNetworkPlanesWithDeterministicCompatFallback(t *testing.T) {
+	repoRoot := repoRootFromServiceTest(t)
+	composeFiles := []string{
+		filepath.Join(repoRoot, "docker-compose.yml"),
+		filepath.Join(repoRoot, "docker-compose.release.yml"),
+	}
+
+	for _, path := range composeFiles {
+		contentBytes, err := os.ReadFile(path)
+		require.NoError(t, err)
+		content := string(contentBytes)
+
+		require.NotContains(t, content, "app-network", "%s should not keep a flat shared network topology", filepath.Base(path))
+		require.Contains(t, content, "DOCKER_NETWORK_GUARDRAILS_MODE: ${DOCKER_NETWORK_GUARDRAILS_MODE:-enforced}", "%s must surface deterministic guardrail mode to api runtime diagnostics", filepath.Base(path))
+		require.Contains(t, content, "docker compose -f "+filepath.Base(path)+" -f docker-compose.network-compat.yml up -d", "%s must document explicit compat override handling", filepath.Base(path))
+
+		require.Contains(t, content, "edge:\n    driver: bridge\n    driver_opts:\n      com.docker.network.bridge.enable_icc: \"false\"", "%s must enforce ICC guardrail on hardened edge network", filepath.Base(path))
+		require.Contains(t, content, "core:\n    driver: bridge\n    internal: true\n    driver_opts:\n      com.docker.network.bridge.enable_icc: \"false\"", "%s must enforce ICC guardrail on hardened internal core network", filepath.Base(path))
+		require.NotContains(t, content, "edge_compat", "%s must not expose alternate network names that can drift from actual topology", filepath.Base(path))
+		require.NotContains(t, content, "core_compat", "%s must not expose alternate network names that can drift from actual topology", filepath.Base(path))
+		require.Equal(t, 4, strings.Count(content, "- core"), "%s must place db/api/web/proxy on core plane", filepath.Base(path))
+		require.Equal(t, 1, strings.Count(content, "- edge"), "%s must place only proxy on edge plane", filepath.Base(path))
+		require.Contains(t, content, "- \"80:80\"", "%s must keep proxy as the single host-exposed edge entrypoint", filepath.Base(path))
+	}
+}
+
 func findDirectDockerExecViolations(t *testing.T, dir string) []string {
 	t.Helper()
 

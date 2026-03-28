@@ -17,6 +17,7 @@ type Config struct {
 	DBHostPublishMode     string
 	DBHostPublishHost     string
 	DBHostPublishPort     int
+	DockerNetworkMode     string
 	DBMaxOpenConns        int
 	DBMaxIdleConns        int
 	DBConnMaxLifetime     time.Duration
@@ -68,6 +69,7 @@ func Load() (Config, error) {
 	v.SetDefault("DB_HOST_PUBLISH_MODE", "disabled")
 	v.SetDefault("DB_HOST_PUBLISH_HOST", "127.0.0.1")
 	v.SetDefault("DB_HOST_PUBLISH_PORT", 5432)
+	v.SetDefault("DOCKER_NETWORK_GUARDRAILS_MODE", "enforced")
 	v.SetDefault("DB_MAX_OPEN_CONNS", 20)
 	v.SetDefault("DB_MAX_IDLE_CONNS", 10)
 	v.SetDefault("DB_CONN_MAX_LIFETIME_MIN", 30)
@@ -112,6 +114,7 @@ func Load() (Config, error) {
 		DBHostPublishMode:     normalizeDBHostPublishMode(v.GetString("DB_HOST_PUBLISH_MODE")),
 		DBHostPublishHost:     normalizeDBHostPublishHost(v.GetString("DB_HOST_PUBLISH_HOST")),
 		DBHostPublishPort:     normalizeDBHostPublishPort(v.GetInt("DB_HOST_PUBLISH_PORT")),
+		DockerNetworkMode:     normalizeDockerNetworkGuardrailsMode(v.GetString("DOCKER_NETWORK_GUARDRAILS_MODE")),
 		DBMaxOpenConns:        v.GetInt("DB_MAX_OPEN_CONNS"),
 		DBMaxIdleConns:        v.GetInt("DB_MAX_IDLE_CONNS"),
 		DBConnMaxLifetime:     time.Duration(v.GetInt("DB_CONN_MAX_LIFETIME_MIN")) * time.Minute,
@@ -241,4 +244,13 @@ func normalizeDBHostPublishPort(raw int) int {
 		return 5432
 	}
 	return raw
+}
+
+func normalizeDockerNetworkGuardrailsMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "compat":
+		return "compat"
+	default:
+		return "enforced"
+	}
 }

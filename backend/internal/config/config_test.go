@@ -68,3 +68,41 @@ func TestNormalizeDBHostPublishPort(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeDockerNetworkGuardrailsMode(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "defaults to enforced",
+			raw:  "",
+			want: "enforced",
+		},
+		{
+			name: "compat accepted",
+			raw:  "compat",
+			want: "compat",
+		},
+		{
+			name: "compat accepted case-insensitive",
+			raw:  " CoMpAt ",
+			want: "compat",
+		},
+		{
+			name: "invalid values fail closed",
+			raw:  "edge_compat",
+			want: "enforced",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizeDockerNetworkGuardrailsMode(tc.raw); got != tc.want {
+				t.Fatalf("expected network mode %q, got %q", tc.want, got)
+			}
+		})
+	}
+}

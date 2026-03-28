@@ -4,6 +4,24 @@ export interface DockerHealth {
   status: HealthStatus
   detail?: string
   containers?: number
+  dbHostPublish?: DBHostPublishHealthRef
+  networkGuardrails?: DockerNetworkGuardrailsHealthRef
+}
+
+export interface DBHostPublishHealthRef {
+  mode: string
+  enabled: boolean
+  host?: string
+  port?: number
+}
+
+export interface DockerNetworkGuardrailsHealthRef {
+  mode: string
+  iccEnforced: boolean
+  edgeNetwork: string
+  coreNetwork: string
+  fallback: boolean
+  fallbackNotes?: string
 }
 
 export interface TunnelHealth {

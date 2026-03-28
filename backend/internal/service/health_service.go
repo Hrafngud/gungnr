@@ -18,10 +18,11 @@ import (
 )
 
 type DockerHealth struct {
-	Status        string                 `json:"status"`
-	Detail        string                 `json:"detail,omitempty"`
-	Containers    int                    `json:"containers"`
-	DBHostPublish DBHostPublishHealthRef `json:"dbHostPublish"`
+	Status            string                           `json:"status"`
+	Detail            string                           `json:"detail,omitempty"`
+	Containers        int                              `json:"containers"`
+	DBHostPublish     DBHostPublishHealthRef           `json:"dbHostPublish"`
+	NetworkGuardrails DockerNetworkGuardrailsHealthRef `json:"networkGuardrails"`
 }
 
 type DBHostPublishHealthRef struct {
@@ -29,6 +30,15 @@ type DBHostPublishHealthRef struct {
 	Enabled bool   `json:"enabled"`
 	Host    string `json:"host,omitempty"`
 	Port    int    `json:"port,omitempty"`
+}
+
+type DockerNetworkGuardrailsHealthRef struct {
+	Mode          string `json:"mode"`
+	ICCEnforced   bool   `json:"iccEnforced"`
+	EdgeNetwork   string `json:"edgeNetwork"`
+	CoreNetwork   string `json:"coreNetwork"`
+	Fallback      bool   `json:"fallback"`
+	FallbackNotes string `json:"fallbackNotes,omitempty"`
 }
 
 type TunnelHealth struct {
@@ -52,20 +62,22 @@ type TunnelDiagnostics struct {
 }
 
 type HealthService struct {
-	host          *HostService
-	settings      *SettingsService
-	dbPublishMode string
-	dbPublishHost string
-	dbPublishPort int
+	host              *HostService
+	settings          *SettingsService
+	dbPublishMode     string
+	dbPublishHost     string
+	dbPublishPort     int
+	dockerNetworkMode string
 }
 
 func NewHealthService(host *HostService, settings *SettingsService, cfg config.Config) *HealthService {
 	return &HealthService{
-		host:          host,
-		settings:      settings,
-		dbPublishMode: strings.TrimSpace(cfg.DBHostPublishMode),
-		dbPublishHost: strings.TrimSpace(cfg.DBHostPublishHost),
-		dbPublishPort: cfg.DBHostPublishPort,
+		host:              host,
+		settings:          settings,
+		dbPublishMode:     strings.TrimSpace(cfg.DBHostPublishMode),
+		dbPublishHost:     strings.TrimSpace(cfg.DBHostPublishHost),
+		dbPublishPort:     cfg.DBHostPublishPort,
+		dockerNetworkMode: strings.TrimSpace(cfg.DockerNetworkMode),
 	}
 }
 
@@ -80,12 +92,25 @@ func (s *HealthService) Docker(ctx context.Context) DockerHealth {
 		dbPublish.Host = strings.TrimSpace(s.dbPublishHost)
 		dbPublish.Port = s.dbPublishPort
 	}
+	networkGuardrails := DockerNetworkGuardrailsHealthRef{
+		Mode:        "enforced",
+		ICCEnforced: true,
+		EdgeNetwork: "edge",
+		CoreNetwork: "core",
+	}
+	if strings.EqualFold(strings.TrimSpace(s.dockerNetworkMode), "compat") {
+		networkGuardrails.Mode = "compat"
+		networkGuardrails.ICCEnforced = false
+		networkGuardrails.Fallback = true
+		networkGuardrails.FallbackNotes = "bridge ICC guardrail disabled via compat network fallback"
+	}
 
 	if s.host == nil {
 		return DockerHealth{
-			Status:        "error",
-			Detail:        "host service unavailable",
-			DBHostPublish: dbPublish,
+			Status:            "error",
+			Detail:            "host service unavailable",
+			DBHostPublish:     dbPublish,
+			NetworkGuardrails: networkGuardrails,
 		}
 	}
 
@@ -98,18 +123,20 @@ func (s *HealthService) Docker(ctx context.Context) DockerHealth {
 	count, err := s.host.CountRunningContainers(checkCtx)
 	if err != nil {
 		return DockerHealth{
-			Status:        "error",
-			Detail:        err.Error(),
-			DBHostPublish: dbPublish,
+			Status:            "error",
+			Detail:            err.Error(),
+			DBHostPublish:     dbPublish,
+			NetworkGuardrails: networkGuardrails,
 		}
 	}
 
 	detail := fmt.Sprintf("%d containers running", count)
 	return DockerHealth{
-		Status:        "ok",
-		Detail:        detail,
-		Containers:    count,
-		DBHostPublish: dbPublish,
+		Status:            "ok",
+		Detail:            detail,
+		Containers:        count,
+		DBHostPublish:     dbPublish,
+		NetworkGuardrails: networkGuardrails,
 	}
 }
 
