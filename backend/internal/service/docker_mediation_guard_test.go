@@ -92,6 +92,60 @@ func TestComposeNetworkCompatOverrideDisablesICCGuardrailsWithoutChangingPlaneNa
 	require.NotContains(t, content, "core_compat", "compat override must keep canonical plane names to avoid topology/reporting drift")
 }
 
+func TestComposeFilesApplyHardeningProfileWithDocumentedExceptions(t *testing.T) {
+	repoRoot := repoRootFromServiceTest(t)
+	composeFiles := []string{
+		filepath.Join(repoRoot, "docker-compose.yml"),
+		filepath.Join(repoRoot, "docker-compose.release.yml"),
+	}
+
+	for _, path := range composeFiles {
+		contentBytes, err := os.ReadFile(path)
+		require.NoError(t, err)
+		content := string(contentBytes)
+
+		dbSection := composeServiceSection(t, content, "db", "api")
+		require.Contains(t, dbSection, "# Hardening exception: Postgres retains only ownership/user-switch capabilities plus data/runtime-write paths.", "%s must document the Postgres exception set", filepath.Base(path))
+		require.Contains(t, dbSection, "security_opt:\n      - no-new-privileges:true", "%s db must enable no-new-privileges", filepath.Base(path))
+		require.Contains(t, dbSection, "cap_drop:\n      - ALL", "%s db must drop default capabilities", filepath.Base(path))
+		require.Contains(t, dbSection, "cap_add:\n      - CHOWN\n      - DAC_READ_SEARCH\n      - FOWNER\n      - SETGID\n      - SETUID", "%s db must retain only the minimal Postgres ownership/user-switch capabilities", filepath.Base(path))
+		require.Contains(t, dbSection, "read_only: true", "%s db must keep the root filesystem read-only", filepath.Base(path))
+		require.Contains(t, dbSection, "tmpfs:\n      - /tmp\n      - /var/run/postgresql", "%s db must keep only runtime tmpfs paths writable", filepath.Base(path))
+		require.Contains(t, dbSection, "- pgdata:/var/lib/postgresql/data", "%s db must keep the explicit data volume mount", filepath.Base(path))
+		require.Contains(t, dbSection, "pids_limit: 256", "%s db must keep deterministic PID guardrails", filepath.Base(path))
+
+		apiSection := composeServiceSection(t, content, "api", "web")
+		require.Contains(t, apiSection, "# Hardening exception: runtime host integrations keep mounted templates/cloudflared/socket paths writable.", "%s api must document its writable mount exception", filepath.Base(path))
+		require.Contains(t, apiSection, "security_opt:\n      - no-new-privileges:true", "%s api must enable no-new-privileges", filepath.Base(path))
+		require.Contains(t, apiSection, "cap_drop:\n      - ALL", "%s api must drop default capabilities", filepath.Base(path))
+		require.Contains(t, apiSection, "read_only: true", "%s api must keep the root filesystem read-only", filepath.Base(path))
+		require.Contains(t, apiSection, "tmpfs:\n      - /tmp", "%s api must keep only /tmp as writable tmpfs", filepath.Base(path))
+		require.Contains(t, apiSection, "- /var/run/docker.sock:/var/run/docker.sock", "%s api must preserve the explicit docker socket mount", filepath.Base(path))
+		require.Contains(t, apiSection, "- ${TEMPLATES_DIR:-/templates}:${TEMPLATES_DIR:-/templates}", "%s api must preserve the explicit templates mount", filepath.Base(path))
+		require.Contains(t, apiSection, "- ${CLOUDFLARED_DIR:-/home/user/.cloudflared}:${CLOUDFLARED_DIR:-/home/user/.cloudflared}", "%s api must preserve the explicit cloudflared mount", filepath.Base(path))
+		require.Contains(t, apiSection, "pids_limit: 256", "%s api must keep deterministic PID guardrails", filepath.Base(path))
+		require.NotContains(t, apiSection, "cap_add:", "%s api must not retain extra capabilities", filepath.Base(path))
+
+		webSection := composeServiceSection(t, content, "web", "proxy")
+		require.Contains(t, webSection, "# Hardening exception: nginx retains bind/user-switch capabilities plus tmpfs runtime/cache paths.", "%s web must document the nginx capability exception", filepath.Base(path))
+		require.Contains(t, webSection, "security_opt:\n      - no-new-privileges:true", "%s web must enable no-new-privileges", filepath.Base(path))
+		require.Contains(t, webSection, "cap_drop:\n      - ALL", "%s web must drop default capabilities", filepath.Base(path))
+		require.Contains(t, webSection, "cap_add:\n      - NET_BIND_SERVICE\n      - SETGID\n      - SETUID", "%s web must retain only the minimal nginx bind/user-switch capabilities", filepath.Base(path))
+		require.Contains(t, webSection, "read_only: true", "%s web must keep the root filesystem read-only", filepath.Base(path))
+		require.Contains(t, webSection, "tmpfs:\n      - /var/cache/nginx\n      - /var/run\n      - /tmp", "%s web must keep only nginx runtime/cache tmpfs paths writable", filepath.Base(path))
+		require.Contains(t, webSection, "pids_limit: 64", "%s web must keep deterministic PID guardrails", filepath.Base(path))
+
+		proxySection := composeServiceSection(t, content, "proxy", "networks")
+		require.Contains(t, proxySection, "# Hardening exception: nginx retains bind/user-switch capabilities plus tmpfs runtime/cache paths.", "%s proxy must document the nginx capability exception", filepath.Base(path))
+		require.Contains(t, proxySection, "security_opt:\n      - no-new-privileges:true", "%s proxy must enable no-new-privileges", filepath.Base(path))
+		require.Contains(t, proxySection, "cap_drop:\n      - ALL", "%s proxy must drop default capabilities", filepath.Base(path))
+		require.Contains(t, proxySection, "cap_add:\n      - NET_BIND_SERVICE\n      - SETGID\n      - SETUID", "%s proxy must retain only the minimal nginx bind/user-switch capabilities", filepath.Base(path))
+		require.Contains(t, proxySection, "read_only: true", "%s proxy must keep the root filesystem read-only", filepath.Base(path))
+		require.Contains(t, proxySection, "tmpfs:\n      - /var/cache/nginx\n      - /var/run\n      - /tmp", "%s proxy must keep only nginx runtime/cache tmpfs paths writable", filepath.Base(path))
+		require.Contains(t, proxySection, "pids_limit: 64", "%s proxy must keep deterministic PID guardrails", filepath.Base(path))
+	}
+}
+
 func TestComposeFilesSplitNetworkPlanesWithDeterministicCompatFallback(t *testing.T) {
 	repoRoot := repoRootFromServiceTest(t)
 	composeFiles := []string{
@@ -176,6 +230,27 @@ func findDirectDockerExecViolations(t *testing.T, dir string) []string {
 	}
 
 	return violations
+}
+
+func composeServiceSection(t *testing.T, content, service, next string) string {
+	t.Helper()
+
+	startMarker := "  " + service + ":\n"
+	start := strings.Index(content, startMarker)
+	require.NotEqualf(t, -1, start, "compose must include %s service", service)
+
+	var endMarker string
+	if next == "networks" {
+		endMarker = "\nnetworks:\n"
+	} else {
+		endMarker = "\n  " + next + ":\n"
+	}
+
+	searchFrom := start + len(startMarker)
+	endOffset := strings.Index(content[searchFrom:], endMarker)
+	require.NotEqualf(t, -1, endOffset, "%s service must precede %s", service, next)
+
+	return content[start : searchFrom+endOffset]
 }
 
 func dockerCommandFromExecCall(call *ast.CallExpr, execAliases map[string]struct{}) (string, bool) {

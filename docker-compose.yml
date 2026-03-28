@@ -12,6 +12,22 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    # Hardening exception: Postgres retains only ownership/user-switch capabilities plus data/runtime-write paths.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+      - FOWNER
+      - SETGID
+      - SETUID
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+    pids_limit: 256
     # DB host publishing is disabled by default.
     # Enable loopback-only publish with:
     #   docker compose -f docker-compose.yml -f docker-compose.db-host-loopback.yml up -d
@@ -71,6 +87,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # Hardening exception: runtime host integrations keep mounted templates/cloudflared/socket paths writable.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    pids_limit: 256
     restart: unless-stopped
     networks:
       - core
@@ -97,6 +122,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # Hardening exception: nginx retains bind/user-switch capabilities plus tmpfs runtime/cache paths.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - SETGID
+      - SETUID
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    pids_limit: 64
     restart: unless-stopped
     networks:
       - core
@@ -106,6 +146,21 @@ services:
 
   proxy:
     image: nginx:alpine
+    # Hardening exception: nginx retains bind/user-switch capabilities plus tmpfs runtime/cache paths.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - SETGID
+      - SETUID
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    pids_limit: 64
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
