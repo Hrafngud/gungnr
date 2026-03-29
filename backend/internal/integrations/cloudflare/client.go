@@ -65,6 +65,11 @@ type DNSRecord struct {
 	Proxied bool   `json:"proxied"`
 }
 
+type DNSDeleteResult struct {
+	Deleted    bool
+	SkipReason string
+}
+
 type IngressRule struct {
 	Hostname string `json:"hostname"`
 	Service  string `json:"service"`
@@ -183,6 +188,48 @@ func (c *Client) DeleteDNSRecord(ctx context.Context, zoneID, recordID string) e
 	}
 	path := fmt.Sprintf("/zones/%s/dns_records/%s", zoneID, recordID)
 	return c.do(ctx, http.MethodDelete, path, nil, nil)
+}
+
+func (c *Client) DeleteTunnelCNAMERecord(ctx context.Context, zoneID, recordID, hostname, expectedTarget string) (DNSDeleteResult, error) {
+	if err := c.ensureToken(); err != nil {
+		return DNSDeleteResult{}, err
+	}
+
+	zoneID = strings.TrimSpace(zoneID)
+	recordID = strings.TrimSpace(recordID)
+	hostname = strings.ToLower(strings.TrimSpace(hostname))
+	expectedTarget = strings.ToLower(strings.TrimSpace(expectedTarget))
+
+	switch {
+	case zoneID == "" || recordID == "":
+		return DNSDeleteResult{SkipReason: fmt.Sprintf("incomplete target metadata: zone=%q id=%q", zoneID, recordID)}, nil
+	case hostname == "":
+		return DNSDeleteResult{SkipReason: "hostname metadata is missing"}, nil
+	case expectedTarget == "":
+		return DNSDeleteResult{SkipReason: "expected tunnel target is unavailable"}, nil
+	}
+
+	records, err := c.listDNSRecordsByName(ctx, hostname, zoneID)
+	if err != nil {
+		return DNSDeleteResult{}, err
+	}
+
+	record := findDNSRecordByID(records, recordID)
+	if record == nil {
+		return DNSDeleteResult{SkipReason: "it no longer exists"}, nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(record.Type), "CNAME") {
+		return DNSDeleteResult{SkipReason: fmt.Sprintf("type is %s", strings.TrimSpace(record.Type))}, nil
+	}
+	content := strings.ToLower(strings.TrimSpace(record.Content))
+	if content != expectedTarget {
+		return DNSDeleteResult{SkipReason: fmt.Sprintf("target %s no longer matches %s", strings.TrimSpace(record.Content), expectedTarget)}, nil
+	}
+
+	if err := c.DeleteDNSRecord(ctx, zoneID, recordID); err != nil {
+		return DNSDeleteResult{}, err
+	}
+	return DNSDeleteResult{Deleted: true}, nil
 }
 
 func (c *Client) UpdateIngress(ctx context.Context, hostname string, port int) error {
@@ -519,6 +566,18 @@ func (c *Client) createDNSRecord(ctx context.Context, zoneID string, req dnsReco
 func (c *Client) updateDNSRecord(ctx context.Context, zoneID, id string, req dnsRecordRequest) error {
 	path := fmt.Sprintf("/zones/%s/dns_records/%s", zoneID, id)
 	return c.do(ctx, http.MethodPut, path, req, nil)
+}
+
+func findDNSRecordByID(records []dnsRecord, id string) *dnsRecord {
+	trimmed := strings.TrimSpace(id)
+	for _, record := range records {
+		if strings.TrimSpace(record.ID) != trimmed {
+			continue
+		}
+		recordCopy := record
+		return &recordCopy
+	}
+	return nil
 }
 
 type tunnelInfo struct {

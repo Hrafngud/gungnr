@@ -185,54 +185,16 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 				targetHostname := strings.ToLower(strings.TrimSpace(target.Hostname))
 				_, isExposureTarget := exposureHostnameSet[targetHostname]
 
-				if strings.TrimSpace(target.ZoneID) == "" || strings.TrimSpace(target.RecordID) == "" {
-					addArchiveWarning(warnings, fmt.Sprintf("skip DNS record with incomplete target metadata: zone=%q id=%q", target.ZoneID, target.RecordID))
-					if isExposureTarget {
-						exposureSummary.SkippedDNS++
-					}
-					continue
-				}
-				if expectedTarget == "" {
-					addArchiveWarning(warnings, fmt.Sprintf("skip DNS record %s because expected tunnel target is unavailable", target.RecordID))
-					if isExposureTarget {
-						exposureSummary.SkippedDNS++
-					}
-					continue
-				}
-				if strings.TrimSpace(target.Hostname) == "" {
-					addArchiveWarning(warnings, fmt.Sprintf("skip DNS record %s because hostname metadata is missing", target.RecordID))
-					if isExposureTarget {
-						exposureSummary.SkippedDNS++
-					}
-					continue
-				}
-
-				records, err := cfClient.ListDNSRecordsByName(ctx, target.Hostname, target.ZoneID)
+				deleteResult, err := cfClient.DeleteTunnelCNAMERecord(ctx, target.ZoneID, target.RecordID, target.Hostname, expectedTarget)
 				if err != nil {
-					addArchiveWarning(warnings, fmt.Sprintf("list DNS records for %s failed: %v", target.Hostname, err))
+					addArchiveWarning(warnings, fmt.Sprintf("delete DNS record %s failed: %v", target.RecordID, err))
 					if isExposureTarget {
 						exposureSummary.FailedDNS++
 					}
 					continue
 				}
-
-				record := findDNSRecordByID(records, target.RecordID)
-				if record == nil {
-					addArchiveWarning(warnings, fmt.Sprintf("skip DNS record %s because it no longer exists", target.RecordID))
-					if isExposureTarget {
-						exposureSummary.SkippedDNS++
-					}
-					continue
-				}
-				if !strings.EqualFold(strings.TrimSpace(record.Type), "CNAME") {
-					addArchiveWarning(warnings, fmt.Sprintf("skip DNS record %s because type is %s", target.RecordID, record.Type))
-					if isExposureTarget {
-						exposureSummary.SkippedDNS++
-					}
-					continue
-				}
-				if strings.ToLower(strings.TrimSpace(record.Content)) != expectedTarget {
-					addArchiveWarning(warnings, fmt.Sprintf("skip DNS record %s because target %s no longer matches %s", target.RecordID, strings.TrimSpace(record.Content), expectedTarget))
+				if !deleteResult.Deleted {
+					addArchiveWarning(warnings, fmt.Sprintf("skip DNS record %s because %s", target.RecordID, deleteResult.SkipReason))
 					if isExposureTarget {
 						exposureSummary.SkippedDNS++
 					}
@@ -240,13 +202,6 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 				}
 
 				logger.Logf("deleting Cloudflare DNS record %s for %s", target.RecordID, target.Hostname)
-				if err := cfClient.DeleteDNSRecord(ctx, target.ZoneID, target.RecordID); err != nil {
-					addArchiveWarning(warnings, fmt.Sprintf("delete DNS record %s failed: %v", target.RecordID, err))
-					if isExposureTarget {
-						exposureSummary.FailedDNS++
-					}
-					continue
-				}
 				dnsRemoved++
 				if isExposureTarget {
 					exposureSummary.RemovedDNS++
@@ -439,18 +394,6 @@ func dedupeDNSDeleteTargets(values []ProjectArchiveDNSDeleteTarget) []ProjectArc
 		result = append(result, entry)
 	}
 	return result
-}
-
-func findDNSRecordByID(records []cloudflare.DNSRecord, id string) *cloudflare.DNSRecord {
-	trimmed := strings.TrimSpace(id)
-	for _, record := range records {
-		if strings.TrimSpace(record.ID) != trimmed {
-			continue
-		}
-		recordCopy := record
-		return &recordCopy
-	}
-	return nil
 }
 
 func stringSliceSet(values []string) map[string]struct{} {
