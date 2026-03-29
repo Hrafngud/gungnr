@@ -785,13 +785,25 @@
               <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
                 <li>Runtime units includes per-project CPU, RAM, and disk usage indicators.</li>
                 <li>Environment tab edits project <code>.env</code> values from the UI.</li>
-                <li>Archive tab supports dry-run planning and explicit archive execution.</li>
+                <li>Archive tab is contract-frozen around a two-step flow: dry-run preview first, explicit async execution second.</li>
                 <li>Activity timeline keeps project job history and logs in one place.</li>
               </ul>
               <p class="mt-4 text-sm text-[color:var(--muted)]">
                 Key APIs: <code>GET/PUT /api/v1/projects/:name/env</code>, <code>GET /api/v1/host/stats</code>,
                 <code>GET /api/v1/projects/:name/archive/plan</code>, <code>POST /api/v1/projects/:name/archive</code>.
               </p>
+              <p class="mt-4 text-sm text-[color:var(--muted)]">
+                Archive preview now freezes one deterministic operator contract: the preview returns defaults, candidate
+                containers, managed hostnames, service-exposure ownership for <code>forward_local</code> and
+                <code>quick_service</code>, ingress matches, DNS candidates, and warnings before any mutation is queued.
+                Execution reuses the selected toggles and always runs as a background <code>project_archive</code> job.
+              </p>
+              <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                <li><code>forward_local</code> contributes hostname-owned ingress and matching tunnel CNAME cleanup only.</li>
+                <li><code>quick_service</code> in internal mode contributes container cleanup only; ingress and DNS stay out of scope.</li>
+                <li><code>quick_service</code> in host-published mode contributes container cleanup plus managed hostname cleanup when ownership resolves deterministically.</li>
+                <li>Cloudflare DNS deletion remains limited to CNAME records that still point to <code>&lt;tunnel-id&gt;.cfargotunnel.com</code>.</li>
+              </ul>
             </div>
 
             <div
@@ -834,7 +846,7 @@
               data-doc-section
               data-doc-title="NetBird isolation"
               data-doc-group="usage"
-              data-doc-tags="netbird mode mode_a mode_b status acl graph plan apply"
+              data-doc-tags="netbird mode mode_a mode_b status acl graph plan apply reapply rollback"
             >
               <h3 class="text-xl font-semibold">NetBird isolation control plane</h3>
               <p class="mt-2 text-sm text-[color:var(--muted)]">
@@ -843,9 +855,51 @@
               </p>
               <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
                 <li>UI route: <code>/netbird</code> with status, ACL graph, mode planning, and apply controls.</li>
-                <li>Backend APIs: status/config/graph, mode plan/apply, and policies reapply.</li>
-                <li>CLI operators can run <code>gungnr netbird status</code> and <code>gungnr netbird mode --set ...</code>.</li>
+                <li>Authenticated users get read-only status and ACL visibility; mode config, planning, apply, and policy reapply remain admin-only.</li>
+                <li>Backend APIs: status, config, ACL graph, mode plan/apply, and policies reapply.</li>
+                <li>CLI operators can run <code>gungnr netbird status</code> and <code>gungnr netbird mode --set ...</code> against the same backend surface.</li>
               </ul>
+              <div class="mt-4 grid gap-4 lg:grid-cols-2">
+                <div class="card-soft p-5">
+                  <h4 class="text-base font-semibold">Mode behavior</h4>
+                  <ul class="mt-3 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                    <li><code>legacy</code>: panel and project ingress listeners stay on legacy binds (<code>0.0.0.0</code>); no Gungnr-managed NetBird groups or policies remain.</li>
+                    <li><code>mode_a</code>: panel listener moves to <code>wg0</code>; <code>127.0.0.1</code> is added only when <code>allowLocalhost</code> is enabled. Project ingress remains on legacy binds.</li>
+                    <li><code>mode_b</code>: panel follows Mode A, and only the selected <code>modeBProjectIds</code> move project ingress listeners to <code>wg0</code> (plus optional <code>127.0.0.1</code>). Unselected projects stay on legacy binds.</li>
+                  </ul>
+                </div>
+                <div class="card-soft p-5">
+                  <h4 class="text-base font-semibold">Operator flow</h4>
+                  <ul class="mt-3 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                    <li>In the panel, save NetBird mode config first: API token is always required for apply/reapply, while host peer ID and admin peer IDs are additionally required for <code>mode_a</code> and <code>mode_b</code>.</li>
+                    <li>Run dry-run planning before apply. The planner uses <code>targetMode</code>, <code>allowLocalhost</code>, and Mode B project assignments to show policy operations, listener rebindings, redeploy targets, and warnings.</li>
+                    <li>Apply remains asynchronous. The queued <code>netbird_mode_apply</code> job performs plan, managed policy reconcile, listener rebinding, redeploy, and summary logging.</li>
+                    <li>Use policy reapply only to reconcile Gungnr-managed groups and policies for the current effective mode. It does not switch modes, rebind listeners, or redeploy stacks.</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="mt-4 rounded-xl bg-[color:var(--surface-2)] p-5 text-sm text-[color:var(--muted)]">
+                <p class="font-semibold text-[color:var(--text)]">Status, ACL, and rollback notes</p>
+                <ul class="mt-3 flex flex-col gap-2 list-disc pl-4">
+                  <li><code>/netbird</code> status shows connectivity, peer identity, last policy sync, managed counts, API reachability, and <code>currentMode</code> vs <code>configuredMode</code>. Drift is reported when the latest successful apply does not match configured mode or Mode B assignments.</li>
+                  <li>The ACL graph visualizes the effective Gungnr-managed NetBird policy model only. It is not a full Docker/runtime network map.</li>
+                  <li>Deterministic rollback/disable path: apply <code>legacy</code>. Gungnr removes its managed NetBird groups/policies, returns panel and previously assigned Mode B project listeners to legacy binds, and restarts only the panel/project targets whose listener bindings changed.</li>
+                  <li>Rollback does not uninstall the NetBird client, delete the enrolled peer, erase saved NetBird mode config, delete project data or volumes, or modify unrelated NetBird resources outside the Gungnr-managed names.</li>
+                </ul>
+              </div>
+              <div class="mt-4 code-block" id="cmd-netbird-ops">
+                <button class="copy-button" data-copy-target="#cmd-netbird-ops code">Copy</button>
+                <pre class="m-0 text-sm"><code>gungnr netbird status [--api-url URL] [--auth-token TOKEN]
+
+gungnr netbird mode --set &lt;legacy|mode_a|mode_b&gt; [--allow-localhost] \
+  [--api-url URL] [--auth-token TOKEN] \
+  [--netbird-api-base-url URL] [--netbird-api-token TOKEN] \
+  [--host-peer-id ID] [--admin-peer-ids id1,id2] [--yes]</code></pre>
+              </div>
+              <p class="mt-3 text-sm text-[color:var(--muted)]">
+                CLI status reads the panel status API and prints connectivity, policy-sync, and managed-resource blocks.
+                Panel auth can come from <code>--auth-token</code>, <code>GUNGNR_API_TOKEN</code>, or a CLI-issued test token from <code>~/.gungnr/.env</code>. CLI mode switching always requests a dry-run first, prints operation counts and warnings, then polls the queued job until a terminal outcome is reached.
+              </p>
             </div>
 
             <div
@@ -867,8 +921,8 @@ gungnr bootstrap [--plain]
 gungnr restart
 gungnr tunnel run
 gungnr keepalive
-gungnr netbird status
-gungnr netbird mode --set &lt;legacy|mode_a|mode_b&gt; [--allow-localhost]
+gungnr netbird status [--api-url URL] [--auth-token TOKEN]
+gungnr netbird mode --set &lt;legacy|mode_a|mode_b&gt; [--allow-localhost] [--api-url URL] [--auth-token TOKEN]
 gungnr uninstall [--yes]</code></pre>
               </div>
             </div>

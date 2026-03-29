@@ -107,6 +107,14 @@ export interface ProjectArchivePlanContainer {
   service: string
 }
 
+export interface ProjectArchivePlanServiceExposure {
+  jobId: number
+  type: string
+  hostname: string
+  container?: string
+  resolution: string
+}
+
 export interface ProjectArchivePlanIngressRule {
   hostname: string
   service: string
@@ -129,6 +137,7 @@ export interface ProjectArchivePlan {
   defaults: ProjectArchiveOptions
   hostnames: string[]
   containers: ProjectArchivePlanContainer[]
+  serviceExposures: ProjectArchivePlanServiceExposure[]
   ingressRules: ProjectArchivePlanIngressRule[]
   dnsRecords: ProjectArchivePlanDNSRecord[]
   warnings: string[]
