@@ -33,6 +33,14 @@ type projectArchiveServiceExposureSummary struct {
 	FailedDNS  int
 }
 
+type projectArchiveStepStatus string
+
+const (
+	projectArchiveStepStatusCompleted      projectArchiveStepStatus = "completed"
+	projectArchiveStepStatusPartialFailure projectArchiveStepStatus = "partial_failure"
+	projectArchiveStepStatusSkipped        projectArchiveStepStatus = "skipped"
+)
+
 func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.Job, logger jobs.Logger) error {
 	var req ProjectArchiveJobRequest
 	if err := json.Unmarshal([]byte(job.Input), &req); err != nil {
@@ -51,6 +59,7 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 	options := normalizeArchiveOptions(req.Options)
 	warnings := make(map[string]struct{})
 
+	targetContainers := dedupeStrings(req.Targets.Containers)
 	exposureContainers := dedupeStrings(req.Targets.ExposureContainers)
 	exposureHostnames := dedupeHostnames(req.Targets.ExposureHostnames)
 	exposureContainerSet := stringSliceSet(exposureContainers)
@@ -60,13 +69,25 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 		TargetHostnames:  len(exposureHostnames),
 	}
 
+	projectContainerTargets := countStringsExcludingSet(targetContainers, exposureContainerSet)
 	removedContainers := 0
+	projectContainersRemoved := 0
+	projectContainersFailed := 0
+	logProjectArchiveStepStart(
+		logger,
+		"containers",
+		"remove_containers=%t remove_volumes=%t project_targets=%d exposure_targets=%d",
+		options.RemoveContainers,
+		options.RemoveVolumes,
+		projectContainerTargets,
+		exposureSummary.TargetContainers,
+	)
 	if options.RemoveContainers {
 		if w.host == nil {
 			addArchiveWarning(warnings, "host service unavailable while removing project containers")
+			projectContainersFailed = projectContainerTargets
 			exposureSummary.FailedContainers += exposureSummary.TargetContainers
 		} else {
-			targetContainers := dedupeStrings(req.Targets.Containers)
 			targetContainerSet := stringSliceSet(targetContainers)
 			for container := range exposureContainerSet {
 				if _, ok := targetContainerSet[container]; ok {
@@ -87,30 +108,71 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 					logger.Logf("container removal warning: %v", err)
 					if isExposureContainer {
 						exposureSummary.FailedContainers++
+					} else {
+						projectContainersFailed++
 					}
 					continue
 				}
 				removedContainers++
 				if isExposureContainer {
 					exposureSummary.RemovedContainers++
+				} else {
+					projectContainersRemoved++
 				}
 			}
 		}
-	} else if exposureSummary.TargetContainers > 0 {
+	} else {
 		exposureSummary.SkippedContainers = exposureSummary.TargetContainers
 		logger.Logf("service-exposure container cleanup skipped because removeContainers=false (%d target(s))", exposureSummary.TargetContainers)
 	}
+	containersStepStatus := projectArchiveStepStatusCompleted
+	if !options.RemoveContainers {
+		containersStepStatus = projectArchiveStepStatusSkipped
+	} else if w.host == nil || projectContainersFailed > 0 || exposureSummary.FailedContainers > 0 {
+		containersStepStatus = projectArchiveStepStatusPartialFailure
+	}
+	logProjectArchiveStepResult(
+		logger,
+		"containers",
+		containersStepStatus,
+		"project_targets=%d project_removed=%d project_failed=%d exposure_targets=%d exposure_removed=%d exposure_skipped=%d exposure_failed=%d total_removed=%d",
+		projectContainerTargets,
+		projectContainersRemoved,
+		projectContainersFailed,
+		exposureSummary.TargetContainers,
+		exposureSummary.RemovedContainers,
+		exposureSummary.SkippedContainers,
+		exposureSummary.FailedContainers,
+		removedContainers,
+	)
 
 	runtimeCfg, err := w.resolveArchiveRuntimeConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("resolve runtime config: %w", err)
 	}
 
+	hostnames := dedupeHostnames(req.Targets.Hostnames)
+	ingressTargets := normalizeIngressDeleteTargets(req.Targets.IngressRules)
+	remoteTargets := filterIngressDeleteTargetsBySource(ingressTargets, "remote")
+	localTargets := filterIngressDeleteTargetsBySource(ingressTargets, "local")
+	projectHostnameTargets := countStringsExcludingSet(hostnames, exposureHostnameSet)
 	remoteIngressRemoved := 0
 	localIngressRemoved := 0
+	ingressStepFailed := false
+	tunnelRestarted := false
+	tunnelRestartFailed := false
+	logProjectArchiveStepStart(
+		logger,
+		"ingress",
+		"remove_ingress=%t project_hostnames=%d exposure_hostnames=%d target_rules=%d remote_rules=%d local_rules=%d",
+		options.RemoveIngress,
+		projectHostnameTargets,
+		exposureSummary.TargetHostnames,
+		len(ingressTargets),
+		len(remoteTargets),
+		len(localTargets),
+	)
 	if options.RemoveIngress {
-		ingressTargets := normalizeIngressDeleteTargets(req.Targets.IngressRules)
-		hostnames := dedupeHostnames(req.Targets.Hostnames)
 		targetHostnameSet := stringSliceSet(hostnames)
 		for hostname := range exposureHostnameSet {
 			if _, ok := targetHostnameSet[hostname]; ok {
@@ -124,8 +186,6 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 			exposureSummary.SkippedIngress += exposureSummary.TargetHostnames
 		} else {
 			cfClient := cloudflare.NewClient(runtimeCfg)
-			remoteTargets := filterIngressDeleteTargetsBySource(ingressTargets, "remote")
-			localTargets := filterIngressDeleteTargetsBySource(ingressTargets, "local")
 			remoteTunnelMismatch := false
 
 			if len(remoteTargets) > 0 {
@@ -136,6 +196,7 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 					} else {
 						addArchiveWarning(warnings, fmt.Sprintf("remove remote ingress rules failed: %v", removeErr))
 						exposureSummary.FailedIngress += countHostnamesInSet(hostnames, exposureHostnameSet)
+						ingressStepFailed = true
 					}
 				} else {
 					remoteIngressRemoved = len(removedRemote)
@@ -149,6 +210,7 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 				if localErr != nil {
 					addArchiveWarning(warnings, fmt.Sprintf("remove local ingress rules failed: %v", localErr))
 					exposureSummary.FailedIngress += countHostnamesInSet(hostnames, exposureHostnameSet)
+					ingressStepFailed = true
 				} else {
 					localIngressRemoved = len(removedLocal)
 					exposureSummary.RemovedIngressLocal += countIngressRulesForHostnames(removedLocal, exposureHostnameSet)
@@ -156,6 +218,10 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 					if localIngressRemoved > 0 {
 						if restartErr := w.restartTunnelForArchive(ctx, logger, fmt.Sprintf("job-%d", job.ID), runtimeCfg.CloudflaredConfig); restartErr != nil {
 							addArchiveWarning(warnings, fmt.Sprintf("cloudflared restart after ingress cleanup failed: %v", restartErr))
+							tunnelRestartFailed = true
+							ingressStepFailed = true
+						} else {
+							tunnelRestarted = true
 						}
 					}
 				}
@@ -167,9 +233,10 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 			} else if remoteTunnelMismatch && len(localTargets) == 0 {
 				addArchiveWarning(warnings, "remote ingress cleanup skipped because the tunnel is locally managed and no planned local ingress rules were available")
 				exposureSummary.FailedIngress += countHostnamesInSet(hostnames, exposureHostnameSet)
+				ingressStepFailed = true
 			}
 		}
-	} else if exposureSummary.TargetHostnames > 0 {
+	} else {
 		exposureSummary.SkippedIngress = exposureSummary.TargetHostnames
 		logger.Logf("service-exposure ingress cleanup skipped because removeIngress=false (%d target(s))", exposureSummary.TargetHostnames)
 	}
@@ -184,10 +251,47 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 			exposureSummary.SkippedIngress += remainingIngress
 		}
 	}
+	ingressStepStatus := projectArchiveStepStatusCompleted
+	if !options.RemoveIngress {
+		ingressStepStatus = projectArchiveStepStatusSkipped
+	} else if ingressStepFailed {
+		ingressStepStatus = projectArchiveStepStatusPartialFailure
+	}
+	logProjectArchiveStepResult(
+		logger,
+		"ingress",
+		ingressStepStatus,
+		"project_hostnames=%d exposure_hostnames=%d target_rules=%d remote_rules=%d local_rules=%d removed_remote=%d removed_local=%d exposure_removed_remote=%d exposure_removed_local=%d exposure_skipped=%d exposure_failed=%d tunnel_restarted=%t tunnel_restart_failed=%t",
+		projectHostnameTargets,
+		exposureSummary.TargetHostnames,
+		len(ingressTargets),
+		len(remoteTargets),
+		len(localTargets),
+		remoteIngressRemoved,
+		localIngressRemoved,
+		exposureSummary.RemovedIngressRemote,
+		exposureSummary.RemovedIngressLocal,
+		exposureSummary.SkippedIngress,
+		exposureSummary.FailedIngress,
+		tunnelRestarted,
+		tunnelRestartFailed,
+	)
 
 	dnsRemoved := 0
 	dnsTargets := dedupeDNSDeleteTargets(req.Targets.DNSRecords)
 	exposureSummary.TargetDNS = countExposureDNSTargets(dnsTargets, exposureHostnameSet)
+	dnsStepFailed := false
+	dnsSkippedRecords := 0
+	dnsFailedRecords := 0
+	expectedTargetResolved := false
+	logProjectArchiveStepStart(
+		logger,
+		"dns",
+		"remove_dns=%t target_records=%d exposure_records=%d",
+		options.RemoveDNS,
+		len(dnsTargets),
+		exposureSummary.TargetDNS,
+	)
 	if options.RemoveDNS {
 		if len(dnsTargets) == 0 {
 			addArchiveWarning(warnings, "DNS cleanup requested but no deletable records were targeted")
@@ -197,6 +301,9 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 			expectedTarget, expectedErr := cfClient.ExpectedTunnelCNAME(ctx)
 			if expectedErr != nil {
 				addArchiveWarning(warnings, fmt.Sprintf("resolve tunnel dns target failed: %v", expectedErr))
+				dnsStepFailed = true
+			} else {
+				expectedTargetResolved = true
 			}
 			expectedTarget = strings.ToLower(strings.TrimSpace(expectedTarget))
 
@@ -207,6 +314,8 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 				deleteResult, err := cfClient.DeleteTunnelCNAMERecord(ctx, target.ZoneID, target.RecordID, target.Hostname, expectedTarget)
 				if err != nil {
 					addArchiveWarning(warnings, fmt.Sprintf("delete DNS record %s failed: %v", target.RecordID, err))
+					dnsFailedRecords++
+					dnsStepFailed = true
 					if isExposureTarget {
 						exposureSummary.FailedDNS++
 					}
@@ -214,6 +323,7 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 				}
 				if !deleteResult.Deleted {
 					addArchiveWarning(warnings, fmt.Sprintf("skip DNS record %s because %s", target.RecordID, deleteResult.SkipReason))
+					dnsSkippedRecords++
 					if isExposureTarget {
 						exposureSummary.SkippedDNS++
 					}
@@ -227,7 +337,7 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 				}
 			}
 		}
-	} else if exposureSummary.TargetDNS > 0 {
+	} else {
 		exposureSummary.SkippedDNS = exposureSummary.TargetDNS
 		logger.Logf("service-exposure DNS cleanup skipped because removeDns=false (%d target(s))", exposureSummary.TargetDNS)
 	}
@@ -238,54 +348,107 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 			exposureSummary.SkippedDNS += remainingDNS
 		}
 	}
+	dnsStepStatus := projectArchiveStepStatusCompleted
+	if !options.RemoveDNS {
+		dnsStepStatus = projectArchiveStepStatusSkipped
+	} else if dnsStepFailed {
+		dnsStepStatus = projectArchiveStepStatusPartialFailure
+	}
+	logProjectArchiveStepResult(
+		logger,
+		"dns",
+		dnsStepStatus,
+		"target_records=%d removed=%d skipped=%d failed=%d exposure_records=%d exposure_removed=%d exposure_skipped=%d exposure_failed=%d expected_target_resolved=%t",
+		len(dnsTargets),
+		dnsRemoved,
+		dnsSkippedRecords,
+		dnsFailedRecords,
+		exposureSummary.TargetDNS,
+		exposureSummary.RemovedDNS,
+		exposureSummary.SkippedDNS,
+		exposureSummary.FailedDNS,
+		expectedTargetResolved,
+	)
 
 	statusPersisted := false
+	auditLogged := false
+	statusAuditStepFailed := false
+	logProjectArchiveStepStart(logger, "status_audit", "project=%s audit_enabled=%t", req.Project, w.audit != nil)
 	projectRecord, err := lookupProjectRecord(ctx, w.projects, req.Project)
 	if err != nil {
 		addArchiveWarning(warnings, fmt.Sprintf("project status update skipped: resolve project record failed: %v", err))
+		statusAuditStepFailed = true
 	} else if projectRecord == nil {
 		addArchiveWarning(warnings, fmt.Sprintf("project status update skipped: no project database row found for %s", req.Project))
+		statusAuditStepFailed = true
 	} else {
 		projectRecord.Status = "archived"
 		if err := w.projects.Update(ctx, projectRecord); err != nil {
 			addArchiveWarning(warnings, fmt.Sprintf("project status update failed: %v", err))
+			statusAuditStepFailed = true
 		} else {
 			statusPersisted = true
 		}
 	}
 
-	if exposureSummary.TargetContainers+exposureSummary.TargetHostnames+exposureSummary.TargetDNS == 0 {
-		logger.Log("service-exposure cleanup summary: no resolved forward_local/quick_service targets")
-	} else {
-		logger.Logf(
-			"service-exposure cleanup summary: containers target=%d removed=%d skipped=%d failed=%d | ingress target=%d removed_remote=%d removed_local=%d skipped=%d failed=%d | dns target=%d removed=%d skipped=%d failed=%d",
-			exposureSummary.TargetContainers,
-			exposureSummary.RemovedContainers,
-			exposureSummary.SkippedContainers,
-			exposureSummary.FailedContainers,
-			exposureSummary.TargetHostnames,
-			exposureSummary.RemovedIngressRemote,
-			exposureSummary.RemovedIngressLocal,
-			exposureSummary.SkippedIngress,
-			exposureSummary.FailedIngress,
-			exposureSummary.TargetDNS,
-			exposureSummary.RemovedDNS,
-			exposureSummary.SkippedDNS,
-			exposureSummary.FailedDNS,
-		)
+	statusAuditStepStatusForAudit := projectArchiveStepStatusCompleted
+	if statusAuditStepFailed {
+		statusAuditStepStatusForAudit = projectArchiveStepStatusPartialFailure
 	}
-
-	if len(warnings) == 0 {
-		logger.Logf("archive completed for project %s", req.Project)
-	} else {
-		sortedWarnings := sortedArchiveWarnings(warnings)
-		logger.Logf("archive completed with warnings for project %s (%d warning(s))", req.Project, len(sortedWarnings))
-		for _, warning := range sortedWarnings {
-			logger.Logf("warning: %s", warning)
-		}
-	}
+	sortedWarnings := sortedArchiveWarnings(warnings)
+	auditWarningCount := 0
 
 	if w.audit != nil {
+		completionSummary := map[string]any{
+			"outcome":      projectArchiveExecutionOutcome(containersStepStatus, ingressStepStatus, dnsStepStatus, statusAuditStepStatusForAudit, len(sortedWarnings)),
+			"warningCount": len(sortedWarnings),
+			"steps": map[string]any{
+				"containers": map[string]any{
+					"status":               string(containersStepStatus),
+					"projectTargetCount":   projectContainerTargets,
+					"projectRemovedCount":  projectContainersRemoved,
+					"projectFailedCount":   projectContainersFailed,
+					"exposureTargetCount":  exposureSummary.TargetContainers,
+					"exposureRemovedCount": exposureSummary.RemovedContainers,
+					"exposureSkippedCount": exposureSummary.SkippedContainers,
+					"exposureFailedCount":  exposureSummary.FailedContainers,
+					"totalRemovedCount":    removedContainers,
+					"removeContainers":     options.RemoveContainers,
+					"removeVolumes":        options.RemoveVolumes,
+				},
+				"ingress": map[string]any{
+					"status":                 string(ingressStepStatus),
+					"projectHostnameCount":   projectHostnameTargets,
+					"exposureHostnameCount":  exposureSummary.TargetHostnames,
+					"targetRuleCount":        len(ingressTargets),
+					"remoteRuleCount":        len(remoteTargets),
+					"localRuleCount":         len(localTargets),
+					"removedRemoteRuleCount": remoteIngressRemoved,
+					"removedLocalRuleCount":  localIngressRemoved,
+					"tunnelRestarted":        tunnelRestarted,
+					"tunnelRestartFailed":    tunnelRestartFailed,
+					"removeIngress":          options.RemoveIngress,
+				},
+				"dns": map[string]any{
+					"status":                 string(dnsStepStatus),
+					"targetRecordCount":      len(dnsTargets),
+					"removedRecordCount":     dnsRemoved,
+					"skippedRecordCount":     dnsSkippedRecords,
+					"failedRecordCount":      dnsFailedRecords,
+					"exposureTargetCount":    exposureSummary.TargetDNS,
+					"exposureRemovedCount":   exposureSummary.RemovedDNS,
+					"exposureSkippedCount":   exposureSummary.SkippedDNS,
+					"exposureFailedCount":    exposureSummary.FailedDNS,
+					"expectedTargetResolved": expectedTargetResolved,
+					"removeDns":              options.RemoveDNS,
+				},
+				"statusAudit": map[string]any{
+					"status":          string(statusAuditStepStatusForAudit),
+					"statusPersisted": statusPersisted,
+					"auditLogged":     true,
+				},
+			},
+		}
 		metadata := map[string]any{
 			"project":              req.Project,
 			"jobId":                job.ID,
@@ -313,7 +476,8 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 				"skippedDnsRecords":    exposureSummary.SkippedDNS,
 				"failedDnsRecords":     exposureSummary.FailedDNS,
 			},
-			"warnings": sortedArchiveWarnings(warnings),
+			"completionSummary": completionSummary,
+			"warnings":          sortedWarnings,
 		}
 		if err := w.audit.Log(ctx, AuditEntry{
 			UserID:    req.RequestedBy.UserID,
@@ -322,8 +486,69 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 			Target:    req.Project,
 			Metadata:  metadata,
 		}); err != nil {
+			statusAuditStepFailed = true
+			auditWarningCount = 1
 			logger.Logf("audit warning: failed to write archive completion event: %v", err)
+		} else {
+			auditLogged = true
 		}
+	}
+
+	statusAuditStepStatus := projectArchiveStepStatusCompleted
+	if statusAuditStepFailed {
+		statusAuditStepStatus = projectArchiveStepStatusPartialFailure
+	}
+	logProjectArchiveStepResult(
+		logger,
+		"status_audit",
+		statusAuditStepStatus,
+		"status_persisted=%t audit_logged=%t",
+		statusPersisted,
+		auditLogged,
+	)
+
+	if exposureSummary.TargetContainers+exposureSummary.TargetHostnames+exposureSummary.TargetDNS == 0 {
+		logger.Log("service-exposure cleanup summary: no resolved forward_local/quick_service targets")
+	} else {
+		logger.Logf(
+			"service-exposure cleanup summary: containers target=%d removed=%d skipped=%d failed=%d | ingress target=%d removed_remote=%d removed_local=%d skipped=%d failed=%d | dns target=%d removed=%d skipped=%d failed=%d",
+			exposureSummary.TargetContainers,
+			exposureSummary.RemovedContainers,
+			exposureSummary.SkippedContainers,
+			exposureSummary.FailedContainers,
+			exposureSummary.TargetHostnames,
+			exposureSummary.RemovedIngressRemote,
+			exposureSummary.RemovedIngressLocal,
+			exposureSummary.SkippedIngress,
+			exposureSummary.FailedIngress,
+			exposureSummary.TargetDNS,
+			exposureSummary.RemovedDNS,
+			exposureSummary.SkippedDNS,
+			exposureSummary.FailedDNS,
+		)
+	}
+
+	totalWarningCount := len(sortedWarnings) + auditWarningCount
+	overallOutcome := projectArchiveExecutionOutcome(containersStepStatus, ingressStepStatus, dnsStepStatus, statusAuditStepStatus, totalWarningCount)
+	logger.Logf(
+		"archive completion summary: outcome=%s warnings=%d steps=containers:%s ingress:%s dns:%s status_audit:%s",
+		overallOutcome,
+		totalWarningCount,
+		containersStepStatus,
+		ingressStepStatus,
+		dnsStepStatus,
+		statusAuditStepStatus,
+	)
+	switch overallOutcome {
+	case "partial_failure":
+		logger.Logf("archive completed with partial failures for project %s (warning_count=%d)", req.Project, totalWarningCount)
+	case "completed_with_warnings":
+		logger.Logf("archive completed with warnings for project %s (%d warning(s))", req.Project, totalWarningCount)
+	default:
+		logger.Logf("archive completed for project %s", req.Project)
+	}
+	for _, warning := range sortedWarnings {
+		logger.Logf("warning: %s", warning)
 	}
 
 	return nil
@@ -524,4 +749,64 @@ func countExposureDNSTargets(targets []ProjectArchiveDNSDeleteTarget, exposureHo
 		}
 	}
 	return count
+}
+
+func countStringsExcludingSet(values []string, excluded map[string]struct{}) int {
+	if len(values) == 0 {
+		return 0
+	}
+	count := 0
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := excluded[trimmed]; ok {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func projectArchiveExecutionOutcome(
+	containers projectArchiveStepStatus,
+	ingress projectArchiveStepStatus,
+	dns projectArchiveStepStatus,
+	statusAudit projectArchiveStepStatus,
+	warningCount int,
+) string {
+	for _, status := range []projectArchiveStepStatus{containers, ingress, dns, statusAudit} {
+		if status == projectArchiveStepStatusPartialFailure {
+			return "partial_failure"
+		}
+	}
+	if warningCount > 0 {
+		return "completed_with_warnings"
+	}
+	return "completed"
+}
+
+func logProjectArchiveStepStart(logger jobs.Logger, step string, format string, args ...any) {
+	if logger == nil {
+		return
+	}
+	message := strings.TrimSpace(fmt.Sprintf(format, args...))
+	if message == "" {
+		logger.Logf("archive step %s: start", step)
+		return
+	}
+	logger.Logf("archive step %s: start %s", step, message)
+}
+
+func logProjectArchiveStepResult(logger jobs.Logger, step string, status projectArchiveStepStatus, format string, args ...any) {
+	if logger == nil {
+		return
+	}
+	message := strings.TrimSpace(fmt.Sprintf(format, args...))
+	if message == "" {
+		logger.Logf("archive step %s: result=%s", step, status)
+		return
+	}
+	logger.Logf("archive step %s: result=%s %s", step, status, message)
 }
