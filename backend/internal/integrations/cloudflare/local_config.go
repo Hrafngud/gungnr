@@ -49,7 +49,31 @@ func RemoveLocalIngressHostnames(configPath string, hostnames []string) ([]Ingre
 	}
 
 	ingress := coerceIngress(payload["ingress"])
-	removed, nextIngress := removeIngressRules(ingress, targets)
+	removed, nextIngress := removeIngressRulesByHostname(ingress, targets)
+	if len(removed) == 0 {
+		return []IngressRule{}, nil
+	}
+
+	payload["ingress"] = ensureCatchAllRule(nextIngress)
+	if err := writeLocalConfigPayload(path, payload); err != nil {
+		return nil, err
+	}
+	return removed, nil
+}
+
+func RemoveLocalIngressRules(configPath string, targets []IngressRule) ([]IngressRule, error) {
+	normalizedTargets := normalizeIngressRuleTargets(targets)
+	if len(normalizedTargets) == 0 {
+		return []IngressRule{}, nil
+	}
+
+	path, payload, err := readLocalConfigPayload(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	ingress := coerceIngress(payload["ingress"])
+	removed, nextIngress := removeIngressRulesByExactTarget(ingress, normalizedTargets)
 	if len(removed) == 0 {
 		return []IngressRule{}, nil
 	}

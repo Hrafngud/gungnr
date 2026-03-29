@@ -86,12 +86,19 @@ type ProjectArchiveDNSDeleteTarget struct {
 	Content  string `json:"content"`
 }
 
+type ProjectArchiveIngressDeleteTarget struct {
+	Hostname string `json:"hostname"`
+	Service  string `json:"service"`
+	Source   string `json:"source"`
+}
+
 type ProjectArchiveTargets struct {
-	Containers         []string                        `json:"containers"`
-	Hostnames          []string                        `json:"hostnames"`
-	ExposureContainers []string                        `json:"exposureContainers,omitempty"`
-	ExposureHostnames  []string                        `json:"exposureHostnames,omitempty"`
-	DNSRecords         []ProjectArchiveDNSDeleteTarget `json:"dnsRecords"`
+	Containers         []string                            `json:"containers"`
+	Hostnames          []string                            `json:"hostnames"`
+	ExposureContainers []string                            `json:"exposureContainers,omitempty"`
+	ExposureHostnames  []string                            `json:"exposureHostnames,omitempty"`
+	IngressRules       []ProjectArchiveIngressDeleteTarget `json:"ingressRules,omitempty"`
+	DNSRecords         []ProjectArchiveDNSDeleteTarget     `json:"dnsRecords"`
 }
 
 type ProjectArchiveJobRequest struct {
@@ -212,6 +219,7 @@ func (s *ProjectArchiveService) Queue(
 		Hostnames:          []string{},
 		ExposureContainers: []string{},
 		ExposureHostnames:  []string{},
+		IngressRules:       []ProjectArchiveIngressDeleteTarget{},
 		DNSRecords:         []ProjectArchiveDNSDeleteTarget{},
 	}
 
@@ -239,6 +247,17 @@ func (s *ProjectArchiveService) Queue(
 				continue
 			}
 			targets.ExposureHostnames = append(targets.ExposureHostnames, hostname)
+		}
+		for _, ingress := range plan.Ingress {
+			hostname := strings.ToLower(strings.TrimSpace(ingress.Hostname))
+			if hostname == "" {
+				continue
+			}
+			targets.IngressRules = append(targets.IngressRules, ProjectArchiveIngressDeleteTarget{
+				Hostname: hostname,
+				Service:  strings.TrimSpace(ingress.Service),
+				Source:   strings.ToLower(strings.TrimSpace(ingress.Source)),
+			})
 		}
 	}
 	if options.RemoveDNS {

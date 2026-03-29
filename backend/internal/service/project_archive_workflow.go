@@ -109,6 +109,7 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 	remoteIngressRemoved := 0
 	localIngressRemoved := 0
 	if options.RemoveIngress {
+		ingressTargets := normalizeIngressDeleteTargets(req.Targets.IngressRules)
 		hostnames := dedupeHostnames(req.Targets.Hostnames)
 		targetHostnameSet := stringSliceSet(hostnames)
 		for hostname := range exposureHostnameSet {
@@ -118,36 +119,54 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 			exposureSummary.SkippedIngress++
 		}
 
-		if len(hostnames) == 0 {
-			addArchiveWarning(warnings, "ingress cleanup requested but no hostnames were targeted")
+		if len(ingressTargets) == 0 {
+			addArchiveWarning(warnings, "ingress cleanup requested but no planned ingress rules were targeted")
 			exposureSummary.SkippedIngress += exposureSummary.TargetHostnames
 		} else {
 			cfClient := cloudflare.NewClient(runtimeCfg)
-			removedRemote, removeErr := cfClient.RemoveIngressHostnames(ctx, hostnames)
-			if removeErr != nil {
-				if errors.Is(removeErr, cloudflare.ErrTunnelNotRemote) {
-					removedLocal, localErr := cloudflare.RemoveLocalIngressHostnames(runtimeCfg.CloudflaredConfig, hostnames)
-					if localErr != nil {
-						addArchiveWarning(warnings, fmt.Sprintf("remove local ingress rules failed: %v", localErr))
-						exposureSummary.FailedIngress += countHostnamesInSet(hostnames, exposureHostnameSet)
+			remoteTargets := filterIngressDeleteTargetsBySource(ingressTargets, "remote")
+			localTargets := filterIngressDeleteTargetsBySource(ingressTargets, "local")
+			remoteTunnelMismatch := false
+
+			if len(remoteTargets) > 0 {
+				removedRemote, removeErr := cfClient.RemoveIngressRules(ctx, remoteTargets)
+				if removeErr != nil {
+					if errors.Is(removeErr, cloudflare.ErrTunnelNotRemote) {
+						remoteTunnelMismatch = true
 					} else {
-						localIngressRemoved = len(removedLocal)
-						exposureSummary.RemovedIngressLocal += countIngressRulesForHostnames(removedLocal, exposureHostnameSet)
-						logger.Logf("removed %d local ingress rules", localIngressRemoved)
-						if localIngressRemoved > 0 {
-							if restartErr := w.restartTunnelForArchive(ctx, logger, fmt.Sprintf("job-%d", job.ID), runtimeCfg.CloudflaredConfig); restartErr != nil {
-								addArchiveWarning(warnings, fmt.Sprintf("cloudflared restart after ingress cleanup failed: %v", restartErr))
-							}
-						}
+						addArchiveWarning(warnings, fmt.Sprintf("remove remote ingress rules failed: %v", removeErr))
+						exposureSummary.FailedIngress += countHostnamesInSet(hostnames, exposureHostnameSet)
 					}
 				} else {
-					addArchiveWarning(warnings, fmt.Sprintf("remove remote ingress rules failed: %v", removeErr))
-					exposureSummary.FailedIngress += countHostnamesInSet(hostnames, exposureHostnameSet)
+					remoteIngressRemoved = len(removedRemote)
+					exposureSummary.RemovedIngressRemote += countIngressRulesForHostnames(removedRemote, exposureHostnameSet)
+					logger.Logf("removed %d remote ingress rules", remoteIngressRemoved)
 				}
-			} else {
-				remoteIngressRemoved = len(removedRemote)
-				exposureSummary.RemovedIngressRemote += countIngressRulesForHostnames(removedRemote, exposureHostnameSet)
-				logger.Logf("removed %d remote ingress rules", remoteIngressRemoved)
+			}
+
+			if len(localTargets) > 0 {
+				removedLocal, localErr := cloudflare.RemoveLocalIngressRules(runtimeCfg.CloudflaredConfig, localTargets)
+				if localErr != nil {
+					addArchiveWarning(warnings, fmt.Sprintf("remove local ingress rules failed: %v", localErr))
+					exposureSummary.FailedIngress += countHostnamesInSet(hostnames, exposureHostnameSet)
+				} else {
+					localIngressRemoved = len(removedLocal)
+					exposureSummary.RemovedIngressLocal += countIngressRulesForHostnames(removedLocal, exposureHostnameSet)
+					logger.Logf("removed %d local ingress rules", localIngressRemoved)
+					if localIngressRemoved > 0 {
+						if restartErr := w.restartTunnelForArchive(ctx, logger, fmt.Sprintf("job-%d", job.ID), runtimeCfg.CloudflaredConfig); restartErr != nil {
+							addArchiveWarning(warnings, fmt.Sprintf("cloudflared restart after ingress cleanup failed: %v", restartErr))
+						}
+					}
+				}
+			}
+
+			if len(remoteTargets) == 0 && len(localTargets) == 0 {
+				addArchiveWarning(warnings, "ingress cleanup requested but no source-scoped ingress rules were targeted")
+				exposureSummary.SkippedIngress += exposureSummary.TargetHostnames
+			} else if remoteTunnelMismatch && len(localTargets) == 0 {
+				addArchiveWarning(warnings, "remote ingress cleanup skipped because the tunnel is locally managed and no planned local ingress rules were available")
+				exposureSummary.FailedIngress += countHostnamesInSet(hostnames, exposureHostnameSet)
 			}
 		}
 	} else if exposureSummary.TargetHostnames > 0 {
@@ -392,6 +411,54 @@ func dedupeDNSDeleteTargets(values []ProjectArchiveDNSDeleteTarget) []ProjectArc
 		entry.Hostname = strings.ToLower(strings.TrimSpace(entry.Hostname))
 		entry.Content = strings.TrimSpace(entry.Content)
 		result = append(result, entry)
+	}
+	return result
+}
+
+func normalizeIngressDeleteTargets(values []ProjectArchiveIngressDeleteTarget) []ProjectArchiveIngressDeleteTarget {
+	result := make([]ProjectArchiveIngressDeleteTarget, 0, len(values))
+	for _, entry := range values {
+		hostname := strings.ToLower(strings.TrimSpace(entry.Hostname))
+		source := strings.ToLower(strings.TrimSpace(entry.Source))
+		service := strings.TrimSpace(entry.Service)
+		if hostname == "" {
+			continue
+		}
+		entry.Hostname = hostname
+		entry.Service = service
+		entry.Source = source
+		result = append(result, entry)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Hostname == result[j].Hostname {
+			if result[i].Service == result[j].Service {
+				return result[i].Source < result[j].Source
+			}
+			return result[i].Service < result[j].Service
+		}
+		return result[i].Hostname < result[j].Hostname
+	})
+	return result
+}
+
+func filterIngressDeleteTargetsBySource(values []ProjectArchiveIngressDeleteTarget, source string) []cloudflare.IngressRule {
+	source = strings.ToLower(strings.TrimSpace(source))
+	if source == "" {
+		return []cloudflare.IngressRule{}
+	}
+	result := make([]cloudflare.IngressRule, 0, len(values))
+	for _, entry := range values {
+		if strings.ToLower(strings.TrimSpace(entry.Source)) != source {
+			continue
+		}
+		hostname := strings.ToLower(strings.TrimSpace(entry.Hostname))
+		if hostname == "" {
+			continue
+		}
+		result = append(result, cloudflare.IngressRule{
+			Hostname: hostname,
+			Service:  strings.TrimSpace(entry.Service),
+		})
 	}
 	return result
 }

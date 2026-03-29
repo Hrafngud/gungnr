@@ -1,11 +1,17 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
+	"go-notes/internal/config"
 	"go-notes/internal/infra/contract"
 	"go-notes/internal/models"
+	"go-notes/internal/repository"
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -240,4 +246,181 @@ func TestResolveForwardLocalServiceExposureWarnsForAmbiguousProjectOverlap(t *te
 	)
 	require.False(t, ok)
 	require.Contains(t, sortedArchiveWarnings(warnings), "unresolved forward_local ownership for job 19 (subdomain=\"mockservice\"): deterministic project mapping is unavailable")
+}
+
+func TestProjectArchiveQueueCapturesExactPlannedIngressRules(t *testing.T) {
+	t.Parallel()
+
+	templatesDir := t.TempDir()
+	projectDir := filepath.Join(templatesDir, "demo")
+	configPath := filepath.Join(t.TempDir(), "config.yml")
+
+	require.NoError(t, os.MkdirAll(projectDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "docker-compose.yml"), []byte("services: {}\n"), 0o644))
+	require.NoError(t, os.WriteFile(configPath, []byte(
+		"ingress:\n"+
+			"  - hostname: demo.example.com\n"+
+			"    service: http://localhost:8080\n"+
+			"  - hostname: demo.example.com\n"+
+			"    service: http://localhost:9090\n"+
+			"  - hostname: other.example.com\n"+
+			"    service: http://localhost:7070\n"+
+			"  - service: http_status:404\n",
+	), 0o644))
+
+	jobRepo := &archiveTestJobRepo{}
+	service := NewProjectArchiveService(
+		config.Config{
+			TemplatesDir:      templatesDir,
+			Domain:            "example.com",
+			CloudflaredConfig: configPath,
+		},
+		&archiveTestProjectRepo{
+			projects: []models.Project{{
+				Name:   "demo",
+				Path:   projectDir,
+				Status: "running",
+			}},
+		},
+		nil,
+		NewJobService(jobRepo, nil),
+		nil,
+	)
+
+	job, plan, err := service.Queue(context.Background(), "demo", DefaultProjectArchiveOptions(), ProjectArchiveActor{UserID: 7, Login: "tester"})
+	require.NoError(t, err)
+	require.NotNil(t, job)
+	require.Len(t, plan.Ingress, 2)
+
+	var payload ProjectArchiveJobRequest
+	require.NoError(t, json.Unmarshal([]byte(job.Input), &payload))
+	require.Equal(t, []string{"demo.example.com"}, payload.Targets.Hostnames)
+	require.ElementsMatch(t, []ProjectArchiveIngressDeleteTarget{
+		{Hostname: "demo.example.com", Service: "http://localhost:8080", Source: "local"},
+		{Hostname: "demo.example.com", Service: "http://localhost:9090", Source: "local"},
+	}, payload.Targets.IngressRules)
+}
+
+type archiveTestProjectRepo struct {
+	projects []models.Project
+}
+
+func (r *archiveTestProjectRepo) List(ctx context.Context) ([]models.Project, error) {
+	return append([]models.Project(nil), r.projects...), nil
+}
+
+func (r *archiveTestProjectRepo) Create(ctx context.Context, project *models.Project) error {
+	r.projects = append(r.projects, *project)
+	return nil
+}
+
+func (r *archiveTestProjectRepo) GetByName(ctx context.Context, name string) (*models.Project, error) {
+	for _, project := range r.projects {
+		if project.Name == name {
+			copied := project
+			return &copied, nil
+		}
+	}
+	return nil, repository.ErrNotFound
+}
+
+func (r *archiveTestProjectRepo) Update(ctx context.Context, project *models.Project) error {
+	for i := range r.projects {
+		if r.projects[i].Name == project.Name {
+			r.projects[i] = *project
+			return nil
+		}
+	}
+	return repository.ErrNotFound
+}
+
+type archiveTestJobRepo struct {
+	jobs   []models.Job
+	nextID uint
+}
+
+func (r *archiveTestJobRepo) List(ctx context.Context) ([]models.Job, error) {
+	return append([]models.Job(nil), r.jobs...), nil
+}
+
+func (r *archiveTestJobRepo) ListPage(ctx context.Context, offset int, limit int) ([]models.Job, int64, error) {
+	jobs := append([]models.Job(nil), r.jobs...)
+	if offset >= len(jobs) {
+		return []models.Job{}, int64(len(jobs)), nil
+	}
+	end := offset + limit
+	if end > len(jobs) {
+		end = len(jobs)
+	}
+	return jobs[offset:end], int64(len(jobs)), nil
+}
+
+func (r *archiveTestJobRepo) GetLatestByType(ctx context.Context, jobType string) (*models.Job, error) {
+	for i := len(r.jobs) - 1; i >= 0; i-- {
+		if r.jobs[i].Type == jobType {
+			job := r.jobs[i]
+			return &job, nil
+		}
+	}
+	return nil, repository.ErrNotFound
+}
+
+func (r *archiveTestJobRepo) GetLatestByTypeAndStatus(ctx context.Context, jobType string, status string) (*models.Job, error) {
+	for i := len(r.jobs) - 1; i >= 0; i-- {
+		if r.jobs[i].Type == jobType && r.jobs[i].Status == status {
+			job := r.jobs[i]
+			return &job, nil
+		}
+	}
+	return nil, repository.ErrNotFound
+}
+
+func (r *archiveTestJobRepo) Create(ctx context.Context, job *models.Job) error {
+	r.nextID++
+	job.ID = r.nextID
+	r.jobs = append(r.jobs, *job)
+	return nil
+}
+
+func (r *archiveTestJobRepo) Get(ctx context.Context, id uint) (*models.Job, error) {
+	for _, job := range r.jobs {
+		if job.ID == id {
+			copied := job
+			return &copied, nil
+		}
+	}
+	return nil, repository.ErrNotFound
+}
+
+func (r *archiveTestJobRepo) MarkRunning(ctx context.Context, id uint, startedAt time.Time) error {
+	for i := range r.jobs {
+		if r.jobs[i].ID == id {
+			r.jobs[i].Status = "running"
+			r.jobs[i].StartedAt = &startedAt
+			return nil
+		}
+	}
+	return repository.ErrNotFound
+}
+
+func (r *archiveTestJobRepo) MarkFinished(ctx context.Context, id uint, status string, finishedAt time.Time, errMsg string) error {
+	for i := range r.jobs {
+		if r.jobs[i].ID == id {
+			r.jobs[i].Status = status
+			r.jobs[i].FinishedAt = &finishedAt
+			r.jobs[i].Error = errMsg
+			return nil
+		}
+	}
+	return repository.ErrNotFound
+}
+
+func (r *archiveTestJobRepo) AppendLog(ctx context.Context, id uint, line string) error {
+	for i := range r.jobs {
+		if r.jobs[i].ID == id {
+			r.jobs[i].LogLines += line
+			return nil
+		}
+	}
+	return repository.ErrNotFound
 }

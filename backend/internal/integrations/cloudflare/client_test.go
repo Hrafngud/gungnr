@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -109,6 +110,109 @@ func TestDeleteTunnelCNAMERecordSkipsWhenRecordIsNotCNAME(t *testing.T) {
 	require.False(t, result.Deleted)
 	require.Equal(t, "type is A", result.SkipReason)
 	require.Equal(t, 0, deleteCalls)
+}
+
+func TestRemoveIngressRulesByExactTargetRemovesOnlyPlannedRuleOccurrence(t *testing.T) {
+	t.Parallel()
+
+	existing := []map[string]any{
+		{"hostname": "app.example.com", "service": "http://localhost:8080"},
+		{"hostname": "app.example.com", "service": "http://localhost:8080"},
+		{"hostname": "app.example.com", "service": "http://localhost:9090"},
+		{"hostname": "other.example.com", "service": "http://localhost:7070"},
+		{"service": "http_status:404"},
+	}
+
+	removed, next := removeIngressRulesByExactTarget(existing, normalizeIngressRuleTargets([]IngressRule{
+		{Hostname: "app.example.com", Service: "http://localhost:8080"},
+	}))
+
+	require.Len(t, removed, 1)
+	require.Equal(t, IngressRule{Hostname: "app.example.com", Service: "http://localhost:8080"}, removed[0])
+
+	rules := ingressRulesFromConfig(next)
+	require.Len(t, rules, 3)
+	require.Equal(t, 1, countMatchingIngressRules(rules, IngressRule{Hostname: "app.example.com", Service: "http://localhost:8080"}))
+	require.Equal(t, 1, countMatchingIngressRules(rules, IngressRule{Hostname: "app.example.com", Service: "http://localhost:9090"}))
+	require.Equal(t, 1, countMatchingIngressRules(rules, IngressRule{Hostname: "other.example.com", Service: "http://localhost:7070"}))
+
+	catchAllCount := 0
+	for _, rule := range next {
+		if isCatchAll(rule) {
+			catchAllCount++
+		}
+	}
+	require.Equal(t, 1, catchAllCount)
+}
+
+func TestRemoveIngressRulesByExactTargetRemovesDuplicatePlannedRuleOccurrences(t *testing.T) {
+	t.Parallel()
+
+	existing := []map[string]any{
+		{"hostname": "app.example.com", "service": "http://localhost:8080"},
+		{"hostname": "app.example.com", "service": "http://localhost:8080"},
+		{"hostname": "app.example.com", "service": "http://localhost:9090"},
+		{"service": "http_status:404"},
+	}
+
+	removed, next := removeIngressRulesByExactTarget(existing, normalizeIngressRuleTargets([]IngressRule{
+		{Hostname: "app.example.com", Service: "http://localhost:8080"},
+		{Hostname: "app.example.com", Service: "http://localhost:8080"},
+	}))
+
+	require.Len(t, removed, 2)
+	require.Equal(t, 0, countMatchingIngressRules(ingressRulesFromConfig(next), IngressRule{Hostname: "app.example.com", Service: "http://localhost:8080"}))
+	require.Equal(t, 1, countMatchingIngressRules(ingressRulesFromConfig(next), IngressRule{Hostname: "app.example.com", Service: "http://localhost:9090"}))
+}
+
+func TestRemoveLocalIngressRulesPreservesCatchAllAndUnplannedRules(t *testing.T) {
+	t.Parallel()
+
+	configPath := t.TempDir() + "/config.yml"
+	err := os.WriteFile(configPath, []byte(strings.TrimSpace(`
+ingress:
+  - hostname: app.example.com
+    service: http://localhost:8080
+  - hostname: app.example.com
+    service: http://localhost:9090
+  - hostname: other.example.com
+    service: http://localhost:7070
+  - service: http_status:404
+`)+"\n"), 0o644)
+	require.NoError(t, err)
+
+	removed, err := RemoveLocalIngressRules(configPath, []IngressRule{
+		{Hostname: "app.example.com", Service: "http://localhost:8080"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []IngressRule{{Hostname: "app.example.com", Service: "http://localhost:8080"}}, removed)
+
+	rules, err := ListLocalIngressRules(configPath)
+	require.NoError(t, err)
+	require.Len(t, rules, 2)
+	require.Equal(t, 1, countMatchingIngressRules(rules, IngressRule{Hostname: "app.example.com", Service: "http://localhost:9090"}))
+	require.Equal(t, 1, countMatchingIngressRules(rules, IngressRule{Hostname: "other.example.com", Service: "http://localhost:7070"}))
+
+	_, payload, err := readLocalConfigPayload(configPath)
+	require.NoError(t, err)
+	catchAllCount := 0
+	for _, rule := range coerceIngress(payload["ingress"]) {
+		if isCatchAll(rule) {
+			catchAllCount++
+		}
+	}
+	require.Equal(t, 1, catchAllCount)
+}
+
+func countMatchingIngressRules(rules []IngressRule, target IngressRule) int {
+	count := 0
+	for _, rule := range rules {
+		if strings.EqualFold(strings.TrimSpace(rule.Hostname), strings.TrimSpace(target.Hostname)) &&
+			strings.TrimSpace(rule.Service) == strings.TrimSpace(target.Service) {
+			count++
+		}
+	}
+	return count
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
