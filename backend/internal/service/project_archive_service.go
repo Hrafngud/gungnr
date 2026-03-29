@@ -168,7 +168,7 @@ func (s *ProjectArchiveService) Plan(ctx context.Context, projectName string) (P
 	warnings := make(map[string]struct{})
 	baseDomain := normalizeDomain(runtimeCfg.Domain)
 	projectHostnames := s.discoverHostnames(ctx, resolved.NormalizedName, baseDomain, warnings)
-	plan.ServiceExposures = s.planServiceExposures(ctx, resolved.NormalizedName, baseDomain, warnings)
+	plan.ServiceExposures = s.planServiceExposures(ctx, resolved.NormalizedName, projectHostnames, baseDomain, warnings)
 
 	exposureHostnames, exposureContainers := archiveExposureTargets(plan.ServiceExposures)
 	plan.Hostnames = mergeArchiveHostnames(projectHostnames, exposureHostnames)
@@ -395,6 +395,7 @@ func (s *ProjectArchiveService) discoverHostnames(
 func (s *ProjectArchiveService) planServiceExposures(
 	ctx context.Context,
 	project string,
+	projectHostnames []string,
 	baseDomain string,
 	warnings map[string]struct{},
 ) []ProjectArchivePlanServiceCleanup {
@@ -411,10 +412,11 @@ func (s *ProjectArchiveService) planServiceExposures(
 
 	seen := make(map[string]struct{})
 	result := make([]ProjectArchivePlanServiceCleanup, 0)
+	ownership := newArchiveExposureOwnershipContext(project, projectHostnames)
 	for _, job := range jobs {
 		switch strings.TrimSpace(job.Type) {
 		case JobTypeForwardLocal:
-			candidate, ok := resolveForwardLocalServiceExposure(project, baseDomain, job, warnings)
+			candidate, ok := resolveForwardLocalServiceExposure(ownership, baseDomain, job, warnings)
 			if !ok {
 				continue
 			}
@@ -425,7 +427,7 @@ func (s *ProjectArchiveService) planServiceExposures(
 			seen[key] = struct{}{}
 			result = append(result, candidate)
 		case JobTypeQuickService:
-			candidate, ok := resolveQuickServiceExposure(project, baseDomain, job, warnings)
+			candidate, ok := resolveQuickServiceExposure(ownership, baseDomain, job, warnings)
 			if !ok {
 				continue
 			}
@@ -450,8 +452,151 @@ func (s *ProjectArchiveService) planServiceExposures(
 	return result
 }
 
+type archiveExposureOwnershipContext struct {
+	project   string
+	aliases   []string
+	hostnames []string
+}
+
+type archiveExposureOwnershipMatch struct {
+	Resolution  string
+	Hostname    string
+	HostnameErr string
+	Matched     bool
+	Ambiguous   bool
+}
+
+func newArchiveExposureOwnershipContext(project string, projectHostnames []string) archiveExposureOwnershipContext {
+	project = strings.ToLower(strings.TrimSpace(project))
+
+	aliasSet := make(map[string]struct{})
+	addAlias := func(value string) {
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		if normalized == "" {
+			return
+		}
+		aliasSet[normalized] = struct{}{}
+	}
+
+	hostnameSet := make(map[string]struct{})
+	addHostname := func(value string) {
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		if normalized == "" || ValidateDomain(normalized) != nil {
+			return
+		}
+		hostnameSet[normalized] = struct{}{}
+	}
+
+	addAlias(project)
+	for _, hostname := range projectHostnames {
+		addHostname(hostname)
+	}
+
+	aliases := make([]string, 0, len(aliasSet))
+	for alias := range aliasSet {
+		aliases = append(aliases, alias)
+	}
+	sort.Slice(aliases, func(i, j int) bool {
+		if len(aliases[i]) == len(aliases[j]) {
+			return aliases[i] < aliases[j]
+		}
+		return len(aliases[i]) > len(aliases[j])
+	})
+
+	hostnames := make([]string, 0, len(hostnameSet))
+	for hostname := range hostnameSet {
+		hostnames = append(hostnames, hostname)
+	}
+	sort.Slice(hostnames, func(i, j int) bool {
+		if len(hostnames[i]) == len(hostnames[j]) {
+			return hostnames[i] < hostnames[j]
+		}
+		return len(hostnames[i]) > len(hostnames[j])
+	})
+
+	return archiveExposureOwnershipContext{
+		project:   project,
+		aliases:   aliases,
+		hostnames: hostnames,
+	}
+}
+
+func (c archiveExposureOwnershipContext) match(subdomain, domain, baseDomain string) archiveExposureOwnershipMatch {
+	subdomain = strings.ToLower(strings.TrimSpace(subdomain))
+	if subdomain == "" {
+		return archiveExposureOwnershipMatch{}
+	}
+
+	subdomainResolution, subdomainMatched, subdomainAmbiguous := c.matchSubdomain(subdomain)
+	hostname, hostnameErr := resolveExposureHostname(subdomain, domain, baseDomain)
+	if subdomainMatched {
+		return archiveExposureOwnershipMatch{
+			Resolution:  subdomainResolution,
+			Hostname:    hostname,
+			HostnameErr: hostnameErr,
+			Matched:     true,
+		}
+	}
+
+	if hostnameErr == "" {
+		hostnameResolution, hostnameMatched, hostnameAmbiguous := c.matchHostname(hostname)
+		if hostnameMatched {
+			return archiveExposureOwnershipMatch{
+				Resolution: hostnameResolution,
+				Hostname:   hostname,
+				Matched:    true,
+			}
+		}
+		if hostnameAmbiguous {
+			return archiveExposureOwnershipMatch{Ambiguous: true}
+		}
+	}
+
+	if subdomainAmbiguous {
+		return archiveExposureOwnershipMatch{Ambiguous: true}
+	}
+	return archiveExposureOwnershipMatch{}
+}
+
+func (c archiveExposureOwnershipContext) matchSubdomain(subdomain string) (string, bool, bool) {
+	for _, alias := range c.aliases {
+		switch {
+		case subdomain == alias:
+			return "subdomain.exact", true, false
+		case strings.HasPrefix(subdomain, alias+"-"):
+			return "subdomain.prefix", true, false
+		case strings.HasPrefix(subdomain, alias):
+			return "", false, true
+		}
+	}
+	return "", false, false
+}
+
+func (c archiveExposureOwnershipContext) matchHostname(hostname string) (string, bool, bool) {
+	hostname = strings.ToLower(strings.TrimSpace(hostname))
+	if hostname == "" {
+		return "", false, false
+	}
+	for _, projectHostname := range c.hostnames {
+		switch {
+		case hostname == projectHostname:
+			return "hostname.exact", true, false
+		case strings.HasSuffix(hostname, "."+projectHostname):
+			prefix := strings.TrimSuffix(hostname, "."+projectHostname)
+			if prefix == "" {
+				return "hostname.exact", true, false
+			}
+			if strings.Contains(prefix, ".") {
+				return "", false, true
+			}
+			return "hostname.scoped", true, false
+		}
+	}
+	return "", false, false
+}
+
 func resolveForwardLocalServiceExposure(
-	project string,
+	ownership archiveExposureOwnershipContext,
 	baseDomain string,
 	job models.Job,
 	warnings map[string]struct{},
@@ -461,17 +606,10 @@ func resolveForwardLocalServiceExposure(
 		return ProjectArchivePlanServiceCleanup{}, false
 	}
 
-	project = strings.ToLower(strings.TrimSpace(project))
 	subdomain := strings.ToLower(strings.TrimSpace(payload.Subdomain))
-
-	resolution := ""
-	switch {
-	case subdomain == project:
-		resolution = "subdomain.exact"
-	case strings.HasPrefix(subdomain, project+"-"):
-		resolution = "subdomain.prefix"
-	default:
-		if strings.HasPrefix(subdomain, project) {
+	match := ownership.match(subdomain, payload.Domain, baseDomain)
+	if !match.Matched {
+		if match.Ambiguous {
 			addArchiveWarning(
 				warnings,
 				fmt.Sprintf(
@@ -483,12 +621,10 @@ func resolveForwardLocalServiceExposure(
 		}
 		return ProjectArchivePlanServiceCleanup{}, false
 	}
-
-	hostname, hostErr := resolveExposureHostname(subdomain, payload.Domain, baseDomain)
-	if hostErr != "" {
+	if match.HostnameErr != "" {
 		addArchiveWarning(
 			warnings,
-			fmt.Sprintf("unresolved forward_local ownership for job %d: %s", job.ID, hostErr),
+			fmt.Sprintf("unresolved forward_local ownership for job %d: %s", job.ID, match.HostnameErr),
 		)
 		return ProjectArchivePlanServiceCleanup{}, false
 	}
@@ -496,13 +632,13 @@ func resolveForwardLocalServiceExposure(
 	return ProjectArchivePlanServiceCleanup{
 		JobID:      job.ID,
 		Type:       JobTypeForwardLocal,
-		Hostname:   hostname,
-		Resolution: resolution,
+		Hostname:   match.Hostname,
+		Resolution: match.Resolution,
 	}, true
 }
 
 func resolveQuickServiceExposure(
-	project string,
+	ownership archiveExposureOwnershipContext,
 	baseDomain string,
 	job models.Job,
 	warnings map[string]struct{},
@@ -512,7 +648,6 @@ func resolveQuickServiceExposure(
 		return ProjectArchivePlanServiceCleanup{}, false
 	}
 
-	project = strings.ToLower(strings.TrimSpace(project))
 	subdomain := strings.ToLower(strings.TrimSpace(payload.Subdomain))
 	exposureMode, err := normalizeQuickServiceExposureRequest(payload.ExposureMode, payload.Port)
 	if err != nil {
@@ -523,14 +658,9 @@ func resolveQuickServiceExposure(
 		return ProjectArchivePlanServiceCleanup{}, false
 	}
 
-	resolution := ""
-	switch {
-	case subdomain == project:
-		resolution = "subdomain.exact"
-	case strings.HasPrefix(subdomain, project+"-"):
-		resolution = "subdomain.prefix"
-	default:
-		if strings.HasPrefix(subdomain, project) {
+	match := ownership.match(subdomain, payload.Domain, baseDomain)
+	if !match.Matched {
+		if match.Ambiguous {
 			addArchiveWarning(
 				warnings,
 				fmt.Sprintf(
@@ -545,15 +675,14 @@ func resolveQuickServiceExposure(
 
 	hostname := ""
 	if quickServiceRequiresPublishedPort(exposureMode) {
-		resolvedHostname, hostErr := resolveExposureHostname(subdomain, payload.Domain, baseDomain)
-		if hostErr != "" {
+		if match.HostnameErr != "" {
 			addArchiveWarning(
 				warnings,
-				fmt.Sprintf("unresolved quick_service ownership for job %d: %s", job.ID, hostErr),
+				fmt.Sprintf("unresolved quick_service ownership for job %d: %s", job.ID, match.HostnameErr),
 			)
 			return ProjectArchivePlanServiceCleanup{}, false
 		}
-		hostname = resolvedHostname
+		hostname = match.Hostname
 	}
 
 	container := quickServiceContainerFromLogs(job.LogLines)
@@ -577,7 +706,7 @@ func resolveQuickServiceExposure(
 		Type:       JobTypeQuickService,
 		Hostname:   hostname,
 		Container:  container,
-		Resolution: resolution + ".exposure." + exposureMode,
+		Resolution: match.Resolution + ".exposure." + exposureMode,
 	}, true
 }
 
