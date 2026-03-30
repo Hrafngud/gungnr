@@ -785,7 +785,8 @@
               <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
                 <li>Runtime units includes per-project CPU, RAM, and disk usage indicators.</li>
                 <li>Environment tab edits project <code>.env</code> values from the UI.</li>
-                <li>Archive tab is contract-frozen around a two-step flow: dry-run preview first, explicit async execution second.</li>
+                <li>Archive tab is contract-frozen around one operator flow: backend-authored preview first, privileged confirmation modal second, queued async archive job handoff third.</li>
+                <li>Admin and superuser accounts can refresh the live archive preview and queue cleanup; non-admin users remain read-only with rationale and no destructive fallback path.</li>
                 <li>Activity timeline keeps project job history and logs in one place.</li>
               </ul>
               <p class="mt-4 text-sm text-[color:var(--muted)]">
@@ -793,12 +794,21 @@
                 <code>GET /api/v1/projects/:name/archive/plan</code>, <code>POST /api/v1/projects/:name/archive</code>.
               </p>
               <p class="mt-4 text-sm text-[color:var(--muted)]">
-                Archive preview now freezes one deterministic operator contract: the preview returns defaults, candidate
+                Archive preview is the authoritative backend-authored cleanup scope. It returns defaults, candidate
                 containers, managed hostnames, service-exposure ownership for <code>forward_local</code> and
-                <code>quick_service</code>, ingress matches, DNS candidates, and warnings before any mutation is queued.
-                Execution reuses the selected toggles and always runs as a background <code>project_archive</code> job.
+                <code>quick_service</code>, exact ingress-rule matches, DNS candidates, warnings, and the toggle-aware
+                cleanup counts visible in Project Detail before any mutation is queued.
+              </p>
+              <p class="mt-4 text-sm text-[color:var(--muted)]">
+                Queueing archive cleanup always goes through the dedicated confirmation modal and typed confirmation
+                phrase. The modal surfaces destructive volume-deletion copy when that option is enabled and never runs
+                cleanup synchronously from the Archive tab. When submitted, the backend rebuilds the archive plan from
+                current project state and queues the existing <code>project_archive</code> job, so follow-up happens on
+                the job page or in the project activity timeline.
               </p>
               <ul class="mt-4 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                <li>Container, ingress, and DNS cleanup stay toggle-aware and backend-planned at queue time; treat the preview as read-only guidance and the queued job as the authoritative execution handoff.</li>
+                <li>Ingress cleanup removes only the exact planned managed rule matches and still preserves the local catch-all <code>http_status:404</code> fallback.</li>
                 <li><code>forward_local</code> contributes hostname-owned ingress and matching tunnel CNAME cleanup only.</li>
                 <li><code>quick_service</code> in internal mode contributes container cleanup only; ingress and DNS stay out of scope.</li>
                 <li><code>quick_service</code> in host-published mode contributes container cleanup plus managed hostname cleanup when ownership resolves deterministically.</li>
