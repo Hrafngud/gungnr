@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -19,20 +18,6 @@ type NetBirdController struct {
 	settings *service.SettingsService
 	jobs     *service.JobService
 	audit    *service.AuditService
-}
-
-type netBirdModePlanRequest struct {
-	TargetMode      string `json:"targetMode"`
-	AllowLocalhost  bool   `json:"allowLocalhost"`
-	ModeBProjectIDs []uint `json:"modeBProjectIds,omitempty"`
-}
-
-type netBirdModeConfigUpsertRequest struct {
-	APIBaseURL      *string   `json:"apiBaseUrl,omitempty"`
-	APIToken        *string   `json:"apiToken,omitempty"`
-	HostPeerID      *string   `json:"hostPeerId,omitempty"`
-	AdminPeerIDs    *[]string `json:"adminPeerIds,omitempty"`
-	ModeBProjectIDs *[]uint   `json:"modeBProjectIds,omitempty"`
 }
 
 func NewNetBirdController(service *service.NetBirdService, settings *service.SettingsService, jobs *service.JobService, audit *service.AuditService) *NetBirdController {
@@ -104,7 +89,7 @@ func (c *NetBirdController) PlanMode(ctx *gin.Context) {
 		return
 	}
 
-	c.logAudit(ctx, session.UserID, session.Login, plan)
+	c.logAudit(ctx, "netbird.mode.plan", string(plan.TargetMode), netBirdModePlanAuditMetadata(plan))
 	ctx.JSON(http.StatusOK, gin.H{"plan": plan})
 }
 
@@ -169,28 +154,7 @@ func (c *NetBirdController) ApplyMode(ctx *gin.Context) {
 		}
 	}
 	if c.settings != nil && inlineConfigProvided {
-		update := service.NetBirdModeConfigUpdate{}
-		if inlineConfigRequest.APIBaseURL != "" {
-			value := inlineConfigRequest.APIBaseURL
-			update.APIBaseURL = &value
-		}
-		if inlineConfigRequest.APIToken != "" {
-			value := inlineConfigRequest.APIToken
-			update.APIToken = &value
-		}
-		if inlineConfigRequest.HostPeerID != "" {
-			value := inlineConfigRequest.HostPeerID
-			update.HostPeerID = &value
-		}
-		if len(inlineConfigRequest.AdminPeerIDs) > 0 {
-			value := append([]string(nil), inlineConfigRequest.AdminPeerIDs...)
-			update.AdminPeerIDs = &value
-		}
-		if len(inlineConfigRequest.ModeBProjectIDs) > 0 || targetMode == service.NetBirdModeB {
-			value := append([]uint(nil), inlineConfigRequest.ModeBProjectIDs...)
-			update.ModeBProjectIDs = &value
-		}
-
+		update := buildNetBirdConfigUpdateFromApplyRequest(inlineConfigRequest, targetMode)
 		_, upsertErr := c.settings.UpsertNetBirdModeConfig(ctx.Request.Context(), update)
 		if upsertErr != nil {
 			apierror.RespondWithError(ctx, http.StatusInternalServerError, upsertErr, errs.CodeNetBirdApplyFailed, "failed to persist netbird mode config")
@@ -208,25 +172,7 @@ func (c *NetBirdController) ApplyMode(ctx *gin.Context) {
 		return
 	}
 
-	if c.audit != nil {
-		_ = c.audit.Log(ctx.Request.Context(), service.AuditEntry{
-			UserID:    session.UserID,
-			UserLogin: session.Login,
-			Action:    "netbird.mode.apply",
-			Target:    string(targetMode),
-			Metadata: map[string]any{
-				"jobId":             job.ID,
-				"targetMode":        targetMode,
-				"allowLocalhost":    req.AllowLocalhost,
-				"apiBaseUrlSet":     req.APIBaseURL != "",
-				"hostPeerIdSet":     req.HostPeerID != "",
-				"adminPeerIdCount":  len(req.AdminPeerIDs),
-				"modeBProjectCount": len(req.ModeBProjectIDs),
-				"usedStoredConfig":  usedStoredConfig,
-			},
-		})
-	}
-
+	c.logAudit(ctx, "netbird.mode.apply", string(targetMode), netBirdModeApplyAuditMetadata(job.ID, req, targetMode, usedStoredConfig))
 	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
 }
 
@@ -279,23 +225,7 @@ func (c *NetBirdController) UpdateModeConfig(ctx *gin.Context) {
 		return
 	}
 
-	if c.audit != nil {
-		_ = c.audit.Log(ctx.Request.Context(), service.AuditEntry{
-			UserID:    session.UserID,
-			UserLogin: session.Login,
-			Action:    "netbird.mode.config.update",
-			Target:    "settings",
-			Metadata: map[string]any{
-				"apiBaseUrlSet":     strings.TrimSpace(updated.APIBaseURL) != "",
-				"apiTokenUpdated":   req.APIToken != nil && strings.TrimSpace(*req.APIToken) != "",
-				"apiTokenSet":       updated.APITokenSet,
-				"hostPeerIdSet":     strings.TrimSpace(updated.HostPeerID) != "",
-				"adminPeerIdCount":  len(updated.AdminPeerIDs),
-				"modeBProjectCount": len(updated.ModeBProjectIDs),
-			},
-		})
-	}
-
+	c.logAudit(ctx, "netbird.mode.config.update", "settings", netBirdModeConfigUpdateAuditMetadata(req, updated))
 	ctx.JSON(http.StatusOK, gin.H{"config": updated})
 }
 
@@ -324,72 +254,31 @@ func (c *NetBirdController) ReapplyPolicies(ctx *gin.Context) {
 		return
 	}
 
-	if c.audit != nil {
-		_ = c.audit.Log(ctx.Request.Context(), service.AuditEntry{
-			UserID:    session.UserID,
-			UserLogin: session.Login,
-			Action:    "netbird.policy.reapply",
-			Target:    string(summary.CurrentMode),
-			Metadata: map[string]any{
-				"currentMode":             summary.CurrentMode,
-				"defaultPolicyAction":     summary.DefaultPolicy.Action,
-				"defaultPolicyResult":     summary.DefaultPolicy.Result.Result,
-				"groupResultCounts":       summary.GroupResultCounts,
-				"policyResultCounts":      summary.PolicyResultCounts,
-				"warningCount":            len(summary.Warnings),
-				"requestApiBaseUrlSet":    req.APIBaseURL != "",
-				"requestHostPeerIdSet":    req.HostPeerID != "",
-				"requestAdminPeerIdCount": len(req.AdminPeerIDs),
-			},
-		})
-	}
-
+	c.logAudit(ctx, "netbird.policy.reapply", string(summary.CurrentMode), netBirdPolicyReapplyAuditMetadata(req, summary))
 	ctx.JSON(http.StatusOK, gin.H{"summary": summary})
 }
 
-func (c *NetBirdController) logAudit(ctx *gin.Context, userID uint, userLogin string, plan service.NetBirdModePlan) {
-	if c.audit == nil {
-		return
+func buildNetBirdConfigUpdateFromApplyRequest(req service.NetBirdModeApplyRequest, targetMode service.NetBirdMode) service.NetBirdModeConfigUpdate {
+	update := service.NetBirdModeConfigUpdate{}
+	if req.APIBaseURL != "" {
+		value := req.APIBaseURL
+		update.APIBaseURL = &value
 	}
-	_ = c.audit.Log(ctx.Request.Context(), service.AuditEntry{
-		UserID:    userID,
-		UserLogin: userLogin,
-		Action:    "netbird.mode.plan",
-		Target:    string(plan.TargetMode),
-		Metadata: map[string]any{
-			"currentMode":              plan.CurrentMode,
-			"targetMode":               plan.TargetMode,
-			"allowLocalhost":           plan.AllowLocalhost,
-			"currentModeBProjectCount": len(plan.CurrentModeBProjectIDs),
-			"targetModeBProjectCount":  len(plan.TargetModeBProjectIDs),
-			"groups":                   len(plan.Catalog.Groups),
-			"policies":                 len(plan.Catalog.Policies),
-			"rebindings":               len(plan.ServiceRebindingOperations),
-			"warnings":                 len(plan.Warnings),
-		},
-	})
-}
-
-func netBirdHTTPStatus(err error, fallback int) int {
-	typed, ok := errs.From(err)
-	if !ok {
-		return fallback
+	if req.APIToken != "" {
+		value := req.APIToken
+		update.APIToken = &value
 	}
-	switch typed.Code {
-	case errs.CodeNetBirdInvalidMode, errs.CodeNetBirdInvalidBody:
-		return http.StatusBadRequest
-	case errs.CodeNetBirdUnavailable:
-		return http.StatusInternalServerError
-	case errs.CodeNetBirdStatusFailed, errs.CodeNetBirdACLGraphFailed, errs.CodeNetBirdPlanFailed:
-		return http.StatusBadGateway
-	case errs.CodeNetBirdApplyFailed:
-		return http.StatusInternalServerError
-	case errs.CodeNetBirdReapplyFailed:
-		return http.StatusInternalServerError
-	default:
-		if strings.HasPrefix(string(typed.Code), "NETBIRD-400") {
-			return http.StatusBadRequest
-		}
-		return fallback
+	if req.HostPeerID != "" {
+		value := req.HostPeerID
+		update.HostPeerID = &value
 	}
+	if len(req.AdminPeerIDs) > 0 {
+		value := append([]string(nil), req.AdminPeerIDs...)
+		update.AdminPeerIDs = &value
+	}
+	if len(req.ModeBProjectIDs) > 0 || targetMode == service.NetBirdModeB {
+		value := append([]uint(nil), req.ModeBProjectIDs...)
+		update.ModeBProjectIDs = &value
+	}
+	return update
 }
