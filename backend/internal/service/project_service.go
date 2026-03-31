@@ -12,6 +12,7 @@ import (
 	"go-notes/internal/errs"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
+	"go-notes/internal/validate"
 )
 
 type ProjectService struct {
@@ -109,10 +110,10 @@ func (s *ProjectService) CreateFromTemplate(ctx context.Context, req CreateTempl
 	if req.Subdomain == "" {
 		req.Subdomain = req.Name
 	}
-	if err := ValidateProjectName(req.Name); err != nil {
+	if err := validate.ProjectName(req.Name); err != nil {
 		return nil, err
 	}
-	if err := ValidateSubdomain(req.Subdomain); err != nil {
+	if err := validate.Subdomain(req.Subdomain); err != nil {
 		return nil, err
 	}
 	domain, err := s.resolveDomain(ctx, req.Domain)
@@ -121,12 +122,12 @@ func (s *ProjectService) CreateFromTemplate(ctx context.Context, req CreateTempl
 	}
 	req.Domain = domain
 	if req.ProxyPort != 0 {
-		if err := ValidatePort(req.ProxyPort); err != nil {
+		if err := validate.Port(req.ProxyPort); err != nil {
 			return nil, err
 		}
 	}
 	if req.DBPort != 0 {
-		if err := ValidatePort(req.DBPort); err != nil {
+		if err := validate.Port(req.DBPort); err != nil {
 			return nil, err
 		}
 	}
@@ -141,10 +142,10 @@ func (s *ProjectService) CreateFromTemplate(ctx context.Context, req CreateTempl
 func (s *ProjectService) DeployExisting(ctx context.Context, req DeployExistingRequest) (*models.Job, error) {
 	req.Name = strings.ToLower(strings.TrimSpace(req.Name))
 	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
-	if err := ValidateProjectName(req.Name); err != nil {
+	if err := validate.ProjectName(req.Name); err != nil {
 		return nil, err
 	}
-	if err := ValidateSubdomain(req.Subdomain); err != nil {
+	if err := validate.Subdomain(req.Subdomain); err != nil {
 		return nil, err
 	}
 	domain, err := s.resolveDomain(ctx, req.Domain)
@@ -155,7 +156,7 @@ func (s *ProjectService) DeployExisting(ctx context.Context, req DeployExistingR
 	if req.Port == 0 {
 		req.Port = 80
 	}
-	if err := ValidatePort(req.Port); err != nil {
+	if err := validate.Port(req.Port); err != nil {
 		return nil, err
 	}
 	return s.jobs.Create(ctx, JobTypeDeployExisting, req)
@@ -164,10 +165,10 @@ func (s *ProjectService) DeployExisting(ctx context.Context, req DeployExistingR
 func (s *ProjectService) ForwardLocal(ctx context.Context, req ForwardLocalRequest) (*models.Job, error) {
 	req.Name = strings.ToLower(strings.TrimSpace(req.Name))
 	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
-	if err := ValidateServiceName(req.Name); err != nil {
+	if err := validate.ServiceName(req.Name); err != nil {
 		return nil, err
 	}
-	if err := ValidateSubdomain(req.Subdomain); err != nil {
+	if err := validate.Subdomain(req.Subdomain); err != nil {
 		return nil, err
 	}
 	domain, err := s.resolveDomain(ctx, req.Domain)
@@ -178,7 +179,7 @@ func (s *ProjectService) ForwardLocal(ctx context.Context, req ForwardLocalReque
 	if req.Port == 0 {
 		req.Port = 80
 	}
-	if err := ValidatePort(req.Port); err != nil {
+	if err := validate.Port(req.Port); err != nil {
 		return nil, err
 	}
 	return s.jobs.Create(ctx, JobTypeForwardLocal, req)
@@ -186,7 +187,7 @@ func (s *ProjectService) ForwardLocal(ctx context.Context, req ForwardLocalReque
 
 func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceRequest) (*models.Job, int, error) {
 	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
-	if err := ValidateSubdomain(req.Subdomain); err != nil {
+	if err := validate.Subdomain(req.Subdomain); err != nil {
 		return nil, 0, err
 	}
 	exposureMode, err := normalizeQuickServiceExposureRequest(req.ExposureMode, req.Port)
@@ -202,11 +203,11 @@ func (s *ProjectService) QuickService(ctx context.Context, req QuickServiceReque
 	if req.ContainerPort == 0 {
 		req.ContainerPort = defaultQuickServiceContainerPort
 	}
-	if err := ValidatePort(req.ContainerPort); err != nil {
+	if err := validate.Port(req.ContainerPort); err != nil {
 		return nil, 0, err
 	}
 	if req.ContainerName != "" {
-		if err := validateContainerName(req.ContainerName); err != nil {
+		if err := validate.ContainerName(req.ContainerName); err != nil {
 			return nil, 0, err
 		}
 	}

@@ -1,12 +1,10 @@
 package controller
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 
-	"go-notes/internal/apierror"
 	"go-notes/internal/errs"
+	"go-notes/internal/respond"
 	"go-notes/internal/service"
 )
 
@@ -20,15 +18,15 @@ func NewGitHubController(service *service.GitHubService) *GitHubController {
 
 func (c *GitHubController) Catalog(ctx *gin.Context) {
 	if c.service == nil {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeGitHubUnavailable, "github service unavailable", nil)
+		respond.Err(ctx, errs.New(errs.CodeGitHubUnavailable, "github service unavailable"), errs.CodeGitHubUnavailable, "github service unavailable")
 		return
 	}
 
 	catalog, err := c.service.Catalog(ctx.Request.Context())
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeGitHubCatalog, "failed to load github catalog")
+		respond.Err(ctx, err, errs.CodeGitHubCatalog, "failed to load github catalog")
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"catalog": catalog})
+	respond.OK(ctx, gin.H{"catalog": catalog})
 }

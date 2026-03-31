@@ -11,6 +11,7 @@ import (
 	"go-notes/internal/errs"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
+	"go-notes/internal/validate"
 )
 
 type ProjectRuntimeService struct {
@@ -391,7 +392,7 @@ func (s *ProjectRuntimeService) syncRuntimeProjects(
 		if normalized == "" {
 			continue
 		}
-		if err := ValidateProjectName(normalized); err != nil {
+		if err := validate.ProjectName(normalized); err != nil {
 			continue
 		}
 

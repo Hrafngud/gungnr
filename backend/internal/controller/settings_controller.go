@@ -1,24 +1,16 @@
 package controller
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
-	"go-notes/internal/apierror"
 	"go-notes/internal/errs"
 	"go-notes/internal/middleware"
 	"go-notes/internal/models"
+	"go-notes/internal/respond"
 	"go-notes/internal/service"
 )
-
-type SettingsResponse struct {
-	Settings              service.SettingsPayload `json:"settings"`
-	Sources               service.SettingsSources `json:"sources,omitempty"`
-	CloudflaredTunnelName string                  `json:"cloudflaredTunnelName,omitempty"`
-	TemplatesDir          string                  `json:"templatesDir,omitempty"`
-}
 
 type SettingsController struct {
 	service *service.SettingsService
@@ -32,33 +24,33 @@ func NewSettingsController(service *service.SettingsService, audit *service.Audi
 func (c *SettingsController) Get(ctx *gin.Context) {
 	settings, err := c.service.Get(ctx.Request.Context())
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeSettingsLoadFailed, "failed to load settings")
+		respond.Err(ctx, err, errs.CodeSettingsLoadFailed, "failed to load settings")
 		return
 	}
 	response, err := c.buildResponse(ctx, settings)
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeSettingsSourcesFailed, "failed to load settings sources")
+		respond.Err(ctx, err, errs.CodeSettingsSourcesFailed, "failed to load settings sources")
 		return
 	}
-	ctx.JSON(http.StatusOK, response)
+	respond.OK(ctx, response)
 }
 
 func (c *SettingsController) Update(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeSettingsAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeSettingsAdminRequired, "admin role required"), errs.CodeSettingsAdminRequired, "admin role required")
 		return
 	}
 
 	var req service.SettingsPayload
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeSettingsInvalidBody, "invalid request body", nil)
+		respond.Err(ctx, errs.New(errs.CodeSettingsInvalidBody, "invalid request body"), errs.CodeSettingsInvalidBody, "invalid request body")
 		return
 	}
 
 	settings, err := c.service.Update(ctx.Request.Context(), req)
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeSettingsUpdateFailed, "failed to update settings")
+		respond.Err(ctx, err, errs.CodeSettingsUpdateFailed, "failed to update settings")
 		return
 	}
 
@@ -80,33 +72,33 @@ func (c *SettingsController) Update(ctx *gin.Context) {
 
 	response, err := c.buildResponse(ctx, settings)
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeSettingsSourcesFailed, "failed to load settings sources")
+		respond.Err(ctx, err, errs.CodeSettingsSourcesFailed, "failed to load settings sources")
 		return
 	}
 
-	ctx.JSON(http.StatusOK, response)
+	respond.OK(ctx, response)
 }
 
 func (c *SettingsController) CloudflaredPreview(ctx *gin.Context) {
 	preview, err := c.service.CloudflaredPreview(ctx.Request.Context())
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeSettingsPreviewFailed, err.Error())
+		respond.Err(ctx, err, errs.CodeSettingsPreviewFailed, err.Error())
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"preview": preview})
+	respond.OK(ctx, gin.H{"preview": preview})
 }
 
 func (c *SettingsController) SyncCloudflareFromEnv(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeSettingsAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeSettingsAdminRequired, "admin role required"), errs.CodeSettingsAdminRequired, "admin role required")
 		return
 	}
 
 	settings, err := c.service.SyncCloudflareFromEnv(ctx.Request.Context())
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeSettingsSyncFailed, "failed to sync Cloudflare settings")
+		respond.Err(ctx, err, errs.CodeSettingsSyncFailed, "failed to sync Cloudflare settings")
 		return
 	}
 
@@ -120,11 +112,11 @@ func (c *SettingsController) SyncCloudflareFromEnv(ctx *gin.Context) {
 
 	response, err := c.buildResponse(ctx, settings)
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeSettingsSourcesFailed, "failed to load settings sources")
+		respond.Err(ctx, err, errs.CodeSettingsSourcesFailed, "failed to load settings sources")
 		return
 	}
 
-	ctx.JSON(http.StatusOK, response)
+	respond.OK(ctx, response)
 }
 
 func (c *SettingsController) logAudit(ctx *gin.Context, action, target string, metadata map[string]any) {
@@ -141,12 +133,12 @@ func (c *SettingsController) logAudit(ctx *gin.Context, action, target string, m
 	})
 }
 
-func (c *SettingsController) buildResponse(ctx *gin.Context, settings service.SettingsPayload) (SettingsResponse, error) {
+func (c *SettingsController) buildResponse(ctx *gin.Context, settings service.SettingsPayload) (models.SettingsFullResponse, error) {
 	cfg, sources, err := c.service.ResolveConfigWithSources(ctx.Request.Context())
 	if err != nil {
-		return SettingsResponse{}, err
+		return models.SettingsFullResponse{}, err
 	}
-	return SettingsResponse{
+	return models.SettingsFullResponse{
 		Settings:              settings,
 		Sources:               sources,
 		CloudflaredTunnelName: strings.TrimSpace(cfg.CloudflaredTunnel),

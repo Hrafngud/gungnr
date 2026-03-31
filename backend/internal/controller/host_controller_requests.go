@@ -1,79 +1,66 @@
 package controller
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
-	"go-notes/internal/apierror"
 	"go-notes/internal/errs"
+	"go-notes/internal/models"
+	"go-notes/internal/respond"
 	"go-notes/internal/utils/httpx"
 )
 
-type containerActionRequest struct {
-	Container string `json:"container"`
-}
-
-type removeContainerRequest struct {
-	Container     string `json:"container"`
-	RemoveVolumes bool   `json:"removeVolumes"`
-}
-
-type projectActionRequest struct {
-	Project string `json:"project"`
-}
-
 func (c *HostController) parseContainerAction(ctx *gin.Context) (string, bool) {
-	var req containerActionRequest
+	var req models.ContainerActionRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidBody, "invalid request body", nil)
+		respond.Err(ctx, errs.New(errs.CodeHostInvalidBody, "invalid request body"), errs.CodeHostInvalidBody, "invalid request body")
 		return "", false
 	}
 	container := strings.TrimSpace(req.Container)
 	if container == "" {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidContainer, "container is required", nil)
+		respond.Err(ctx, errs.New(errs.CodeHostInvalidContainer, "container is required"), errs.CodeHostInvalidContainer, "container is required")
 		return "", false
 	}
 	if !httpx.IsSafeRef(container) {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidContainer, "invalid container name", nil)
+		respond.Err(ctx, errs.New(errs.CodeHostInvalidContainer, "invalid container name"), errs.CodeHostInvalidContainer, "invalid container name")
 		return "", false
 	}
 	return container, true
 }
 
-func (c *HostController) parseRemoveContainerAction(ctx *gin.Context) (removeContainerRequest, bool) {
-	var req removeContainerRequest
+func (c *HostController) parseRemoveContainerAction(ctx *gin.Context) (models.RemoveContainerRequest, bool) {
+	var req models.RemoveContainerRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidBody, "invalid request body", nil)
-		return removeContainerRequest{}, false
+		respond.Err(ctx, errs.New(errs.CodeHostInvalidBody, "invalid request body"), errs.CodeHostInvalidBody, "invalid request body")
+		return models.RemoveContainerRequest{}, false
 	}
 	container := strings.TrimSpace(req.Container)
 	if container == "" {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidContainer, "container is required", nil)
-		return removeContainerRequest{}, false
+		respond.Err(ctx, errs.New(errs.CodeHostInvalidContainer, "container is required"), errs.CodeHostInvalidContainer, "container is required")
+		return models.RemoveContainerRequest{}, false
 	}
 	if !httpx.IsSafeRef(container) {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidContainer, "invalid container name", nil)
-		return removeContainerRequest{}, false
+		respond.Err(ctx, errs.New(errs.CodeHostInvalidContainer, "invalid container name"), errs.CodeHostInvalidContainer, "invalid container name")
+		return models.RemoveContainerRequest{}, false
 	}
 	req.Container = container
 	return req, true
 }
 
 func (c *HostController) parseProjectAction(ctx *gin.Context) (string, bool) {
-	var req projectActionRequest
+	var req models.ProjectActionRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidBody, "invalid request body", nil)
+		respond.Err(ctx, errs.New(errs.CodeHostInvalidBody, "invalid request body"), errs.CodeHostInvalidBody, "invalid request body")
 		return "", false
 	}
 	project := strings.TrimSpace(req.Project)
 	if project == "" {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidProject, "project is required", nil)
+		respond.Err(ctx, errs.New(errs.CodeHostInvalidProject, "project is required"), errs.CodeHostInvalidProject, "project is required")
 		return "", false
 	}
 	if project == "." || project == ".." || !httpx.IsSafeRef(project) {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidProject, "invalid project name", nil)
+		respond.Err(ctx, errs.New(errs.CodeHostInvalidProject, "invalid project name"), errs.CodeHostInvalidProject, "invalid project name")
 		return "", false
 	}
 	return project, true

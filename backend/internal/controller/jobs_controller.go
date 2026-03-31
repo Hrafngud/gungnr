@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"errors"
 	"math"
 	"net/http"
 	"strings"
@@ -9,9 +8,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"go-notes/internal/apierror"
 	"go-notes/internal/errs"
 	"go-notes/internal/models"
+	"go-notes/internal/respond"
 	"go-notes/internal/service"
 	"go-notes/internal/utils/httpx"
 )
@@ -33,13 +32,13 @@ func (c *JobsController) List(ctx *gin.Context) {
 
 	jobs, total, err := c.service.ListPage(ctx.Request.Context(), page, limit)
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeJobListFailed, "failed to load jobs")
+		respond.Err(ctx, err, errs.CodeJobListFailed, "failed to load jobs")
 		return
 	}
 
-	response := make([]jobResponse, 0, len(jobs))
+	response := make([]models.JobResponse, 0, len(jobs))
 	for _, job := range jobs {
-		response = append(response, newJobResponse(job))
+		response = append(response, models.NewJobResponse(job))
 	}
 
 	totalPages := 0
@@ -47,7 +46,7 @@ func (c *JobsController) List(ctx *gin.Context) {
 		totalPages = int(math.Ceil(float64(total) / float64(limit)))
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	respond.OK(ctx, gin.H{
 		"jobs":       response,
 		"page":       page,
 		"pageSize":   limit,
@@ -56,92 +55,69 @@ func (c *JobsController) List(ctx *gin.Context) {
 	})
 }
 
-type jobDetailResponse struct {
-	jobResponse
-	LogLines []string `json:"logLines"`
-}
-
 func (c *JobsController) Get(ctx *gin.Context) {
 	id, err := httpx.ParseUintParam(ctx.Param("id"))
 	if err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeJobInvalidID, "invalid job id", nil)
+		respond.Err(ctx, errs.New(errs.CodeJobInvalidID, "invalid job id"), errs.CodeJobInvalidID, "invalid job id")
 		return
 	}
 
 	job, err := c.service.Get(ctx.Request.Context(), id)
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusNotFound, err, errs.CodeJobNotFound, "job not found")
+		respond.Err(ctx, err, errs.CodeJobNotFound, "job not found")
 		return
 	}
 
-	ctx.JSON(http.StatusOK, jobDetailResponse{
-		jobResponse: newJobResponse(*job),
+	respond.OK(ctx, models.JobDetailResponse{
+		JobResponse: models.NewJobResponse(*job),
 		LogLines:    c.service.LogLines(job),
 	})
-}
-
-type stopJobRequest struct {
-	Error string `json:"error"`
 }
 
 func (c *JobsController) Stop(ctx *gin.Context) {
 	id, err := httpx.ParseUintParam(ctx.Param("id"))
 	if err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeJobInvalidID, "invalid job id", nil)
+		respond.Err(ctx, errs.New(errs.CodeJobInvalidID, "invalid job id"), errs.CodeJobInvalidID, "invalid job id")
 		return
 	}
 
-	var req stopJobRequest
+	var req models.StopJobRequest
 	if ctx.Request.ContentLength > 0 {
 		if err := ctx.ShouldBindJSON(&req); err != nil {
-			apierror.Respond(ctx, http.StatusBadRequest, errs.CodeJobInvalidBody, "invalid request body", nil)
+			respond.Err(ctx, errs.New(errs.CodeJobInvalidBody, "invalid request body"), errs.CodeJobInvalidBody, "invalid request body")
 			return
 		}
 	}
 
 	job, err := c.service.Stop(ctx.Request.Context(), id, req.Error)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrJobAlreadyFinished), errors.Is(err, service.ErrJobRunning), errors.Is(err, service.ErrJobNotStoppable):
-			apierror.RespondWithError(ctx, http.StatusConflict, err, errs.CodeJobStopFailed, err.Error())
-		case errors.Is(err, service.ErrJobNotFound):
-			apierror.RespondWithError(ctx, http.StatusNotFound, err, errs.CodeJobNotFound, "job not found")
-		default:
-			apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeJobStopFailed, "failed to stop job")
-		}
+		respond.Err(ctx, err, errs.CodeJobStopFailed, "failed to stop job")
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"job": newJobResponse(*job)})
+	respond.OK(ctx, gin.H{"job": models.NewJobResponse(*job)})
 }
 
 func (c *JobsController) Retry(ctx *gin.Context) {
 	id, err := httpx.ParseUintParam(ctx.Param("id"))
 	if err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeJobInvalidID, "invalid job id", nil)
+		respond.Err(ctx, errs.New(errs.CodeJobInvalidID, "invalid job id"), errs.CodeJobInvalidID, "invalid job id")
 		return
 	}
 
 	job, err := c.service.Retry(ctx.Request.Context(), id)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrJobAlreadyFinished), errors.Is(err, service.ErrJobRunning), errors.Is(err, service.ErrJobNotRetryable):
-			apierror.RespondWithError(ctx, http.StatusConflict, err, errs.CodeJobRetryFailed, err.Error())
-		case errors.Is(err, service.ErrJobNotFound):
-			apierror.RespondWithError(ctx, http.StatusNotFound, err, errs.CodeJobNotFound, "job not found")
-		default:
-			apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeJobRetryFailed, "failed to retry job")
-		}
+		respond.Err(ctx, err, errs.CodeJobRetryFailed, "failed to retry job")
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"job": newJobResponse(*job)})
+	respond.OK(ctx, gin.H{"job": models.NewJobResponse(*job)})
 }
 
 func (c *JobsController) Stream(ctx *gin.Context) {
 	id, err := httpx.ParseUintParam(ctx.Param("id"))
 	if err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeJobInvalidID, "invalid job id", nil)
+		respond.Err(ctx, errs.New(errs.CodeJobInvalidID, "invalid job id"), errs.CodeJobInvalidID, "invalid job id")
 		return
 	}
 
@@ -149,7 +125,7 @@ func (c *JobsController) Stream(ctx *gin.Context) {
 
 	flusher, ok := httpx.SSEFlusher(ctx)
 	if !ok {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeJobStreamUnsupported, "streaming unsupported", nil)
+		respond.Err(ctx, errs.New(errs.CodeJobStreamUnsupported, "streaming unsupported"), errs.CodeJobStreamUnsupported, "streaming unsupported")
 		return
 	}
 

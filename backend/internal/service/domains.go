@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"go-notes/internal/errs"
+	"go-notes/internal/validate"
 )
 
 func normalizeDomain(input string) string {
@@ -33,7 +34,7 @@ func selectDomain(requested, base string, additional []string) (string, error) {
 		}
 		return normalizedBase, nil
 	}
-	if err := ValidateDomain(normalizedRequested); err != nil {
+	if err := validate.Domain(normalizedRequested); err != nil {
 		return "", err
 	}
 	if normalizedRequested == normalizedBase {

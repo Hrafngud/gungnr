@@ -1,4 +1,4 @@
-package validation
+package validate
 
 import (
 	"regexp"
@@ -69,7 +69,6 @@ func Domain(domain string) error {
 }
 
 // ContainerRef validates a container reference used in API requests.
-// Checks for non-empty and safe characters (alphanumeric, underscore, dot, dash).
 func ContainerRef(name string) error {
 	if name == "" {
 		return errs.New(errs.CodeContainerName, "container is required")
@@ -81,7 +80,6 @@ func ContainerRef(name string) error {
 }
 
 // ProjectRef validates a project reference used in host API requests.
-// Checks for non-empty, no path traversal, and safe characters.
 func ProjectRef(name string) error {
 	if name == "" {
 		return errs.New(errs.CodeHostInvalidProject, "project is required")
@@ -112,6 +110,22 @@ func UserRole(role string) error {
 	return nil
 }
 
+// UserID validates a parsed user ID.
+func UserID(id uint) error {
+	if id == 0 {
+		return errs.New(errs.CodeUserInvalidID, "invalid user id")
+	}
+	return nil
+}
+
+// UserLogin validates a user login is not empty.
+func UserLogin(login string) error {
+	if strings.TrimSpace(login) == "" {
+		return errs.New(errs.CodeUserLoginRequired, "login is required")
+	}
+	return nil
+}
+
 // ArchiveOptions validates project archive option constraints.
 func ArchiveOptions(removeContainers, removeVolumes bool) error {
 	if !removeContainers && removeVolumes {
@@ -120,9 +134,7 @@ func ArchiveOptions(removeContainers, removeVolumes bool) error {
 	return nil
 }
 
-// NetBirdModeApplyFields validates required fields for a NetBird mode apply request
-// after settings resolution. targetMode is the parsed mode, isLegacy indicates
-// whether the target is the legacy mode (which has fewer required fields).
+// NetBirdModeApplyFields validates required fields for a NetBird mode apply request.
 func NetBirdModeApplyFields(apiToken, hostPeerID string, adminPeerIDs []string, isLegacy bool) error {
 	if apiToken == "" {
 		return errs.New(errs.CodeNetBirdInvalidBody, "apiToken is required; save NetBird mode config first or provide apiToken in request")

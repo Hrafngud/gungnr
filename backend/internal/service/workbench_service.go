@@ -12,6 +12,7 @@ import (
 
 	"go-notes/internal/errs"
 	"go-notes/internal/repository"
+	"go-notes/internal/validate"
 )
 
 const defaultWorkbenchLockWaitTimeout = 15 * time.Second
@@ -170,7 +171,7 @@ func (s *WorkbenchService) ParseComposeCoreFromSource(source WorkbenchComposeSou
 
 func normalizeWorkbenchProjectName(projectName string) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(projectName))
-	if err := ValidateProjectName(normalized); err != nil {
+	if err := validate.ProjectName(normalized); err != nil {
 		return "", errs.New(errs.CodeProjectInvalidName, "project name must be lowercase alphanumerics or dashes")
 	}
 	return normalized, nil

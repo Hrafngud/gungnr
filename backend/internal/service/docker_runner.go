@@ -7,14 +7,13 @@ import (
 	"net"
 	"path"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"syscall"
 	"time"
 
-	"go-notes/internal/errs"
 	"go-notes/internal/infra/contract"
 	"go-notes/internal/jobs"
+	"go-notes/internal/validate"
 )
 
 const (
@@ -69,21 +68,21 @@ func (r *DockerRunner) RunContainer(ctx context.Context, logger jobs.Logger, req
 	if containerPort == 0 {
 		containerPort = defaultQuickServiceContainerPort
 	}
-	if err := ValidatePort(containerPort); err != nil {
+	if err := validate.Port(containerPort); err != nil {
 		return err
 	}
 
 	name := strings.TrimSpace(req.ContainerName)
 	if name == "" {
 		name = inferContainerName(image)
-	} else if err := validateContainerName(name); err != nil {
+	} else if err := validate.ContainerName(name); err != nil {
 		return err
 	}
 	if name == "" {
 		return fmt.Errorf("container name is required")
 	}
 
-	if err := ValidatePort(req.HostPort); err != nil {
+	if err := validate.Port(req.HostPort); err != nil {
 		return err
 	}
 	if inUse, err := r.isPortInUse(ctx, req.HostPort); err != nil {
@@ -244,7 +243,7 @@ func (r *DockerRunner) listContainers(ctx context.Context) ([]DockerContainer, e
 }
 
 func (r *DockerRunner) isPortInUse(ctx context.Context, port int) (bool, error) {
-	if err := ValidatePort(port); err != nil {
+	if err := validate.Port(port); err != nil {
 		return false, err
 	}
 
@@ -275,15 +274,6 @@ func isPermissionError(err error) bool {
 		err = opErr.Err
 	}
 	return errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM)
-}
-
-var containerNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
-
-func validateContainerName(name string) error {
-	if !containerNamePattern.MatchString(name) {
-		return errs.New(errs.CodeContainerName, fmt.Sprintf("container name %q is invalid; use letters, numbers, '.', '_' or '-'", name))
-	}
-	return nil
 }
 
 func inferContainerName(image string) string {
@@ -325,7 +315,7 @@ func sanitizeContainerName(name string) string {
 	if sanitized == "" {
 		return ""
 	}
-	if err := validateContainerName(sanitized); err != nil {
+	if err := validate.ContainerName(sanitized); err != nil {
 		return ""
 	}
 	return sanitized
