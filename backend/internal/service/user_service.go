@@ -5,16 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"go-notes/internal/errs"
 	ghintegration "go-notes/internal/integrations/github"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
+	"go-notes/internal/sanitize"
+	"go-notes/internal/validate"
 
 	"github.com/google/go-github/v62/github"
 )
 
+// Sentinel errors kept temporarily for apierror.mapKnown() compatibility
+// during migration. Will be removed in Phase 4.
 var ErrLastSuperUser = errors.New("cannot demote last superuser")
 var ErrAllowlistUserNotFound = errors.New("github user not found")
 var ErrAllowlistLoginRequired = errors.New("github login required")
@@ -33,11 +36,19 @@ func (s *UserService) List(ctx context.Context) ([]models.User, error) {
 	return s.userRepo.ListAll()
 }
 
-func (s *UserService) UpdateRole(ctx context.Context, userID uint, role string) (*models.User, error) {
+func (s *UserService) UpdateRole(ctx context.Context, userID uint, rawRole string) (*models.User, error) {
+	role := sanitize.Role(rawRole)
+	if err := validate.UserID(userID); err != nil {
+		return nil, err
+	}
+	if err := validate.UserRole(role); err != nil {
+		return nil, err
+	}
+
 	user, err := s.userRepo.GetByID(userID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return nil, errs.Wrap(errs.CodeUserNotFound, ErrUserNotFound.Error(), ErrUserNotFound)
+			return nil, errs.New(errs.CodeUserNotFound, "user not found")
 		}
 		return nil, err
 	}
@@ -48,7 +59,7 @@ func (s *UserService) UpdateRole(ctx context.Context, userID uint, role string) 
 			return nil, fmt.Errorf("count superusers: %w", err)
 		}
 		if superUsers <= 1 {
-			return nil, errs.Wrap(errs.CodeUserLastSuperUser, ErrLastSuperUser.Error(), ErrLastSuperUser)
+			return nil, errs.New(errs.CodeUserLastSuperUser, "cannot demote last superuser")
 		}
 	}
 
@@ -60,18 +71,17 @@ func (s *UserService) UpdateRole(ctx context.Context, userID uint, role string) 
 	return user, nil
 }
 
-func (s *UserService) AddAllowlistUser(ctx context.Context, login string) (*models.User, error) {
-	trimmed := strings.TrimSpace(login)
-	trimmed = strings.TrimPrefix(trimmed, "@")
-	if trimmed == "" {
-		return nil, errs.Wrap(errs.CodeUserLoginRequired, ErrAllowlistLoginRequired.Error(), ErrAllowlistLoginRequired)
+func (s *UserService) AddAllowlistUser(ctx context.Context, rawLogin string) (*models.User, error) {
+	login := sanitize.UserLogin(rawLogin)
+	if err := validate.UserLogin(login); err != nil {
+		return nil, err
 	}
 
 	client := github.NewClient(nil)
-	ghUser, _, err := client.Users.Get(ctx, trimmed)
+	ghUser, _, err := client.Users.Get(ctx, login)
 	if err != nil {
 		if isGitHubNotFound(err) {
-			return nil, errs.Wrap(errs.CodeUserGitHubNotFound, ErrAllowlistUserNotFound.Error(), ErrAllowlistUserNotFound)
+			return nil, errs.New(errs.CodeUserGitHubNotFound, "github user not found")
 		}
 		detail := ghintegration.FormatError(err)
 		if detail == "" {
@@ -92,15 +102,19 @@ func (s *UserService) AddAllowlistUser(ctx context.Context, login string) (*mode
 }
 
 func (s *UserService) RemoveAllowlistUser(ctx context.Context, userID uint) error {
+	if err := validate.UserID(userID); err != nil {
+		return err
+	}
+
 	user, err := s.userRepo.GetByID(userID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return errs.Wrap(errs.CodeUserNotFound, ErrUserNotFound.Error(), ErrUserNotFound)
+			return errs.New(errs.CodeUserNotFound, "user not found")
 		}
 		return err
 	}
 	if user.Role == models.RoleSuperUser {
-		return errs.Wrap(errs.CodeUserRemoveSuperUser, ErrCannotRemoveSuperUser.Error(), ErrCannotRemoveSuperUser)
+		return errs.New(errs.CodeUserRemoveSuperUser, "cannot remove superuser")
 	}
 
 	if err := s.userRepo.DeleteByIDs([]uint{userID}); err != nil {

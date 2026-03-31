@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"go-notes/internal/middleware"
+	"go-notes/internal/models"
 	"go-notes/internal/service"
 )
 
@@ -56,7 +57,7 @@ func netBirdModeApplyAuditMetadata(
 }
 
 func netBirdModeConfigUpdateAuditMetadata(
-	req netBirdModeConfigUpsertRequest,
+	req models.NetBirdModeConfigUpsertRequest,
 	updated service.NetBirdModeConfig,
 ) map[string]any {
 	return map[string]any{

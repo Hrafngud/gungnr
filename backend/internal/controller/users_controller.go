@@ -1,37 +1,17 @@
 package controller
 
 import (
-	"errors"
-	"net/http"
-	"strings"
-	"time"
-
 	"github.com/gin-gonic/gin"
 
-	"go-notes/internal/apierror"
 	"go-notes/internal/errs"
 	"go-notes/internal/models"
+	"go-notes/internal/respond"
 	"go-notes/internal/service"
 	"go-notes/internal/utils/httpx"
 )
 
 type UsersController struct {
 	service *service.UserService
-}
-
-type userResponse struct {
-	ID          uint      `json:"id"`
-	Login       string    `json:"login"`
-	Role        string    `json:"role"`
-	LastLoginAt time.Time `json:"lastLoginAt"`
-}
-
-type updateUserRoleRequest struct {
-	Role string `json:"role"`
-}
-
-type createUserRequest struct {
-	Login string `json:"login"`
 }
 
 func NewUsersController(service *service.UserService) *UsersController {
@@ -41,115 +21,58 @@ func NewUsersController(service *service.UserService) *UsersController {
 func (c *UsersController) List(ctx *gin.Context) {
 	users, err := c.service.List(ctx.Request.Context())
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeUserListFailed, "failed to load users")
+		respond.Err(ctx, err, errs.CodeUserListFailed, "failed to load users")
 		return
 	}
-
-	response := make([]userResponse, 0, len(users))
-	for _, user := range users {
-		response = append(response, userResponse{
-			ID:          user.ID,
-			Login:       user.Login,
-			Role:        user.Role,
-			LastLoginAt: user.LastLoginAt,
-		})
-	}
-
-	ctx.JSON(http.StatusOK, gin.H{"users": response})
+	respond.OK(ctx, gin.H{"users": models.NewUserResponses(users)})
 }
 
 func (c *UsersController) UpdateRole(ctx *gin.Context) {
 	userID, err := httpx.ParseUintParam(ctx.Param("id"))
-	if err != nil || userID == 0 {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeUserInvalidID, "invalid user id", nil)
-		return
-	}
-
-	var req updateUserRoleRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeUserInvalidPayload, "invalid payload", nil)
-		return
-	}
-
-	role := strings.ToLower(strings.TrimSpace(req.Role))
-	if role != models.RoleAdmin && role != models.RoleUser {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeUserInvalidRole, "role must be admin or user", nil)
-		return
-	}
-
-	user, err := c.service.UpdateRole(ctx.Request.Context(), userID, role)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrUserNotFound):
-			apierror.RespondWithError(ctx, http.StatusNotFound, err, errs.CodeUserNotFound, "user not found")
-		case errors.Is(err, service.ErrLastSuperUser):
-			apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeUserLastSuperUser, "cannot demote last superuser")
-		default:
-			apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeUserUpdateFailed, "failed to update role")
-		}
+		respond.Err(ctx, errs.New(errs.CodeUserInvalidID, "invalid user id"), errs.CodeUserInvalidID, "invalid user id")
 		return
 	}
 
-	ctx.JSON(http.StatusOK, userResponse{
-		ID:          user.ID,
-		Login:       user.Login,
-		Role:        user.Role,
-		LastLoginAt: user.LastLoginAt,
-	})
+	var req models.UpdateUserRoleRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		respond.Err(ctx, errs.New(errs.CodeUserInvalidPayload, "invalid payload"), errs.CodeUserInvalidPayload, "invalid payload")
+		return
+	}
+
+	user, err := c.service.UpdateRole(ctx.Request.Context(), userID, req.Role)
+	if err != nil {
+		respond.Err(ctx, err, errs.CodeUserUpdateFailed, "failed to update role")
+		return
+	}
+	respond.OK(ctx, models.NewUserResponse(user))
 }
 
 func (c *UsersController) Create(ctx *gin.Context) {
-	var req createUserRequest
+	var req models.CreateUserRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeUserInvalidPayload, "invalid payload", nil)
+		respond.Err(ctx, errs.New(errs.CodeUserInvalidPayload, "invalid payload"), errs.CodeUserInvalidPayload, "invalid payload")
 		return
 	}
 
-	login := strings.TrimSpace(req.Login)
-	if login == "" {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeUserLoginRequired, "login is required", nil)
-		return
-	}
-
-	user, err := c.service.AddAllowlistUser(ctx.Request.Context(), login)
+	user, err := c.service.AddAllowlistUser(ctx.Request.Context(), req.Login)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAllowlistLoginRequired):
-			apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeUserLoginRequired, "login is required")
-		case errors.Is(err, service.ErrAllowlistUserNotFound):
-			apierror.RespondWithError(ctx, http.StatusNotFound, err, errs.CodeUserGitHubNotFound, "github user not found")
-		default:
-			apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeUserCreateFailed, "failed to add user")
-		}
+		respond.Err(ctx, err, errs.CodeUserCreateFailed, "failed to add user")
 		return
 	}
-
-	ctx.JSON(http.StatusOK, userResponse{
-		ID:          user.ID,
-		Login:       user.Login,
-		Role:        user.Role,
-		LastLoginAt: user.LastLoginAt,
-	})
+	respond.OK(ctx, models.NewUserResponse(user))
 }
 
 func (c *UsersController) Delete(ctx *gin.Context) {
 	userID, err := httpx.ParseUintParam(ctx.Param("id"))
-	if err != nil || userID == 0 {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeUserInvalidID, "invalid user id", nil)
+	if err != nil {
+		respond.Err(ctx, errs.New(errs.CodeUserInvalidID, "invalid user id"), errs.CodeUserInvalidID, "invalid user id")
 		return
 	}
 
 	if err := c.service.RemoveAllowlistUser(ctx.Request.Context(), userID); err != nil {
-		switch {
-		case errors.Is(err, service.ErrUserNotFound):
-			apierror.RespondWithError(ctx, http.StatusNotFound, err, errs.CodeUserNotFound, "user not found")
-		case errors.Is(err, service.ErrCannotRemoveSuperUser):
-			apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeUserRemoveSuperUser, "cannot remove superuser")
-		default:
-			apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeUserDeleteFailed, "failed to remove user")
-		}
+		respond.Err(ctx, err, errs.CodeUserDeleteFailed, "failed to remove user")
 		return
 	}
-
-	ctx.Status(http.StatusNoContent)
+	respond.NoContent(ctx)
 }

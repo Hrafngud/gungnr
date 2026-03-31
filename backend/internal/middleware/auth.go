@@ -1,15 +1,14 @@
 package middleware
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
-	"go-notes/internal/apierror"
 	"go-notes/internal/auth"
 	"go-notes/internal/errs"
 	"go-notes/internal/models"
+	"go-notes/internal/respond"
 )
 
 const sessionContextKey = "session"
@@ -24,7 +23,7 @@ func AuthRequired(sessions *auth.Manager) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		session, err := ReadSession(ctx, sessions)
 		if err != nil {
-			apierror.Respond(ctx, http.StatusUnauthorized, errs.CodeAuthUnauthenticated, "unauthenticated", nil)
+			respond.Err(ctx, errs.New(errs.CodeAuthUnauthenticated, "unauthenticated"), errs.CodeAuthUnauthenticated, "unauthenticated")
 			ctx.Abort()
 			return
 		}
@@ -92,13 +91,13 @@ func requireRole(sessions *auth.Manager, requiredRole string) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		session, err := ReadSession(ctx, sessions)
 		if err != nil {
-			apierror.Respond(ctx, http.StatusUnauthorized, errs.CodeAuthUnauthenticated, "unauthenticated", nil)
+			respond.Err(ctx, errs.New(errs.CodeAuthUnauthenticated, "unauthenticated"), errs.CodeAuthUnauthenticated, "unauthenticated")
 			ctx.Abort()
 			return
 		}
 
 		if !roleAllowed(session.Role, requiredRole) {
-			apierror.Respond(ctx, http.StatusForbidden, errs.CodeAuthForbidden, "forbidden", nil)
+			respond.Err(ctx, errs.New(errs.CodeAuthForbidden, "forbidden"), errs.CodeAuthForbidden, "forbidden")
 			ctx.Abort()
 			return
 		}

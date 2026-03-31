@@ -13,6 +13,7 @@ import (
 	"go-notes/internal/integrations/cloudflare"
 	"go-notes/internal/jobs"
 	"go-notes/internal/models"
+	"go-notes/internal/validate"
 )
 
 type projectArchiveServiceExposureSummary struct {
@@ -48,7 +49,7 @@ func (w *ProjectWorkflows) handleProjectArchive(ctx context.Context, job models.
 	}
 
 	req.Project = strings.ToLower(strings.TrimSpace(req.Project))
-	if err := ValidateProjectName(req.Project); err != nil {
+	if err := validate.ProjectName(req.Project); err != nil {
 		return err
 	}
 

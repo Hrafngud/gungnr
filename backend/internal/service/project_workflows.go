@@ -27,6 +27,7 @@ import (
 	"go-notes/internal/jobs"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
+	"go-notes/internal/validate"
 )
 
 type ProjectWorkflows struct {
@@ -100,10 +101,10 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	if req.Subdomain == "" {
 		req.Subdomain = req.Name
 	}
-	if err := ValidateProjectName(req.Name); err != nil {
+	if err := validate.ProjectName(req.Name); err != nil {
 		return err
 	}
-	if err := ValidateSubdomain(req.Subdomain); err != nil {
+	if err := validate.Subdomain(req.Subdomain); err != nil {
 		return err
 	}
 
@@ -275,16 +276,16 @@ func (w *ProjectWorkflows) handleDeployExisting(ctx context.Context, job models.
 	}
 	req.Name = strings.ToLower(strings.TrimSpace(req.Name))
 	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
-	if err := ValidateProjectName(req.Name); err != nil {
+	if err := validate.ProjectName(req.Name); err != nil {
 		return err
 	}
-	if err := ValidateSubdomain(req.Subdomain); err != nil {
+	if err := validate.Subdomain(req.Subdomain); err != nil {
 		return err
 	}
 	if req.Port == 0 {
 		req.Port = 80
 	}
-	if err := ValidatePort(req.Port); err != nil {
+	if err := validate.Port(req.Port); err != nil {
 		return err
 	}
 	logger.Logf("using host port %d for ingress", req.Port)
@@ -547,16 +548,16 @@ func (w *ProjectWorkflows) handleForwardLocal(ctx context.Context, job models.Jo
 	}
 	req.Name = strings.ToLower(strings.TrimSpace(req.Name))
 	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
-	if err := ValidateServiceName(req.Name); err != nil {
+	if err := validate.ServiceName(req.Name); err != nil {
 		return err
 	}
-	if err := ValidateSubdomain(req.Subdomain); err != nil {
+	if err := validate.Subdomain(req.Subdomain); err != nil {
 		return err
 	}
 	if req.Port == 0 {
 		req.Port = 80
 	}
-	if err := ValidatePort(req.Port); err != nil {
+	if err := validate.Port(req.Port); err != nil {
 		return err
 	}
 	logger.Logf("forwarding localhost port %d for %s", req.Port, req.Name)
@@ -588,7 +589,7 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 	}
 	requestedPort := req.RequestedPort
 	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
-	if err := ValidateSubdomain(req.Subdomain); err != nil {
+	if err := validate.Subdomain(req.Subdomain); err != nil {
 		return err
 	}
 	exposureMode, err := normalizeQuickServiceExposureRequest(req.ExposureMode, req.Port)
@@ -604,11 +605,11 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 	if req.ContainerPort == 0 {
 		req.ContainerPort = defaultQuickServiceContainerPort
 	}
-	if err := ValidatePort(req.ContainerPort); err != nil {
+	if err := validate.Port(req.ContainerPort); err != nil {
 		return err
 	}
 	if req.ContainerName != "" {
-		if err := validateContainerName(req.ContainerName); err != nil {
+		if err := validate.ContainerName(req.ContainerName); err != nil {
 			return err
 		}
 	}
@@ -616,7 +617,7 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 		if requestedPort == 0 {
 			requestedPort = req.Port
 		}
-		if err := ValidatePort(req.Port); err != nil {
+		if err := validate.Port(req.Port); err != nil {
 			return err
 		}
 		if requestedPort != req.Port {
@@ -628,7 +629,7 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 		if requestedPort == 0 {
 			requestedPort = req.Port
 		}
-		if err := ValidatePort(req.Port); err != nil {
+		if err := validate.Port(req.Port); err != nil {
 			return err
 		}
 		if requestedPort != req.Port {
@@ -801,7 +802,7 @@ func projectPath(base, name string) (string, error) {
 	if strings.TrimSpace(base) == "" {
 		return "", fmt.Errorf("TEMPLATES_DIR not configured")
 	}
-	if err := ValidateProjectName(name); err != nil {
+	if err := validate.ProjectName(name); err != nil {
 		return "", err
 	}
 	path := filepath.Join(base, name)
@@ -842,7 +843,7 @@ func addDockerReservedPorts(ctx context.Context, probeClient infraPortProbeClien
 }
 
 func ensureAvailableHostPort(ctx context.Context, probeClient infraPortProbeClient, requested int) (int, error) {
-	if err := ValidatePort(requested); err != nil {
+	if err := validate.Port(requested); err != nil {
 		return 0, err
 	}
 

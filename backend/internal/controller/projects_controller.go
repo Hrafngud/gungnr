@@ -3,14 +3,14 @@ package controller
 import (
 	"bufio"
 	"math"
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
-	"go-notes/internal/apierror"
 	"go-notes/internal/errs"
 	"go-notes/internal/middleware"
+	"go-notes/internal/models"
+	"go-notes/internal/respond"
 	"go-notes/internal/service"
 	"go-notes/internal/utils/httpx"
 )
@@ -52,30 +52,30 @@ func (c *ProjectsController) List(ctx *gin.Context) {
 	if c.runtime != nil {
 		summaries, err := c.runtime.ListSummaries(ctx.Request.Context())
 		if err != nil {
-			apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeProjectListFailed, "failed to load projects")
+			respond.Err(ctx, err, errs.CodeProjectListFailed, "failed to load projects")
 			return
 		}
 
-		ctx.JSON(http.StatusOK, gin.H{"projects": newProjectResponsesFromSummaries(summaries)})
+		respond.OK(ctx, gin.H{"projects": newProjectResponsesFromSummaries(summaries)})
 		return
 	}
 
 	projects, err := c.service.List(ctx.Request.Context())
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeProjectListFailed, "failed to load projects")
+		respond.Err(ctx, err, errs.CodeProjectListFailed, "failed to load projects")
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"projects": newProjectResponsesFromModels(projects)})
+	respond.OK(ctx, gin.H{"projects": models.NewProjectResponses(projects)})
 }
 
 func (c *ProjectsController) ListLocal(ctx *gin.Context) {
 	projects, err := c.service.ListLocal(ctx.Request.Context())
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeProjectLocalListFailed, err.Error())
+		respond.Err(ctx, err, errs.CodeProjectLocalListFailed, err.Error())
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"projects": projects})
+	respond.OK(ctx, gin.H{"projects": projects})
 }
 
 func (c *ProjectsController) Detail(ctx *gin.Context) {
@@ -84,18 +84,17 @@ func (c *ProjectsController) Detail(ctx *gin.Context) {
 		return
 	}
 	if c.runtime == nil {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeProjectDetailFailed, "project runtime service unavailable", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectDetailFailed, "project runtime service unavailable"), errs.CodeProjectDetailFailed, "project runtime service unavailable")
 		return
 	}
 
 	detail, err := c.runtime.Detail(ctx.Request.Context(), project)
 	if err != nil {
-		status := projectHTTPStatus(err, http.StatusInternalServerError)
-		apierror.RespondWithError(ctx, status, err, errs.CodeProjectDetailFailed, "failed to load project detail")
+		respond.Err(ctx, err, errs.CodeProjectDetailFailed, "failed to load project detail")
 		return
 	}
 
-	ctx.JSON(http.StatusOK, detail)
+	respond.OK(ctx, detail)
 }
 
 func (c *ProjectsController) ListJobs(ctx *gin.Context) {
@@ -104,7 +103,7 @@ func (c *ProjectsController) ListJobs(ctx *gin.Context) {
 		return
 	}
 	if c.jobs == nil {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeProjectJobsFailed, "job service unavailable", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectJobsFailed, "job service unavailable"), errs.CodeProjectJobsFailed, "job service unavailable")
 		return
 	}
 
@@ -116,14 +115,13 @@ func (c *ProjectsController) ListJobs(ctx *gin.Context) {
 
 	jobs, total, err := c.jobs.ListByProjectPage(ctx.Request.Context(), project, page, limit)
 	if err != nil {
-		status := projectHTTPStatus(err, http.StatusInternalServerError)
-		apierror.RespondWithError(ctx, status, err, errs.CodeProjectJobsFailed, "failed to load project jobs")
+		respond.Err(ctx, err, errs.CodeProjectJobsFailed, "failed to load project jobs")
 		return
 	}
 
-	response := make([]jobResponse, 0, len(jobs))
+	response := make([]models.JobResponse, 0, len(jobs))
 	for _, job := range jobs {
-		response = append(response, newJobResponse(job))
+		response = append(response, models.NewJobResponse(job))
 	}
 
 	totalPages := 0
@@ -131,7 +129,7 @@ func (c *ProjectsController) ListJobs(ctx *gin.Context) {
 		totalPages = int(math.Ceil(float64(total) / float64(limit)))
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	respond.OK(ctx, gin.H{
 		"jobs":       response,
 		"page":       page,
 		"pageSize":   limit,
@@ -143,7 +141,7 @@ func (c *ProjectsController) ListJobs(ctx *gin.Context) {
 func (c *ProjectsController) RestartStack(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectAdminRequired, "admin role required"), errs.CodeProjectAdminRequired, "admin role required")
 		return
 	}
 	project, ok := c.parseProjectParam(ctx)
@@ -151,14 +149,13 @@ func (c *ProjectsController) RestartStack(ctx *gin.Context) {
 		return
 	}
 	if c.runtime == nil || c.jobs == nil {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeProjectStackFailed, "project restart service unavailable", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectStackFailed, "project restart service unavailable"), errs.CodeProjectStackFailed, "project restart service unavailable")
 		return
 	}
 
 	resolved, err := c.runtime.Resolve(ctx.Request.Context(), project)
 	if err != nil {
-		status := projectHTTPStatus(err, http.StatusInternalServerError)
-		apierror.RespondWithError(ctx, status, err, errs.CodeProjectStackFailed, "failed to resolve project")
+		respond.Err(ctx, err, errs.CodeProjectStackFailed, "failed to resolve project")
 		return
 	}
 
@@ -166,7 +163,7 @@ func (c *ProjectsController) RestartStack(ctx *gin.Context) {
 		Project: resolved.NormalizedName,
 	})
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeProjectStackFailed, "failed to queue project restart")
+		respond.Err(ctx, err, errs.CodeProjectStackFailed, "failed to queue project restart")
 		return
 	}
 
@@ -175,13 +172,13 @@ func (c *ProjectsController) RestartStack(ctx *gin.Context) {
 		"jobId":   job.ID,
 	})
 
-	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
+	respond.Accepted(ctx, gin.H{"job": models.NewJobResponse(*job)})
 }
 
 func (c *ProjectsController) StopContainer(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectAdminRequired, "admin role required"), errs.CodeProjectAdminRequired, "admin role required")
 		return
 	}
 	project, container, ok := c.parseProjectContainerAction(ctx)
@@ -189,25 +186,25 @@ func (c *ProjectsController) StopContainer(ctx *gin.Context) {
 		return
 	}
 	if c.host == nil {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeProjectContainerFailed, "host service unavailable", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectContainerFailed, "host service unavailable"), errs.CodeProjectContainerFailed, "host service unavailable")
 		return
 	}
 
 	if err := c.host.StopContainer(ctx.Request.Context(), container); err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeProjectContainerFailed, "failed to stop project container")
+		respond.Err(ctx, err, errs.CodeProjectContainerFailed, "failed to stop project container")
 		return
 	}
 	c.logAudit(ctx, "project.container.stop", container, map[string]any{
 		"project":   project,
 		"container": container,
 	})
-	ctx.JSON(http.StatusOK, gin.H{"status": "stopped"})
+	respond.OK(ctx, gin.H{"status": "stopped"})
 }
 
 func (c *ProjectsController) RestartContainer(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectAdminRequired, "admin role required"), errs.CodeProjectAdminRequired, "admin role required")
 		return
 	}
 	project, container, ok := c.parseProjectContainerAction(ctx)
@@ -215,25 +212,25 @@ func (c *ProjectsController) RestartContainer(ctx *gin.Context) {
 		return
 	}
 	if c.host == nil {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeProjectContainerFailed, "host service unavailable", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectContainerFailed, "host service unavailable"), errs.CodeProjectContainerFailed, "host service unavailable")
 		return
 	}
 
 	if err := c.host.RestartContainer(ctx.Request.Context(), container); err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeProjectContainerFailed, "failed to restart project container")
+		respond.Err(ctx, err, errs.CodeProjectContainerFailed, "failed to restart project container")
 		return
 	}
 	c.logAudit(ctx, "project.container.restart", container, map[string]any{
 		"project":   project,
 		"container": container,
 	})
-	ctx.JSON(http.StatusOK, gin.H{"status": "restarted"})
+	respond.OK(ctx, gin.H{"status": "restarted"})
 }
 
 func (c *ProjectsController) RemoveContainer(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectAdminRequired, "admin role required"), errs.CodeProjectAdminRequired, "admin role required")
 		return
 	}
 	project, req, ok := c.parseProjectRemoveContainerAction(ctx)
@@ -241,12 +238,12 @@ func (c *ProjectsController) RemoveContainer(ctx *gin.Context) {
 		return
 	}
 	if c.host == nil {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeProjectContainerFailed, "host service unavailable", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectContainerFailed, "host service unavailable"), errs.CodeProjectContainerFailed, "host service unavailable")
 		return
 	}
 
 	if err := c.host.RemoveContainer(ctx.Request.Context(), req.Container, req.RemoveVolumes); err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeProjectContainerFailed, "failed to remove project container")
+		respond.Err(ctx, err, errs.CodeProjectContainerFailed, "failed to remove project container")
 		return
 	}
 	c.logAudit(ctx, "project.container.remove", req.Container, map[string]any{
@@ -254,7 +251,7 @@ func (c *ProjectsController) RemoveContainer(ctx *gin.Context) {
 		"container":     req.Container,
 		"removeVolumes": req.RemoveVolumes,
 	})
-	ctx.JSON(http.StatusOK, gin.H{"status": "removed"})
+	respond.OK(ctx, gin.H{"status": "removed"})
 }
 
 func (c *ProjectsController) StreamLogs(ctx *gin.Context) {
@@ -264,21 +261,20 @@ func (c *ProjectsController) StreamLogs(ctx *gin.Context) {
 	}
 	container := strings.TrimSpace(ctx.Query("container"))
 	if container == "" {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidContainer, "container is required", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectInvalidContainer, "container is required"), errs.CodeProjectInvalidContainer, "container is required")
 		return
 	}
 	if !httpx.IsSafeRef(container) {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidContainer, "invalid container name", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectInvalidContainer, "invalid container name"), errs.CodeProjectInvalidContainer, "invalid container name")
 		return
 	}
 	if c.runtime == nil || c.host == nil {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeProjectLogsFailed, "project logs service unavailable", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectLogsFailed, "project logs service unavailable"), errs.CodeProjectLogsFailed, "project logs service unavailable")
 		return
 	}
 
 	if _, err := c.runtime.EnsureContainerInProject(ctx.Request.Context(), project, container); err != nil {
-		status := projectHTTPStatus(err, http.StatusInternalServerError)
-		apierror.RespondWithError(ctx, status, err, errs.CodeProjectLogsFailed, "failed to resolve project container")
+		respond.Err(ctx, err, errs.CodeProjectLogsFailed, "failed to resolve project container")
 		return
 	}
 
@@ -291,13 +287,13 @@ func (c *ProjectsController) StreamLogs(ctx *gin.Context) {
 	httpx.SetSSEHeaders(ctx)
 	flusher, ok := httpx.SSEFlusher(ctx)
 	if !ok {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeHostStreamUnsupported, "streaming unsupported", nil)
+		respond.Err(ctx, errs.New(errs.CodeHostStreamUnsupported, "streaming unsupported"), errs.CodeHostStreamUnsupported, "streaming unsupported")
 		return
 	}
 
 	waiter, stdout, err := c.host.StartContainerLogs(ctx.Request.Context(), container, opts)
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeProjectLogsFailed, "failed to stream project container logs")
+		respond.Err(ctx, err, errs.CodeProjectLogsFailed, "failed to stream project container logs")
 		return
 	}
 	defer stdout.Close()
@@ -329,7 +325,7 @@ func (c *ProjectsController) StreamLogs(ctx *gin.Context) {
 func (c *ProjectsController) ReadEnv(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectAdminRequired, "admin role required"), errs.CodeProjectAdminRequired, "admin role required")
 		return
 	}
 	project, ok := c.parseProjectParam(ctx)
@@ -337,14 +333,13 @@ func (c *ProjectsController) ReadEnv(ctx *gin.Context) {
 		return
 	}
 	if c.env == nil {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeProjectEnvReadFailed, "project env service unavailable", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectEnvReadFailed, "project env service unavailable"), errs.CodeProjectEnvReadFailed, "project env service unavailable")
 		return
 	}
 
 	env, err := c.env.Load(ctx.Request.Context(), project)
 	if err != nil {
-		status := projectHTTPStatus(err, http.StatusInternalServerError)
-		apierror.RespondWithError(ctx, status, err, errs.CodeProjectEnvReadFailed, "failed to load project .env")
+		respond.Err(ctx, err, errs.CodeProjectEnvReadFailed, "failed to load project .env")
 		return
 	}
 
@@ -355,13 +350,13 @@ func (c *ProjectsController) ReadEnv(ctx *gin.Context) {
 		"sizeBytes": env.SizeBytes,
 	})
 
-	ctx.JSON(http.StatusOK, gin.H{"env": env})
+	respond.OK(ctx, gin.H{"env": env})
 }
 
 func (c *ProjectsController) WriteEnv(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectAdminRequired, "admin role required"), errs.CodeProjectAdminRequired, "admin role required")
 		return
 	}
 	project, ok := c.parseProjectParam(ctx)
@@ -369,13 +364,13 @@ func (c *ProjectsController) WriteEnv(ctx *gin.Context) {
 		return
 	}
 	if c.env == nil {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeProjectEnvWriteFailed, "project env service unavailable", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectEnvWriteFailed, "project env service unavailable"), errs.CodeProjectEnvWriteFailed, "project env service unavailable")
 		return
 	}
 
-	var req projectEnvWriteRequest
+	var req models.ProjectEnvWriteRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "invalid request body", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectInvalidBody, "invalid request body"), errs.CodeProjectInvalidBody, "invalid request body")
 		return
 	}
 	createBackup := true
@@ -385,8 +380,7 @@ func (c *ProjectsController) WriteEnv(ctx *gin.Context) {
 
 	result, err := c.env.Save(ctx.Request.Context(), project, req.Content, createBackup)
 	if err != nil {
-		status := projectHTTPStatus(err, http.StatusInternalServerError)
-		apierror.RespondWithError(ctx, status, err, errs.CodeProjectEnvWriteFailed, "failed to save project .env")
+		respond.Err(ctx, err, errs.CodeProjectEnvWriteFailed, "failed to save project .env")
 		return
 	}
 
@@ -397,24 +391,24 @@ func (c *ProjectsController) WriteEnv(ctx *gin.Context) {
 		"backupPath": result.BackupPath,
 	})
 
-	ctx.JSON(http.StatusOK, gin.H{"env": result})
+	respond.OK(ctx, gin.H{"env": result})
 }
 
 func (c *ProjectsController) CreateFromTemplate(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectAdminRequired, "admin role required"), errs.CodeProjectAdminRequired, "admin role required")
 		return
 	}
 	var req service.CreateTemplateRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "invalid request body", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectInvalidBody, "invalid request body"), errs.CodeProjectInvalidBody, "invalid request body")
 		return
 	}
 
 	job, err := c.service.CreateFromTemplate(ctx.Request.Context(), req)
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeProjectCreateFailed, err.Error())
+		respond.Err(ctx, err, errs.CodeProjectCreateFailed, err.Error())
 		return
 	}
 
@@ -431,24 +425,24 @@ func (c *ProjectsController) CreateFromTemplate(ctx *gin.Context) {
 		"jobId":     job.ID,
 	})
 
-	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
+	respond.Accepted(ctx, gin.H{"job": models.NewJobResponse(*job)})
 }
 
 func (c *ProjectsController) DeployExisting(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectAdminRequired, "admin role required"), errs.CodeProjectAdminRequired, "admin role required")
 		return
 	}
 	var req service.DeployExistingRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "invalid request body", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectInvalidBody, "invalid request body"), errs.CodeProjectInvalidBody, "invalid request body")
 		return
 	}
 
 	job, err := c.service.DeployExisting(ctx.Request.Context(), req)
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeProjectDeployFailed, err.Error())
+		respond.Err(ctx, err, errs.CodeProjectDeployFailed, err.Error())
 		return
 	}
 
@@ -459,24 +453,24 @@ func (c *ProjectsController) DeployExisting(ctx *gin.Context) {
 		"jobId":     job.ID,
 	})
 
-	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
+	respond.Accepted(ctx, gin.H{"job": models.NewJobResponse(*job)})
 }
 
 func (c *ProjectsController) ForwardLocal(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectAdminRequired, "admin role required"), errs.CodeProjectAdminRequired, "admin role required")
 		return
 	}
 	var req service.ForwardLocalRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "invalid request body", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectInvalidBody, "invalid request body"), errs.CodeProjectInvalidBody, "invalid request body")
 		return
 	}
 
 	job, err := c.service.ForwardLocal(ctx.Request.Context(), req)
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeProjectForwardFailed, err.Error())
+		respond.Err(ctx, err, errs.CodeProjectForwardFailed, err.Error())
 		return
 	}
 
@@ -487,24 +481,24 @@ func (c *ProjectsController) ForwardLocal(ctx *gin.Context) {
 		"jobId":     job.ID,
 	})
 
-	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
+	respond.Accepted(ctx, gin.H{"job": models.NewJobResponse(*job)})
 }
 
 func (c *ProjectsController) QuickService(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectAdminRequired, "admin role required"), errs.CodeProjectAdminRequired, "admin role required")
 		return
 	}
 	var req service.QuickServiceRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeProjectInvalidBody, "invalid request body", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectInvalidBody, "invalid request body"), errs.CodeProjectInvalidBody, "invalid request body")
 		return
 	}
 
 	job, hostPort, err := c.service.QuickService(ctx.Request.Context(), req)
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusBadRequest, err, errs.CodeProjectQuickFailed, err.Error())
+		respond.Err(ctx, err, errs.CodeProjectQuickFailed, err.Error())
 		return
 	}
 	exposureMode, exposureErr := service.NormalizeQuickServiceExposureMode(req.ExposureMode, req.Port)
@@ -521,5 +515,5 @@ func (c *ProjectsController) QuickService(ctx *gin.Context) {
 		"exposureMode":  exposureMode,
 	})
 
-	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job), "hostPort": hostPort})
+	respond.Accepted(ctx, gin.H{"job": models.NewJobResponse(*job), "hostPort": hostPort})
 }

@@ -1,20 +1,19 @@
 package controller
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 
-	"go-notes/internal/apierror"
 	"go-notes/internal/errs"
 	"go-notes/internal/middleware"
+	"go-notes/internal/models"
+	"go-notes/internal/respond"
 	"go-notes/internal/service"
 )
 
 func (c *ProjectsController) ArchivePlan(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectAdminRequired, "admin role required"), errs.CodeProjectAdminRequired, "admin role required")
 		return
 	}
 
@@ -23,14 +22,13 @@ func (c *ProjectsController) ArchivePlan(ctx *gin.Context) {
 		return
 	}
 	if c.archive == nil {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeProjectArchivePlanFailed, "project archive service unavailable", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectArchivePlanFailed, "project archive service unavailable"), errs.CodeProjectArchivePlanFailed, "project archive service unavailable")
 		return
 	}
 
 	plan, err := c.archive.Plan(ctx.Request.Context(), project)
 	if err != nil {
-		status := projectHTTPStatus(err, http.StatusInternalServerError)
-		apierror.RespondWithError(ctx, status, err, errs.CodeProjectArchivePlanFailed, "failed to build project archive plan")
+		respond.Err(ctx, err, errs.CodeProjectArchivePlanFailed, "failed to build project archive plan")
 		return
 	}
 
@@ -44,13 +42,13 @@ func (c *ProjectsController) ArchivePlan(ctx *gin.Context) {
 		"defaultOptions": plan.Defaults,
 	})
 
-	ctx.JSON(http.StatusOK, gin.H{"plan": plan})
+	respond.OK(ctx, gin.H{"plan": plan})
 }
 
 func (c *ProjectsController) Archive(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeProjectAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectAdminRequired, "admin role required"), errs.CodeProjectAdminRequired, "admin role required")
 		return
 	}
 
@@ -59,7 +57,7 @@ func (c *ProjectsController) Archive(ctx *gin.Context) {
 		return
 	}
 	if c.archive == nil {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeProjectArchiveFailed, "project archive service unavailable", nil)
+		respond.Err(ctx, errs.New(errs.CodeProjectArchiveFailed, "project archive service unavailable"), errs.CodeProjectArchiveFailed, "project archive service unavailable")
 		return
 	}
 
@@ -73,8 +71,7 @@ func (c *ProjectsController) Archive(ctx *gin.Context) {
 		Login:  session.Login,
 	})
 	if err != nil {
-		status := projectHTTPStatus(err, http.StatusInternalServerError)
-		apierror.RespondWithError(ctx, status, err, errs.CodeProjectArchiveFailed, "failed to queue project archive")
+		respond.Err(ctx, err, errs.CodeProjectArchiveFailed, "failed to queue project archive")
 		return
 	}
 
@@ -94,8 +91,8 @@ func (c *ProjectsController) Archive(ctx *gin.Context) {
 		"warningCount": len(plan.Warnings),
 	})
 
-	ctx.JSON(http.StatusAccepted, gin.H{
-		"job":  newJobResponse(*job),
+	respond.Accepted(ctx, gin.H{
+		"job":  models.NewJobResponse(*job),
 		"plan": plan,
 	})
 }

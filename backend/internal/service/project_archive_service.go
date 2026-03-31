@@ -12,6 +12,7 @@ import (
 	"go-notes/internal/integrations/cloudflare"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
+	"go-notes/internal/validate"
 )
 
 const ingressLogPrefix = "configuring tunnel ingress for "
@@ -398,7 +399,7 @@ func (s *ProjectArchiveService) discoverHostnames(
 
 	if baseDomain != "" {
 		fallback := fmt.Sprintf("%s.%s", project, baseDomain)
-		if ValidateDomain(fallback) == nil {
+		if validate.Domain(fallback) == nil {
 			candidates[fallback] = struct{}{}
 		}
 	}
@@ -500,7 +501,7 @@ func newArchiveExposureOwnershipContext(project string, projectHostnames []strin
 	hostnameSet := make(map[string]struct{})
 	addHostname := func(value string) {
 		normalized := strings.ToLower(strings.TrimSpace(value))
-		if normalized == "" || ValidateDomain(normalized) != nil {
+		if normalized == "" || validate.Domain(normalized) != nil {
 			return
 		}
 		hostnameSet[normalized] = struct{}{}
@@ -744,7 +745,7 @@ func resolveExposureHostname(subdomain, domain, baseDomain string) (string, stri
 	}
 
 	hostname := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%s.%s", subdomain, domain)))
-	if ValidateDomain(hostname) != nil {
+	if validate.Domain(hostname) != nil {
 		return "", fmt.Sprintf("hostname %q is invalid", hostname)
 	}
 	return hostname, ""
@@ -764,7 +765,7 @@ func quickServiceContainerFromLogs(logLines string) string {
 		if container == "" {
 			continue
 		}
-		if err := validateContainerName(container); err != nil {
+		if err := validate.ContainerName(container); err != nil {
 			continue
 		}
 		return container
@@ -810,7 +811,7 @@ func addHostnamesFromJobInput(target map[string]struct{}, input string, baseDoma
 		if normalized == "" {
 			return
 		}
-		if ValidateDomain(normalized) != nil {
+		if validate.Domain(normalized) != nil {
 			return
 		}
 		target[normalized] = struct{}{}
@@ -854,7 +855,7 @@ func addHostnamesFromJobLogs(target map[string]struct{}, logs string) {
 		if hostname == "" {
 			continue
 		}
-		if ValidateDomain(hostname) != nil {
+		if validate.Domain(hostname) != nil {
 			continue
 		}
 		target[hostname] = struct{}{}

@@ -13,6 +13,7 @@ import (
 	"go-notes/internal/infra/contract"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
+	"go-notes/internal/validate"
 )
 
 var projectComposeFileCandidates = []string{
@@ -52,7 +53,7 @@ func resolveProjectPath(
 ) (projectPathResolution, error) {
 	requested := strings.TrimSpace(projectName)
 	normalized := strings.ToLower(requested)
-	if err := ValidateProjectName(normalized); err != nil {
+	if err := validate.ProjectName(normalized); err != nil {
 		return projectPathResolution{}, errs.New(errs.CodeProjectInvalidName, "project name must be lowercase alphanumerics or dashes")
 	}
 

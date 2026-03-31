@@ -8,12 +8,13 @@ import (
 
 	"go-notes/internal/errs"
 	"go-notes/internal/middleware"
+	"go-notes/internal/models"
 	"go-notes/internal/service"
 )
 
 func workbenchComposeApplyAuditMetadata(
 	project string,
-	req projectWorkbenchComposeApplyRequest,
+	req models.ProjectWorkbenchComposeApplyRequest,
 	result *service.WorkbenchComposeApplyResult,
 	opErr error,
 ) map[string]any {
@@ -83,7 +84,7 @@ func workbenchComposeApplyAuditMetadata(
 
 func workbenchComposeRestoreAuditMetadata(
 	project string,
-	req projectWorkbenchComposeRestoreRequest,
+	req models.ProjectWorkbenchComposeRestoreRequest,
 	result *service.WorkbenchComposeRestoreResult,
 	opErr error,
 ) map[string]any {
