@@ -34,6 +34,20 @@ services:
     networks:
       - core
 
+  api-init:
+    image: alpine:3.20
+    environment:
+      INFRA_QUEUE_ROOT: ${INFRA_QUEUE_ROOT:-/templates/.infra}
+    command:
+      - sh
+      - -lc
+      - mkdir -p "$INFRA_QUEUE_ROOT/intents" "$INFRA_QUEUE_ROOT/results" "$INFRA_QUEUE_ROOT/claims" && chown -R 1000:1000 "$INFRA_QUEUE_ROOT"
+    restart: "no"
+    networks:
+      - core
+    volumes:
+      - ${TEMPLATES_DIR:-/templates}:${TEMPLATES_DIR:-/templates}
+
   api:
     build:
       context: ./backend
@@ -78,11 +92,15 @@ services:
       DB_HOST_PUBLISH_MODE: ${DB_HOST_PUBLISH_MODE:-disabled}
       DB_HOST_PUBLISH_HOST: ${DB_HOST_PUBLISH_HOST:-127.0.0.1}
       DB_HOST_PUBLISH_PORT: ${DB_HOST_PUBLISH_PORT:-5432}
-      DOCKER_NETWORK_GUARDRAILS_MODE: ${DOCKER_NETWORK_GUARDRAILS_MODE:-enforced}
+      DOCKER_NETWORK_GUARDRAILS_MODE: ${DOCKER_NETWORK_GUARDRAILS_MODE:-compat}
       DOCKER_DAEMON_ISOLATION_MODE: ${DOCKER_DAEMON_ISOLATION_MODE:-disabled}
     depends_on:
+      api-init:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
+    group_add:
+      - "${DOCKER_SOCKET_GID:-0}"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
       interval: 10s
@@ -132,6 +150,7 @@ services:
     cap_drop:
       - ALL
     cap_add:
+      - CHOWN
       - NET_BIND_SERVICE
       - SETGID
       - SETUID
@@ -156,6 +175,7 @@ services:
     cap_drop:
       - ALL
     cap_add:
+      - CHOWN
       - NET_BIND_SERVICE
       - SETGID
       - SETUID
@@ -177,18 +197,14 @@ services:
       - core
 
 networks:
-  # Hardened default: deny inter-container communication on bridge networks.
-  # Compatibility fallback for engines/drivers that reject this option:
-  #   docker compose -f docker-compose.yml -f docker-compose.network-compat.yml up -d
+  # Keep the plane split (`edge` + internal `core`) by default.
+  # Blanket bridge ICC blocking was removed because it prevents required panel traffic
+  # such as api->db and proxy->api/web on shared compose networks.
   edge:
     driver: bridge
-    driver_opts:
-      com.docker.network.bridge.enable_icc: "false"
   core:
     driver: bridge
     internal: true
-    driver_opts:
-      com.docker.network.bridge.enable_icc: "false"
 
 volumes:
   pgdata:

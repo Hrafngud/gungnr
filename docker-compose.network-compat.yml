@@ -6,6 +6,8 @@ services:
 networks:
   edge:
     driver: bridge
+    driver_opts: {}
   core:
     driver: bridge
     internal: true
+    driver_opts: {}

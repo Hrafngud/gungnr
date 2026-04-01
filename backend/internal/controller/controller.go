@@ -24,7 +24,7 @@ func (h *HealthController) Healthz(ctx *gin.Context) {
 
 func (h *HealthController) Docker(ctx *gin.Context) {
 	if h.service == nil {
-		respond.ErrManual(ctx, http.StatusOK, errs.CodeInternal, "health service unavailable")
+		ctx.JSON(http.StatusOK, gin.H{"status": "error", "code": errs.CodeInternal, "detail": "health service unavailable"})
 		return
 	}
 	respond.OK(ctx, h.service.Docker(ctx.Request.Context()))
@@ -32,17 +32,16 @@ func (h *HealthController) Docker(ctx *gin.Context) {
 
 func (h *HealthController) Tunnel(ctx *gin.Context) {
 	if h.service == nil {
-		respond.ErrManual(ctx, http.StatusOK, errs.CodeInternal, "health service unavailable")
+		ctx.JSON(http.StatusOK, gin.H{"status": "error", "code": errs.CodeInternal, "detail": "health service unavailable"})
 		return
 	}
 	health := h.service.Tunnel(ctx.Request.Context())
+	status := http.StatusOK
 	switch health.Status {
 	case "missing":
-		respond.ErrManual(ctx, http.StatusFailedDependency, errs.CodeInternal, "tunnel missing")
-		return
+		status = http.StatusFailedDependency
 	case "error":
-		respond.ErrManual(ctx, http.StatusBadGateway, errs.CodeInternal, "tunnel error")
-		return
+		status = http.StatusBadGateway
 	}
-	respond.OK(ctx, health)
+	ctx.JSON(status, health)
 }

@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -79,9 +81,100 @@ func TestApplyMode_InvalidModeDoesNotPersistInlineConfig(t *testing.T) {
 	}
 }
 
+func TestNetBirdControllerMapsGatewayStyleFailuresToBadGateway(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	controller := NewNetBirdController(
+		service.NewNetBirdService(config.Config{}, nil, &failingProjectRepo{err: errors.New("boom")}, nil),
+		nil,
+		nil,
+		nil,
+	)
+
+	testCases := []struct {
+		name         string
+		path         string
+		method       string
+		body         string
+		withAdmin    bool
+		handler      func(*gin.Context)
+		expectedCode string
+	}{
+		{
+			name:         "status",
+			path:         "/api/v1/netbird/status",
+			method:       http.MethodGet,
+			handler:      controller.Status,
+			expectedCode: "NETBIRD-500-STATUS",
+		},
+		{
+			name:         "graph",
+			path:         "/api/v1/netbird/graph",
+			method:       http.MethodGet,
+			handler:      controller.Graph,
+			expectedCode: "NETBIRD-500-ACL-GRAPH",
+		},
+		{
+			name:         "plan",
+			path:         "/api/v1/netbird/mode/plan",
+			method:       http.MethodPost,
+			body:         `{"targetMode":"legacy"}`,
+			withAdmin:    true,
+			handler:      controller.PlanMode,
+			expectedCode: "NETBIRD-500-PLAN",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			if tc.body != "" {
+				ctx.Request.Header.Set("Content-Type", "application/json")
+			}
+			if tc.withAdmin {
+				ctx.Set("session", auth.Session{
+					UserID: 1,
+					Login:  "admin",
+					Role:   models.RoleAdmin,
+				})
+			}
+
+			tc.handler(ctx)
+
+			if recorder.Code != http.StatusBadGateway {
+				t.Fatalf("expected status %d, got %d", http.StatusBadGateway, recorder.Code)
+			}
+
+			var payload map[string]any
+			if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if payload["code"] != tc.expectedCode {
+				t.Fatalf("expected code %q, got %#v", tc.expectedCode, payload["code"])
+			}
+		})
+	}
+}
+
 type fakeSettingsRepo struct {
 	settings *models.Settings
 }
+
+type failingProjectRepo struct {
+	err error
+}
+
+func (f *failingProjectRepo) List(context.Context) ([]models.Project, error) { return nil, f.err }
+
+func (*failingProjectRepo) Create(context.Context, *models.Project) error { return nil }
+
+func (*failingProjectRepo) GetByName(context.Context, string) (*models.Project, error) {
+	return nil, repository.ErrNotFound
+}
+
+func (*failingProjectRepo) Update(context.Context, *models.Project) error { return nil }
 
 func (f *fakeSettingsRepo) Get(context.Context) (*models.Settings, error) {
 	if f.settings == nil {

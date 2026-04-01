@@ -47,6 +47,9 @@ type BootstrapEnv struct {
 	CloudflaredConfig   string
 	CloudflaredTunnel   string
 	CloudflaredDir      string
+	InfraQueueRoot      string
+	DockerSocketGID     string
+	DockerNetworkMode   string
 	PostgresUser        string
 	PostgresPassword    string
 	PostgresDB          string
@@ -55,21 +58,23 @@ type BootstrapEnv struct {
 
 func (env BootstrapEnv) Validate() error {
 	required := map[string]string{
-		"SESSION_SECRET":          env.SessionSecret,
-		"GITHUB_CLIENT_ID":        env.GitHubClientID,
-		"GITHUB_CLIENT_SECRET":    env.GitHubClientSecret,
-		"GITHUB_CALLBACK_URL":     env.GitHubCallbackURL,
-		"SUPERUSER_GH_NAME":       env.SuperUserGitHubName,
-		"SUPER_GH_ID":             strconv.FormatInt(env.SuperUserGitHubID, 10),
-		"TEMPLATES_DIR":           env.TemplatesDir,
-		"DOMAIN":                  env.Domain,
-		"CLOUDFLARE_API_TOKEN":    env.CloudflareAPIToken,
-		"CLOUDFLARE_ACCOUNT_ID":   env.CloudflareAccountID,
-		"CLOUDFLARE_ZONE_ID":      env.CloudflareZoneID,
-		"CLOUDFLARE_TUNNEL_ID":    env.CloudflareTunnelID,
-		"CLOUDFLARED_CONFIG":      env.CloudflaredConfig,
-		"CLOUDFLARED_TUNNEL_NAME": env.CloudflaredTunnel,
-		"CLOUDFLARED_DIR":         env.CloudflaredDir,
+		"SESSION_SECRET":                 env.SessionSecret,
+		"GITHUB_CLIENT_ID":               env.GitHubClientID,
+		"GITHUB_CLIENT_SECRET":           env.GitHubClientSecret,
+		"GITHUB_CALLBACK_URL":            env.GitHubCallbackURL,
+		"SUPERUSER_GH_NAME":              env.SuperUserGitHubName,
+		"SUPER_GH_ID":                    strconv.FormatInt(env.SuperUserGitHubID, 10),
+		"TEMPLATES_DIR":                  env.TemplatesDir,
+		"DOMAIN":                         env.Domain,
+		"CLOUDFLARE_API_TOKEN":           env.CloudflareAPIToken,
+		"CLOUDFLARE_ACCOUNT_ID":          env.CloudflareAccountID,
+		"CLOUDFLARE_ZONE_ID":             env.CloudflareZoneID,
+		"CLOUDFLARE_TUNNEL_ID":           env.CloudflareTunnelID,
+		"CLOUDFLARED_CONFIG":             env.CloudflaredConfig,
+		"CLOUDFLARED_TUNNEL_NAME":        env.CloudflaredTunnel,
+		"CLOUDFLARED_DIR":                env.CloudflaredDir,
+		"INFRA_QUEUE_ROOT":               env.InfraQueueRoot,
+		"DOCKER_NETWORK_GUARDRAILS_MODE": env.DockerNetworkMode,
 	}
 
 	for key, value := range required {
@@ -119,6 +124,9 @@ func (env BootstrapEnv) Entries() []filesystem.EnvEntry {
 		{Key: "CLOUDFLARED_CONFIG", Value: env.CloudflaredConfig},
 		{Key: "CLOUDFLARED_TUNNEL_NAME", Value: env.CloudflaredTunnel},
 		{Key: "CLOUDFLARED_DIR", Value: env.CloudflaredDir},
+		{Key: "INFRA_QUEUE_ROOT", Value: env.InfraQueueRoot},
+		{Key: "DOCKER_SOCKET_GID", Value: env.DockerSocketGID},
+		{Key: "DOCKER_NETWORK_GUARDRAILS_MODE", Value: env.DockerNetworkMode},
 		{Key: "VITE_API_BASE_URL", Value: env.ViteAPIBaseURL},
 	}
 

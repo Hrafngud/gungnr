@@ -55,6 +55,20 @@ func Err(ctx *gin.Context, err error, fallbackCode errs.Code, fallbackMessage st
 	})
 }
 
+// ErrStatus sends an error response with an explicit HTTP status override while
+// still extracting typed code, message, fields, and details from the error.
+func ErrStatus(ctx *gin.Context, status int, err error, fallbackCode errs.Code, fallbackMessage string) {
+	code, message, fields, details := classify(err, fallbackCode, fallbackMessage)
+	ctx.JSON(status, Response{
+		Code:    code,
+		Message: message,
+		Error:   message,
+		Fields:  fields,
+		Details: details,
+		DocsURL: docsURL(code),
+	})
+}
+
 // ErrManual sends an error response with an explicit HTTP status override.
 func ErrManual(ctx *gin.Context, status int, code errs.Code, message string) {
 	ctx.JSON(status, Response{

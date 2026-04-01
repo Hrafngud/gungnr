@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"io"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 
@@ -37,7 +38,7 @@ func (c *NetBirdController) Status(ctx *gin.Context) {
 
 	status, err := c.service.Status(ctx.Request.Context())
 	if err != nil {
-		respond.Err(ctx, err, errs.CodeNetBirdStatusFailed, "failed to load netbird status")
+		respond.ErrStatus(ctx, netBirdHTTPStatus(err, http.StatusInternalServerError), err, errs.CodeNetBirdStatusFailed, "failed to load netbird status")
 		return
 	}
 
@@ -56,7 +57,7 @@ func (c *NetBirdController) Graph(ctx *gin.Context) {
 
 	graph, err := c.service.ACLGraph(ctx.Request.Context())
 	if err != nil {
-		respond.Err(ctx, err, errs.CodeNetBirdACLGraphFailed, "failed to load netbird acl graph")
+		respond.ErrStatus(ctx, netBirdHTTPStatus(err, http.StatusInternalServerError), err, errs.CodeNetBirdACLGraphFailed, "failed to load netbird acl graph")
 		return
 	}
 
@@ -82,7 +83,7 @@ func (c *NetBirdController) PlanMode(ctx *gin.Context) {
 
 	plan, err := c.service.PlanMode(ctx.Request.Context(), req.TargetMode, req.AllowLocalhost, req.ModeBProjectIDs)
 	if err != nil {
-		respond.Err(ctx, err, errs.CodeNetBirdPlanFailed, "failed to build netbird mode plan")
+		respond.ErrStatus(ctx, netBirdHTTPStatus(err, http.StatusInternalServerError), err, errs.CodeNetBirdPlanFailed, "failed to build netbird mode plan")
 		return
 	}
 

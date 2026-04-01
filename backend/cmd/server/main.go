@@ -159,9 +159,18 @@ func main() {
 	} else {
 		log.Printf("docker network guardrails mode=enforced edge=edge core=core icc_enforced=true")
 	}
+	go logStartupDockerHealth(healthService)
+	log.Printf("server starting on %s", cfg.Port)
+	if err := r.Run(":" + cfg.Port); err != nil {
+		log.Fatalf("server exited: %v", err)
+	}
+}
+
+func logStartupDockerHealth(healthService *service.HealthService) {
 	startupDockerCtx, startupDockerCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer startupDockerCancel()
+
 	startupDockerHealth := healthService.Docker(startupDockerCtx)
-	startupDockerCancel()
 	log.Printf(
 		"docker daemon isolation mode=%s active=%s preflight=%s supported=%t socket=%s server=%s",
 		startupDockerHealth.DaemonIsolation.Mode,
@@ -176,9 +185,5 @@ func main() {
 	}
 	if len(startupDockerHealth.DaemonIsolation.Warnings) > 0 {
 		log.Printf("docker daemon isolation warnings=%s", strings.Join(startupDockerHealth.DaemonIsolation.Warnings, " | "))
-	}
-	log.Printf("server starting on %s", cfg.Port)
-	if err := r.Run(":" + cfg.Port); err != nil {
-		log.Fatalf("server exited: %v", err)
 	}
 }

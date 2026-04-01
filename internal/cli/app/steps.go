@@ -321,6 +321,10 @@ func runEnvSetup(ctx context.Context, state *State, ui UI) error {
 	if err != nil {
 		return err
 	}
+	dockerSocketGID, err := docker.DockerSocketGID()
+	if err != nil {
+		return err
+	}
 
 	state.Env = BootstrapEnv{
 		AppEnv:              "prod",
@@ -350,6 +354,9 @@ func runEnvSetup(ctx context.Context, state *State, ui UI) error {
 		CloudflaredConfig:   state.CloudflaredConfig,
 		CloudflaredTunnel:   state.Tunnel.Name,
 		CloudflaredDir:      state.Paths.CloudflaredDir,
+		InfraQueueRoot:      filepath.Join(dataPaths.TemplatesDir, ".infra"),
+		DockerSocketGID:     dockerSocketGID,
+		DockerNetworkMode:   "compat",
 		PostgresUser:        DefaultPostgresUser,
 		PostgresPassword:    DefaultPostgresPassword,
 		PostgresDB:          DefaultPostgresDB,
