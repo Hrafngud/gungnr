@@ -118,6 +118,7 @@ services:
     restart: unless-stopped
     networks:
       - core
+      - egress
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${TEMPLATES_DIR:-/templates}:${TEMPLATES_DIR:-/templates}
@@ -197,14 +198,15 @@ services:
       - core
 
 networks:
-  # Keep the plane split (`edge` + internal `core`) by default.
-  # Blanket bridge ICC blocking was removed because it prevents required panel traffic
-  # such as api->db and proxy->api/web on shared compose networks.
+  # Keep the plane split (`edge` + internal `core`) by default while giving
+  # the API a dedicated outbound bridge for GitHub/Cloudflare egress.
   edge:
     driver: bridge
   core:
     driver: bridge
     internal: true
+  egress:
+    driver: bridge
 
 volumes:
   pgdata:

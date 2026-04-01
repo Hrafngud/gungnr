@@ -11,3 +11,6 @@ networks:
     driver: bridge
     internal: true
     driver_opts: {}
+  egress:
+    driver: bridge
+    driver_opts: {}
