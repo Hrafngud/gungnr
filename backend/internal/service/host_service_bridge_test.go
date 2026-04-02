@@ -57,6 +57,10 @@ type stubHostInfraBridgeClient struct {
 	runtimeRequestID         string
 	runtimeResult            contract.Result
 	runtimeErr               error
+	runtimeStreamCalled      bool
+	runtimeStreamRequestID   string
+	runtimeStreamResult      contract.Result
+	runtimeStreamErr         error
 	composeCalled            bool
 	composeRequestID         string
 	composePayload           contract.ComposeUpStackPayload
@@ -123,6 +127,12 @@ func (s *stubHostInfraBridgeClient) HostRuntimeStats(_ context.Context, requestI
 	s.runtimeCalled = true
 	s.runtimeRequestID = requestID
 	return s.runtimeResult, s.runtimeErr
+}
+
+func (s *stubHostInfraBridgeClient) HostRuntimeStream(_ context.Context, requestID string) (contract.Result, error) {
+	s.runtimeStreamCalled = true
+	s.runtimeStreamRequestID = requestID
+	return s.runtimeStreamResult, s.runtimeStreamErr
 }
 
 func (s *stubHostInfraBridgeClient) ComposeUpStack(_ context.Context, requestID string, payload contract.ComposeUpStackPayload) (contract.Result, error) {
@@ -665,7 +675,7 @@ func TestHostServiceRestartProjectStackBridgeFailureMapping(t *testing.T) {
 	require.Equal(t, "COMPOSE-500", details["worker_error_code"])
 }
 
-func TestHostServiceRuntimeStatsBridgeSuccess(t *testing.T) {
+func TestHostServiceRuntimeSnapshotBridgeSuccess(t *testing.T) {
 	t.Parallel()
 
 	bridge := &stubHostInfraBridgeClient{
@@ -686,7 +696,7 @@ func TestHostServiceRuntimeStatsBridgeSuccess(t *testing.T) {
 	}
 	svc := &HostService{infraClient: bridge}
 
-	stats, err := svc.RuntimeStats(context.Background())
+	stats, err := svc.RuntimeSnapshot(context.Background())
 	require.NoError(t, err)
 	require.True(t, bridge.runtimeCalled)
 	require.Equal(t, "runner-01", stats.Hostname)
@@ -697,7 +707,7 @@ func TestHostServiceRuntimeStatsBridgeSuccess(t *testing.T) {
 	require.Equal(t, 4250.0, stats.CPU.SpeedMHz)
 }
 
-func TestHostServiceRuntimeStatsBridgeFailureMapping(t *testing.T) {
+func TestHostServiceRuntimeSnapshotBridgeFailureMapping(t *testing.T) {
 	t.Parallel()
 
 	bridge := &stubHostInfraBridgeClient{
@@ -713,16 +723,51 @@ func TestHostServiceRuntimeStatsBridgeFailureMapping(t *testing.T) {
 	}
 	svc := &HostService{infraClient: bridge}
 
-	_, err := svc.RuntimeStats(context.Background())
+	_, err := svc.RuntimeSnapshot(context.Background())
 	require.Error(t, err)
 
 	typed, ok := errs.From(err)
 	require.True(t, ok)
 	require.Equal(t, errs.CodeHostStatsFailed, typed.Code)
-	require.Equal(t, "failed to load host runtime stats", typed.Message)
+	require.Equal(t, "failed to load host runtime snapshot", typed.Message)
 	details, ok := typed.Details.(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, contract.TaskTypeHostRuntimeStats, details["task_type"])
 	require.Equal(t, "host", details["target"])
 	require.Equal(t, "intent-runtime-fail", details["intent_id"])
+}
+
+func TestHostServiceRuntimeStreamBridgeSuccess(t *testing.T) {
+	t.Parallel()
+
+	bridge := &stubHostInfraBridgeClient{
+		runtimeStreamResult: contract.Result{
+			Status: contract.StatusSucceeded,
+			Data: map[string]any{
+				"collectedAt": "2026-03-18T18:00:00Z",
+				"mode":        "debounced",
+				"intervalMs":  100,
+				"host": map[string]any{
+					"memoryUsedBytes":      1024,
+					"memoryUsedPercent":    25,
+					"memoryFreeBytes":      3072,
+					"memoryAvailableBytes": 4096,
+				},
+				"panel": map[string]any{
+					"cpuUsedPercent":     12.5,
+					"memoryUsedBytes":    2048,
+					"memorySharePercent": 5.5,
+				},
+			},
+		},
+	}
+	svc := &HostService{infraClient: bridge}
+
+	sample, err := svc.RuntimeStreamSample(context.Background())
+	require.NoError(t, err)
+	require.True(t, bridge.runtimeStreamCalled)
+	require.Equal(t, "debounced", sample.Mode)
+	require.Equal(t, 100, sample.IntervalMs)
+	require.EqualValues(t, 1024, sample.Host.MemoryUsedBytes)
+	require.Equal(t, 12.5, sample.Panel.CPUUsedPercent)
 }

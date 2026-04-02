@@ -181,6 +181,7 @@ func (r *Runner) supportsTask(taskType contract.TaskType) bool {
 		contract.TaskTypeDockerPublishedPorts,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
+		contract.TaskTypeHostRuntimeStream,
 		contract.TaskTypeProjectFileWriteAtomic,
 		contract.TaskTypeProjectFileCopy,
 		contract.TaskTypeProjectFileRemove:
@@ -206,6 +207,7 @@ func (r *Runner) SupportedTasks() []contract.TaskType {
 		contract.TaskTypeDockerPublishedPorts,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
+		contract.TaskTypeHostRuntimeStream,
 		contract.TaskTypeProjectFileWriteAtomic,
 		contract.TaskTypeProjectFileCopy,
 		contract.TaskTypeProjectFileRemove,
@@ -277,6 +279,8 @@ func (r *Runner) handleIntent(ctx context.Context, intent contract.Intent) error
 		outcome = r.handleComposeUpStack(ctx, intent)
 	case contract.TaskTypeHostRuntimeStats:
 		outcome = r.handleHostRuntimeStats(ctx, intent)
+	case contract.TaskTypeHostRuntimeStream:
+		outcome = r.handleHostRuntimeStream(ctx, intent)
 	case contract.TaskTypeProjectFileWriteAtomic:
 		outcome = r.handleProjectFileWriteAtomic(ctx, intent)
 	case contract.TaskTypeProjectFileCopy:

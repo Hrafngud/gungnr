@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
@@ -27,7 +27,13 @@ import { useFieldGuidance } from '@/composables/useFieldGuidance'
 import { usePageLoadingStore } from '@/stores/pageLoading'
 import { clampPercent, formatBytes, formatPercent } from '@/utils/runtimeMetrics'
 import type { CloudflaredPreview, Settings, SettingsSources } from '@/types/settings'
-import type { DockerContainer, DockerReadDiagnostic, DockerUsageSummary, HostRuntimeStats } from '@/types/host'
+import type {
+  DockerContainer,
+  DockerReadDiagnostic,
+  DockerUsageSummary,
+  HostRuntimeSnapshot,
+  HostRuntimeStreamSample,
+} from '@/types/host'
 import type { LocalProject } from '@/types/projects'
 import type { DockerHealth, TunnelHealth } from '@/types/health'
 
@@ -79,9 +85,12 @@ const usageSummary = ref<DockerUsageSummary | null>(null)
 const usageDiagnostics = ref<DockerReadDiagnostic[]>([])
 const usageLoading = ref(false)
 const usageError = ref<string | null>(null)
-const runtimeStats = ref<HostRuntimeStats | null>(null)
-const runtimeStatsLoading = ref(false)
-const runtimeStatsError = ref<string | null>(null)
+const runtimeSnapshot = ref<HostRuntimeSnapshot | null>(null)
+const runtimeSnapshotLoading = ref(false)
+const runtimeSnapshotError = ref<string | null>(null)
+const runtimeStreamSample = ref<HostRuntimeStreamSample | null>(null)
+const runtimeStreamState = ref<'idle' | 'connecting' | 'live' | 'error'>('idle')
+const runtimeStreamError = ref<string | null>(null)
 const localProjects = ref<LocalProject[]>([])
 const localProjectsLoading = ref(false)
 const localProjectsError = ref<string | null>(null)
@@ -99,6 +108,7 @@ type ContainerActionState = {
 }
 
 const actionStates = reactive<Record<string, ContainerActionState>>({})
+let runtimeStreamSource: EventSource | null = null
 const removeModalOpen = ref(false)
 const removeTarget = ref<DockerContainer | null>(null)
 const removeTargetName = computed(() => removeTarget.value?.name ?? '')
@@ -204,7 +214,7 @@ const usageCounts = computed(() => {
 })
 
 const hostDataRefreshing = computed(() =>
-  containersLoading.value || usageLoading.value || localProjectsLoading.value || runtimeStatsLoading.value,
+  containersLoading.value || usageLoading.value || localProjectsLoading.value || runtimeSnapshotLoading.value,
 )
 
 const formatClockSpeed = (value: number | null | undefined) => {
@@ -219,7 +229,7 @@ const formatMemorySpeed = (value: number | null | undefined) => {
 }
 
 const runtimeIdentityCards = computed(() => {
-  const stats = runtimeStats.value
+  const stats = runtimeSnapshot.value
   if (!stats) return []
   const diskAvailableBytes = stats.disk.availableBytes ?? stats.disk.freeBytes
   return [
@@ -269,64 +279,115 @@ const runtimeIdentityCards = computed(() => {
   ]
 })
 
-const runtimeSignalIndicators = computed(() => {
-  const stats = runtimeStats.value
-  if (!stats) return []
+const runtimeLiveIndicators = computed(() => {
+  const sample = runtimeStreamSample.value
+  if (!sample) return []
+  const snapshot = runtimeSnapshot.value
+  const panelSummary = snapshot?.panel
+  const projectsSummary = snapshot?.projects
   return [
     {
       key: 'host-memory',
       scope: 'Host',
       metric: 'RAM',
-      value: formatBytes(stats.memory.usedBytes),
-      meta: `${formatPercent(stats.memory.usedPercent)} of ${formatBytes(stats.memory.totalBytes)}`,
-      percent: clampPercent(stats.memory.usedPercent),
-    },
-    {
-      key: 'host-disk',
-      scope: 'Host',
-      metric: 'Disk',
-      value: formatBytes(stats.disk.usedBytes),
-      meta: `${formatPercent(stats.disk.usedPercent)} of ${formatBytes(stats.disk.totalBytes)}`,
-      percent: clampPercent(stats.disk.usedPercent),
+      value: formatBytes(sample.host.memoryUsedBytes),
+      meta: snapshot
+        ? `${formatPercent(sample.host.memoryUsedPercent)} of ${formatBytes(snapshot.memory.totalBytes)}`
+        : formatPercent(sample.host.memoryUsedPercent),
+      percent: clampPercent(sample.host.memoryUsedPercent),
     },
     {
       key: 'panel-cpu',
       scope: 'Gungnr panel',
       metric: 'CPU',
-      value: formatPercent(stats.panelUsage.cpuUsedPercent),
-      meta: `${stats.panelUsage.runningContainers}/${stats.panelUsage.containers} running containers`,
-      percent: clampPercent(stats.panelUsage.cpuUsedPercent),
+      value: formatPercent(sample.panel.cpuUsedPercent),
+      meta: panelSummary
+        ? `${panelSummary.runningContainers}/${panelSummary.containers} running containers`
+        : 'Live container CPU stream',
+      percent: clampPercent(sample.panel.cpuUsedPercent),
     },
     {
       key: 'panel-memory',
       scope: 'Gungnr panel',
       metric: 'RAM',
-      value: formatBytes(stats.panelUsage.memoryUsedBytes),
-      meta: `${formatPercent(stats.panelUsage.memorySharePercent)} of host memory`,
-      percent: clampPercent(stats.panelUsage.memorySharePercent),
+      value: formatBytes(sample.panel.memoryUsedBytes),
+      meta: `${formatPercent(sample.panel.memorySharePercent)} of host memory`,
+      percent: clampPercent(sample.panel.memorySharePercent),
     },
     {
       key: 'projects-cpu',
       scope: 'Projects',
       metric: 'CPU',
-      value: formatPercent(stats.projectsUsage.cpuUsedPercent),
-      meta: `${stats.projectsUsage.runningContainers}/${stats.projectsUsage.containers} running containers`,
-      percent: clampPercent(stats.projectsUsage.cpuUsedPercent),
+      value: formatPercent(sample.projects.cpuUsedPercent),
+      meta: projectsSummary
+        ? `${projectsSummary.runningContainers}/${projectsSummary.containers} running containers`
+        : 'Live container CPU stream',
+      percent: clampPercent(sample.projects.cpuUsedPercent),
     },
     {
       key: 'projects-memory',
       scope: 'Projects',
       metric: 'RAM',
-      value: formatBytes(stats.projectsUsage.memoryUsedBytes),
-      meta: `${formatPercent(stats.projectsUsage.memorySharePercent)} of host memory`,
-      percent: clampPercent(stats.projectsUsage.memorySharePercent),
+      value: formatBytes(sample.projects.memoryUsedBytes),
+      meta: `${formatPercent(sample.projects.memorySharePercent)} of host memory`,
+      percent: clampPercent(sample.projects.memorySharePercent),
     },
   ]
 })
 
-const runtimeWarnings = computed(() => {
-  const warnings = runtimeStats.value?.warnings ?? []
+const runtimeSnapshotIndicators = computed(() => {
+  const snapshot = runtimeSnapshot.value
+  if (!snapshot) return []
+  return [
+    {
+      key: 'host-disk',
+      scope: 'Host',
+      metric: 'Disk',
+      value: formatBytes(snapshot.disk.usedBytes),
+      meta: `${formatPercent(snapshot.disk.usedPercent)} of ${formatBytes(snapshot.disk.totalBytes)}`,
+      percent: clampPercent(snapshot.disk.usedPercent),
+    },
+    {
+      key: 'panel-disk',
+      scope: 'Gungnr panel',
+      metric: 'Disk',
+      value: formatBytes(snapshot.panel.diskUsedBytes),
+      meta: `${formatPercent(snapshot.panel.diskSharePercent)} of host disk`,
+      percent: clampPercent(snapshot.panel.diskSharePercent),
+    },
+    {
+      key: 'projects-disk',
+      scope: 'Projects',
+      metric: 'Disk',
+      value: formatBytes(snapshot.projects.diskUsedBytes),
+      meta: `${formatPercent(snapshot.projects.diskSharePercent)} of host disk`,
+      percent: clampPercent(snapshot.projects.diskSharePercent),
+    },
+  ]
+})
+
+const runtimeSnapshotWarnings = computed(() => {
+  const warnings = runtimeSnapshot.value?.warnings ?? []
   return warnings.slice(0, 3)
+})
+
+const runtimeStreamWarnings = computed(() => {
+  const warnings = runtimeStreamSample.value?.warnings ?? []
+  return warnings.slice(0, 3)
+})
+
+const runtimeStreamBadge = computed<{ tone: BadgeTone; label: string }>(() => {
+  const intervalMs = runtimeStreamSample.value?.intervalMs ?? 100
+  switch (runtimeStreamState.value) {
+    case 'live':
+      return { tone: 'ok', label: `Live · ${intervalMs}ms` }
+    case 'connecting':
+      return { tone: 'warn', label: 'Connecting…' }
+    case 'error':
+      return { tone: 'error', label: 'Stream error' }
+    default:
+      return { tone: 'neutral', label: 'Stream idle' }
+  }
 })
 
 const containerDiagnosticMessage = computed(() => {
@@ -487,18 +548,68 @@ const loadDockerUsage = async () => {
   }
 }
 
-const loadRuntimeStats = async () => {
-  runtimeStatsLoading.value = true
-  runtimeStatsError.value = null
+const loadRuntimeSnapshot = async () => {
+  runtimeSnapshotLoading.value = true
+  runtimeSnapshotError.value = null
   try {
-    const { data } = await hostApi.runtimeStats()
-    runtimeStats.value = data.stats ?? null
+    const { data } = await hostApi.runtimeSnapshot()
+    runtimeSnapshot.value = data.snapshot ?? null
   } catch (err) {
-    runtimeStatsError.value = apiErrorMessage(err)
-    runtimeStats.value = null
+    runtimeSnapshotError.value = apiErrorMessage(err)
   } finally {
-    runtimeStatsLoading.value = false
+    runtimeSnapshotLoading.value = false
   }
+}
+
+const closeRuntimeSignalStream = () => {
+  if (!runtimeStreamSource) return
+  runtimeStreamSource.close()
+  runtimeStreamSource = null
+}
+
+const startRuntimeSignalStream = () => {
+  closeRuntimeSignalStream()
+  runtimeStreamState.value = 'connecting'
+  runtimeStreamError.value = null
+
+  const source = new EventSource(hostApi.runtimeStatsStreamUrl(), { withCredentials: true })
+  runtimeStreamSource = source
+
+  source.onopen = () => {
+    if (runtimeStreamSource !== source) return
+    runtimeStreamState.value = 'live'
+  }
+
+  source.addEventListener('sample', (event) => {
+    if (runtimeStreamSource !== source) return
+    const message = event as MessageEvent
+    try {
+      runtimeStreamSample.value = JSON.parse(message.data) as HostRuntimeStreamSample
+      runtimeStreamError.value = null
+      runtimeStreamState.value = 'live'
+    } catch {
+      runtimeStreamError.value = 'Malformed runtime signal sample.'
+      runtimeStreamState.value = 'error'
+    }
+  })
+
+  source.addEventListener('error', (event) => {
+    if (runtimeStreamSource !== source) return
+    const message = event as MessageEvent
+    if (message?.data) {
+      try {
+        const payload = JSON.parse(message.data) as { message?: string }
+        runtimeStreamError.value = payload.message || 'Runtime signal stream error.'
+      } catch {
+        runtimeStreamError.value = 'Runtime signal stream error.'
+      }
+      runtimeStreamState.value = 'error'
+      return
+    }
+    if (source.readyState === EventSource.CLOSED) {
+      runtimeStreamState.value = 'idle'
+    }
+  })
 }
 
 const loadLocalProjects = async () => {
@@ -516,7 +627,7 @@ const loadLocalProjects = async () => {
 }
 
 const refreshHostData = async () => {
-  await Promise.allSettled([loadContainers(), loadLocalProjects(), loadDockerUsage(), loadRuntimeStats()])
+  await Promise.allSettled([loadContainers(), loadLocalProjects(), loadDockerUsage(), loadRuntimeSnapshot()])
 }
 
 const stopContainer = async (container: DockerContainer) => {
@@ -613,6 +724,7 @@ const confirmRemove = async () => {
 
 onMounted(async () => {
   pageLoading.start('Loading host settings...')
+  startRuntimeSignalStream()
   await Promise.all([
     loadSettings(),
     loadPreview(),
@@ -620,9 +732,13 @@ onMounted(async () => {
     loadContainers(),
     loadLocalProjects(),
     loadDockerUsage(),
-    loadRuntimeStats(),
+    loadRuntimeSnapshot(),
   ])
   pageLoading.stop()
+})
+
+onBeforeUnmount(() => {
+  closeRuntimeSignalStream()
 })
 
 watch(projectOptions, (options) => {
@@ -710,32 +826,37 @@ watch(projectFilter, () => {
               Runtime signals
             </h2>
             <p class="mt-2 text-sm text-[color:var(--muted)]">
-              Live host runtime snapshot from worker with panel and project footprint indicators.
+              Refresh-only host snapshot plus a debounced live stream for CPU and RAM signals.
             </p>
           </div>
-          <UiButton
-            variant="ghost"
-            size="sm"
-            :disabled="runtimeStatsLoading"
-            @click="loadRuntimeStats"
-          >
-            <span class="flex items-center gap-2">
-              <NavIcon name="refresh" class="h-3.5 w-3.5" />
-              <UiInlineSpinner v-if="runtimeStatsLoading" />
-              Refresh stats
-            </span>
-          </UiButton>
+          <div class="flex flex-wrap items-center gap-2">
+            <UiBadge :tone="runtimeStreamBadge.tone">
+              {{ runtimeStreamBadge.label }}
+            </UiBadge>
+            <UiButton
+              variant="ghost"
+              size="sm"
+              :disabled="runtimeSnapshotLoading"
+              @click="loadRuntimeSnapshot"
+            >
+              <span class="flex items-center gap-2">
+                <NavIcon name="refresh" class="h-3.5 w-3.5" />
+                <UiInlineSpinner v-if="runtimeSnapshotLoading" />
+                Refresh snapshot
+              </span>
+            </UiButton>
+          </div>
         </div>
 
-        <UiState v-if="runtimeStatsError" tone="error">
-          {{ runtimeStatsError }}
+        <UiState v-if="runtimeSnapshotError" tone="error">
+          {{ runtimeSnapshotError }}
         </UiState>
 
-        <UiState v-else-if="runtimeStatsLoading" loading>
-          Loading runtime stats...
+        <UiState v-else-if="runtimeSnapshotLoading && !runtimeSnapshot" loading>
+          Loading runtime snapshot...
         </UiState>
 
-        <template v-else-if="runtimeStats">
+        <template v-else-if="runtimeSnapshot">
           <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
             <div class="grid gap-3 md:grid-cols-2 h-fit">
               <UiPanel
@@ -756,40 +877,100 @@ watch(projectFilter, () => {
               </UiPanel>
             </div>
 
-            <div class="grid gap-3 md:grid-cols-2 h-fit">
-              <article
-                v-for="indicator in runtimeSignalIndicators"
-                :key="indicator.key"
-                class="space-y-2 rounded-md border border-[color:var(--border-soft)] bg-[color:var(--surface)]/70 p-3"
-              >
+            <div class="grid gap-4 h-fit">
+              <UiPanel variant="soft" class="space-y-4 p-4">
                 <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p class="text-xs uppercase tracking-[0.24em] text-[color:var(--muted-2)]">
+                      Live stream
+                    </p>
+                    <p class="mt-1 text-xs text-[color:var(--muted)]">
+                      Debounced {{ runtimeStreamSample?.intervalMs ?? 100 }}ms updates for CPU and RAM.
+                    </p>
+                  </div>
+                  <UiBadge :tone="runtimeStreamBadge.tone">
+                    {{ runtimeStreamBadge.label }}
+                  </UiBadge>
+                </div>
+                <div class="grid gap-3 md:grid-cols-2">
+                  <article
+                    v-for="indicator in runtimeLiveIndicators"
+                    :key="indicator.key"
+                    class="space-y-2 rounded-md border border-[color:var(--border-soft)] bg-[color:var(--surface)]/70 p-3"
+                  >
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <p class="text-xs uppercase tracking-[0.24em] text-[color:var(--muted-2)]">
+                        {{ indicator.scope }}
+                      </p>
+                      <p class="text-[11px] uppercase tracking-[0.24em] text-[color:var(--muted)]">
+                        {{ indicator.metric }}
+                      </p>
+                    </div>
+                    <p class="text-sm font-semibold text-[color:var(--text)]">
+                      {{ indicator.value }}
+                    </p>
+                    <UiRuntimeLedMeter
+                      :label="`${indicator.scope} ${indicator.metric}`"
+                      :percent="indicator.percent"
+                    />
+                    <p class="text-xs text-[color:var(--muted)]">
+                      {{ indicator.meta }}
+                    </p>
+                  </article>
+                </div>
+                <UiInlineFeedback v-if="runtimeStreamError" tone="error">
+                  {{ runtimeStreamError }}
+                </UiInlineFeedback>
+                <UiInlineFeedback v-else-if="runtimeStreamWarnings.length > 0" tone="warn">
+                  {{ runtimeStreamWarnings.join(' · ') }}
+                </UiInlineFeedback>
+              </UiPanel>
+
+              <UiPanel variant="soft" class="space-y-4 p-4">
+                <div>
                   <p class="text-xs uppercase tracking-[0.24em] text-[color:var(--muted-2)]">
-                    {{ indicator.scope }}
+                    Refresh-only snapshot
                   </p>
-                  <p class="text-[11px] uppercase tracking-[0.24em] text-[color:var(--muted)]">
-                    {{ indicator.metric }}
+                  <p class="mt-1 text-xs text-[color:var(--muted)]">
+                    Disk and identity data only change when the snapshot is refreshed.
                   </p>
                 </div>
-                <p class="text-sm font-semibold text-[color:var(--text)]">
-                  {{ indicator.value }}
-                </p>
-                <UiRuntimeLedMeter
-                  :label="`${indicator.scope} ${indicator.metric}`"
-                  :percent="indicator.percent"
-                />
-                <p class="text-xs text-[color:var(--muted)]">
-                  {{ indicator.meta }}
-                </p>
-              </article>
+                <div class="grid gap-3 md:grid-cols-2">
+                  <article
+                    v-for="indicator in runtimeSnapshotIndicators"
+                    :key="indicator.key"
+                    class="space-y-2 rounded-md border border-[color:var(--border-soft)] bg-[color:var(--surface)]/70 p-3"
+                  >
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <p class="text-xs uppercase tracking-[0.24em] text-[color:var(--muted-2)]">
+                        {{ indicator.scope }}
+                      </p>
+                      <p class="text-[11px] uppercase tracking-[0.24em] text-[color:var(--muted)]">
+                        {{ indicator.metric }}
+                      </p>
+                    </div>
+                    <p class="text-sm font-semibold text-[color:var(--text)]">
+                      {{ indicator.value }}
+                    </p>
+                    <UiRuntimeLedMeter
+                      :label="`${indicator.scope} ${indicator.metric}`"
+                      :percent="indicator.percent"
+                    />
+                    <p class="text-xs text-[color:var(--muted)]">
+                      {{ indicator.meta }}
+                    </p>
+                  </article>
+                </div>
+                <UiInlineFeedback v-if="runtimeSnapshotWarnings.length > 0" tone="warn">
+                  {{ runtimeSnapshotWarnings.join(' · ') }}
+                </UiInlineFeedback>
+              </UiPanel>
             </div>
           </div>
-          <UiInlineFeedback v-if="runtimeWarnings.length > 0" tone="warn">
-            {{ runtimeWarnings.join(' · ') }}
-          </UiInlineFeedback>
-          </template>
+        </template>
 
         <UiState v-else>
-          Runtime stats not loaded yet.
+          Runtime snapshot not loaded yet.
         </UiState>
       </UiPanel>
 

@@ -65,6 +65,7 @@ type hostInfraBridgeClient interface {
 	DockerContainerLogs(ctx context.Context, requestID string, payload contract.DockerContainerLogsPayload) (contract.Result, error)
 	DockerRuntimeCheck(ctx context.Context, requestID string) (contract.Result, error)
 	HostRuntimeStats(ctx context.Context, requestID string) (contract.Result, error)
+	HostRuntimeStream(ctx context.Context, requestID string) (contract.Result, error)
 	ComposeUpStack(ctx context.Context, requestID string, payload contract.ComposeUpStackPayload) (contract.Result, error)
 }
 
@@ -152,32 +153,62 @@ type HostRuntimeGPU struct {
 	SpeedMHz float64 `json:"speedMHz,omitempty"`
 }
 
-type HostRuntimeWorkloadUsage struct {
-	Containers         int     `json:"containers"`
-	RunningContainers  int     `json:"runningContainers"`
-	CPUUsedPercent     float64 `json:"cpuUsedPercent"`
-	MemoryUsedBytes    int64   `json:"memoryUsedBytes"`
-	DiskUsedBytes      int64   `json:"diskUsedBytes"`
-	MemorySharePercent float64 `json:"memorySharePercent"`
-	DiskSharePercent   float64 `json:"diskSharePercent"`
+type HostRuntimeMemorySnapshot struct {
+	TotalBytes     int64 `json:"totalBytes"`
+	FreeBytes      int64 `json:"freeBytes"`
+	AvailableBytes int64 `json:"availableBytes,omitempty"`
+	SpeedMTs       int   `json:"speedMTs,omitempty"`
 }
 
-type HostRuntimeStats struct {
-	CollectedAt    string                              `json:"collectedAt"`
-	Hostname       string                              `json:"hostname,omitempty"`
-	UptimeSeconds  int64                               `json:"uptimeSeconds"`
-	UptimeHuman    string                              `json:"uptimeHuman"`
-	SystemImage    string                              `json:"systemImage"`
-	Kernel         string                              `json:"kernel"`
-	CPU            HostRuntimeCPU                      `json:"cpu"`
-	GPU            *HostRuntimeGPU                     `json:"gpu,omitempty"`
-	Memory         HostRuntimeResource                 `json:"memory"`
-	Disk           HostRuntimeResource                 `json:"disk"`
-	PanelUsage     HostRuntimeWorkloadUsage            `json:"panelUsage"`
-	ProjectsUsage  HostRuntimeWorkloadUsage            `json:"projectsUsage"`
-	ProjectsByName map[string]HostRuntimeWorkloadUsage `json:"projectsByName,omitempty"`
-	Warnings       []string                            `json:"warnings,omitempty"`
+type HostRuntimeWorkloadSnapshot struct {
+	Containers        int     `json:"containers"`
+	RunningContainers int     `json:"runningContainers"`
+	DiskUsedBytes     int64   `json:"diskUsedBytes"`
+	DiskSharePercent  float64 `json:"diskSharePercent"`
 }
+
+type HostRuntimeSnapshot struct {
+	CollectedAt    string                                 `json:"collectedAt"`
+	Hostname       string                                 `json:"hostname,omitempty"`
+	UptimeSeconds  int64                                  `json:"uptimeSeconds"`
+	UptimeHuman    string                                 `json:"uptimeHuman"`
+	SystemImage    string                                 `json:"systemImage"`
+	Kernel         string                                 `json:"kernel"`
+	CPU            HostRuntimeCPU                         `json:"cpu"`
+	GPU            *HostRuntimeGPU                        `json:"gpu,omitempty"`
+	Memory         HostRuntimeMemorySnapshot              `json:"memory"`
+	Disk           HostRuntimeResource                    `json:"disk"`
+	Panel          HostRuntimeWorkloadSnapshot            `json:"panel"`
+	Projects       HostRuntimeWorkloadSnapshot            `json:"projects"`
+	ProjectsByName map[string]HostRuntimeWorkloadSnapshot `json:"projectsByName,omitempty"`
+	Warnings       []string                               `json:"warnings,omitempty"`
+}
+
+type HostRuntimeHostStreamUsage struct {
+	MemoryUsedBytes      int64   `json:"memoryUsedBytes"`
+	MemoryUsedPercent    float64 `json:"memoryUsedPercent"`
+	MemoryFreeBytes      int64   `json:"memoryFreeBytes"`
+	MemoryAvailableBytes int64   `json:"memoryAvailableBytes,omitempty"`
+}
+
+type HostRuntimeWorkloadStreamUsage struct {
+	CPUUsedPercent     float64 `json:"cpuUsedPercent"`
+	MemoryUsedBytes    int64   `json:"memoryUsedBytes"`
+	MemorySharePercent float64 `json:"memorySharePercent"`
+}
+
+type HostRuntimeStreamSample struct {
+	CollectedAt    string                                    `json:"collectedAt"`
+	Mode           string                                    `json:"mode"`
+	IntervalMs     int                                       `json:"intervalMs"`
+	Host           HostRuntimeHostStreamUsage                `json:"host"`
+	Panel          HostRuntimeWorkloadStreamUsage            `json:"panel"`
+	Projects       HostRuntimeWorkloadStreamUsage            `json:"projects"`
+	ProjectsByName map[string]HostRuntimeWorkloadStreamUsage `json:"projectsByName,omitempty"`
+	Warnings       []string                                  `json:"warnings,omitempty"`
+}
+
+const HostRuntimeStreamInterval = 100 * time.Millisecond
 
 type dockerSystemDFLine struct {
 	Type        string `json:"Type"`
@@ -322,21 +353,21 @@ func parseDockerPSLinesToContainers(lines []string) ([]DockerContainer, error) {
 	return containers, nil
 }
 
-func (s *HostService) RuntimeStats(ctx context.Context) (HostRuntimeStats, error) {
+func (s *HostService) RuntimeSnapshot(ctx context.Context) (HostRuntimeSnapshot, error) {
 	if s.infraClient == nil {
-		return HostRuntimeStats{}, errs.New(errs.CodeHostStatsFailed, "infra bridge client unavailable")
+		return HostRuntimeSnapshot{}, errs.New(errs.CodeHostStatsFailed, "infra bridge client unavailable")
 	}
 
 	result, err := s.infraClient.HostRuntimeStats(ctx, "")
 	if err != nil {
-		return HostRuntimeStats{}, bridgeTaskErrorWithCode(errs.CodeHostStatsFailed, "failed to load host runtime stats", contract.TaskTypeHostRuntimeStats, "host", err)
+		return HostRuntimeSnapshot{}, bridgeTaskErrorWithCode(errs.CodeHostStatsFailed, "failed to load host runtime snapshot", contract.TaskTypeHostRuntimeStats, "host", err)
 	}
-	if err := bridgeResultErrorWithCode(errs.CodeHostStatsFailed, "failed to load host runtime stats", contract.TaskTypeHostRuntimeStats, "host", result); err != nil {
-		return HostRuntimeStats{}, err
+	if err := bridgeResultErrorWithCode(errs.CodeHostStatsFailed, "failed to load host runtime snapshot", contract.TaskTypeHostRuntimeStats, "host", result); err != nil {
+		return HostRuntimeSnapshot{}, err
 	}
 	if len(result.Data) == 0 {
-		return HostRuntimeStats{}, errs.WithDetails(
-			errs.New(errs.CodeHostStatsFailed, "host runtime stats payload is empty"),
+		return HostRuntimeSnapshot{}, errs.WithDetails(
+			errs.New(errs.CodeHostStatsFailed, "host runtime snapshot payload is empty"),
 			map[string]any{
 				"task_type": contract.TaskTypeHostRuntimeStats,
 				"intent_id": result.IntentID,
@@ -346,13 +377,46 @@ func (s *HostService) RuntimeStats(ctx context.Context) (HostRuntimeStats, error
 
 	raw, err := json.Marshal(result.Data)
 	if err != nil {
-		return HostRuntimeStats{}, errs.Wrap(errs.CodeHostStatsFailed, "failed to parse host runtime stats payload", err)
+		return HostRuntimeSnapshot{}, errs.Wrap(errs.CodeHostStatsFailed, "failed to parse host runtime snapshot payload", err)
 	}
-	var stats HostRuntimeStats
+	var stats HostRuntimeSnapshot
 	if err := json.Unmarshal(raw, &stats); err != nil {
-		return HostRuntimeStats{}, errs.Wrap(errs.CodeHostStatsFailed, "failed to decode host runtime stats payload", err)
+		return HostRuntimeSnapshot{}, errs.Wrap(errs.CodeHostStatsFailed, "failed to decode host runtime snapshot payload", err)
 	}
 	return stats, nil
+}
+
+func (s *HostService) RuntimeStreamSample(ctx context.Context) (HostRuntimeStreamSample, error) {
+	if s.infraClient == nil {
+		return HostRuntimeStreamSample{}, errs.New(errs.CodeHostStatsFailed, "infra bridge client unavailable")
+	}
+
+	result, err := s.infraClient.HostRuntimeStream(ctx, "")
+	if err != nil {
+		return HostRuntimeStreamSample{}, bridgeTaskErrorWithCode(errs.CodeHostStatsFailed, "failed to load host runtime stream sample", contract.TaskTypeHostRuntimeStream, "host", err)
+	}
+	if err := bridgeResultErrorWithCode(errs.CodeHostStatsFailed, "failed to load host runtime stream sample", contract.TaskTypeHostRuntimeStream, "host", result); err != nil {
+		return HostRuntimeStreamSample{}, err
+	}
+	if len(result.Data) == 0 {
+		return HostRuntimeStreamSample{}, errs.WithDetails(
+			errs.New(errs.CodeHostStatsFailed, "host runtime stream payload is empty"),
+			map[string]any{
+				"task_type": contract.TaskTypeHostRuntimeStream,
+				"intent_id": result.IntentID,
+			},
+		)
+	}
+
+	raw, err := json.Marshal(result.Data)
+	if err != nil {
+		return HostRuntimeStreamSample{}, errs.Wrap(errs.CodeHostStatsFailed, "failed to parse host runtime stream payload", err)
+	}
+	var sample HostRuntimeStreamSample
+	if err := json.Unmarshal(raw, &sample); err != nil {
+		return HostRuntimeStreamSample{}, errs.Wrap(errs.CodeHostStatsFailed, "failed to decode host runtime stream payload", err)
+	}
+	return sample, nil
 }
 
 func (s *HostService) DockerRuntime(ctx context.Context) (DockerRuntimeInfo, error) {

@@ -98,6 +98,7 @@ func main() {
 		contract.TaskTypeDockerPublishedPorts,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
+		contract.TaskTypeHostRuntimeStream,
 		contract.TaskTypeProjectFileWriteAtomic,
 		contract.TaskTypeProjectFileCopy,
 		contract.TaskTypeProjectFileRemove,

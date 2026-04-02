@@ -354,6 +354,10 @@ func (c *Client) HostRuntimeStats(ctx context.Context, requestID string) (contra
 	return c.runTask(ctx, requestID, contract.TaskTypeHostRuntimeStats, map[string]any{})
 }
 
+func (c *Client) HostRuntimeStream(ctx context.Context, requestID string) (contract.Result, error) {
+	return c.runTask(ctx, requestID, contract.TaskTypeHostRuntimeStream, map[string]any{})
+}
+
 func (c *Client) ComposeUpStack(ctx context.Context, requestID string, payload contract.ComposeUpStackPayload) (contract.Result, error) {
 	payload.Project = strings.TrimSpace(payload.Project)
 	payload.ProjectDir = strings.TrimSpace(payload.ProjectDir)

@@ -3,6 +3,7 @@ package controller
 import (
 	"bufio"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -58,12 +59,55 @@ func (c *HostController) DockerUsage(ctx *gin.Context) {
 }
 
 func (c *HostController) RuntimeStats(ctx *gin.Context) {
-	stats, err := c.service.RuntimeStats(ctx.Request.Context())
+	snapshot, err := c.service.RuntimeSnapshot(ctx.Request.Context())
 	if err != nil {
-		respond.Err(ctx, err, errs.CodeHostStatsFailed, "failed to load host runtime stats")
+		respond.Err(ctx, err, errs.CodeHostStatsFailed, "failed to load host runtime snapshot")
 		return
 	}
-	respond.OK(ctx, gin.H{"stats": stats})
+	respond.OK(ctx, gin.H{"snapshot": snapshot})
+}
+
+func (c *HostController) StreamRuntimeStats(ctx *gin.Context) {
+	httpx.SetSSEHeaders(ctx)
+
+	flusher, ok := httpx.SSEFlusher(ctx)
+	if !ok {
+		respond.Err(ctx, errs.New(errs.CodeHostStreamUnsupported, "streaming unsupported"), errs.CodeHostStreamUnsupported, "streaming unsupported")
+		return
+	}
+
+	httpx.SendSSEEvent(ctx, flusher, "meta", gin.H{
+		"mode":       "debounced",
+		"intervalMs": int(service.HostRuntimeStreamInterval / time.Millisecond),
+	})
+
+	sendSample := func() bool {
+		sample, err := c.service.RuntimeStreamSample(ctx.Request.Context())
+		if err != nil {
+			httpx.SendSSEEvent(ctx, flusher, "error", gin.H{"code": errs.CodeHostStatsFailed, "message": err.Error()})
+			return false
+		}
+		httpx.SendSSEEvent(ctx, flusher, "sample", sample)
+		return true
+	}
+
+	if !sendSample() {
+		return
+	}
+
+	ticker := time.NewTicker(service.HostRuntimeStreamInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Request.Context().Done():
+			return
+		case <-ticker.C:
+			if !sendSample() {
+				return
+			}
+		}
+	}
 }
 
 func (c *HostController) StreamDockerLogs(ctx *gin.Context) {

@@ -44,6 +44,7 @@ const (
 	TaskTypeHostListenTCPPorts     TaskType = "host_listen_tcp_ports"
 	TaskTypeDockerPublishedPorts   TaskType = "docker_published_ports"
 	TaskTypeHostRuntimeStats       TaskType = "host_runtime_stats"
+	TaskTypeHostRuntimeStream      TaskType = "host_runtime_stream"
 	TaskTypeDockerRunQuickService  TaskType = "docker_run_quick_service"
 	TaskTypeProjectFileWriteAtomic TaskType = "project_file_write_atomic"
 	TaskTypeProjectFileCopy        TaskType = "project_file_copy"
@@ -155,6 +156,8 @@ type HostListenTCPPortsPayload struct{}
 type DockerPublishedPortsPayload struct{}
 
 type HostRuntimeStatsPayload struct{}
+
+type HostRuntimeStreamPayload struct{}
 
 type DockerRunQuickServicePayload struct {
 	Image         string `json:"image"`

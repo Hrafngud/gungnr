@@ -246,6 +246,10 @@ func (s *hostControllerBridgeStub) HostRuntimeStats(_ context.Context, _ string)
 	return contract.Result{}, nil
 }
 
+func (s *hostControllerBridgeStub) HostRuntimeStream(_ context.Context, _ string) (contract.Result, error) {
+	return contract.Result{}, nil
+}
+
 func (s *hostControllerBridgeStub) ComposeUpStack(_ context.Context, _ string, _ contract.ComposeUpStackPayload) (contract.Result, error) {
 	return contract.Result{}, nil
 }
