@@ -1,18 +1,16 @@
 package service
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"go-notes/internal/errs"
 	infraclient "go-notes/internal/infra/client"
@@ -42,6 +40,15 @@ type DockerContainer struct {
 	PortBindings []DockerPortBinding `json:"portBindings"`
 }
 
+type DockerRuntimeInfo struct {
+	ServerVersion   string   `json:"serverVersion,omitempty"`
+	DockerRootDir   string   `json:"dockerRootDir,omitempty"`
+	SecurityOptions []string `json:"securityOptions,omitempty"`
+	Warnings        []string `json:"warnings,omitempty"`
+	Rootless        bool     `json:"rootless"`
+	UsernsRemap     bool     `json:"usernsRemap"`
+}
+
 type HostService struct {
 	templatesDir string
 	projects     repository.ProjectRepository
@@ -52,7 +59,13 @@ type hostInfraBridgeClient interface {
 	StopContainer(ctx context.Context, requestID, container string) (contract.Result, error)
 	RestartContainer(ctx context.Context, requestID, container string) (contract.Result, error)
 	RemoveContainer(ctx context.Context, requestID, container string, removeVolumes bool) (contract.Result, error)
+	DockerListContainers(ctx context.Context, requestID string, includeAll bool) (contract.Result, error)
+	DockerSystemDF(ctx context.Context, requestID string) (contract.Result, error)
+	DockerListVolumes(ctx context.Context, requestID string) (contract.Result, error)
+	DockerContainerLogs(ctx context.Context, requestID string, payload contract.DockerContainerLogsPayload) (contract.Result, error)
+	DockerRuntimeCheck(ctx context.Context, requestID string) (contract.Result, error)
 	HostRuntimeStats(ctx context.Context, requestID string) (contract.Result, error)
+	HostRuntimeStream(ctx context.Context, requestID string) (contract.Result, error)
 	ComposeUpStack(ctx context.Context, requestID string, payload contract.ComposeUpStackPayload) (contract.Result, error)
 }
 
@@ -70,67 +83,32 @@ type ContainerLogsOptions struct {
 	Timestamps bool
 }
 
+type ContainerLogsWaiter interface {
+	Wait() error
+}
+
+type containerLogsBridgeWaiter struct {
+	done <-chan error
+}
+
+func (w containerLogsBridgeWaiter) Wait() error {
+	return <-w.done
+}
+
 func (s *HostService) ListContainers(ctx context.Context, includeAll bool) ([]DockerContainer, error) {
-	args := []string{"ps"}
-	if includeAll {
-		args = append(args, "-a")
-	}
-	args = append(args, "--format", "{{json .}}")
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	output, err := cmd.CombinedOutput()
+	lines, err := s.readDockerPSLines(ctx, includeAll, errs.CodeHostDockerFailed, "failed to list docker containers")
 	if err != nil {
-		return nil, fmt.Errorf("docker ps failed: %w: %s", err, strings.TrimSpace(string(output)))
+		return nil, err
 	}
-
-	scanner := bufio.NewScanner(bytes.NewReader(output))
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	var containers []DockerContainer
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var entry dockerPSLine
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			return nil, fmt.Errorf("parse docker output: %w", err)
-		}
-		labels := parseDockerLabels(entry.Labels)
-		containers = append(containers, DockerContainer{
-			ID:           entry.ID,
-			Name:         entry.Names,
-			Image:        entry.Image,
-			Status:       entry.Status,
-			Ports:        entry.Ports,
-			CreatedAt:    entry.CreatedAt,
-			RunningFor:   entry.RunningFor,
-			Service:      labels["com.docker.compose.service"],
-			Project:      labels["com.docker.compose.project"],
-			PortBindings: parseDockerPorts(entry.Ports),
-		})
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan docker output: %w", err)
-	}
-
-	return containers, nil
+	return parseDockerPSLinesToContainers(lines)
 }
 
 func (s *HostService) CountRunningContainers(ctx context.Context) (int, error) {
-	cmd := exec.CommandContext(ctx, "docker", "ps", "--format", "{{.ID}}")
-	output, err := cmd.CombinedOutput()
+	lines, err := s.readDockerPSLines(ctx, false, errs.CodeHostDockerFailed, "failed to count running containers")
 	if err != nil {
-		return 0, fmt.Errorf("docker ps failed: %w: %s", err, strings.TrimSpace(string(output)))
+		return 0, err
 	}
-
-	count := 0
-	for _, line := range strings.Split(string(output), "\n") {
-		if strings.TrimSpace(line) != "" {
-			count++
-		}
-	}
-	return count, nil
+	return len(lines), nil
 }
 
 type DockerUsageEntry struct {
@@ -175,32 +153,62 @@ type HostRuntimeGPU struct {
 	SpeedMHz float64 `json:"speedMHz,omitempty"`
 }
 
-type HostRuntimeWorkloadUsage struct {
-	Containers         int     `json:"containers"`
-	RunningContainers  int     `json:"runningContainers"`
-	CPUUsedPercent     float64 `json:"cpuUsedPercent"`
-	MemoryUsedBytes    int64   `json:"memoryUsedBytes"`
-	DiskUsedBytes      int64   `json:"diskUsedBytes"`
-	MemorySharePercent float64 `json:"memorySharePercent"`
-	DiskSharePercent   float64 `json:"diskSharePercent"`
+type HostRuntimeMemorySnapshot struct {
+	TotalBytes     int64 `json:"totalBytes"`
+	FreeBytes      int64 `json:"freeBytes"`
+	AvailableBytes int64 `json:"availableBytes,omitempty"`
+	SpeedMTs       int   `json:"speedMTs,omitempty"`
 }
 
-type HostRuntimeStats struct {
-	CollectedAt    string                              `json:"collectedAt"`
-	Hostname       string                              `json:"hostname,omitempty"`
-	UptimeSeconds  int64                               `json:"uptimeSeconds"`
-	UptimeHuman    string                              `json:"uptimeHuman"`
-	SystemImage    string                              `json:"systemImage"`
-	Kernel         string                              `json:"kernel"`
-	CPU            HostRuntimeCPU                      `json:"cpu"`
-	GPU            *HostRuntimeGPU                     `json:"gpu,omitempty"`
-	Memory         HostRuntimeResource                 `json:"memory"`
-	Disk           HostRuntimeResource                 `json:"disk"`
-	PanelUsage     HostRuntimeWorkloadUsage            `json:"panelUsage"`
-	ProjectsUsage  HostRuntimeWorkloadUsage            `json:"projectsUsage"`
-	ProjectsByName map[string]HostRuntimeWorkloadUsage `json:"projectsByName,omitempty"`
-	Warnings       []string                            `json:"warnings,omitempty"`
+type HostRuntimeWorkloadSnapshot struct {
+	Containers        int     `json:"containers"`
+	RunningContainers int     `json:"runningContainers"`
+	DiskUsedBytes     int64   `json:"diskUsedBytes"`
+	DiskSharePercent  float64 `json:"diskSharePercent"`
 }
+
+type HostRuntimeSnapshot struct {
+	CollectedAt    string                                 `json:"collectedAt"`
+	Hostname       string                                 `json:"hostname,omitempty"`
+	UptimeSeconds  int64                                  `json:"uptimeSeconds"`
+	UptimeHuman    string                                 `json:"uptimeHuman"`
+	SystemImage    string                                 `json:"systemImage"`
+	Kernel         string                                 `json:"kernel"`
+	CPU            HostRuntimeCPU                         `json:"cpu"`
+	GPU            *HostRuntimeGPU                        `json:"gpu,omitempty"`
+	Memory         HostRuntimeMemorySnapshot              `json:"memory"`
+	Disk           HostRuntimeResource                    `json:"disk"`
+	Panel          HostRuntimeWorkloadSnapshot            `json:"panel"`
+	Projects       HostRuntimeWorkloadSnapshot            `json:"projects"`
+	ProjectsByName map[string]HostRuntimeWorkloadSnapshot `json:"projectsByName,omitempty"`
+	Warnings       []string                               `json:"warnings,omitempty"`
+}
+
+type HostRuntimeHostStreamUsage struct {
+	MemoryUsedBytes      int64   `json:"memoryUsedBytes"`
+	MemoryUsedPercent    float64 `json:"memoryUsedPercent"`
+	MemoryFreeBytes      int64   `json:"memoryFreeBytes"`
+	MemoryAvailableBytes int64   `json:"memoryAvailableBytes,omitempty"`
+}
+
+type HostRuntimeWorkloadStreamUsage struct {
+	CPUUsedPercent     float64 `json:"cpuUsedPercent"`
+	MemoryUsedBytes    int64   `json:"memoryUsedBytes"`
+	MemorySharePercent float64 `json:"memorySharePercent"`
+}
+
+type HostRuntimeStreamSample struct {
+	CollectedAt    string                                    `json:"collectedAt"`
+	Mode           string                                    `json:"mode"`
+	IntervalMs     int                                       `json:"intervalMs"`
+	Host           HostRuntimeHostStreamUsage                `json:"host"`
+	Panel          HostRuntimeWorkloadStreamUsage            `json:"panel"`
+	Projects       HostRuntimeWorkloadStreamUsage            `json:"projects"`
+	ProjectsByName map[string]HostRuntimeWorkloadStreamUsage `json:"projectsByName,omitempty"`
+	Warnings       []string                                  `json:"warnings,omitempty"`
+}
+
+const HostRuntimeStreamInterval = 100 * time.Millisecond
 
 type dockerSystemDFLine struct {
 	Type        string `json:"Type"`
@@ -227,10 +235,12 @@ func (s *HostService) DockerUsage(ctx context.Context, project string) (DockerUs
 	if project == "" {
 		return summary, nil
 	}
+	summary.Project = project
 
-	containers, err := s.ListContainers(ctx, true)
+	containers, err := s.listContainersForUsage(ctx, true)
 	if err != nil {
-		return DockerUsageSummary{}, err
+		summary.ProjectCounts = &DockerUsageProjectCounts{}
+		return summary, wrapDockerUsageProjectCountsDegraded(err)
 	}
 
 	normalizedProject := strings.ToLower(project)
@@ -251,7 +261,8 @@ func (s *HostService) DockerUsage(ctx context.Context, project string) (DockerUs
 
 	volumes, err := s.listVolumes(ctx)
 	if err != nil {
-		return DockerUsageSummary{}, err
+		summary.ProjectCounts = &DockerUsageProjectCounts{}
+		return summary, wrapDockerUsageProjectCountsDegraded(err)
 	}
 	volumeCount := 0
 	for _, volume := range volumes {
@@ -261,7 +272,6 @@ func (s *HostService) DockerUsage(ctx context.Context, project string) (DockerUs
 		}
 	}
 
-	summary.Project = project
 	summary.ProjectCounts = &DockerUsageProjectCounts{
 		Containers: len(projectContainers),
 		Images:     len(imageSet),
@@ -270,21 +280,94 @@ func (s *HostService) DockerUsage(ctx context.Context, project string) (DockerUs
 	return summary, nil
 }
 
-func (s *HostService) RuntimeStats(ctx context.Context) (HostRuntimeStats, error) {
+func (s *HostService) listContainersForUsage(ctx context.Context, includeAll bool) ([]DockerContainer, error) {
+	lines, err := s.readDockerPSLines(ctx, includeAll, errs.CodeHostUsageFailed, "failed to load docker usage")
+	if err != nil {
+		return nil, err
+	}
+	return parseDockerPSLinesToContainers(lines)
+}
+
+func (s *HostService) readDockerPSLines(ctx context.Context, includeAll bool, code errs.Code, message string) ([]string, error) {
 	if s.infraClient == nil {
-		return HostRuntimeStats{}, errs.New(errs.CodeHostStatsFailed, "infra bridge client unavailable")
+		return nil, errs.WithDetails(
+			errs.New(code, "infra bridge client unavailable"),
+			map[string]any{"task_type": contract.TaskTypeDockerListContainers},
+		)
+	}
+
+	result, err := s.infraClient.DockerListContainers(ctx, "", includeAll)
+	if err != nil {
+		return nil, bridgeTaskErrorWithCode(code, message, contract.TaskTypeDockerListContainers, "docker", err)
+	}
+	if err := bridgeResultErrorWithCode(code, message, contract.TaskTypeDockerListContainers, "docker", result); err != nil {
+		return nil, err
+	}
+	return decodeBridgeLinesPayload(result)
+}
+
+func decodeBridgeLinesPayload(result contract.Result) ([]string, error) {
+	if len(result.Data) == 0 {
+		return []string{}, nil
+	}
+	rawLines, exists := result.Data["lines"]
+	if !exists || rawLines == nil {
+		return []string{}, nil
+	}
+	raw, err := json.Marshal(rawLines)
+	if err != nil {
+		return nil, fmt.Errorf("encode worker lines payload: %w", err)
+	}
+	var lines []string
+	if err := json.Unmarshal(raw, &lines); err != nil {
+		return nil, fmt.Errorf("decode worker lines payload: %w", err)
+	}
+	return lines, nil
+}
+
+func parseDockerPSLinesToContainers(lines []string) ([]DockerContainer, error) {
+	containers := make([]DockerContainer, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var entry dockerPSLine
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			return nil, fmt.Errorf("parse docker output: %w", err)
+		}
+		labels := parseDockerLabels(entry.Labels)
+		containers = append(containers, DockerContainer{
+			ID:           entry.ID,
+			Name:         entry.Names,
+			Image:        entry.Image,
+			Status:       entry.Status,
+			Ports:        entry.Ports,
+			CreatedAt:    entry.CreatedAt,
+			RunningFor:   entry.RunningFor,
+			Service:      labels["com.docker.compose.service"],
+			Project:      labels["com.docker.compose.project"],
+			PortBindings: parseDockerPorts(entry.Ports),
+		})
+	}
+	return containers, nil
+}
+
+func (s *HostService) RuntimeSnapshot(ctx context.Context) (HostRuntimeSnapshot, error) {
+	if s.infraClient == nil {
+		return HostRuntimeSnapshot{}, errs.New(errs.CodeHostStatsFailed, "infra bridge client unavailable")
 	}
 
 	result, err := s.infraClient.HostRuntimeStats(ctx, "")
 	if err != nil {
-		return HostRuntimeStats{}, bridgeTaskErrorWithCode(errs.CodeHostStatsFailed, "failed to load host runtime stats", contract.TaskTypeHostRuntimeStats, "host", err)
+		return HostRuntimeSnapshot{}, bridgeTaskErrorWithCode(errs.CodeHostStatsFailed, "failed to load host runtime snapshot", contract.TaskTypeHostRuntimeStats, "host", err)
 	}
-	if err := bridgeResultErrorWithCode(errs.CodeHostStatsFailed, "failed to load host runtime stats", contract.TaskTypeHostRuntimeStats, "host", result); err != nil {
-		return HostRuntimeStats{}, err
+	if err := bridgeResultErrorWithCode(errs.CodeHostStatsFailed, "failed to load host runtime snapshot", contract.TaskTypeHostRuntimeStats, "host", result); err != nil {
+		return HostRuntimeSnapshot{}, err
 	}
 	if len(result.Data) == 0 {
-		return HostRuntimeStats{}, errs.WithDetails(
-			errs.New(errs.CodeHostStatsFailed, "host runtime stats payload is empty"),
+		return HostRuntimeSnapshot{}, errs.WithDetails(
+			errs.New(errs.CodeHostStatsFailed, "host runtime snapshot payload is empty"),
 			map[string]any{
 				"task_type": contract.TaskTypeHostRuntimeStats,
 				"intent_id": result.IntentID,
@@ -294,37 +377,193 @@ func (s *HostService) RuntimeStats(ctx context.Context) (HostRuntimeStats, error
 
 	raw, err := json.Marshal(result.Data)
 	if err != nil {
-		return HostRuntimeStats{}, errs.Wrap(errs.CodeHostStatsFailed, "failed to parse host runtime stats payload", err)
+		return HostRuntimeSnapshot{}, errs.Wrap(errs.CodeHostStatsFailed, "failed to parse host runtime snapshot payload", err)
 	}
-	var stats HostRuntimeStats
+	var stats HostRuntimeSnapshot
 	if err := json.Unmarshal(raw, &stats); err != nil {
-		return HostRuntimeStats{}, errs.Wrap(errs.CodeHostStatsFailed, "failed to decode host runtime stats payload", err)
+		return HostRuntimeSnapshot{}, errs.Wrap(errs.CodeHostStatsFailed, "failed to decode host runtime snapshot payload", err)
 	}
 	return stats, nil
 }
 
-func (s *HostService) StartContainerLogs(ctx context.Context, container string, opts ContainerLogsOptions) (*exec.Cmd, io.ReadCloser, error) {
-	args := []string{"logs"}
-	if opts.Follow {
-		args = append(args, "-f")
+func (s *HostService) RuntimeStreamSample(ctx context.Context) (HostRuntimeStreamSample, error) {
+	if s.infraClient == nil {
+		return HostRuntimeStreamSample{}, errs.New(errs.CodeHostStatsFailed, "infra bridge client unavailable")
 	}
-	if opts.Timestamps {
-		args = append(args, "--timestamps")
-	}
-	if opts.Tail > 0 {
-		args = append(args, "--tail", strconv.Itoa(opts.Tail))
-	}
-	args = append(args, container)
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	stdout, err := cmd.StdoutPipe()
+	result, err := s.infraClient.HostRuntimeStream(ctx, "")
 	if err != nil {
-		return nil, nil, fmt.Errorf("attach docker logs: %w", err)
+		return HostRuntimeStreamSample{}, bridgeTaskErrorWithCode(errs.CodeHostStatsFailed, "failed to load host runtime stream sample", contract.TaskTypeHostRuntimeStream, "host", err)
 	}
-	if err := cmd.Start(); err != nil {
-		return nil, nil, fmt.Errorf("start docker logs: %w", err)
+	if err := bridgeResultErrorWithCode(errs.CodeHostStatsFailed, "failed to load host runtime stream sample", contract.TaskTypeHostRuntimeStream, "host", result); err != nil {
+		return HostRuntimeStreamSample{}, err
 	}
-	return cmd, stdout, nil
+	if len(result.Data) == 0 {
+		return HostRuntimeStreamSample{}, errs.WithDetails(
+			errs.New(errs.CodeHostStatsFailed, "host runtime stream payload is empty"),
+			map[string]any{
+				"task_type": contract.TaskTypeHostRuntimeStream,
+				"intent_id": result.IntentID,
+			},
+		)
+	}
+
+	raw, err := json.Marshal(result.Data)
+	if err != nil {
+		return HostRuntimeStreamSample{}, errs.Wrap(errs.CodeHostStatsFailed, "failed to parse host runtime stream payload", err)
+	}
+	var sample HostRuntimeStreamSample
+	if err := json.Unmarshal(raw, &sample); err != nil {
+		return HostRuntimeStreamSample{}, errs.Wrap(errs.CodeHostStatsFailed, "failed to decode host runtime stream payload", err)
+	}
+	return sample, nil
+}
+
+func (s *HostService) DockerRuntime(ctx context.Context) (DockerRuntimeInfo, error) {
+	if s.infraClient == nil {
+		return DockerRuntimeInfo{}, errs.WithDetails(
+			errs.New(errs.CodeHostDockerFailed, "infra bridge client unavailable"),
+			map[string]any{"task_type": contract.TaskTypeDockerRuntimeCheck},
+		)
+	}
+
+	result, err := s.infraClient.DockerRuntimeCheck(ctx, "")
+	if err != nil {
+		return DockerRuntimeInfo{}, bridgeTaskError("failed to inspect docker runtime", contract.TaskTypeDockerRuntimeCheck, "docker", err)
+	}
+	if err := bridgeResultError("failed to inspect docker runtime", contract.TaskTypeDockerRuntimeCheck, "docker", result); err != nil {
+		return DockerRuntimeInfo{}, err
+	}
+
+	var payload struct {
+		ServerVersion   string   `json:"server_version"`
+		DockerRootDir   string   `json:"docker_root_dir"`
+		SecurityOptions []string `json:"security_options"`
+		Warnings        []string `json:"warnings"`
+		Rootless        bool     `json:"rootless"`
+		UsernsRemap     bool     `json:"userns_remap"`
+	}
+	if len(result.Data) > 0 {
+		raw, marshalErr := json.Marshal(result.Data)
+		if marshalErr != nil {
+			return DockerRuntimeInfo{}, fmt.Errorf("encode docker runtime payload: %w", marshalErr)
+		}
+		if unmarshalErr := json.Unmarshal(raw, &payload); unmarshalErr != nil {
+			return DockerRuntimeInfo{}, fmt.Errorf("decode docker runtime payload: %w", unmarshalErr)
+		}
+	}
+
+	serverVersion := strings.TrimSpace(payload.ServerVersion)
+	if serverVersion == "" {
+		lines, linesErr := decodeBridgeLinesPayload(result)
+		if linesErr != nil {
+			return DockerRuntimeInfo{}, fmt.Errorf("decode docker runtime version payload: %w", linesErr)
+		}
+		if len(lines) > 0 {
+			serverVersion = strings.TrimSpace(lines[0])
+		}
+	}
+
+	return DockerRuntimeInfo{
+		ServerVersion:   serverVersion,
+		DockerRootDir:   strings.TrimSpace(payload.DockerRootDir),
+		SecurityOptions: payload.SecurityOptions,
+		Warnings:        payload.Warnings,
+		Rootless:        payload.Rootless,
+		UsernsRemap:     payload.UsernsRemap,
+	}, nil
+}
+
+func (s *HostService) StartContainerLogs(ctx context.Context, container string, opts ContainerLogsOptions) (ContainerLogsWaiter, io.ReadCloser, error) {
+	container = strings.TrimSpace(container)
+	if container == "" {
+		return nil, nil, fmt.Errorf("container is required")
+	}
+	if s.infraClient == nil {
+		return nil, nil, fmt.Errorf("infra bridge client unavailable")
+	}
+
+	reader, writer := io.Pipe()
+	done := make(chan error, 1)
+
+	go func() {
+		err := s.streamContainerLogs(ctx, container, opts, func(line string) error {
+			_, writeErr := io.WriteString(writer, line+"\n")
+			return writeErr
+		})
+		if err != nil {
+			_ = writer.CloseWithError(err)
+		} else {
+			_ = writer.Close()
+		}
+		done <- err
+	}()
+
+	return containerLogsBridgeWaiter{done: done}, reader, nil
+}
+
+func (s *HostService) streamContainerLogs(ctx context.Context, container string, opts ContainerLogsOptions, emit func(string) error) error {
+	tail := opts.Tail
+	if tail <= 0 {
+		tail = 200
+	}
+	if tail > 5000 {
+		tail = 5000
+	}
+
+	firstFetch := true
+	since := ""
+	pollInterval := 1 * time.Second
+
+	for {
+		// Use current time as the next since-cursor to avoid duplicates while following.
+		nextSince := time.Now().UTC().Format(time.RFC3339Nano)
+
+		requestTail := 0
+		if firstFetch {
+			requestTail = tail
+		}
+
+		result, err := s.infraClient.DockerContainerLogs(ctx, "", contract.DockerContainerLogsPayload{
+			Container:  container,
+			Tail:       requestTail,
+			Follow:     false,
+			Timestamps: opts.Timestamps,
+			Since:      since,
+		})
+		if err != nil {
+			return fmt.Errorf("fetch docker logs via infra bridge: %w", err)
+		}
+		if result.Status == contract.StatusFailed {
+			message := "host worker reported failure"
+			if result.Error != nil && strings.TrimSpace(result.Error.Message) != "" {
+				message = result.Error.Message
+			}
+			return fmt.Errorf("docker logs task failed: %s", message)
+		}
+
+		lines, err := decodeBridgeLinesPayload(result)
+		if err != nil {
+			return fmt.Errorf("decode docker logs payload: %w", err)
+		}
+		for _, line := range lines {
+			if emitErr := emit(line); emitErr != nil {
+				return emitErr
+			}
+		}
+
+		if !opts.Follow {
+			return nil
+		}
+
+		firstFetch = false
+		since = nextSince
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(pollInterval):
+		}
+	}
 }
 
 func (s *HostService) StopContainer(ctx context.Context, container string) error {
@@ -550,29 +789,52 @@ type composeProjectMeta struct {
 	ConfigFiles []string
 }
 
-func (s *HostService) readComposeProjectMeta(ctx context.Context, project string) (composeProjectMeta, error) {
-	return readComposeProjectMeta(ctx, project)
-}
+func readComposeProjectMeta(ctx context.Context, runtimeMetaClient infraDockerMetadataClient, project string) (composeProjectMeta, error) {
+	project = strings.TrimSpace(project)
+	if project == "" {
+		return composeProjectMeta{}, fmt.Errorf("compose project is required")
+	}
+	if runtimeMetaClient == nil {
+		return composeProjectMeta{}, fmt.Errorf("infra bridge client unavailable")
+	}
 
-func readComposeProjectMeta(ctx context.Context, project string) (composeProjectMeta, error) {
-	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "-q", "--filter", "label=com.docker.compose.project="+project)
-	output, err := cmd.CombinedOutput()
+	result, err := runtimeMetaClient.DockerListContainers(ctx, "", true)
 	if err != nil {
-		return composeProjectMeta{}, fmt.Errorf("docker ps compose metadata failed: %w: %s", err, strings.TrimSpace(string(output)))
+		return composeProjectMeta{}, fmt.Errorf("docker list containers for compose metadata failed: %w", err)
+	}
+	if result.Status == contract.StatusFailed {
+		message := "host worker reported failure"
+		if result.Error != nil && strings.TrimSpace(result.Error.Message) != "" {
+			message = result.Error.Message
+		}
+		return composeProjectMeta{}, fmt.Errorf("docker list containers for compose metadata failed: %s", message)
 	}
 
-	containerIDs := parseLines(output)
-	if len(containerIDs) == 0 {
-		return composeProjectMeta{}, fmt.Errorf("compose project not found: %q", project)
+	lines, err := decodeBridgeLinesPayload(result)
+	if err != nil {
+		return composeProjectMeta{}, fmt.Errorf("decode compose metadata payload: %w", err)
 	}
 
-	var lastErr error
-	for _, containerID := range containerIDs {
-		labels, err := inspectContainerLabels(ctx, containerID)
-		if err != nil {
-			lastErr = err
+	foundProjectContainer := false
+	var parseErr error
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
+
+		var entry dockerPSLine
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			parseErr = err
+			continue
+		}
+
+		labels := parseDockerLabels(entry.Labels)
+		if !strings.EqualFold(strings.TrimSpace(labels["com.docker.compose.project"]), project) {
+			continue
+		}
+		foundProjectContainer = true
+
 		workingDir := strings.TrimSpace(labels["com.docker.compose.project.working_dir"])
 		configFilesRaw := strings.TrimSpace(labels["com.docker.compose.project.config_files"])
 		if workingDir == "" && configFilesRaw == "" {
@@ -583,27 +845,14 @@ func readComposeProjectMeta(ctx context.Context, project string) (composeProject
 			ConfigFiles: splitComposeConfigFiles(configFilesRaw),
 		}, nil
 	}
-	if lastErr != nil {
-		return composeProjectMeta{}, fmt.Errorf("inspect compose metadata failed: %w", lastErr)
+
+	if parseErr != nil {
+		return composeProjectMeta{}, fmt.Errorf("parse compose metadata payload: %w", parseErr)
+	}
+	if !foundProjectContainer {
+		return composeProjectMeta{}, fmt.Errorf("compose project not found: %q", project)
 	}
 	return composeProjectMeta{}, fmt.Errorf("compose metadata labels unavailable for project %q", project)
-}
-
-func inspectContainerLabels(ctx context.Context, containerID string) (map[string]string, error) {
-	cmd := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{json .Config.Labels}}", containerID)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("docker inspect labels failed for %s: %w: %s", containerID, err, strings.TrimSpace(string(output)))
-	}
-	trimmed := strings.TrimSpace(string(output))
-	if trimmed == "" || trimmed == "null" {
-		return map[string]string{}, nil
-	}
-	labels := map[string]string{}
-	if err := json.Unmarshal([]byte(trimmed), &labels); err != nil {
-		return nil, fmt.Errorf("parse docker inspect labels for %s: %w", containerID, err)
-	}
-	return labels, nil
 }
 
 func resolveComposeProjectDir(baseDir, project, workingDir string, configFiles []string) (string, error) {
@@ -713,38 +962,11 @@ func parseLines(raw []byte) []string {
 	return items
 }
 
-func (s *HostService) composeUp(ctx context.Context, projectDir string, configFiles []string, logger jobs.Logger) error {
-	args := []string{"compose"}
-	for _, configFile := range configFiles {
-		args = append(args, "-f", configFile)
-	}
-	args = append(args, "up", "--build", "-d")
-
-	hostLogf(logger, "running command in %s: docker %s", projectDir, strings.Join(args, " "))
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Dir = projectDir
-	output, err := cmd.CombinedOutput()
-	logCommandOutput(logger, output)
-	if err != nil {
-		return fmt.Errorf("docker %s failed: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
 func hostLogf(logger jobs.Logger, format string, args ...any) {
 	if logger == nil {
 		return
 	}
 	logger.Logf(format, args...)
-}
-
-func logCommandOutput(logger jobs.Logger, output []byte) {
-	if logger == nil {
-		return
-	}
-	for _, line := range parseLines(output) {
-		logger.Log(line)
-	}
 }
 
 type dockerPSLine struct {
@@ -759,18 +981,37 @@ type dockerPSLine struct {
 }
 
 func (s *HostService) readDockerUsage(ctx context.Context) (DockerUsageSummary, int64, error) {
-	cmd := exec.CommandContext(ctx, "docker", "system", "df", "--format", "{{json .}}")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return DockerUsageSummary{}, 0, fmt.Errorf("docker system df failed: %w: %s", err, strings.TrimSpace(string(output)))
+	if s.infraClient == nil {
+		return DockerUsageSummary{}, 0, errs.WithDetails(
+			errs.New(errs.CodeHostUsageFailed, "infra bridge client unavailable"),
+			map[string]any{"task_type": contract.TaskTypeDockerSystemDF},
+		)
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(output))
+	result, err := s.infraClient.DockerSystemDF(ctx, "")
+	if err != nil {
+		return DockerUsageSummary{}, 0, bridgeTaskErrorWithCode(errs.CodeHostUsageFailed, "failed to load docker usage", contract.TaskTypeDockerSystemDF, "docker", err)
+	}
+	if err := bridgeResultErrorWithCode(errs.CodeHostUsageFailed, "failed to load docker usage", contract.TaskTypeDockerSystemDF, "docker", result); err != nil {
+		return DockerUsageSummary{}, 0, err
+	}
+
+	lines, err := decodeBridgeLinesPayload(result)
+	if err != nil {
+		return DockerUsageSummary{}, 0, errs.WithDetails(
+			errs.Wrap(errs.CodeHostUsageFailed, "failed to decode docker usage payload", err),
+			map[string]any{
+				"task_type": contract.TaskTypeDockerSystemDF,
+				"intent_id": result.IntentID,
+			},
+		)
+	}
+
 	var summary DockerUsageSummary
 	var totalBytes int64
 
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
@@ -795,24 +1036,39 @@ func (s *HostService) readDockerUsage(ctx context.Context) (DockerUsageSummary, 
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return DockerUsageSummary{}, 0, fmt.Errorf("scan docker system df output: %w", err)
-	}
-
 	return summary, totalBytes, nil
 }
 
 func (s *HostService) listVolumes(ctx context.Context) ([]dockerVolumeLine, error) {
-	cmd := exec.CommandContext(ctx, "docker", "volume", "ls", "--format", "{{json .}}")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("docker volume ls failed: %w: %s", err, strings.TrimSpace(string(output)))
+	if s.infraClient == nil {
+		return nil, errs.WithDetails(
+			errs.New(errs.CodeHostUsageFailed, "infra bridge client unavailable"),
+			map[string]any{"task_type": contract.TaskTypeDockerListVolumes},
+		)
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(output))
-	volumes := make([]dockerVolumeLine, 0)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	result, err := s.infraClient.DockerListVolumes(ctx, "")
+	if err != nil {
+		return nil, bridgeTaskErrorWithCode(errs.CodeHostUsageFailed, "failed to load docker usage", contract.TaskTypeDockerListVolumes, "docker", err)
+	}
+	if err := bridgeResultErrorWithCode(errs.CodeHostUsageFailed, "failed to load docker usage", contract.TaskTypeDockerListVolumes, "docker", result); err != nil {
+		return nil, err
+	}
+
+	lines, err := decodeBridgeLinesPayload(result)
+	if err != nil {
+		return nil, errs.WithDetails(
+			errs.Wrap(errs.CodeHostUsageFailed, "failed to decode docker volume payload", err),
+			map[string]any{
+				"task_type": contract.TaskTypeDockerListVolumes,
+				"intent_id": result.IntentID,
+			},
+		)
+	}
+
+	volumes := make([]dockerVolumeLine, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
@@ -822,29 +1078,66 @@ func (s *HostService) listVolumes(ctx context.Context) ([]dockerVolumeLine, erro
 		}
 		volumes = append(volumes, entry)
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan docker volume output: %w", err)
-	}
 	return volumes, nil
 }
 
 func parseDockerLabels(raw string) map[string]string {
 	labels := make(map[string]string)
+	currentKey := ""
 	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
 		if entry == "" {
 			continue
 		}
-		parts := strings.SplitN(entry, "=", 2)
-		if len(parts) != 2 {
+
+		if key, value, ok := parseDockerLabelEntry(entry); ok {
+			currentKey = key
+			labels[key] = value
 			continue
 		}
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-		if key != "" {
-			labels[key] = value
+
+		if currentKey != "" {
+			labels[currentKey] = labels[currentKey] + "," + entry
 		}
 	}
 	return labels
+}
+
+func parseDockerLabelEntry(entry string) (string, string, bool) {
+	keyRaw, valueRaw, ok := strings.Cut(entry, "=")
+	if !ok {
+		return "", "", false
+	}
+	key := strings.TrimSpace(keyRaw)
+	if !isLikelyDockerLabelKey(key) {
+		return "", "", false
+	}
+	return key, strings.TrimSpace(valueRaw), true
+}
+
+func isLikelyDockerLabelKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for idx, r := range key {
+		if idx == 0 && !isASCIIAlphaNum(r) {
+			return false
+		}
+		if isASCIIAlphaNum(r) {
+			continue
+		}
+		switch r {
+		case '.', '_', '-', '/':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIIAlphaNum(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }
 
 func parseDockerPorts(raw string) []DockerPortBinding {

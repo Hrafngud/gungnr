@@ -8,7 +8,7 @@ import (
 	"go-notes/internal/errs"
 )
 
-func TestResolveWorkbenchSnapshotPortsDeterministicPreferredModuleAndFallback(t *testing.T) {
+func TestResolveWorkbenchSnapshotPortsDeterministicPreferredCatalogDefaultAndFallback(t *testing.T) {
 	t.Parallel()
 
 	snapshot := WorkbenchStackSnapshot{
@@ -16,7 +16,6 @@ func TestResolveWorkbenchSnapshotPortsDeterministicPreferredModuleAndFallback(t 
 		Revision:    3,
 		Services: []WorkbenchComposeService{
 			{ServiceName: "api", Image: "nginx:stable"},
-			{ServiceName: "cache", Image: "redis:7"},
 			{ServiceName: "worker", Image: "busybox:latest"},
 		},
 		Ports: []WorkbenchComposePort{
@@ -27,7 +26,7 @@ func TestResolveWorkbenchSnapshotPortsDeterministicPreferredModuleAndFallback(t 
 				Protocol:      "tcp",
 			},
 			{
-				ServiceName:   "cache",
+				ServiceName:   "redis",
 				ContainerPort: 6379,
 				Protocol:      "tcp",
 			},
@@ -37,8 +36,8 @@ func TestResolveWorkbenchSnapshotPortsDeterministicPreferredModuleAndFallback(t 
 				Protocol:      "tcp",
 			},
 		},
-		Modules: []WorkbenchStackModule{
-			{ModuleType: "redis", ServiceName: "cache"},
+		ManagedServices: []WorkbenchManagedService{
+			{EntryKey: "redis", ServiceName: "redis"},
 		},
 	}
 
@@ -74,9 +73,9 @@ func TestResolveWorkbenchSnapshotPortsDeterministicPreferredModuleAndFallback(t 
 	if apiPort == nil || apiPort.HostPort == nil || *apiPort.HostPort != 8080 {
 		t.Fatalf("expected api host port 8080, got %#v", apiPort)
 	}
-	cachePort := findWorkbenchPort(firstResolved.Ports, "cache")
+	cachePort := findWorkbenchPort(firstResolved.Ports, "redis")
 	if cachePort == nil || cachePort.HostPort == nil || *cachePort.HostPort != 6379 {
-		t.Fatalf("expected cache host port 6379 from module default, got %#v", cachePort)
+		t.Fatalf("expected redis host port 6379 from catalog-managed default, got %#v", cachePort)
 	}
 	workerPort := findWorkbenchPort(firstResolved.Ports, "worker")
 	if workerPort == nil || workerPort.HostPort == nil || *workerPort.HostPort != 8081 {
@@ -87,7 +86,7 @@ func TestResolveWorkbenchSnapshotPortsDeterministicPreferredModuleAndFallback(t 
 	if apiOutcome == nil || apiOutcome.Source != workbenchPortSourceComposeHostPort || apiOutcome.Status != workbenchPortAllocationAssigned {
 		t.Fatalf("unexpected api outcome: %#v", apiOutcome)
 	}
-	cacheOutcome := findWorkbenchOutcome(firstSummary.Outcomes, "cache")
+	cacheOutcome := findWorkbenchOutcome(firstSummary.Outcomes, "redis")
 	if cacheOutcome == nil || cacheOutcome.Source != workbenchPortSourceModuleDefault || cacheOutcome.Status != workbenchPortAllocationAssigned {
 		t.Fatalf("unexpected cache outcome: %#v", cacheOutcome)
 	}
@@ -376,8 +375,8 @@ func TestResolveWorkbenchSnapshotPortsSynthesizesManagedServicePorts(t *testing.
 	if redisOutcome.AssignedHostPort == nil || *redisOutcome.AssignedHostPort != 6380 {
 		t.Fatalf("expected redis assigned host port 6380, got %#v", redisOutcome)
 	}
-	if redisOutcome.Source != workbenchPortSourceContainerPort {
-		t.Fatalf("expected redis source %q, got %#v", workbenchPortSourceContainerPort, redisOutcome)
+	if redisOutcome.Source != workbenchPortSourceModuleDefault {
+		t.Fatalf("expected redis source %q, got %#v", workbenchPortSourceModuleDefault, redisOutcome)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"go-notes/internal/integrations/cloudflare"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
+	"go-notes/internal/validate"
 )
 
 const defaultCloudflaredConfigPath = "~/.cloudflared/config.yml"
@@ -126,7 +127,7 @@ func (s *SettingsService) Update(ctx context.Context, input SettingsPayload) (Se
 	if input.AdditionalDomains != nil {
 		normalized := normalizeDomainList(input.AdditionalDomains)
 		for _, domain := range normalized {
-			if err := ValidateDomain(domain); err != nil {
+			if err := validate.Domain(domain); err != nil {
 				return SettingsPayload{}, fmt.Errorf("additional domain %q: %w", domain, err)
 			}
 		}
@@ -539,7 +540,7 @@ func (s *SettingsService) ResolveDomainSelection(ctx context.Context, requested 
 		}
 		normalizedRequested = base
 	}
-	if err := ValidateDomain(normalizedRequested); err != nil {
+	if err := validate.Domain(normalizedRequested); err != nil {
 		return DomainSelection{}, err
 	}
 

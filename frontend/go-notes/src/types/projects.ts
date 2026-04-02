@@ -29,6 +29,15 @@ export interface ProjectDetailRuntime {
   envExists: boolean
 }
 
+export interface ProjectDetailDiagnostic {
+  scope: string
+  status: string
+  code: string
+  message: string
+  sourceCode?: string
+  taskType?: string
+}
+
 export interface ProjectPublishedPort {
   container: string
   service: string
@@ -68,6 +77,7 @@ export interface ProjectDetail {
   runtime: ProjectDetailRuntime
   network: ProjectDetailNetwork
   containers: ProjectContainer[]
+  diagnostics?: ProjectDetailDiagnostic[]
 }
 
 export interface ProjectEnvRead {
@@ -107,6 +117,14 @@ export interface ProjectArchivePlanContainer {
   service: string
 }
 
+export interface ProjectArchivePlanServiceExposure {
+  jobId: number
+  type: string
+  hostname: string
+  container?: string
+  resolution: string
+}
+
 export interface ProjectArchivePlanIngressRule {
   hostname: string
   service: string
@@ -129,6 +147,7 @@ export interface ProjectArchivePlan {
   defaults: ProjectArchiveOptions
   hostnames: string[]
   containers: ProjectArchivePlanContainer[]
+  serviceExposures: ProjectArchivePlanServiceExposure[]
   ingressRules: ProjectArchivePlanIngressRule[]
   dnsRecords: ProjectArchivePlanDNSRecord[]
   warnings: string[]

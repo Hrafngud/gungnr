@@ -14,7 +14,7 @@ import { usePageLoadingStore } from '@/stores/pageLoading'
 import { hostApi } from '@/services/host'
 import { apiErrorMessage } from '@/services/api'
 import { isPendingJob, jobStatusLabel, jobStatusTone } from '@/utils/jobStatus'
-import type { DockerContainer } from '@/types/host'
+import type { DockerContainer, DockerReadDiagnostic } from '@/types/host'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 
@@ -23,6 +23,7 @@ const auditStore = useAuditStore()
 const pageLoading = usePageLoadingStore()
 
 const containers = ref<DockerContainer[]>([])
+const containerDiagnostics = ref<DockerReadDiagnostic[]>([])
 const containersLoading = ref(false)
 const containersError = ref<string | null>(null)
 
@@ -55,6 +56,11 @@ const jobCounts = computed(() => {
 })
 
 const latestJob = computed(() => jobsStore.jobs[0] ?? null)
+const containerDiagnosticMessage = computed(() => {
+  const diagnostics = containerDiagnostics.value
+  if (diagnostics.length === 0) return ''
+  return diagnostics.map((diagnostic) => diagnostic.message).join(' ')
+})
 
 const containerTone = (status: string): BadgeTone => {
   const normalized = status.toLowerCase()
@@ -85,12 +91,15 @@ const loadContainers = async () => {
   if (containersLoading.value) return
   containersLoading.value = true
   containersError.value = null
+  containerDiagnostics.value = []
   try {
     const { data } = await hostApi.listDocker()
     containers.value = data.containers
+    containerDiagnostics.value = Array.isArray(data.diagnostics) ? data.diagnostics : []
   } catch (err) {
     containersError.value = apiErrorMessage(err)
     containers.value = []
+    containerDiagnostics.value = []
   } finally {
     containersLoading.value = false
   }
@@ -167,6 +176,9 @@ onMounted(async () => {
 
       <UiState v-if="containersError" tone="error">
         {{ containersError }}
+      </UiState>
+      <UiState v-else-if="containerDiagnosticMessage" tone="warn">
+        {{ containerDiagnosticMessage }}
       </UiState>
 
       <UiState v-else-if="containersLoading" loading>

@@ -415,6 +415,13 @@ func runKeepaliveRecovery(ctx keepaliveContext, trigger string, controls keepali
 		logger.Error("panel", result.PanelError)
 		return result
 	}
+	dataDir := filepath.Dir(ctx.EnvPath)
+	logger.Info("panel", fmt.Sprintf("refreshing panel runtime env entries in %s", ctx.EnvPath))
+	if err := RefreshPanelRuntimeEnvEntries(ctx.EnvPath, dataDir); err != nil {
+		result.PanelError = err.Error()
+		logger.Error("panel", result.PanelError)
+		return result
+	}
 
 	logger.Info("panel", fmt.Sprintf("rebuilding panel compose stack with %s", composeFile))
 	if err := docker.RebuildCompose(composeFile, ctx.EnvPath, ctx.DockerLog); err != nil {

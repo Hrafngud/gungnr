@@ -27,6 +27,7 @@ import (
 	"go-notes/internal/jobs"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
+	"go-notes/internal/validate"
 )
 
 type ProjectWorkflows struct {
@@ -45,9 +46,17 @@ type cloudflareWorkflowClient interface {
 	UpdateIngress(ctx context.Context, hostname string, port int) error
 }
 
+type infraPortProbeClient interface {
+	HostListenTCPPorts(ctx context.Context, requestID string) (contract.Result, error)
+	DockerPublishedPorts(ctx context.Context, requestID string) (contract.Result, error)
+}
+
 type infraBridgeClient interface {
+	infraPortProbeClient
 	RestartTunnel(ctx context.Context, requestID, configPath string) (contract.Result, error)
 }
+
+const bridgeProbeWaitTimeout = 2 * time.Second
 
 func NewProjectWorkflows(
 	cfg config.Config,
@@ -92,10 +101,10 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	if req.Subdomain == "" {
 		req.Subdomain = req.Name
 	}
-	if err := ValidateProjectName(req.Name); err != nil {
+	if err := validate.ProjectName(req.Name); err != nil {
 		return err
 	}
-	if err := ValidateSubdomain(req.Subdomain); err != nil {
+	if err := validate.Subdomain(req.Subdomain); err != nil {
 		return err
 	}
 
@@ -197,7 +206,7 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	proxyPort := req.ProxyPort
 	dbPort := req.DBPort
 	reserved := map[int]bool{}
-	addDockerReservedPorts(ctx, reserved)
+	addDockerReservedPorts(ctx, w.infraClient, reserved)
 	if proxyPort == 0 {
 		proxyPort, err = findFreePort(80, reserved)
 		if err != nil {
@@ -267,16 +276,16 @@ func (w *ProjectWorkflows) handleDeployExisting(ctx context.Context, job models.
 	}
 	req.Name = strings.ToLower(strings.TrimSpace(req.Name))
 	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
-	if err := ValidateProjectName(req.Name); err != nil {
+	if err := validate.ProjectName(req.Name); err != nil {
 		return err
 	}
-	if err := ValidateSubdomain(req.Subdomain); err != nil {
+	if err := validate.Subdomain(req.Subdomain); err != nil {
 		return err
 	}
 	if req.Port == 0 {
 		req.Port = 80
 	}
-	if err := ValidatePort(req.Port); err != nil {
+	if err := validate.Port(req.Port); err != nil {
 		return err
 	}
 	logger.Logf("using host port %d for ingress", req.Port)
@@ -493,10 +502,10 @@ func workbenchRequestedPortMappingMissingError(
 		label = "requested"
 	}
 	issue := WorkbenchValidationIssue{
-		Class:   workbenchValidationClassSchema,
-		Code:    "WB-JOB-PORT-MAPPING-MISSING",
-		Path:    "$.ports",
-		Message: fmt.Sprintf("workbench snapshot does not contain a %s container port %d mapping", label, assignment.ContainerPort),
+		Class:    workbenchValidationClassSchema,
+		Code:     "WB-JOB-PORT-MAPPING-MISSING",
+		Path:     "$.ports",
+		Message:  fmt.Sprintf("workbench snapshot does not contain a %s container port %d mapping", label, assignment.ContainerPort),
 		HostPort: strconv.Itoa(assignment.ContainerPort),
 	}
 	return errs.WithDetails(
@@ -539,16 +548,16 @@ func (w *ProjectWorkflows) handleForwardLocal(ctx context.Context, job models.Jo
 	}
 	req.Name = strings.ToLower(strings.TrimSpace(req.Name))
 	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
-	if err := ValidateServiceName(req.Name); err != nil {
+	if err := validate.ServiceName(req.Name); err != nil {
 		return err
 	}
-	if err := ValidateSubdomain(req.Subdomain); err != nil {
+	if err := validate.Subdomain(req.Subdomain); err != nil {
 		return err
 	}
 	if req.Port == 0 {
 		req.Port = 80
 	}
-	if err := ValidatePort(req.Port); err != nil {
+	if err := validate.Port(req.Port); err != nil {
 		return err
 	}
 	logger.Logf("forwarding localhost port %d for %s", req.Port, req.Name)
@@ -579,16 +588,15 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 		return fmt.Errorf("parse quick service request: %w", err)
 	}
 	requestedPort := req.RequestedPort
-	if requestedPort == 0 {
-		requestedPort = req.Port
-	}
 	req.Subdomain = strings.ToLower(strings.TrimSpace(req.Subdomain))
-	if err := ValidateSubdomain(req.Subdomain); err != nil {
+	if err := validate.Subdomain(req.Subdomain); err != nil {
 		return err
 	}
-	if err := ValidatePort(req.Port); err != nil {
+	exposureMode, err := normalizeQuickServiceExposureRequest(req.ExposureMode, req.Port)
+	if err != nil {
 		return err
 	}
+	req.ExposureMode = exposureMode
 	req.Image = strings.TrimSpace(req.Image)
 	req.ContainerName = strings.TrimSpace(req.ContainerName)
 	if req.Image == "" {
@@ -597,14 +605,50 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 	if req.ContainerPort == 0 {
 		req.ContainerPort = defaultQuickServiceContainerPort
 	}
-	if err := ValidatePort(req.ContainerPort); err != nil {
+	if err := validate.Port(req.ContainerPort); err != nil {
 		return err
 	}
 	if req.ContainerName != "" {
-		if err := validateContainerName(req.ContainerName); err != nil {
+		if err := validate.ContainerName(req.ContainerName); err != nil {
 			return err
 		}
 	}
+	if quickServiceRequiresPublishedPort(exposureMode) {
+		if requestedPort == 0 {
+			requestedPort = req.Port
+		}
+		if err := validate.Port(req.Port); err != nil {
+			return err
+		}
+		if requestedPort != req.Port {
+			logger.Logf("requested host port %d was unavailable at queue time; using host port %d for quick service", requestedPort, req.Port)
+		} else {
+			logger.Logf("using host port %d for quick service", req.Port)
+		}
+	} else {
+		if requestedPort == 0 {
+			requestedPort = req.Port
+		}
+		if err := validate.Port(req.Port); err != nil {
+			return err
+		}
+		if requestedPort != req.Port {
+			logger.Logf("requested local host port %d was unavailable at queue time; using loopback host port %d for internal quick service", requestedPort, req.Port)
+		} else {
+			logger.Logf("using loopback host port %d for internal quick service", req.Port)
+		}
+		logger.Log("using internal-only quick-service exposure; DNS and tunnel ingress will be skipped")
+	}
+
+	if err := w.runContainer(ctx, logger, req); err != nil {
+		return err
+	}
+
+	if !quickServiceRequiresPublishedPort(exposureMode) {
+		logger.Logf("quick service kept internal-only on %s:%d; skipping tunnel ingress and DNS configuration", contract.QuickServicePublishLoopbackHost, req.Port)
+		return nil
+	}
+
 	runtimeCfg, err := w.settings.ResolveConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
@@ -613,16 +657,6 @@ func (w *ProjectWorkflows) handleQuickService(ctx context.Context, job models.Jo
 	if err != nil {
 		return err
 	}
-	if requestedPort != req.Port {
-		logger.Logf("requested host port %d was unavailable at queue time; using host port %d for quick service", requestedPort, req.Port)
-	} else {
-		logger.Logf("using host port %d for quick service", req.Port)
-	}
-
-	if err := w.runContainer(ctx, logger, req); err != nil {
-		return err
-	}
-
 	hostname := fmt.Sprintf("%s.%s", req.Subdomain, selection.Domain)
 	logger.Logf("configuring tunnel ingress for %s", hostname)
 	cloudflareClient := cloudflare.NewClient(runtimeCfg)
@@ -650,6 +684,7 @@ func (w *ProjectWorkflows) runContainer(ctx context.Context, logger jobs.Logger,
 		HostPort:      req.Port,
 		ContainerPort: req.ContainerPort,
 		ContainerName: req.ContainerName,
+		ExposureMode:  req.ExposureMode,
 	}
 	return w.dockerRunner.RunContainer(ctx, logger, dockerReq)
 }
@@ -767,7 +802,7 @@ func projectPath(base, name string) (string, error) {
 	if strings.TrimSpace(base) == "" {
 		return "", fmt.Errorf("TEMPLATES_DIR not configured")
 	}
-	if err := ValidateProjectName(name); err != nil {
+	if err := validate.ProjectName(name); err != nil {
 		return "", err
 	}
 	path := filepath.Join(base, name)
@@ -797,8 +832,8 @@ func findFreePort(start int, reserved map[int]bool) (int, error) {
 	return 0, fmt.Errorf("no free port available from %d", start)
 }
 
-func addDockerReservedPorts(ctx context.Context, reserved map[int]bool) {
-	ports, err := listDockerPublishedPorts(ctx)
+func addDockerReservedPorts(ctx context.Context, probeClient infraPortProbeClient, reserved map[int]bool) {
+	ports, err := listDockerPublishedPorts(ctx, probeClient)
 	if err != nil {
 		return
 	}
@@ -807,14 +842,14 @@ func addDockerReservedPorts(ctx context.Context, reserved map[int]bool) {
 	}
 }
 
-func ensureAvailableHostPort(ctx context.Context, requested int) (int, error) {
-	if err := ValidatePort(requested); err != nil {
+func ensureAvailableHostPort(ctx context.Context, probeClient infraPortProbeClient, requested int) (int, error) {
+	if err := validate.Port(requested); err != nil {
 		return 0, err
 	}
 
 	reserved := map[int]bool{}
-	addDockerReservedPorts(ctx, reserved)
-	addHostReservedPorts(ctx, reserved)
+	addDockerReservedPorts(ctx, probeClient, reserved)
+	addHostReservedPorts(ctx, probeClient, reserved)
 
 	if !reserved[requested] {
 		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", requested))
@@ -835,8 +870,8 @@ func ensureAvailableHostPort(ctx context.Context, requested int) (int, error) {
 	return port, nil
 }
 
-func addHostReservedPorts(ctx context.Context, reserved map[int]bool) {
-	ports, err := listHostListeningPorts(ctx)
+func addHostReservedPorts(ctx context.Context, probeClient infraPortProbeClient, reserved map[int]bool) {
+	ports, err := listHostListeningPorts(ctx, probeClient)
 	if err != nil {
 		return
 	}
@@ -864,13 +899,24 @@ func findFreePortNearby(start int, reserved map[int]bool) (int, error) {
 	return 0, fmt.Errorf("no free port available from %d", start)
 }
 
-func listHostListeningPorts(ctx context.Context) ([]int, error) {
-	cmd := exec.CommandContext(ctx, "ss", "-ltnH")
-	output, err := cmd.CombinedOutput()
+func listHostListeningPorts(ctx context.Context, probeClient infraPortProbeClient) ([]int, error) {
+	if probeClient == nil {
+		return nil, fmt.Errorf("infra bridge probe client unavailable")
+	}
+
+	// Probe failures are non-fatal for callers, so keep bridge waits short.
+	probeCtx, cancel := context.WithTimeout(ctx, bridgeProbeWaitTimeout)
+	defer cancel()
+
+	result, err := probeClient.HostListenTCPPorts(probeCtx, "")
 	if err != nil {
 		return nil, err
 	}
-	return parseHostListeningPorts(string(output)), nil
+	lines, err := decodeBridgeLinesPayload(result)
+	if err != nil {
+		return nil, err
+	}
+	return parseHostListeningPorts(strings.Join(lines, "\n")), nil
 }
 
 var hostPortSuffixPattern = regexp.MustCompile(`(?:\]|:)(\d+)$`)
@@ -904,13 +950,24 @@ func parseHostListeningPorts(raw string) []int {
 	return ports
 }
 
-func listDockerPublishedPorts(ctx context.Context) ([]int, error) {
-	cmd := exec.CommandContext(ctx, "docker", "ps", "--format", "{{.Ports}}")
-	output, err := cmd.CombinedOutput()
+func listDockerPublishedPorts(ctx context.Context, probeClient infraPortProbeClient) ([]int, error) {
+	if probeClient == nil {
+		return nil, fmt.Errorf("infra bridge probe client unavailable")
+	}
+
+	// Probe failures are non-fatal for callers, so keep bridge waits short.
+	probeCtx, cancel := context.WithTimeout(ctx, bridgeProbeWaitTimeout)
+	defer cancel()
+
+	result, err := probeClient.DockerPublishedPorts(probeCtx, "")
 	if err != nil {
 		return nil, err
 	}
-	return parsePublishedPorts(string(output)), nil
+	lines, err := decodeBridgeLinesPayload(result)
+	if err != nil {
+		return nil, err
+	}
+	return parsePublishedPorts(strings.Join(lines, "\n")), nil
 }
 
 func parsePublishedPorts(raw string) []int {

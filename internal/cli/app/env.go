@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 
+	"gungnr-cli/internal/cli/integrations/docker"
 	"gungnr-cli/internal/cli/integrations/filesystem"
 )
 
@@ -47,29 +49,124 @@ type BootstrapEnv struct {
 	CloudflaredConfig   string
 	CloudflaredTunnel   string
 	CloudflaredDir      string
+	InfraQueueRoot      string
+	DockerSocketGID     string
+	DockerNetworkMode   string
 	PostgresUser        string
 	PostgresPassword    string
 	PostgresDB          string
 	ViteAPIBaseURL      string
 }
 
+type PanelRuntimeEnv struct {
+	InfraQueueRoot    string
+	DockerSocketGID   string
+	DockerNetworkMode string
+}
+
+func ResolvePanelRuntimeEnv(dataDir string) (PanelRuntimeEnv, error) {
+	return resolvePanelRuntimeEnv(dataDir, docker.DockerSocketGID)
+}
+
+func RefreshPanelRuntimeEnvEntries(envPath, dataDir string) error {
+	return refreshPanelRuntimeEnvEntries(envPath, dataDir, docker.DockerSocketGID)
+}
+
+func resolvePanelRuntimeEnv(dataDir string, socketGIDResolver func() (string, error)) (PanelRuntimeEnv, error) {
+	dataDir = strings.TrimSpace(dataDir)
+	if dataDir == "" {
+		return PanelRuntimeEnv{}, errors.New("runtime data directory is required")
+	}
+	if socketGIDResolver == nil {
+		return PanelRuntimeEnv{}, errors.New("docker socket group resolver is required")
+	}
+
+	socketGID, err := socketGIDResolver()
+	if err != nil {
+		return PanelRuntimeEnv{}, err
+	}
+
+	runtimeEnv := PanelRuntimeEnv{
+		InfraQueueRoot:    filepath.Join(dataDir, "templates", ".infra"),
+		DockerSocketGID:   socketGID,
+		DockerNetworkMode: "compat",
+	}
+	if err := runtimeEnv.Validate(); err != nil {
+		return PanelRuntimeEnv{}, err
+	}
+	return runtimeEnv, nil
+}
+
+func refreshPanelRuntimeEnvEntries(envPath, dataDir string, socketGIDResolver func() (string, error)) error {
+	envPath = strings.TrimSpace(envPath)
+	if envPath == "" {
+		return errors.New("runtime env path is required")
+	}
+
+	runtimeEnv, err := resolvePanelRuntimeEnv(dataDir, socketGIDResolver)
+	if err != nil {
+		return err
+	}
+	if err := filesystem.UpsertEnvFileEntries(envPath, runtimeEnv.Entries()); err != nil {
+		return fmt.Errorf("unable to refresh runtime env entries in %s: %w", envPath, err)
+	}
+	return nil
+}
+
+func (env PanelRuntimeEnv) Validate() error {
+	if strings.TrimSpace(env.InfraQueueRoot) == "" {
+		return errors.New("INFRA_QUEUE_ROOT is required")
+	}
+	if strings.TrimSpace(env.DockerSocketGID) == "" {
+		return errors.New("DOCKER_SOCKET_GID is required")
+	}
+	if strings.TrimSpace(env.DockerNetworkMode) == "" {
+		return errors.New("DOCKER_NETWORK_GUARDRAILS_MODE is required")
+	}
+	return nil
+}
+
+func (env PanelRuntimeEnv) Entries() []filesystem.EnvEntry {
+	return []filesystem.EnvEntry{
+		{Key: "INFRA_QUEUE_ROOT", Value: env.InfraQueueRoot},
+		{Key: "DOCKER_SOCKET_GID", Value: env.DockerSocketGID},
+		{Key: "DOCKER_NETWORK_GUARDRAILS_MODE", Value: env.DockerNetworkMode},
+	}
+}
+
+func (env PanelRuntimeEnv) Apply(target *BootstrapEnv) error {
+	if target == nil {
+		return errors.New("bootstrap env target is required")
+	}
+	if err := env.Validate(); err != nil {
+		return err
+	}
+	target.InfraQueueRoot = env.InfraQueueRoot
+	target.DockerSocketGID = env.DockerSocketGID
+	target.DockerNetworkMode = env.DockerNetworkMode
+	return nil
+}
+
 func (env BootstrapEnv) Validate() error {
 	required := map[string]string{
-		"SESSION_SECRET":          env.SessionSecret,
-		"GITHUB_CLIENT_ID":        env.GitHubClientID,
-		"GITHUB_CLIENT_SECRET":    env.GitHubClientSecret,
-		"GITHUB_CALLBACK_URL":     env.GitHubCallbackURL,
-		"SUPERUSER_GH_NAME":       env.SuperUserGitHubName,
-		"SUPER_GH_ID":             strconv.FormatInt(env.SuperUserGitHubID, 10),
-		"TEMPLATES_DIR":           env.TemplatesDir,
-		"DOMAIN":                  env.Domain,
-		"CLOUDFLARE_API_TOKEN":    env.CloudflareAPIToken,
-		"CLOUDFLARE_ACCOUNT_ID":   env.CloudflareAccountID,
-		"CLOUDFLARE_ZONE_ID":      env.CloudflareZoneID,
-		"CLOUDFLARE_TUNNEL_ID":    env.CloudflareTunnelID,
-		"CLOUDFLARED_CONFIG":      env.CloudflaredConfig,
-		"CLOUDFLARED_TUNNEL_NAME": env.CloudflaredTunnel,
-		"CLOUDFLARED_DIR":         env.CloudflaredDir,
+		"SESSION_SECRET":                 env.SessionSecret,
+		"GITHUB_CLIENT_ID":               env.GitHubClientID,
+		"GITHUB_CLIENT_SECRET":           env.GitHubClientSecret,
+		"GITHUB_CALLBACK_URL":            env.GitHubCallbackURL,
+		"SUPERUSER_GH_NAME":              env.SuperUserGitHubName,
+		"SUPER_GH_ID":                    strconv.FormatInt(env.SuperUserGitHubID, 10),
+		"TEMPLATES_DIR":                  env.TemplatesDir,
+		"DOMAIN":                         env.Domain,
+		"CLOUDFLARE_API_TOKEN":           env.CloudflareAPIToken,
+		"CLOUDFLARE_ACCOUNT_ID":          env.CloudflareAccountID,
+		"CLOUDFLARE_ZONE_ID":             env.CloudflareZoneID,
+		"CLOUDFLARE_TUNNEL_ID":           env.CloudflareTunnelID,
+		"CLOUDFLARED_CONFIG":             env.CloudflaredConfig,
+		"CLOUDFLARED_TUNNEL_NAME":        env.CloudflaredTunnel,
+		"CLOUDFLARED_DIR":                env.CloudflaredDir,
+		"INFRA_QUEUE_ROOT":               env.InfraQueueRoot,
+		"DOCKER_SOCKET_GID":              env.DockerSocketGID,
+		"DOCKER_NETWORK_GUARDRAILS_MODE": env.DockerNetworkMode,
 	}
 
 	for key, value := range required {
@@ -119,6 +216,9 @@ func (env BootstrapEnv) Entries() []filesystem.EnvEntry {
 		{Key: "CLOUDFLARED_CONFIG", Value: env.CloudflaredConfig},
 		{Key: "CLOUDFLARED_TUNNEL_NAME", Value: env.CloudflaredTunnel},
 		{Key: "CLOUDFLARED_DIR", Value: env.CloudflaredDir},
+		{Key: "INFRA_QUEUE_ROOT", Value: env.InfraQueueRoot},
+		{Key: "DOCKER_SOCKET_GID", Value: env.DockerSocketGID},
+		{Key: "DOCKER_NETWORK_GUARDRAILS_MODE", Value: env.DockerNetworkMode},
 		{Key: "VITE_API_BASE_URL", Value: env.ViteAPIBaseURL},
 	}
 

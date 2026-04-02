@@ -35,6 +35,9 @@ func Restart() error {
 		return fmt.Errorf("unable to create state directory: %w", err)
 	}
 	logPath := filepath.Join(stateDir, "docker-compose.log")
+	if err := RefreshPanelRuntimeEnvEntries(envPath, paths.DataDir); err != nil {
+		return err
+	}
 
 	if err := docker.StopCompose(composeFile, envPath); err != nil {
 		return err

@@ -72,13 +72,19 @@ type WorkbenchPortSuggestionSummary struct {
 
 type workbenchHostPortScanner func(ctx context.Context) (map[int]struct{}, error)
 
-func workbenchScanOccupiedHostPorts(ctx context.Context) (map[int]struct{}, error) {
+func workbenchScanOccupiedHostPortsWithProbeClient(probeClient infraPortProbeClient) workbenchHostPortScanner {
+	return func(ctx context.Context) (map[int]struct{}, error) {
+		return workbenchScanOccupiedHostPorts(ctx, probeClient)
+	}
+}
+
+func workbenchScanOccupiedHostPorts(ctx context.Context, probeClient infraPortProbeClient) (map[int]struct{}, error) {
 	occupied := make(map[int]struct{})
-	hostPorts, hostErr := listHostListeningPorts(ctx)
+	hostPorts, hostErr := listHostListeningPorts(ctx, probeClient)
 	for _, port := range hostPorts {
 		occupied[port] = struct{}{}
 	}
-	dockerPorts, dockerErr := listDockerPublishedPorts(ctx)
+	dockerPorts, dockerErr := listDockerPublishedPorts(ctx, probeClient)
 	for _, port := range dockerPorts {
 		occupied[port] = struct{}{}
 	}
@@ -435,7 +441,7 @@ func workbenchResolveSuggestionPortCandidate(
 		}, nil
 	}
 
-	if moduleDefault, ok := workbenchResolveModuleDefaultPort(snapshot.Modules, serviceName); ok {
+	if moduleDefault, ok := workbenchResolveManagedServiceDefaultPort(snapshot.ManagedServices, serviceName); ok {
 		return workbenchPortResolveCandidate{
 			port:   moduleDefault,
 			source: workbenchPortSourceModuleDefault,

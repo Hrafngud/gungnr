@@ -51,8 +51,9 @@ import { useAuthStore } from '@/stores/auth'
 import { usePageLoadingStore } from '@/stores/pageLoading'
 import { useToastStore } from '@/stores/toasts'
 import { useWorkbenchStore, type WorkbenchRequestStatus } from '@/stores/workbench'
+import type { Job } from '@/types/jobs'
 import { isCopyValueAllowed, writeTextToClipboard } from '@/utils/clipboard'
-import type { ProjectDetail } from '@/types/projects'
+import type { ProjectDetail, ProjectDetailDiagnostic } from '@/types/projects'
 import {
   buildWorkbenchPortSelectorKey,
   type WorkbenchComposeBackupMetadata,
@@ -99,6 +100,8 @@ const error = ref<string | null>(null)
 const detail = ref<ProjectDetail | null>(null)
 const stackRestarting = ref(false)
 const stackRestartError = ref<string | null>(null)
+const archiveQueuedJob = ref<Job | null>(null)
+const archiveQueuedWarningCount = ref(0)
 const workbenchPreviewPanelOpen = ref(false)
 const workbenchRestorePanelOpen = ref(false)
 const workbenchRestoreSelectedBackupId = ref('')
@@ -118,6 +121,14 @@ const projectName = computed(() => {
   return decodeURIComponent(raw).trim()
 })
 const projectRepositoryUrl = computed(() => detail.value?.project.record?.repoUrl?.trim() ?? '')
+const projectRuntimeDiagnostics = computed<ProjectDetailDiagnostic[]>(() => detail.value?.diagnostics ?? [])
+const projectRuntimeDegraded = computed(() =>
+  projectRuntimeDiagnostics.value.some((diagnostic) => diagnostic.status.trim().toLowerCase() === 'degraded'),
+)
+const projectRuntimeStatus = computed(() => {
+  if (projectRuntimeDegraded.value) return 'degraded'
+  return detail.value?.project.record?.status || ''
+})
 
 const workbenchComposeSupported = computed(() => (detail.value?.runtime.composeFiles?.length ?? 0) > 0)
 const workbenchQueryEnabled = computed(
@@ -1665,6 +1676,18 @@ const load = async () => {
   }
 }
 
+const handleArchiveQueued = ({
+  job,
+  warningCount,
+}: {
+  job: Job
+  warningCount: number
+}) => {
+  archiveQueuedJob.value = job
+  archiveQueuedWarningCount.value = warningCount
+  void load()
+}
+
 const refreshWorkbench = async () => {
   const name = projectName.value
   if (!name) return
@@ -2251,6 +2274,8 @@ onBeforeUnmount(() => {
 watch(projectName, () => {
   activeSectionTab.value = 'workbench'
   stackRestartError.value = null
+  archiveQueuedJob.value = null
+  archiveQueuedWarningCount.value = 0
   workbenchRestorePanelOpen.value = false
   workbenchPreviewPanelOpen.value = false
   workbenchRestoreSelectedBackupId.value = ''
@@ -2901,7 +2926,8 @@ watch(projectName, () => {
         :project-name="projectName"
         :project-runtime-key="detail.project.normalizedName"
         :containers="detail.containers"
-        :project-status="detail.project.record?.status || ''"
+        :runtime-diagnostics="projectRuntimeDiagnostics"
+        :project-status="projectRuntimeStatus"
         :is-admin="isAdmin"
         :stack-restarting="stackRestarting"
         :stack-restart-error="stackRestartError"
@@ -2921,7 +2947,10 @@ watch(projectName, () => {
         :project-name="projectName"
         :project-display-name="detail.project.normalizedName"
         :is-admin="isAdmin"
-        @queued="load"
+        :queued-job="archiveQueuedJob"
+        :queued-warning-count="archiveQueuedWarningCount"
+        @queued="handleArchiveQueued"
+        @show-activity="activeSectionTab = 'activity'"
       />
       <ProjectActivityTimelineSection
         v-else

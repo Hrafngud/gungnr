@@ -19,6 +19,15 @@ export interface DockerContainer {
   portBindings: DockerPortBinding[]
 }
 
+export interface DockerReadDiagnostic {
+  scope: string
+  status: string
+  code: string
+  message: string
+  sourceCode?: string
+  taskType?: string
+}
+
 export interface DockerUsageEntry {
   count: number
   size: string
@@ -40,15 +49,6 @@ export interface DockerUsageSummary {
   projectCounts?: DockerUsageProjectCounts
 }
 
-export interface HostRuntimeResource {
-  totalBytes: number
-  usedBytes: number
-  freeBytes: number
-  availableBytes?: number
-  usedPercent: number
-  speedMTs?: number
-}
-
 export interface HostRuntimeCPU {
   model: string
   cores: number
@@ -61,17 +61,29 @@ export interface HostRuntimeGPU {
   speedMHz?: number
 }
 
-export interface HostRuntimeWorkloadUsage {
+export interface HostRuntimeResource {
+  totalBytes: number
+  usedBytes: number
+  freeBytes: number
+  availableBytes?: number
+  usedPercent: number
+}
+
+export interface HostRuntimeMemorySnapshot {
+  totalBytes: number
+  freeBytes: number
+  availableBytes?: number
+  speedMTs?: number
+}
+
+export interface HostRuntimeWorkloadSnapshot {
   containers: number
   runningContainers: number
-  cpuUsedPercent: number
-  memoryUsedBytes: number
   diskUsedBytes: number
-  memorySharePercent: number
   diskSharePercent: number
 }
 
-export interface HostRuntimeStats {
+export interface HostRuntimeSnapshot {
   collectedAt: string
   hostname?: string
   uptimeSeconds: number
@@ -80,10 +92,34 @@ export interface HostRuntimeStats {
   kernel: string
   cpu: HostRuntimeCPU
   gpu?: HostRuntimeGPU
-  memory: HostRuntimeResource
+  memory: HostRuntimeMemorySnapshot
   disk: HostRuntimeResource
-  panelUsage: HostRuntimeWorkloadUsage
-  projectsUsage: HostRuntimeWorkloadUsage
-  projectsByName?: Record<string, HostRuntimeWorkloadUsage>
+  panel: HostRuntimeWorkloadSnapshot
+  projects: HostRuntimeWorkloadSnapshot
+  projectsByName?: Record<string, HostRuntimeWorkloadSnapshot>
+  warnings?: string[]
+}
+
+export interface HostRuntimeHostStreamUsage {
+  memoryUsedBytes: number
+  memoryUsedPercent: number
+  memoryFreeBytes: number
+  memoryAvailableBytes?: number
+}
+
+export interface HostRuntimeWorkloadStreamUsage {
+  cpuUsedPercent: number
+  memoryUsedBytes: number
+  memorySharePercent: number
+}
+
+export interface HostRuntimeStreamSample {
+  collectedAt: string
+  mode: string
+  intervalMs: number
+  host: HostRuntimeHostStreamUsage
+  panel: HostRuntimeWorkloadStreamUsage
+  projects: HostRuntimeWorkloadStreamUsage
+  projectsByName?: Record<string, HostRuntimeWorkloadStreamUsage>
   warnings?: string[]
 }

@@ -12,6 +12,7 @@ import (
 
 	"go-notes/internal/errs"
 	"go-notes/internal/repository"
+	"go-notes/internal/validate"
 )
 
 const defaultWorkbenchLockWaitTimeout = 15 * time.Second
@@ -30,16 +31,18 @@ type WorkbenchComposeSource struct {
 }
 
 type WorkbenchService struct {
-	templatesDir    string
-	projects        repository.ProjectRepository
-	settings        repository.SettingsRepository
-	sessionSecret   string
-	hostPortScanner workbenchHostPortScanner
-	lockManager     *workbenchProjectLockManager
-	lockWaitTimeout time.Duration
-	backupMaxCount  int
-	backupMaxAge    time.Duration
-	nowFn           func() time.Time
+	templatesDir      string
+	projects          repository.ProjectRepository
+	settings          repository.SettingsRepository
+	sessionSecret     string
+	hostPortScanner   workbenchHostPortScanner
+	runtimeMetaClient infraDockerMetadataClient
+	fileClient        infraProjectFileMutationClient
+	lockManager       *workbenchProjectLockManager
+	lockWaitTimeout   time.Duration
+	backupMaxCount    int
+	backupMaxAge      time.Duration
+	nowFn             func() time.Time
 }
 
 func NewWorkbenchService(templatesDir string, projects repository.ProjectRepository) *WorkbenchService {
@@ -53,17 +56,31 @@ func NewWorkbenchServiceWithStorage(
 	sessionSecret string,
 ) *WorkbenchService {
 	return &WorkbenchService{
-		templatesDir:    strings.TrimSpace(templatesDir),
-		projects:        projects,
-		settings:        settings,
-		sessionSecret:   strings.TrimSpace(sessionSecret),
-		hostPortScanner: workbenchScanOccupiedHostPorts,
-		lockManager:     newWorkbenchProjectLockManager(),
-		lockWaitTimeout: defaultWorkbenchLockWaitTimeout,
-		backupMaxCount:  defaultWorkbenchBackupMaxCount,
-		backupMaxAge:    defaultWorkbenchBackupMaxAge,
-		nowFn:           time.Now,
+		templatesDir:      strings.TrimSpace(templatesDir),
+		projects:          projects,
+		settings:          settings,
+		sessionSecret:     strings.TrimSpace(sessionSecret),
+		hostPortScanner:   workbenchScanOccupiedHostPortsWithProbeClient(nil),
+		runtimeMetaClient: nil,
+		fileClient:        nil,
+		lockManager:       newWorkbenchProjectLockManager(),
+		lockWaitTimeout:   defaultWorkbenchLockWaitTimeout,
+		backupMaxCount:    defaultWorkbenchBackupMaxCount,
+		backupMaxAge:      defaultWorkbenchBackupMaxAge,
+		nowFn:             time.Now,
 	}
+}
+
+func (s *WorkbenchService) SetPortProbeClient(probeClient infraPortProbeClient) {
+	s.hostPortScanner = workbenchScanOccupiedHostPortsWithProbeClient(probeClient)
+}
+
+func (s *WorkbenchService) SetRuntimeMetaClient(runtimeMetaClient infraDockerMetadataClient) {
+	s.runtimeMetaClient = runtimeMetaClient
+}
+
+func (s *WorkbenchService) SetFileMutationClient(fileClient infraProjectFileMutationClient) {
+	s.fileClient = fileClient
 }
 
 func (s *WorkbenchService) AcquireProjectLock(ctx context.Context, projectName string) (func(), error) {
@@ -75,7 +92,7 @@ func (s *WorkbenchService) AcquireProjectLock(ctx context.Context, projectName s
 }
 
 func (s *WorkbenchService) ResolveComposeSource(ctx context.Context, projectName string) (WorkbenchComposeSource, error) {
-	resolved, err := resolveProjectPath(ctx, s.projects, s.templatesDir, projectName)
+	resolved, err := resolveProjectPath(ctx, s.projects, s.templatesDir, projectName, s.runtimeMetaClient)
 	if err != nil {
 		return WorkbenchComposeSource{}, err
 	}
@@ -154,7 +171,7 @@ func (s *WorkbenchService) ParseComposeCoreFromSource(source WorkbenchComposeSou
 
 func normalizeWorkbenchProjectName(projectName string) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(projectName))
-	if err := ValidateProjectName(normalized); err != nil {
+	if err := validate.ProjectName(normalized); err != nil {
 		return "", errs.New(errs.CodeProjectInvalidName, "project name must be lowercase alphanumerics or dashes")
 	}
 	return normalized, nil

@@ -109,7 +109,14 @@ const dockerSummary = computed(() => {
   const status = statusLabel(dockerHealth.value?.status)
   const count = dockerHealth.value?.containers
   const rawStatus = dockerHealth.value?.status
-  if (typeof count === 'number' && (rawStatus === 'ok' || rawStatus === 'warning')) {
+  const hasUnavailableCountDiagnostic = (dockerHealth.value?.diagnostics ?? []).some(
+    (diagnostic) => diagnostic.scope === 'containers' || diagnostic.scope === 'runtime',
+  )
+  if (
+    typeof count === 'number'
+    && !hasUnavailableCountDiagnostic
+    && (rawStatus === 'ok' || rawStatus === 'warning')
+  ) {
     return `${status} · ${count} containers`
   }
   return status

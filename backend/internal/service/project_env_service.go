@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go-notes/internal/errs"
+	"go-notes/internal/infra/contract"
 	"go-notes/internal/repository"
 )
 
@@ -30,21 +31,33 @@ type ProjectEnvWrite struct {
 }
 
 type ProjectEnvService struct {
-	templatesDir string
-	projects     repository.ProjectRepository
-	maxBytes     int64
+	templatesDir      string
+	projects          repository.ProjectRepository
+	maxBytes          int64
+	runtimeMetaClient infraDockerMetadataClient
+	fileClient        infraProjectFileMutationClient
 }
 
 func NewProjectEnvService(templatesDir string, projects repository.ProjectRepository) *ProjectEnvService {
 	return &ProjectEnvService{
-		templatesDir: strings.TrimSpace(templatesDir),
-		projects:     projects,
-		maxBytes:     defaultProjectEnvMaxBytes,
+		templatesDir:      strings.TrimSpace(templatesDir),
+		projects:          projects,
+		maxBytes:          defaultProjectEnvMaxBytes,
+		runtimeMetaClient: nil,
+		fileClient:        nil,
 	}
 }
 
+func (s *ProjectEnvService) SetRuntimeMetaClient(runtimeMetaClient infraDockerMetadataClient) {
+	s.runtimeMetaClient = runtimeMetaClient
+}
+
+func (s *ProjectEnvService) SetFileMutationClient(fileClient infraProjectFileMutationClient) {
+	s.fileClient = fileClient
+}
+
 func (s *ProjectEnvService) Load(ctx context.Context, projectName string) (ProjectEnvRead, error) {
-	resolved, err := resolveProjectPath(ctx, s.projects, s.templatesDir, projectName)
+	resolved, err := resolveProjectPath(ctx, s.projects, s.templatesDir, projectName, s.runtimeMetaClient)
 	if err != nil {
 		return ProjectEnvRead{}, err
 	}
@@ -92,7 +105,7 @@ func (s *ProjectEnvService) Save(
 		)
 	}
 
-	resolved, err := resolveProjectPath(ctx, s.projects, s.templatesDir, projectName)
+	resolved, err := resolveProjectPath(ctx, s.projects, s.templatesDir, projectName, s.runtimeMetaClient)
 	if err != nil {
 		return ProjectEnvWrite{}, err
 	}
@@ -107,45 +120,39 @@ func (s *ProjectEnvService) Save(
 	if existing, err := os.Lstat(envPath); err == nil && existing.Mode()&os.ModeSymlink != 0 {
 		return ProjectEnvWrite{}, errs.New(errs.CodeProjectEnvWriteFailed, "refusing to write through symlinked .env")
 	}
+	if s.fileClient == nil {
+		return ProjectEnvWrite{}, errs.New(errs.CodeProjectEnvWriteFailed, "infra bridge file client unavailable")
+	}
 
 	backupPath := ""
 	if createBackup {
 		if exists, _, _ := envFileInfo(envPath); exists {
 			backupPath = filepath.Join(projectDir, fmt.Sprintf(".env.backup.%s", time.Now().UTC().Format("20060102-150405")))
-			if err := copyFile(envPath, backupPath); err != nil {
+			if !isPathWithinBase(projectDir, backupPath) {
+				return ProjectEnvWrite{}, errs.New(errs.CodeProjectEnvWriteFailed, "unsafe .env backup path")
+			}
+			if _, err := s.fileClient.ProjectFileCopy(ctx, "", contract.ProjectFileCopyPayload{
+				BasePath:        projectDir,
+				SourcePath:      envPath,
+				DestinationPath: backupPath,
+				Mode:            0o600,
+				CreateParents:   true,
+			}); err != nil {
 				return ProjectEnvWrite{}, errs.Wrap(errs.CodeProjectEnvWriteFailed, "failed to create .env backup", err)
 			}
 		}
 	}
 
-	tempFile, err := os.CreateTemp(projectDir, ".env.tmp-*")
-	if err != nil {
-		return ProjectEnvWrite{}, errs.Wrap(errs.CodeProjectEnvWriteFailed, "failed to create temp .env file", err)
-	}
-	tempPath := tempFile.Name()
-	cleanupTemp := true
-	defer func() {
-		if cleanupTemp {
-			_ = os.Remove(tempPath)
-		}
-	}()
-
-	if _, err := tempFile.WriteString(content); err != nil {
-		_ = tempFile.Close()
-		return ProjectEnvWrite{}, errs.Wrap(errs.CodeProjectEnvWriteFailed, "failed to write temp .env file", err)
-	}
-	if err := tempFile.Sync(); err != nil {
-		_ = tempFile.Close()
-		return ProjectEnvWrite{}, errs.Wrap(errs.CodeProjectEnvWriteFailed, "failed to flush temp .env file", err)
-	}
-	if err := tempFile.Close(); err != nil {
-		return ProjectEnvWrite{}, errs.Wrap(errs.CodeProjectEnvWriteFailed, "failed to close temp .env file", err)
-	}
-
-	if err := os.Rename(tempPath, envPath); err != nil {
+	if _, err := s.fileClient.ProjectFileWriteAtomic(ctx, "", contract.ProjectFileWriteAtomicPayload{
+		BasePath:      projectDir,
+		Path:          envPath,
+		Content:       content,
+		Mode:          0o600,
+		PreserveMode:  false,
+		CreateParents: true,
+	}); err != nil {
 		return ProjectEnvWrite{}, errs.Wrap(errs.CodeProjectEnvWriteFailed, "failed to replace .env file", err)
 	}
-	cleanupTemp = false
 
 	info, err := os.Stat(envPath)
 	if err != nil {
@@ -168,12 +175,4 @@ func isPathWithinBase(baseDir, target string) bool {
 		return false
 	}
 	return rel == "." || (!strings.HasPrefix(rel, "..") && rel != "")
-}
-
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0o600)
 }

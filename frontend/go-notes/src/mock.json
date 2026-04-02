@@ -385,6 +385,28 @@
           "service": "redis"
         }
       ],
+      "serviceExposures": [
+        {
+          "jobId": 42,
+          "type": "forward_local",
+          "hostname": "metrics.mock.example.com",
+          "resolution": "subdomain.prefix"
+        },
+        {
+          "jobId": 43,
+          "type": "quick_service",
+          "hostname": "api.mock.example.com",
+          "container": "quick-mock-service-api",
+          "resolution": "subdomain.prefix.exposure.host_published"
+        },
+        {
+          "jobId": 44,
+          "type": "quick_service",
+          "hostname": "",
+          "container": "quick-mock-service-internal",
+          "resolution": "subdomain.prefix.exposure.internal"
+        }
+      ],
       "ingressRules": [
         {
           "hostname": "mock.example.com",

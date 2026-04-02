@@ -199,6 +199,88 @@ func (s *WorkbenchService) MutateStoredSnapshotModule(
 	return mutated, mutationSummary, nil
 }
 
+// MutateLegacyModuleCompatibility preserves the legacy /workbench/modules
+// request/response contract while mutating the canonical catalog-managed
+// optional-service records under ManagedServices.
+func (s *WorkbenchService) MutateLegacyModuleCompatibility(
+	ctx context.Context,
+	projectName string,
+	input WorkbenchModuleMutationRequest,
+) (WorkbenchStackSnapshot, WorkbenchModuleMutationSummary, error) {
+	normalizedProject, err := normalizeWorkbenchProjectName(projectName)
+	if err != nil {
+		return WorkbenchStackSnapshot{}, WorkbenchModuleMutationSummary{}, err
+	}
+
+	normalizedInput, issues := normalizeWorkbenchModuleMutationRequest(input)
+	summary := WorkbenchModuleMutationSummary{
+		Action:   normalizedInput.Action,
+		Selector: normalizedInput.Selector,
+	}
+	definition, hasDefinition := workbenchOptionalServiceDefinitionByLegacyModuleType(normalizedInput.Selector.ModuleType)
+	acceptedLegacyServiceNames := workbenchLegacyCompatibilitySelectorServiceNames(definition)
+	if !hasDefinition {
+		issues = append(issues, WorkbenchMutationIssue{
+			Class:      workbenchMutationIssueClassSchema,
+			Code:       "WB-MODULE-TYPE-UNSUPPORTED",
+			Path:       "$.selector.moduleType",
+			Message:    fmt.Sprintf("module type %q is not supported", normalizedInput.Selector.ModuleType),
+			Service:    normalizedInput.Selector.ServiceName,
+			ModuleType: normalizedInput.Selector.ModuleType,
+			Action:     normalizedInput.Action,
+		})
+	} else if !workbenchLegacyCompatibilitySelectorServiceMatch(definition, normalizedInput.Selector.ServiceName) {
+		issues = append(issues, WorkbenchMutationIssue{
+			Class:      workbenchMutationIssueClassSchema,
+			Code:       "WB-MODULE-TARGET-UNSUPPORTED",
+			Path:       "$.selector.serviceName",
+			Message:    fmt.Sprintf("module target service %q is not supported by legacy compatibility path; accepted selector.serviceName values for module type %q are: %s", normalizedInput.Selector.ServiceName, definition.legacyModuleType, strings.Join(acceptedLegacyServiceNames, ", ")),
+			Service:    normalizedInput.Selector.ServiceName,
+			ModuleType: normalizedInput.Selector.ModuleType,
+			Action:     normalizedInput.Action,
+		})
+	}
+	if len(issues) > 0 {
+		return WorkbenchStackSnapshot{}, summary, workbenchModuleMutationValidationError(WorkbenchStackSnapshot{}, summary, issues)
+	}
+
+	release, err := s.AcquireProjectLock(ctx, normalizedProject)
+	if err != nil {
+		return WorkbenchStackSnapshot{}, WorkbenchModuleMutationSummary{}, err
+	}
+	defer release()
+
+	snapshot, exists, err := s.loadStoredWorkbenchSnapshot(ctx, normalizedProject)
+	if err != nil {
+		return WorkbenchStackSnapshot{}, WorkbenchModuleMutationSummary{}, err
+	}
+	if !exists {
+		return WorkbenchStackSnapshot{}, WorkbenchModuleMutationSummary{}, errs.WithDetails(
+			errs.New(errs.CodeWorkbenchSourceNotFound, fmt.Sprintf("workbench snapshot not found for project %q", normalizedProject)),
+			map[string]any{
+				"project": normalizedProject,
+			},
+		)
+	}
+
+	mutated, mutationSummary, mutationIssues := mutateWorkbenchLegacyModuleCompatibility(snapshot, normalizedInput, definition)
+	if len(mutationIssues) > 0 {
+		return mutated, mutationSummary, workbenchModuleMutationValidationError(mutated, mutationSummary, mutationIssues)
+	}
+	if !mutationSummary.Changed {
+		return mutated, mutationSummary, nil
+	}
+
+	if mutated.Revision <= 0 {
+		mutated.Revision = 1
+	}
+	mutated.Revision++
+	if err := s.saveWorkbenchSnapshot(ctx, normalizedProject, mutated); err != nil {
+		return mutated, mutationSummary, err
+	}
+	return mutated, mutationSummary, nil
+}
+
 func normalizeWorkbenchResourceMutationRequest(
 	input WorkbenchResourceMutationRequest,
 ) (WorkbenchResourceMutationRequest, []WorkbenchMutationIssue) {
@@ -569,6 +651,137 @@ func mutateWorkbenchSnapshotModule(
 	summary.CurrentCount = workbenchCountMatchingModules(next.Modules, target)
 	summary.Changed = !reflect.DeepEqual(beforeModules, next.Modules)
 	return next, summary, nil
+}
+
+func mutateWorkbenchLegacyModuleCompatibility(
+	snapshot WorkbenchStackSnapshot,
+	input WorkbenchModuleMutationRequest,
+	definition workbenchOptionalServiceDefinition,
+) (WorkbenchStackSnapshot, WorkbenchModuleMutationSummary, []WorkbenchMutationIssue) {
+	normalizedSnapshot := normalizeWorkbenchStackSnapshot(snapshot)
+	beforeManagedServices := append([]WorkbenchManagedService{}, normalizedSnapshot.ManagedServices...)
+
+	serviceName := strings.TrimSpace(definition.defaultServiceName)
+	summary := WorkbenchModuleMutationSummary{
+		Action:   input.Action,
+		Selector: input.Selector,
+	}
+	summary.PreviousCount = workbenchCountManagedOptionalServicesByServiceName(normalizedSnapshot.ManagedServices, serviceName)
+
+	issues := []WorkbenchMutationIssue{}
+	next := normalizedSnapshot
+
+	switch input.Action {
+	case workbenchModuleMutationActionAdd:
+		if summary.PreviousCount > 0 {
+			issues = append(issues, WorkbenchMutationIssue{
+				Class:      workbenchMutationIssueClassConflict,
+				Code:       "WB-MODULE-DUPLICATE",
+				Path:       "$.selector",
+				Message:    fmt.Sprintf("module %q is already enabled for service %q", input.Selector.ModuleType, serviceName),
+				Service:    serviceName,
+				ModuleType: input.Selector.ModuleType,
+				Action:     input.Action,
+			})
+		} else if workbenchSnapshotHasService(normalizedSnapshot.Services, serviceName) ||
+			workbenchFindManagedOptionalServiceByServiceName(normalizedSnapshot.ManagedServices, serviceName) >= 0 {
+			issues = append(issues, WorkbenchMutationIssue{
+				Class:      workbenchMutationIssueClassSchema,
+				Code:       "WB-MODULE-TARGET-UNSUPPORTED",
+				Path:       "$.selector.serviceName",
+				Message:    fmt.Sprintf("module target service %q is not eligible for legacy compatibility mutation; use /workbench/services catalog mutations", serviceName),
+				Service:    serviceName,
+				ModuleType: input.Selector.ModuleType,
+				Action:     input.Action,
+			})
+		} else {
+			next.ManagedServices = append(next.ManagedServices, WorkbenchManagedService{
+				EntryKey:    definition.key,
+				ServiceName: serviceName,
+			})
+		}
+	case workbenchModuleMutationActionRemove:
+		if summary.PreviousCount > 0 {
+			filtered := make([]WorkbenchManagedService, 0, len(next.ManagedServices))
+			for _, managedService := range next.ManagedServices {
+				if strings.EqualFold(strings.TrimSpace(managedService.ServiceName), serviceName) {
+					continue
+				}
+				filtered = append(filtered, managedService)
+			}
+			next.ManagedServices = filtered
+			next.Ports = workbenchFilterPortsByServiceName(next.Ports, serviceName)
+			next.Resources = workbenchFilterResourcesByServiceName(next.Resources, serviceName)
+			next.Dependencies = workbenchFilterDependenciesByServiceName(next.Dependencies, serviceName)
+			next.NetworkRefs = workbenchFilterNetworkRefsByServiceName(next.NetworkRefs, serviceName)
+			next.VolumeRefs = workbenchFilterVolumeRefsByServiceName(next.VolumeRefs, serviceName)
+			next.EnvRefs = workbenchFilterEnvRefsByServiceName(next.EnvRefs, serviceName)
+		}
+	default:
+		issues = append(issues, WorkbenchMutationIssue{
+			Class:      workbenchMutationIssueClassSchema,
+			Code:       "WB-MODULE-ACTION-INVALID",
+			Path:       "$.action",
+			Message:    fmt.Sprintf("invalid action %q", input.Action),
+			Service:    input.Selector.ServiceName,
+			ModuleType: input.Selector.ModuleType,
+			Action:     input.Action,
+		})
+	}
+
+	if len(issues) > 0 {
+		sort.SliceStable(issues, func(i, j int) bool {
+			return workbenchMutationIssueLess(issues[i], issues[j])
+		})
+		return normalizedSnapshot, summary, issues
+	}
+
+	next = normalizeWorkbenchStackSnapshot(next)
+	summary.CurrentCount = workbenchCountManagedOptionalServicesByServiceName(next.ManagedServices, serviceName)
+	summary.Changed = !reflect.DeepEqual(beforeManagedServices, next.ManagedServices)
+	return next, summary, nil
+}
+
+func workbenchLegacyCompatibilitySelectorServiceMatch(
+	definition workbenchOptionalServiceDefinition,
+	serviceName string,
+) bool {
+	normalizedServiceName := strings.ToLower(strings.TrimSpace(serviceName))
+	if normalizedServiceName == "" {
+		return false
+	}
+	for _, candidate := range workbenchLegacyCompatibilitySelectorServiceNames(definition) {
+		if normalizedServiceName == strings.ToLower(strings.TrimSpace(candidate)) {
+			return true
+		}
+	}
+	return false
+}
+
+func workbenchLegacyCompatibilitySelectorServiceNames(
+	definition workbenchOptionalServiceDefinition,
+) []string {
+	names := []string{}
+	appendUnique := func(raw string) {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			return
+		}
+		for _, existing := range names {
+			if strings.EqualFold(existing, name) {
+				return
+			}
+		}
+		names = append(names, name)
+	}
+
+	appendUnique(definition.defaultServiceName)
+	switch strings.ToLower(strings.TrimSpace(definition.legacyModuleType)) {
+	case "redis":
+		appendUnique("cache")
+	}
+
+	return names
 }
 
 func validateWorkbenchResourceFieldValue(

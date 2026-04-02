@@ -136,6 +136,43 @@ func WriteEnvFile(path string, entries []EnvEntry) error {
 	return os.WriteFile(path, []byte(builder.String()), 0o600)
 }
 
+func UpsertEnvFileEntry(path, key, value string) error {
+	return UpsertEnvFileEntries(path, []EnvEntry{{Key: key, Value: value}})
+}
+
+func UpsertEnvFileEntries(path string, entries []EnvEntry) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(string(content), "\n")
+	for _, entry := range entries {
+		key := strings.TrimSpace(entry.Key)
+		if key == "" {
+			return errors.New("env key is required")
+		}
+
+		replaced := false
+		for i, line := range lines {
+			if !strings.HasPrefix(line, key+"=") {
+				continue
+			}
+			lines[i] = key + "=" + formatEnvValue(entry.Value)
+			replaced = true
+		}
+		if !replaced {
+			lines = append(lines, key+"="+formatEnvValue(entry.Value))
+		}
+	}
+
+	updated := strings.Join(lines, "\n")
+	if !strings.HasSuffix(updated, "\n") {
+		updated += "\n"
+	}
+	return os.WriteFile(path, []byte(updated), 0o600)
+}
+
 type EnvEntry struct {
 	Key   string
 	Value string

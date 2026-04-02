@@ -321,6 +321,10 @@ func runEnvSetup(ctx context.Context, state *State, ui UI) error {
 	if err != nil {
 		return err
 	}
+	runtimeEnv, err := ResolvePanelRuntimeEnv(dataPaths.Root)
+	if err != nil {
+		return err
+	}
 
 	state.Env = BootstrapEnv{
 		AppEnv:              "prod",
@@ -354,6 +358,9 @@ func runEnvSetup(ctx context.Context, state *State, ui UI) error {
 		PostgresPassword:    DefaultPostgresPassword,
 		PostgresDB:          DefaultPostgresDB,
 		ViteAPIBaseURL:      "/",
+	}
+	if err := runtimeEnv.Apply(&state.Env); err != nil {
+		return err
 	}
 
 	if err := state.Env.Validate(); err != nil {

@@ -65,6 +65,11 @@ type DNSRecord struct {
 	Proxied bool   `json:"proxied"`
 }
 
+type DNSDeleteResult struct {
+	Deleted    bool
+	SkipReason string
+}
+
 type IngressRule struct {
 	Hostname string `json:"hostname"`
 	Service  string `json:"service"`
@@ -185,6 +190,48 @@ func (c *Client) DeleteDNSRecord(ctx context.Context, zoneID, recordID string) e
 	return c.do(ctx, http.MethodDelete, path, nil, nil)
 }
 
+func (c *Client) DeleteTunnelCNAMERecord(ctx context.Context, zoneID, recordID, hostname, expectedTarget string) (DNSDeleteResult, error) {
+	if err := c.ensureToken(); err != nil {
+		return DNSDeleteResult{}, err
+	}
+
+	zoneID = strings.TrimSpace(zoneID)
+	recordID = strings.TrimSpace(recordID)
+	hostname = strings.ToLower(strings.TrimSpace(hostname))
+	expectedTarget = strings.ToLower(strings.TrimSpace(expectedTarget))
+
+	switch {
+	case zoneID == "" || recordID == "":
+		return DNSDeleteResult{SkipReason: fmt.Sprintf("incomplete target metadata: zone=%q id=%q", zoneID, recordID)}, nil
+	case hostname == "":
+		return DNSDeleteResult{SkipReason: "hostname metadata is missing"}, nil
+	case expectedTarget == "":
+		return DNSDeleteResult{SkipReason: "expected tunnel target is unavailable"}, nil
+	}
+
+	records, err := c.listDNSRecordsByName(ctx, hostname, zoneID)
+	if err != nil {
+		return DNSDeleteResult{}, err
+	}
+
+	record := findDNSRecordByID(records, recordID)
+	if record == nil {
+		return DNSDeleteResult{SkipReason: "it no longer exists"}, nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(record.Type), "CNAME") {
+		return DNSDeleteResult{SkipReason: fmt.Sprintf("type is %s", strings.TrimSpace(record.Type))}, nil
+	}
+	content := strings.ToLower(strings.TrimSpace(record.Content))
+	if content != expectedTarget {
+		return DNSDeleteResult{SkipReason: fmt.Sprintf("target %s no longer matches %s", strings.TrimSpace(record.Content), expectedTarget)}, nil
+	}
+
+	if err := c.DeleteDNSRecord(ctx, zoneID, recordID); err != nil {
+		return DNSDeleteResult{}, err
+	}
+	return DNSDeleteResult{Deleted: true}, nil
+}
+
 func (c *Client) UpdateIngress(ctx context.Context, hostname string, port int) error {
 	if strings.TrimSpace(hostname) == "" {
 		return ErrMissingHostname
@@ -260,7 +307,42 @@ func (c *Client) RemoveIngressHostnames(ctx context.Context, hostnames []string)
 		return nil, err
 	}
 
-	removed, nextIngress := removeIngressRules(config.Ingress, targets)
+	removed, nextIngress := removeIngressRulesByHostname(config.Ingress, targets)
+	if len(removed) == 0 {
+		return []IngressRule{}, nil
+	}
+
+	config.Ingress = nextIngress
+	if err := c.updateTunnelConfig(ctx, tunnelID, config); err != nil {
+		return nil, err
+	}
+	return removed, nil
+}
+
+func (c *Client) RemoveIngressRules(ctx context.Context, targets []IngressRule) ([]IngressRule, error) {
+	if err := c.ensureAuth(); err != nil {
+		return nil, err
+	}
+
+	normalizedTargets := normalizeIngressRuleTargets(targets)
+	if len(normalizedTargets) == 0 {
+		return []IngressRule{}, nil
+	}
+
+	tunnelID, err := c.resolveTunnelID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.ensureRemoteManaged(ctx, tunnelID); err != nil {
+		return nil, err
+	}
+
+	config, err := c.getTunnelConfig(ctx, tunnelID)
+	if err != nil {
+		return nil, err
+	}
+
+	removed, nextIngress := removeIngressRulesByExactTarget(config.Ingress, normalizedTargets)
 	if len(removed) == 0 {
 		return []IngressRule{}, nil
 	}
@@ -521,6 +603,18 @@ func (c *Client) updateDNSRecord(ctx context.Context, zoneID, id string, req dns
 	return c.do(ctx, http.MethodPut, path, req, nil)
 }
 
+func findDNSRecordByID(records []dnsRecord, id string) *dnsRecord {
+	trimmed := strings.TrimSpace(id)
+	for _, record := range records {
+		if strings.TrimSpace(record.ID) != trimmed {
+			continue
+		}
+		recordCopy := record
+		return &recordCopy
+	}
+	return nil
+}
+
 type tunnelInfo struct {
 	ID           string        `json:"id"`
 	Name         string        `json:"name"`
@@ -731,7 +825,24 @@ func normalizeHostnameSet(hostnames []string) map[string]struct{} {
 	return result
 }
 
-func removeIngressRules(existing []map[string]any, targets map[string]struct{}) ([]IngressRule, []map[string]any) {
+func normalizeIngressRuleTargets(targets []IngressRule) map[string]int {
+	result := make(map[string]int)
+	for _, target := range targets {
+		hostname := strings.ToLower(strings.TrimSpace(target.Hostname))
+		if hostname == "" {
+			continue
+		}
+		key := ingressRuleTargetKey(hostname, target.Service)
+		result[key]++
+	}
+	return result
+}
+
+func ingressRuleTargetKey(hostname, service string) string {
+	return strings.ToLower(strings.TrimSpace(hostname)) + "\x00" + strings.TrimSpace(service)
+}
+
+func removeIngressRulesByHostname(existing []map[string]any, targets map[string]struct{}) ([]IngressRule, []map[string]any) {
 	if len(targets) == 0 {
 		return []IngressRule{}, ensureCatchAllRule(existing)
 	}
@@ -750,6 +861,46 @@ func removeIngressRules(existing []map[string]any, targets map[string]struct{}) 
 
 		if _, ok := targets[normalizedHostname]; ok {
 			service, _ := rule["service"].(string)
+			removed = append(removed, IngressRule{
+				Hostname: normalizedHostname,
+				Service:  strings.TrimSpace(service),
+			})
+			continue
+		}
+		next = append(next, rule)
+	}
+
+	return removed, ensureCatchAllRule(next)
+}
+
+func removeIngressRulesByExactTarget(existing []map[string]any, targets map[string]int) ([]IngressRule, []map[string]any) {
+	if len(targets) == 0 {
+		return []IngressRule{}, ensureCatchAllRule(existing)
+	}
+
+	remaining := make(map[string]int, len(targets))
+	for key, count := range targets {
+		if count > 0 {
+			remaining[key] = count
+		}
+	}
+
+	removed := make([]IngressRule, 0)
+	next := make([]map[string]any, 0, len(existing))
+	for _, rule := range existing {
+		hostname, _ := rule["hostname"].(string)
+		normalizedHostname := strings.ToLower(strings.TrimSpace(hostname))
+		if normalizedHostname == "" {
+			if !isCatchAll(rule) {
+				next = append(next, rule)
+			}
+			continue
+		}
+
+		service, _ := rule["service"].(string)
+		key := ingressRuleTargetKey(normalizedHostname, service)
+		if remaining[key] > 0 {
+			remaining[key]--
 			removed = append(removed, IngressRule{
 				Hostname: normalizedHostname,
 				Service:  strings.TrimSpace(service),

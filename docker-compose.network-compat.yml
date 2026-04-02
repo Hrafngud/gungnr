@@ -1,0 +1,16 @@
+services:
+  api:
+    environment:
+      DOCKER_NETWORK_GUARDRAILS_MODE: compat
+
+networks:
+  edge:
+    driver: bridge
+    driver_opts: {}
+  core:
+    driver: bridge
+    internal: true
+    driver_opts: {}
+  egress:
+    driver: bridge
+    driver_opts: {}

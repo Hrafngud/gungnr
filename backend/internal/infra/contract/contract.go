@@ -1,11 +1,27 @@
 package contract
 
 import (
+	"strings"
 	"time"
 )
 
 const (
 	VersionV1 = "v1"
+)
+
+const (
+	QuickServiceExposureInternal      = "internal"
+	QuickServiceExposureHostPublished = "host_published"
+	QuickServicePublishLoopbackHost   = "127.0.0.1"
+	QuickServiceDefaultNetwork        = "gungnr_quick_internal"
+	QuickServiceDefaultPIDsLimit      = 128
+	QuickServiceDefaultMemory         = "512m"
+	QuickServiceDefaultCPUs           = "1.0"
+	QuickServiceManagedLabelKey       = "io.gungnr.quick_service"
+	QuickServiceManagedLabelValue     = "true"
+	QuickServiceExposureLabelKey      = "io.gungnr.quick_service.exposure"
+	QuickServiceNetworkLabelKey       = "io.gungnr.quick_service.network"
+	QuickServiceNetworkLabelValue     = "true"
 )
 
 type TaskType string
@@ -20,8 +36,19 @@ const (
 	TaskTypeDockerStopContainer    TaskType = "docker_stop_container"
 	TaskTypeDockerRestartContainer TaskType = "docker_restart_container"
 	TaskTypeDockerRemoveContainer  TaskType = "docker_remove_container"
+	TaskTypeDockerListContainers   TaskType = "docker_list_containers"
+	TaskTypeDockerSystemDF         TaskType = "docker_system_df"
+	TaskTypeDockerListVolumes      TaskType = "docker_list_volumes"
+	TaskTypeDockerContainerLogs    TaskType = "docker_container_logs"
+	TaskTypeDockerRuntimeCheck     TaskType = "docker_runtime_check"
+	TaskTypeHostListenTCPPorts     TaskType = "host_listen_tcp_ports"
+	TaskTypeDockerPublishedPorts   TaskType = "docker_published_ports"
 	TaskTypeHostRuntimeStats       TaskType = "host_runtime_stats"
+	TaskTypeHostRuntimeStream      TaskType = "host_runtime_stream"
 	TaskTypeDockerRunQuickService  TaskType = "docker_run_quick_service"
+	TaskTypeProjectFileWriteAtomic TaskType = "project_file_write_atomic"
+	TaskTypeProjectFileCopy        TaskType = "project_file_copy"
+	TaskTypeProjectFileRemove      TaskType = "project_file_remove"
 	TaskTypeHostPortScan           TaskType = "host_port_scan"
 	TaskTypeAPIHealthProbe         TaskType = "api_health_probe"
 )
@@ -106,13 +133,63 @@ type DockerRemoveContainerPayload struct {
 	RemoveVolumes bool   `json:"remove_volumes,omitempty"`
 }
 
+type DockerListContainersPayload struct {
+	IncludeAll bool `json:"include_all,omitempty"`
+}
+
+type DockerSystemDFPayload struct{}
+
+type DockerListVolumesPayload struct{}
+
+type DockerContainerLogsPayload struct {
+	Container  string `json:"container"`
+	Tail       int    `json:"tail,omitempty"`
+	Follow     bool   `json:"follow,omitempty"`
+	Timestamps bool   `json:"timestamps,omitempty"`
+	Since      string `json:"since,omitempty"`
+}
+
+type DockerRuntimeCheckPayload struct{}
+
+type HostListenTCPPortsPayload struct{}
+
+type DockerPublishedPortsPayload struct{}
+
 type HostRuntimeStatsPayload struct{}
+
+type HostRuntimeStreamPayload struct{}
 
 type DockerRunQuickServicePayload struct {
 	Image         string `json:"image"`
 	HostPort      int    `json:"host_port"`
 	ContainerPort int    `json:"container_port"`
 	ContainerName string `json:"container_name,omitempty"`
+	ExposureMode  string `json:"exposure_mode,omitempty"`
+	PublishHost   string `json:"publish_host,omitempty"`
+	NetworkName   string `json:"network_name,omitempty"`
+}
+
+type ProjectFileWriteAtomicPayload struct {
+	BasePath      string `json:"base_path"`
+	Path          string `json:"path"`
+	Content       string `json:"content"`
+	Mode          uint32 `json:"mode,omitempty"`
+	PreserveMode  bool   `json:"preserve_mode,omitempty"`
+	CreateParents bool   `json:"create_parents,omitempty"`
+}
+
+type ProjectFileCopyPayload struct {
+	BasePath        string `json:"base_path"`
+	SourcePath      string `json:"source_path"`
+	DestinationPath string `json:"destination_path"`
+	Mode            uint32 `json:"mode,omitempty"`
+	CreateParents   bool   `json:"create_parents,omitempty"`
+}
+
+type ProjectFileRemovePayload struct {
+	BasePath       string `json:"base_path"`
+	Path           string `json:"path"`
+	IgnoreNotExist bool   `json:"ignore_not_exist,omitempty"`
 }
 
 type HostPortScanPayload struct {
@@ -123,4 +200,28 @@ type HostPortScanPayload struct {
 type APIHealthProbePayload struct {
 	URL            string `json:"url"`
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
+}
+
+func NormalizeQuickServiceExposureMode(raw string) string {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	normalized = strings.NewReplacer("-", "_", " ", "_").Replace(normalized)
+	switch normalized {
+	case QuickServiceExposureInternal, "internal_only":
+		return QuickServiceExposureInternal
+	case QuickServiceExposureHostPublished, "published", "publish":
+		return QuickServiceExposureHostPublished
+	default:
+		return ""
+	}
+}
+
+func NormalizeQuickServicePublishHost(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", QuickServicePublishLoopbackHost:
+		return QuickServicePublishLoopbackHost
+	case "localhost":
+		return QuickServicePublishLoopbackHost
+	default:
+		return ""
+	}
 }

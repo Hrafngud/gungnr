@@ -12,16 +12,46 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    ports:
-      - "5432:5432"  # Keep for local database access if needed
+    # Hardening exception: Postgres retains only ownership/user-switch capabilities plus data/runtime-write paths.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+      - FOWNER
+      - SETGID
+      - SETUID
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+    pids_limit: 256
+    # DB host publishing is disabled by default.
+    # Enable loopback-only publish with:
+    #   docker compose -f docker-compose.yml -f docker-compose.db-host-loopback.yml up -d
     networks:
-      - app-network
+      - core
+
+  api-init:
+    image: alpine:3.20
+    environment:
+      INFRA_QUEUE_ROOT: ${INFRA_QUEUE_ROOT:-/templates/.infra}
+    command:
+      - sh
+      - -lc
+      - mkdir -p "$INFRA_QUEUE_ROOT/intents" "$INFRA_QUEUE_ROOT/results" "$INFRA_QUEUE_ROOT/claims" && chown -R 1000:1000 "$INFRA_QUEUE_ROOT"
+    restart: "no"
+    networks:
+      - core
+    volumes:
+      - ${TEMPLATES_DIR:-/templates}:${TEMPLATES_DIR:-/templates}
 
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    user: root
     environment:
       APP_ENV: ${APP_ENV:-local}
       PORT: 8080
@@ -59,22 +89,43 @@ services:
       INFRA_RETENTION_INTENT_HOURS: ${INFRA_RETENTION_INTENT_HOURS:-168}
       INFRA_RETENTION_RESULT_HOURS: ${INFRA_RETENTION_RESULT_HOURS:-168}
       INFRA_RETENTION_CLAIM_MINUTES: ${INFRA_RETENTION_CLAIM_MINUTES:-60}
+      DB_HOST_PUBLISH_MODE: ${DB_HOST_PUBLISH_MODE:-disabled}
+      DB_HOST_PUBLISH_HOST: ${DB_HOST_PUBLISH_HOST:-127.0.0.1}
+      DB_HOST_PUBLISH_PORT: ${DB_HOST_PUBLISH_PORT:-5432}
+      DOCKER_NETWORK_GUARDRAILS_MODE: ${DOCKER_NETWORK_GUARDRAILS_MODE:-compat}
+      DOCKER_DAEMON_ISOLATION_MODE: ${DOCKER_DAEMON_ISOLATION_MODE:-disabled}
     depends_on:
+      api-init:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
+    group_add:
+      - "${DOCKER_SOCKET_GID:?DOCKER_SOCKET_GID must be set by bootstrap or restart before compose start}"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+    # Hardening exception: runtime host integrations keep mounted templates/cloudflared/socket paths writable.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    pids_limit: 256
     restart: unless-stopped
     networks:
-      - app-network
+      - core
+      - egress
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${TEMPLATES_DIR:-/templates}:${TEMPLATES_DIR:-/templates}
       - ${CLOUDFLARED_DIR:-/home/user/.cloudflared}:${CLOUDFLARED_DIR:-/home/user/.cloudflared}
-      - ${HOST_HOME_DIR:-/home}:${HOST_HOME_DIR:-/home}
+    # Daemon isolation rollout selection is preflight-gated in backend diagnostics.
+    # Select rootless or userns-remap only after the host daemon has been reconfigured.
+    # Deterministic rollback is always DOCKER_DAEMON_ISOLATION_MODE=disabled before restarting the panel after daemon revert.
     # Port mapping removed for production exposure; keep if needed for local debugging
     # ports:
     #   - "${API_PORT:-8080}:8080"
@@ -94,15 +145,47 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # Hardening exception: nginx retains bind/user-switch capabilities plus tmpfs runtime/cache paths.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - NET_BIND_SERVICE
+      - SETGID
+      - SETUID
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    pids_limit: 64
     restart: unless-stopped
     networks:
-      - app-network
+      - core
     # Port mapping removed for production; keep if needed locally
     # ports:
     #   - "${WEB_PORT:-4173}:80"
 
   proxy:
     image: nginx:alpine
+    # Hardening exception: nginx retains bind/user-switch capabilities plus tmpfs runtime/cache paths.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - NET_BIND_SERVICE
+      - SETGID
+      - SETUID
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    pids_limit: 64
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
@@ -111,10 +194,18 @@ services:
       - web
       - api
     networks:
-      - app-network
+      - edge
+      - core
 
 networks:
-  app-network:
+  # Keep the plane split (`edge` + internal `core`) by default while giving
+  # the API a dedicated outbound bridge for GitHub/Cloudflare egress.
+  edge:
+    driver: bridge
+  core:
+    driver: bridge
+    internal: true
+  egress:
     driver: bridge
 
 volumes:

@@ -1,12 +1,11 @@
 package controller
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 
-	"go-notes/internal/apierror"
 	"go-notes/internal/errs"
+	"go-notes/internal/models"
+	"go-notes/internal/respond"
 	"go-notes/internal/service"
 )
 
@@ -20,38 +19,33 @@ func NewCloudflareController(service *service.CloudflareService) *CloudflareCont
 
 func (c *CloudflareController) Preflight(ctx *gin.Context) {
 	if c.service == nil {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeCloudflareUnavailable, "cloudflare service unavailable", nil)
+		respond.Err(ctx, errs.New(errs.CodeCloudflareUnavailable, "cloudflare service unavailable"), errs.CodeCloudflareUnavailable, "cloudflare service unavailable")
 		return
 	}
 	result, err := c.service.Preflight(ctx.Request.Context())
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusBadGateway, err, errs.CodeCloudflarePreflight, err.Error())
+		respond.Err(ctx, err, errs.CodeCloudflarePreflight, err.Error())
 		return
 	}
-	ctx.JSON(http.StatusOK, result)
-}
-
-type CloudflareZone struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	respond.OK(ctx, result)
 }
 
 func (c *CloudflareController) Zones(ctx *gin.Context) {
 	if c.service == nil {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeCloudflareUnavailable, "cloudflare service unavailable", nil)
+		respond.Err(ctx, errs.New(errs.CodeCloudflareUnavailable, "cloudflare service unavailable"), errs.CodeCloudflareUnavailable, "cloudflare service unavailable")
 		return
 	}
 	zones, err := c.service.Zones(ctx.Request.Context())
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusBadGateway, err, errs.CodeCloudflareZones, err.Error())
+		respond.Err(ctx, err, errs.CodeCloudflareZones, err.Error())
 		return
 	}
-	response := make([]CloudflareZone, 0, len(zones))
+	response := make([]models.CloudflareZoneResponse, 0, len(zones))
 	for _, zone := range zones {
 		if zone.ID == "" || zone.Name == "" {
 			continue
 		}
-		response = append(response, CloudflareZone{ID: zone.ID, Name: zone.Name})
+		response = append(response, models.CloudflareZoneResponse{ID: zone.ID, Name: zone.Name})
 	}
-	ctx.JSON(http.StatusOK, gin.H{"zones": response})
+	respond.OK(ctx, gin.H{"zones": response})
 }

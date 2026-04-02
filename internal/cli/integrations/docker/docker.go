@@ -1,12 +1,15 @@
 package docker
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 
 	"gungnr-cli/internal/cli/integrations/command"
 )
@@ -85,39 +88,72 @@ func FindComposeFileFromDir(startDir string) (string, error) {
 	return "", fmt.Errorf("docker-compose.yml not found from %s upward; run bootstrap from the repo root", startDir)
 }
 
+func DockerSocketGID() (string, error) {
+	info, err := os.Stat("/var/run/docker.sock")
+	if err != nil {
+		return "", fmt.Errorf("unable to stat /var/run/docker.sock: %w", err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return "", errors.New("unable to resolve docker socket group id")
+	}
+	return strconv.FormatUint(uint64(stat.Gid), 10), nil
+}
+
 func StartCompose(composeFile, envFile, logPath string) error {
+	if err := ValidateComposeRuntimeEnv(envFile); err != nil {
+		return err
+	}
+
 	commandName, baseArgs, err := ResolveComposeCommand()
 	if err != nil {
 		return err
 	}
 
 	composeDir := filepath.Dir(composeFile)
-	args := append([]string{}, baseArgs...)
-	args = append(args, "--env-file", envFile, "-f", composeFile, "up", "-d", "--build")
+	args, err := composeArgs(baseArgs, composeFile, envFile)
+	if err != nil {
+		return err
+	}
+	args = append(args, "up", "-d", "--build")
 	return command.RunLoggedInDir(composeDir, commandName, logPath, args...)
 }
 
 func RebuildCompose(composeFile, envFile, logPath string) error {
+	if err := ValidateComposeRuntimeEnv(envFile); err != nil {
+		return err
+	}
+
 	commandName, baseArgs, err := ResolveComposeCommand()
 	if err != nil {
 		return err
 	}
 
 	composeDir := filepath.Dir(composeFile)
-	args := append([]string{}, baseArgs...)
-	args = append(args, "--env-file", envFile, "-f", composeFile, "up", "--build", "--force-recreate", "-d")
+	args, err := composeArgs(baseArgs, composeFile, envFile)
+	if err != nil {
+		return err
+	}
+	args = append(args, "up", "--build", "--force-recreate", "-d")
 	return command.RunLoggedInDir(composeDir, commandName, logPath, args...)
 }
 
 func EnsureComposeRunning(composeFile, envFile, logPath string) error {
+	if err := ValidateComposeRuntimeEnv(envFile); err != nil {
+		return err
+	}
+
 	commandName, baseArgs, err := ResolveComposeCommand()
 	if err != nil {
 		return err
 	}
 
 	composeDir := filepath.Dir(composeFile)
-	args := append([]string{}, baseArgs...)
-	args = append(args, "--env-file", envFile, "-f", composeFile, "up", "-d")
+	args, err := composeArgs(baseArgs, composeFile, envFile)
+	if err != nil {
+		return err
+	}
+	args = append(args, "up", "-d")
 	return command.RunLoggedInDir(composeDir, commandName, logPath, args...)
 }
 
@@ -128,7 +164,114 @@ func StopCompose(composeFile, envFile string) error {
 	}
 
 	composeDir := filepath.Dir(composeFile)
-	args := append([]string{}, baseArgs...)
-	args = append(args, "--env-file", envFile, "-f", composeFile, "down")
+	args, err := composeArgs(baseArgs, composeFile, envFile)
+	if err != nil {
+		return err
+	}
+	args = append(args, "down")
 	return command.RunInteractiveInDir(composeDir, commandName, args...)
+}
+
+func ValidateComposeRuntimeEnv(envFile string) error {
+	expectedGID, err := DockerSocketGID()
+	if err != nil {
+		return err
+	}
+
+	configuredGID, err := readEnvValue(envFile, "DOCKER_SOCKET_GID")
+	if err != nil {
+		return err
+	}
+	if err := validateDockerSocketGroupValue(configuredGID, expectedGID); err != nil {
+		return fmt.Errorf("compose runtime env validation failed: %w", err)
+	}
+	return nil
+}
+
+func composeArgs(baseArgs []string, composeFile, envFile string) ([]string, error) {
+	args := append([]string{}, baseArgs...)
+	args = append(args, "--env-file", envFile, "-f", composeFile)
+
+	mode, err := dockerNetworkModeFromEnvFile(envFile)
+	if err != nil {
+		return nil, err
+	}
+	if mode == "compat" {
+		compatFile := filepath.Join(filepath.Dir(composeFile), "docker-compose.network-compat.yml")
+		if info, statErr := os.Stat(compatFile); statErr == nil && !info.IsDir() {
+			args = append(args, "-f", compatFile)
+		}
+	}
+	return args, nil
+}
+
+func dockerNetworkModeFromEnvFile(envFile string) (string, error) {
+	file, err := os.Open(envFile)
+	if err != nil {
+		return "", fmt.Errorf("unable to open env file %s: %w", envFile, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if !strings.HasPrefix(line, "DOCKER_NETWORK_GUARDRAILS_MODE=") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(line, "DOCKER_NETWORK_GUARDRAILS_MODE="))
+		return strings.Trim(value, "\""), nil
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("unable to read env file %s: %w", envFile, err)
+	}
+	return "", nil
+}
+
+func validateDockerSocketGroupValue(configuredGID, expectedGID string) error {
+	configuredGID = strings.TrimSpace(configuredGID)
+	expectedGID = strings.TrimSpace(expectedGID)
+
+	if expectedGID == "" {
+		return errors.New("current /var/run/docker.sock group id is empty")
+	}
+	if configuredGID == "" {
+		return errors.New("DOCKER_SOCKET_GID is missing from the panel .env; rerun `gungnr restart` to refresh the hardened runtime contract")
+	}
+	if configuredGID != expectedGID {
+		return fmt.Errorf("DOCKER_SOCKET_GID=%s does not match the current /var/run/docker.sock group id %s; rerun `gungnr restart` to refresh the hardened runtime contract", configuredGID, expectedGID)
+	}
+	return nil
+}
+
+func readEnvValue(envFile, key string) (string, error) {
+	file, err := os.Open(envFile)
+	if err != nil {
+		return "", fmt.Errorf("unable to open env file %s: %w", envFile, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if !strings.HasPrefix(line, key+"=") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(line, key+"="))
+		if strings.HasPrefix(value, "\"") || strings.HasPrefix(value, "'") {
+			if parsed, parseErr := strconv.Unquote(value); parseErr == nil {
+				value = parsed
+			}
+		}
+		return value, nil
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("unable to read env file %s: %w", envFile, err)
+	}
+	return "", nil
 }

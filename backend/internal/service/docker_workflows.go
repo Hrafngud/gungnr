@@ -8,6 +8,7 @@ import (
 
 	"go-notes/internal/jobs"
 	"go-notes/internal/models"
+	"go-notes/internal/validate"
 )
 
 type DockerWorkflows struct {
@@ -40,7 +41,7 @@ func (w *DockerWorkflows) handleDockerRun(ctx context.Context, job models.Job, l
 		req.ContainerPort = defaultQuickServiceContainerPort
 	}
 	if req.ContainerName != "" {
-		if err := validateContainerName(req.ContainerName); err != nil {
+		if err := validate.ContainerName(req.ContainerName); err != nil {
 			return err
 		}
 	}

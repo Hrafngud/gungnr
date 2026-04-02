@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
@@ -17,8 +17,12 @@ import { hostApi } from '@/services/host'
 import { projectsApi } from '@/services/projects'
 import { useToastStore } from '@/stores/toasts'
 import { clampPercent, formatBytes, formatPercent } from '@/utils/runtimeMetrics'
-import type { HostRuntimeWorkloadUsage } from '@/types/host'
-import type { ProjectContainer } from '@/types/projects'
+import type {
+  HostRuntimeStreamSample,
+  HostRuntimeWorkloadSnapshot,
+  HostRuntimeWorkloadStreamUsage,
+} from '@/types/host'
+import type { ProjectContainer, ProjectDetailDiagnostic } from '@/types/projects'
 
 type ContainerActionKind = 'stop' | 'restart' | 'remove'
 
@@ -33,6 +37,7 @@ const props = defineProps<{
   projectName: string
   projectRuntimeKey: string
   containers: ProjectContainer[]
+  runtimeDiagnostics: ProjectDetailDiagnostic[]
   projectStatus: string
   isAdmin: boolean
   stackRestarting: boolean
@@ -49,10 +54,15 @@ const actionStates = reactive<Record<string, ContainerActionState>>({})
 const lifecycleActionModalOpen = ref(false)
 const lifecycleActionTarget = ref<ProjectContainer | null>(null)
 const lifecycleActionKind = ref<ContainerActionKind | null>(null)
-const usageLoading = ref(false)
-const usageError = ref<string | null>(null)
-const projectUsage = ref<HostRuntimeWorkloadUsage | null>(null)
-const projectUsageWarnings = ref<string[]>([])
+const usageSnapshotLoading = ref(false)
+const usageSnapshotError = ref<string | null>(null)
+const usageSnapshot = ref<HostRuntimeWorkloadSnapshot | null>(null)
+const usageSnapshotWarnings = ref<string[]>([])
+const usageStreamSample = ref<HostRuntimeWorkloadStreamUsage | null>(null)
+const usageStreamWarnings = ref<string[]>([])
+const usageStreamState = ref<'idle' | 'connecting' | 'live' | 'error'>('idle')
+const usageStreamError = ref<string | null>(null)
+let usageStreamSource: EventSource | null = null
 
 function containerTone(container: ProjectContainer): BadgeTone {
   const normalized = container.status.trim().toLowerCase()
@@ -102,35 +112,48 @@ const usageContainerSignature = computed(() =>
   props.containers.map((container) => `${container.id}:${container.status}`).join('|'),
 )
 
+const runtimeDiagnosticsMessage = computed(() => {
+  const messages = props.runtimeDiagnostics
+    .map((diagnostic) => diagnostic.message.trim())
+    .filter((message, index, items) => message.length > 0 && items.indexOf(message) === index)
+
+  return messages.join(' · ')
+})
+
 const usageIndicators = computed(() => {
-  const usage = projectUsage.value
-  if (!usage) return []
+  const liveUsage = usageStreamSample.value
+  const snapshotUsage = usageSnapshot.value
+  if (!snapshotUsage) return []
   return [
     {
       key: 'cpu',
       label: 'CPU usage',
-      value: formatPercent(usage.cpuUsedPercent),
-      percent: clampPercent(usage.cpuUsedPercent),
-      meta: 'Aggregated from docker stats for project containers.',
+      value: liveUsage ? formatPercent(liveUsage.cpuUsedPercent) : '—',
+      percent: clampPercent(liveUsage?.cpuUsedPercent),
+      meta: liveUsage
+        ? 'Debounced live stream from docker stats for project containers.'
+        : 'Waiting for live stream sample.',
     },
     {
       key: 'memory',
       label: 'RAM usage',
-      value: formatBytes(usage.memoryUsedBytes),
-      percent: clampPercent(usage.memorySharePercent),
-      meta: `${formatPercent(usage.memorySharePercent)} of host memory`,
+      value: liveUsage ? formatBytes(liveUsage.memoryUsedBytes) : '—',
+      percent: clampPercent(liveUsage?.memorySharePercent),
+      meta: liveUsage
+        ? `${formatPercent(liveUsage.memorySharePercent)} of host memory`
+        : 'Waiting for live stream sample.',
     },
     {
-      key: 'disk',
+      key: 'source',
       label: 'Disk usage',
-      value: formatBytes(usage.diskUsedBytes),
-      percent: clampPercent(usage.diskSharePercent),
-      meta: `${formatPercent(usage.diskSharePercent)} of host disk`,
+      value: formatBytes(snapshotUsage.diskUsedBytes),
+      percent: clampPercent(snapshotUsage.diskSharePercent),
+      meta: `${formatPercent(snapshotUsage.diskSharePercent)} of host disk · refresh-only snapshot`,
     },
   ]
 })
 
-const resolveProjectUsage = (projectsByName: Record<string, HostRuntimeWorkloadUsage> | undefined) => {
+const resolveProjectUsage = <T,>(projectsByName: Record<string, T> | undefined) => {
   if (!projectsByName) return null
   const key = activeUsageProjectKey.value
   if (key && projectsByName[key]) return projectsByName[key]
@@ -140,6 +163,24 @@ const resolveProjectUsage = (projectsByName: Record<string, HostRuntimeWorkloadU
   if (fallbackKey) return projectsByName[fallbackKey] ?? null
   return null
 }
+
+const usageSourceMeta = computed(() => {
+  switch (usageStreamState.value) {
+    case 'live':
+      return 'CPU and RAM on 100ms live stream · Disk on refresh'
+    case 'connecting':
+      return 'CPU and RAM stream connecting · Disk on refresh'
+    case 'error':
+      return 'CPU and RAM stream degraded · Disk on refresh'
+    default:
+      return 'CPU and RAM stream idle · Disk on refresh'
+  }
+})
+
+const usageCombinedWarnings = computed(() => {
+  const warnings = [...usageStreamWarnings.value, ...usageSnapshotWarnings.value]
+  return warnings.filter((warning, index) => warning && warnings.indexOf(warning) === index)
+})
 
 const lifecycleActionText = computed(() => {
   const target = lifecycleActionTarget.value
@@ -248,20 +289,72 @@ const confirmLifecycleAction = async () => {
   }
 }
 
-const loadProjectUsage = async () => {
-  usageLoading.value = true
-  usageError.value = null
+const loadProjectUsageSnapshot = async () => {
+  usageSnapshotLoading.value = true
+  usageSnapshotError.value = null
   try {
-    const { data } = await hostApi.runtimeStats()
-    projectUsage.value = resolveProjectUsage(data.stats.projectsByName)
-    projectUsageWarnings.value = (data.stats.warnings ?? []).slice(0, 2)
+    const { data } = await hostApi.runtimeSnapshot()
+    usageSnapshot.value = resolveProjectUsage(data.snapshot.projectsByName)
+    usageSnapshotWarnings.value = (data.snapshot.warnings ?? []).slice(0, 2)
   } catch (err) {
-    usageError.value = apiErrorMessage(err)
-    projectUsage.value = null
-    projectUsageWarnings.value = []
+    usageSnapshotError.value = apiErrorMessage(err)
+    usageSnapshotWarnings.value = []
   } finally {
-    usageLoading.value = false
+    usageSnapshotLoading.value = false
   }
+}
+
+const closeUsageStream = () => {
+  if (!usageStreamSource) return
+  usageStreamSource.close()
+  usageStreamSource = null
+}
+
+const startUsageStream = () => {
+  closeUsageStream()
+  usageStreamState.value = 'connecting'
+  usageStreamError.value = null
+
+  const source = new EventSource(hostApi.runtimeStatsStreamUrl(), { withCredentials: true })
+  usageStreamSource = source
+
+  source.onopen = () => {
+    if (usageStreamSource !== source) return
+    usageStreamState.value = 'live'
+  }
+
+  source.addEventListener('sample', (event) => {
+    if (usageStreamSource !== source) return
+    const message = event as MessageEvent
+    try {
+      const sample = JSON.parse(message.data) as HostRuntimeStreamSample
+      usageStreamSample.value = resolveProjectUsage(sample.projectsByName)
+      usageStreamWarnings.value = (sample.warnings ?? []).slice(0, 2)
+      usageStreamError.value = null
+      usageStreamState.value = 'live'
+    } catch {
+      usageStreamError.value = 'Malformed runtime signal sample.'
+      usageStreamState.value = 'error'
+    }
+  })
+
+  source.addEventListener('error', (event) => {
+    if (usageStreamSource !== source) return
+    const message = event as MessageEvent
+    if (message?.data) {
+      try {
+        const payload = JSON.parse(message.data) as { message?: string }
+        usageStreamError.value = payload.message || 'Runtime signal stream error.'
+      } catch {
+        usageStreamError.value = 'Runtime signal stream error.'
+      }
+      usageStreamState.value = 'error'
+      return
+    }
+    if (source.readyState === EventSource.CLOSED) {
+      usageStreamState.value = 'idle'
+    }
+  })
 }
 
 watch(lifecycleActionModalOpen, (open) => {
@@ -270,12 +363,21 @@ watch(lifecycleActionModalOpen, (open) => {
   lifecycleActionKind.value = null
 })
 
+onMounted(() => {
+  void loadProjectUsageSnapshot()
+  startUsageStream()
+})
+
+onBeforeUnmount(() => {
+  closeUsageStream()
+})
+
 watch(activeUsageProjectKey, () => {
-  void loadProjectUsage()
-}, { immediate: true })
+  void loadProjectUsageSnapshot()
+})
 
 watch(usageContainerSignature, () => {
-  void loadProjectUsage()
+  void loadProjectUsageSnapshot()
 })
 </script>
 
@@ -328,24 +430,24 @@ watch(usageContainerSignature, () => {
         <UiButton
           variant="ghost"
           size="sm"
-          :disabled="usageLoading"
-          @click="loadProjectUsage"
+          :disabled="usageSnapshotLoading"
+          @click="loadProjectUsageSnapshot"
         >
           <span class="inline-flex items-center gap-2">
             <NavIcon name="refresh" class="h-3.5 w-3.5" />
-            <UiInlineSpinner v-if="usageLoading" />
+            <UiInlineSpinner v-if="usageSnapshotLoading" />
             Refresh usage
           </span>
         </UiButton>
       </div>
 
-      <UiState v-if="usageError" tone="error">
-        {{ usageError }}
+      <UiState v-if="usageSnapshotError" tone="error">
+        {{ usageSnapshotError }}
       </UiState>
-      <UiState v-else-if="usageLoading" loading>
-        Loading project usage...
+      <UiState v-else-if="usageSnapshotLoading && !usageSnapshot" loading>
+        Loading project snapshot...
       </UiState>
-      <UiState v-else-if="!projectUsage">
+      <UiState v-else-if="!usageSnapshot">
         Usage metrics are not available for this project yet.
       </UiState>
       <template v-else>
@@ -355,7 +457,7 @@ watch(usageContainerSignature, () => {
               Containers
             </p>
             <p class="text-base font-semibold text-[color:var(--text)]">
-              {{ projectUsage.runningContainers }}/{{ projectUsage.containers }} running
+              {{ usageSnapshot.runningContainers }}/{{ usageSnapshot.containers }} running
             </p>
           </div>
           <div class="space-y-1">
@@ -371,7 +473,7 @@ watch(usageContainerSignature, () => {
               Source
             </p>
             <p class="text-xs text-[color:var(--muted)]">
-              Host worker runtime stats
+              {{ usageSourceMeta }}
             </p>
           </div>
         </UiPanel>
@@ -397,14 +499,20 @@ watch(usageContainerSignature, () => {
           </article>
         </div>
 
-        <UiInlineFeedback v-if="projectUsageWarnings.length > 0" tone="warn">
-          {{ projectUsageWarnings.join(' · ') }}
+        <UiInlineFeedback v-if="usageStreamError" tone="error">
+          {{ usageStreamError }}
+        </UiInlineFeedback>
+        <UiInlineFeedback v-else-if="usageCombinedWarnings.length > 0" tone="warn">
+          {{ usageCombinedWarnings.join(' · ') }}
         </UiInlineFeedback>
       </template>
     </UiPanel>
 
     <UiInlineFeedback v-if="props.stackRestartError" tone="error">
       {{ props.stackRestartError }}
+    </UiInlineFeedback>
+    <UiInlineFeedback v-if="runtimeDiagnosticsMessage" tone="warn">
+      {{ runtimeDiagnosticsMessage }}
     </UiInlineFeedback>
     <UiState v-if="containers.length === 0">No containers currently match this compose project label.</UiState>
     <div v-else class="grid gap-4 xl:grid-cols-2">

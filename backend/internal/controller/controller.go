@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"go-notes/internal/errs"
+	"go-notes/internal/respond"
 	"go-notes/internal/service"
 )
 
@@ -18,7 +19,7 @@ func NewHealthController(service *service.HealthService) *HealthController {
 }
 
 func (h *HealthController) Healthz(ctx *gin.Context) {
-	ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
+	respond.OK(ctx, gin.H{"status": "ok"})
 }
 
 func (h *HealthController) Docker(ctx *gin.Context) {
@@ -26,7 +27,7 @@ func (h *HealthController) Docker(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"status": "error", "code": errs.CodeInternal, "detail": "health service unavailable"})
 		return
 	}
-	ctx.JSON(http.StatusOK, h.service.Docker(ctx.Request.Context()))
+	respond.OK(ctx, h.service.Docker(ctx.Request.Context()))
 }
 
 func (h *HealthController) Tunnel(ctx *gin.Context) {

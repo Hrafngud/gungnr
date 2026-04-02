@@ -218,6 +218,36 @@ docker inspect -f '{{.LogPath}}' &lt;container-id&gt;
 sudo cat "$(docker inspect -f '{{.LogPath}}' &lt;container-id&gt;)"</code></pre>
                   </div>
                 </div>
+                <div class="mt-6 grid gap-4">
+                  <details
+                    class="details-card"
+                    id="error-docker-visibility-degraded"
+                    data-doc-section
+                    data-doc-group="triage"
+                    data-doc-title="docker visibility degraded warning shell"
+                    data-doc-tags="docker degraded warning empty inventory usage health"
+                  >
+                    <summary>Docker shows warning or an empty list, but the host still has containers</summary>
+                    <p>
+                      This is usually degraded Docker visibility, not a confirmed empty daemon. Gungnr now keeps
+                      read-only Docker views available even when bridge-backed Docker reads fail:
+                    </p>
+                    <ul class="mt-3 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                      <li><code>/health/docker</code> can return <code>warning</code> and still show configured Docker posture without live runtime confirmation.</li>
+                      <li><code>/api/v1/host/docker</code> can return <code>200</code> with <code>containers: []</code> and degraded diagnostics.</li>
+                      <li><code>/api/v1/host/docker/usage</code> can return a zeroed usage shell, or preserve global totals while degrading only <code>projectCounts</code>.</li>
+                    </ul>
+                    <p class="mt-3">
+                      Treat <code>diagnostics[]</code> as the authoritative signal. A truly empty Docker daemon should
+                      not also report degraded diagnostics.
+                    </p>
+                    <ol class="mt-3 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-decimal pl-4">
+                      <li>Run <code>docker version</code>, <code>docker ps</code>, and <code>docker system df</code> on the host.</li>
+                      <li>If those succeed, run <code>gungnr restart</code> to refresh the panel runtime env and Docker socket group contract.</li>
+                      <li>If the warning persists, inspect API and worker logs for bridge-task failures instead of assuming the daemon is empty.</li>
+                    </ol>
+                  </details>
+                </div>
               </section>
 
               <section id="errors-install" class="scroll-mt-24">
@@ -646,11 +676,11 @@ sudo cat "$(docker inspect -f '{{.LogPath}}' &lt;container-id&gt;)"</code></pre>
                       </details>
                       <details class="details-card" id="HOST-500-DOCKER" data-doc-section data-doc-group="api-codes" data-doc-title="HOST-500-DOCKER docker command failed" data-doc-tags="host docker" data-doc-code="HOST-500-DOCKER">
                         <summary><span class="error-code">HOST-500-DOCKER</span>Docker command failed</summary>
-                        <p>The Docker command failed on the host. Check that Docker is running and that the API has socket access.</p>
+                        <p>A Docker mutation or probe failed on the host. Check that Docker is running, that the panel still has the intended socket-group access, and that the bridge worker can execute the requested Docker task.</p>
                       </details>
                       <details class="details-card" id="HOST-500-USAGE" data-doc-section data-doc-group="api-codes" data-doc-title="HOST-500-USAGE docker usage failed" data-doc-tags="host docker usage" data-doc-code="HOST-500-USAGE">
                         <summary><span class="error-code">HOST-500-USAGE</span>Failed to load Docker usage</summary>
-                        <p>Docker usage inspection failed. Run <code>docker system df</code> on the host to verify Docker health.</p>
+                        <p>Docker usage inspection failed. On newer host views, this may appear as a degraded <code>200</code> response with diagnostics rather than a hard page failure. Compare the panel diagnostics with host <code>docker system df</code> output and confirm whether the issue is full usage visibility loss or only degraded project-scoped counts.</p>
                       </details>
                       <details class="details-card" id="HOST-500-LOGS" data-doc-section data-doc-group="api-codes" data-doc-title="HOST-500-LOGS docker logs failed" data-doc-tags="host docker logs" data-doc-code="HOST-500-LOGS">
                         <summary><span class="error-code">HOST-500-LOGS</span>Failed to stream Docker logs</summary>

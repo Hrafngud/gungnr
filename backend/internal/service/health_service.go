@@ -13,13 +13,51 @@ import (
 	"strings"
 	"time"
 
+	"go-notes/internal/config"
 	"go-notes/internal/integrations/cloudflare"
 )
 
 type DockerHealth struct {
-	Status     string `json:"status"`
-	Detail     string `json:"detail,omitempty"`
-	Containers int    `json:"containers"`
+	Status            string                           `json:"status"`
+	Detail            string                           `json:"detail,omitempty"`
+	Containers        int                              `json:"containers"`
+	DBHostPublish     DBHostPublishHealthRef           `json:"dbHostPublish"`
+	NetworkGuardrails DockerNetworkGuardrailsHealthRef `json:"networkGuardrails"`
+	DaemonIsolation   DockerDaemonIsolationHealthRef   `json:"daemonIsolation"`
+	Diagnostics       []DockerReadDiagnostic           `json:"diagnostics,omitempty"`
+}
+
+type DBHostPublishHealthRef struct {
+	Mode    string `json:"mode"`
+	Enabled bool   `json:"enabled"`
+	Host    string `json:"host,omitempty"`
+	Port    int    `json:"port,omitempty"`
+}
+
+type DockerNetworkGuardrailsHealthRef struct {
+	Mode          string `json:"mode"`
+	ICCEnforced   bool   `json:"iccEnforced"`
+	EdgeNetwork   string `json:"edgeNetwork"`
+	CoreNetwork   string `json:"coreNetwork"`
+	Fallback      bool   `json:"fallback"`
+	FallbackNotes string `json:"fallbackNotes,omitempty"`
+}
+
+type DockerDaemonIsolationHealthRef struct {
+	Mode            string   `json:"mode"`
+	ActiveMode      string   `json:"activeMode,omitempty"`
+	Supported       bool     `json:"supported"`
+	Active          bool     `json:"active"`
+	PreflightStatus string   `json:"preflightStatus"`
+	ServerVersion   string   `json:"serverVersion,omitempty"`
+	DockerRootDir   string   `json:"dockerRootDir,omitempty"`
+	SocketPath      string   `json:"socketPath"`
+	Rootless        bool     `json:"rootless"`
+	UsernsRemap     bool     `json:"usernsRemap"`
+	Blockers        []string `json:"blockers,omitempty"`
+	Warnings        []string `json:"warnings,omitempty"`
+	RollbackMode    string   `json:"rollbackMode"`
+	RollbackSteps   []string `json:"rollbackSteps,omitempty"`
 }
 
 type TunnelHealth struct {
@@ -43,35 +81,193 @@ type TunnelDiagnostics struct {
 }
 
 type HealthService struct {
-	host     *HostService
-	settings *SettingsService
+	host              *HostService
+	settings          *SettingsService
+	dbPublishMode     string
+	dbPublishHost     string
+	dbPublishPort     int
+	dockerNetworkMode string
+	daemonMode        string
 }
 
-func NewHealthService(host *HostService, settings *SettingsService) *HealthService {
-	return &HealthService{host: host, settings: settings}
+func NewHealthService(host *HostService, settings *SettingsService, cfg config.Config) *HealthService {
+	return &HealthService{
+		host:              host,
+		settings:          settings,
+		dbPublishMode:     strings.TrimSpace(cfg.DBHostPublishMode),
+		dbPublishHost:     strings.TrimSpace(cfg.DBHostPublishHost),
+		dbPublishPort:     cfg.DBHostPublishPort,
+		dockerNetworkMode: strings.TrimSpace(cfg.DockerNetworkMode),
+		daemonMode:        strings.TrimSpace(cfg.DockerDaemonIsolation),
+	}
 }
 
 func (s *HealthService) Docker(ctx context.Context) DockerHealth {
+	dbPublish := DBHostPublishHealthRef{
+		Mode:    "disabled",
+		Enabled: false,
+	}
+	if strings.EqualFold(strings.TrimSpace(s.dbPublishMode), "loopback") {
+		dbPublish.Mode = "loopback"
+		dbPublish.Enabled = true
+		dbPublish.Host = strings.TrimSpace(s.dbPublishHost)
+		dbPublish.Port = s.dbPublishPort
+	}
+	networkGuardrails := DockerNetworkGuardrailsHealthRef{
+		Mode:        "enforced",
+		ICCEnforced: true,
+		EdgeNetwork: "edge",
+		CoreNetwork: "core",
+	}
+	if strings.EqualFold(strings.TrimSpace(s.dockerNetworkMode), "compat") {
+		networkGuardrails.Mode = "compat"
+		networkGuardrails.ICCEnforced = false
+		networkGuardrails.Fallback = true
+		networkGuardrails.FallbackNotes = "bridge ICC guardrail disabled via compat network fallback"
+	}
+	daemonIsolation := defaultDockerDaemonIsolationHealthRef(s.daemonMode)
+
 	if s.host == nil {
-		return DockerHealth{Status: "error", Detail: "host service unavailable"}
+		daemonIsolation.PreflightStatus = "error"
+		daemonIsolation.Blockers = []string{"host service unavailable"}
+		return DockerHealth{
+			Status:            "error",
+			Detail:            "host service unavailable",
+			DBHostPublish:     dbPublish,
+			NetworkGuardrails: networkGuardrails,
+			DaemonIsolation:   daemonIsolation,
+		}
 	}
 
 	// Keep host probe execution independent from request-context cancellation.
 	// Some callers/proxies can apply short request deadlines that would
-	// otherwise kill the docker command before it returns.
-	checkCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
+	// otherwise kill the docker command before it returns. Each bridge-backed
+	// probe gets its own timeout budget so one slow read does not starve the next.
+	runtimeCtx, runtimeCancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer runtimeCancel()
 
-	count, err := s.host.CountRunningContainers(checkCtx)
+	runtimeInfo, err := s.host.DockerRuntime(runtimeCtx)
 	if err != nil {
-		return DockerHealth{Status: "error", Detail: err.Error()}
+		daemonIsolation.PreflightStatus = "error"
+		daemonIsolation.Blockers = []string{"live Docker runtime confirmation is unavailable"}
+		daemonIsolation.Warnings = append(daemonIsolation.Warnings, err.Error())
+		return DockerHealth{
+			Status:            "warning",
+			Detail:            "Docker runtime visibility is unavailable; showing configured Docker posture only.",
+			DBHostPublish:     dbPublish,
+			NetworkGuardrails: networkGuardrails,
+			DaemonIsolation:   daemonIsolation,
+			Diagnostics:       degradedDockerRuntimeDiagnostics(err),
+		}
+	}
+	daemonIsolation = evaluateDockerDaemonIsolationHealth(s.daemonMode, runtimeInfo)
+
+	countCtx, countCancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer countCancel()
+
+	count, err := s.host.CountRunningContainers(countCtx)
+	if err != nil {
+		return DockerHealth{
+			Status:            "warning",
+			Detail:            "Docker container inventory is unavailable; showing configured Docker posture only.",
+			DBHostPublish:     dbPublish,
+			NetworkGuardrails: networkGuardrails,
+			DaemonIsolation:   daemonIsolation,
+			Diagnostics:       degradedDockerContainerDiagnostics(err),
+		}
 	}
 
 	detail := fmt.Sprintf("%d containers running", count)
 	return DockerHealth{
-		Status:     "ok",
-		Detail:     detail,
-		Containers: count,
+		Status:            "ok",
+		Detail:            detail,
+		Containers:        count,
+		DBHostPublish:     dbPublish,
+		NetworkGuardrails: networkGuardrails,
+		DaemonIsolation:   daemonIsolation,
+	}
+}
+
+const dockerSocketContractPath = "/var/run/docker.sock"
+
+func defaultDockerDaemonIsolationHealthRef(mode string) DockerDaemonIsolationHealthRef {
+	return DockerDaemonIsolationHealthRef{
+		Mode:            strings.TrimSpace(mode),
+		PreflightStatus: "ready",
+		SocketPath:      dockerSocketContractPath,
+		RollbackMode:    "disabled",
+		RollbackSteps: []string{
+			"Set DOCKER_DAEMON_ISOLATION_MODE=disabled in the panel runtime before restarting Gungnr.",
+			"Restore the host Docker daemon to its non-isolated socket/configuration and restart docker.",
+			"Restart the panel stack only after /var/run/docker.sock is reachable again from the current compose contract.",
+		},
+	}
+}
+
+func evaluateDockerDaemonIsolationHealth(mode string, runtime DockerRuntimeInfo) DockerDaemonIsolationHealthRef {
+	ref := defaultDockerDaemonIsolationHealthRef(mode)
+	ref.ServerVersion = strings.TrimSpace(runtime.ServerVersion)
+	ref.DockerRootDir = strings.TrimSpace(runtime.DockerRootDir)
+	ref.Rootless = runtime.Rootless
+	ref.UsernsRemap = runtime.UsernsRemap
+	ref.Warnings = append(ref.Warnings, runtime.Warnings...)
+
+	activeMode, activeWarnings := detectDockerDaemonIsolationMode(runtime)
+	ref.ActiveMode = activeMode
+	ref.Warnings = append(ref.Warnings, activeWarnings...)
+	ref.Active = activeMode == ref.Mode
+	ref.Supported = ref.Active
+
+	switch ref.Mode {
+	case "disabled":
+		ref.Supported = activeMode == "disabled"
+		ref.Active = activeMode == "disabled"
+		ref.PreflightStatus = "ready"
+		if activeMode != "disabled" {
+			ref.PreflightStatus = "warning"
+			ref.Warnings = append(ref.Warnings, fmt.Sprintf("configured rollback mode is disabled but the daemon still reports %s isolation", activeMode))
+		}
+	case "userns-remap":
+		if ref.Active {
+			ref.PreflightStatus = "ready"
+			break
+		}
+		ref.PreflightStatus = "blocked"
+		ref.Blockers = append(ref.Blockers, fmt.Sprintf("docker daemon does not currently report %s as the active isolation mode", ref.Mode))
+		ref.Blockers = append(ref.Blockers, "apply the host daemon userns-remap configuration and restart docker before keeping this mode selected")
+	case "rootless":
+		if ref.Active {
+			ref.PreflightStatus = "ready"
+			break
+		}
+		ref.PreflightStatus = "blocked"
+		ref.Blockers = append(ref.Blockers, fmt.Sprintf("docker daemon does not currently report %s as the active isolation mode", ref.Mode))
+		ref.Blockers = append(ref.Blockers, "current panel control paths stay supported only when the rootless daemon is presented through the mounted /var/run/docker.sock contract")
+	default:
+		ref.PreflightStatus = "blocked"
+		ref.Blockers = append(ref.Blockers, "unsupported daemon isolation mode selected")
+	}
+
+	if ref.Mode != "disabled" && ref.ActiveMode != "" && ref.ActiveMode != ref.Mode {
+		ref.Warnings = append(ref.Warnings, fmt.Sprintf("daemon currently reports %s while the selected rollout mode is %s", ref.ActiveMode, ref.Mode))
+	}
+	if ref.ServerVersion == "" {
+		ref.Warnings = append(ref.Warnings, "docker runtime check did not report a server version")
+	}
+
+	return ref
+}
+
+func detectDockerDaemonIsolationMode(runtime DockerRuntimeInfo) (string, []string) {
+	switch {
+	case runtime.Rootless && runtime.UsernsRemap:
+		return "rootless", []string{"daemon reports both rootless and user namespace remap; treating rootless as the active mode"}
+	case runtime.Rootless:
+		return "rootless", nil
+	case runtime.UsernsRemap:
+		return "userns-remap", nil
+	default:
+		return "disabled", nil
 	}
 }
 

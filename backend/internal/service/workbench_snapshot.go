@@ -14,7 +14,7 @@ func (s *WorkbenchService) GetSnapshot(
 		return WorkbenchStackSnapshot{}, err
 	}
 
-	resolution, err := resolveProjectPath(ctx, s.projects, s.templatesDir, normalizedProject)
+	resolution, err := resolveProjectPath(ctx, s.projects, s.templatesDir, normalizedProject, s.runtimeMetaClient)
 	if err != nil {
 		return WorkbenchStackSnapshot{}, err
 	}

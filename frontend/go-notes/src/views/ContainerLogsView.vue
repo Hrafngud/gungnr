@@ -15,7 +15,7 @@ import { getApiBaseUrl } from '@/services/api'
 import { hostApi } from '@/services/host'
 import { usePageLoadingStore } from '@/stores/pageLoading'
 import { useToastStore } from '@/stores/toasts'
-import type { DockerContainer } from '@/types/host'
+import type { DockerContainer, DockerReadDiagnostic } from '@/types/host'
 
 type BadgeTone = 'neutral' | 'ok' | 'warn' | 'error'
 type StreamState = 'idle' | 'connecting' | 'live' | 'paused' | 'error'
@@ -55,6 +55,7 @@ const route = useRoute()
 const pageLoading = usePageLoadingStore()
 
 const containers = ref<DockerContainer[]>([])
+const containerDiagnostics = ref<DockerReadDiagnostic[]>([])
 const loading = ref(false)
 const error = ref('')
 const streamError = ref('')
@@ -376,6 +377,11 @@ const streamBadge = computed<{ tone: BadgeTone; label: string }>(() => {
 })
 
 const hasLogs = computed(() => filteredLines.value.length > 0)
+const containerDiagnosticMessage = computed(() => {
+  const diagnostics = containerDiagnostics.value
+  if (diagnostics.length === 0) return ''
+  return diagnostics.map((diagnostic) => diagnostic.message).join(' ')
+})
 const logFontSizes = [11, 12, 13, 14, 15, 16] as const
 const logFontSize = ref<number>(12)
 const maxLogFontSize = logFontSizes[logFontSizes.length - 1] ?? 16
@@ -391,12 +397,15 @@ const resolvedTail = computed(() => {
 const loadContainers = async () => {
   loading.value = true
   error.value = ''
+  containerDiagnostics.value = []
   try {
     const { data } = await hostApi.listDocker()
     containers.value = data.containers
+    containerDiagnostics.value = Array.isArray(data.diagnostics) ? data.diagnostics : []
     applyRouteSelection()
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load containers.'
+    containerDiagnostics.value = []
   } finally {
     loading.value = false
   }
@@ -704,6 +713,9 @@ onBeforeUnmount(() => {
 
     <UiState v-if="error" tone="error">
       {{ error }}
+    </UiState>
+    <UiState v-else-if="containerDiagnosticMessage" tone="warn">
+      {{ containerDiagnosticMessage }}
     </UiState>
 
     <div class="flex flex-col gap-6">

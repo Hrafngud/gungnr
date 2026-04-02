@@ -2,14 +2,15 @@ package controller
 
 import (
 	"bufio"
-	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
-	"go-notes/internal/apierror"
 	"go-notes/internal/errs"
 	"go-notes/internal/middleware"
+	"go-notes/internal/models"
+	"go-notes/internal/respond"
 	"go-notes/internal/service"
 	"go-notes/internal/utils/httpx"
 )
@@ -27,43 +28,96 @@ func NewHostController(service *service.HostService, jobs *service.JobService, a
 func (c *HostController) ListDocker(ctx *gin.Context) {
 	containers, err := c.service.ListContainers(ctx.Request.Context(), true)
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeHostDockerFailed, "failed to list docker containers")
+		respond.OK(ctx, gin.H{
+			"containers":  []service.DockerContainer{},
+			"diagnostics": service.DegradedDockerContainerDiagnostics(err),
+		})
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"containers": containers})
+	respond.OK(ctx, gin.H{"containers": containers})
 }
 
 func (c *HostController) DockerUsage(ctx *gin.Context) {
 	project := strings.TrimSpace(ctx.Query("project"))
 	if project != "" && !httpx.IsSafeRef(project) {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidProject, "invalid project name", nil)
+		respond.Err(ctx, errs.New(errs.CodeHostInvalidProject, "invalid project name"), errs.CodeHostInvalidProject, "invalid project name")
 		return
 	}
 	usage, err := c.service.DockerUsage(ctx.Request.Context(), project)
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeHostUsageFailed, "failed to load docker usage")
+		summary := service.DegradedDockerUsageSummary(project)
+		if service.IsDockerUsageProjectCountsDegraded(err) {
+			summary = usage
+		}
+		respond.OK(ctx, gin.H{
+			"summary":     summary,
+			"diagnostics": service.DegradedDockerUsageDiagnostics(project, err),
+		})
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"summary": usage})
+	respond.OK(ctx, gin.H{"summary": usage})
 }
 
 func (c *HostController) RuntimeStats(ctx *gin.Context) {
-	stats, err := c.service.RuntimeStats(ctx.Request.Context())
+	snapshot, err := c.service.RuntimeSnapshot(ctx.Request.Context())
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeHostStatsFailed, "failed to load host runtime stats")
+		respond.Err(ctx, err, errs.CodeHostStatsFailed, "failed to load host runtime snapshot")
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"stats": stats})
+	respond.OK(ctx, gin.H{"snapshot": snapshot})
+}
+
+func (c *HostController) StreamRuntimeStats(ctx *gin.Context) {
+	httpx.SetSSEHeaders(ctx)
+
+	flusher, ok := httpx.SSEFlusher(ctx)
+	if !ok {
+		respond.Err(ctx, errs.New(errs.CodeHostStreamUnsupported, "streaming unsupported"), errs.CodeHostStreamUnsupported, "streaming unsupported")
+		return
+	}
+
+	httpx.SendSSEEvent(ctx, flusher, "meta", gin.H{
+		"mode":       "debounced",
+		"intervalMs": int(service.HostRuntimeStreamInterval / time.Millisecond),
+	})
+
+	sendSample := func() bool {
+		sample, err := c.service.RuntimeStreamSample(ctx.Request.Context())
+		if err != nil {
+			httpx.SendSSEEvent(ctx, flusher, "error", gin.H{"code": errs.CodeHostStatsFailed, "message": err.Error()})
+			return false
+		}
+		httpx.SendSSEEvent(ctx, flusher, "sample", sample)
+		return true
+	}
+
+	if !sendSample() {
+		return
+	}
+
+	ticker := time.NewTicker(service.HostRuntimeStreamInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Request.Context().Done():
+			return
+		case <-ticker.C:
+			if !sendSample() {
+				return
+			}
+		}
+	}
 }
 
 func (c *HostController) StreamDockerLogs(ctx *gin.Context) {
 	container := strings.TrimSpace(ctx.Query("container"))
 	if container == "" {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidContainer, "container is required", nil)
+		respond.Err(ctx, errs.New(errs.CodeHostInvalidContainer, "container is required"), errs.CodeHostInvalidContainer, "container is required")
 		return
 	}
 	if !httpx.IsSafeRef(container) {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidContainer, "invalid container name", nil)
+		respond.Err(ctx, errs.New(errs.CodeHostInvalidContainer, "invalid container name"), errs.CodeHostInvalidContainer, "invalid container name")
 		return
 	}
 
@@ -77,13 +131,13 @@ func (c *HostController) StreamDockerLogs(ctx *gin.Context) {
 
 	flusher, ok := httpx.SSEFlusher(ctx)
 	if !ok {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeHostStreamUnsupported, "streaming unsupported", nil)
+		respond.Err(ctx, errs.New(errs.CodeHostStreamUnsupported, "streaming unsupported"), errs.CodeHostStreamUnsupported, "streaming unsupported")
 		return
 	}
 
-	cmd, stdout, err := c.service.StartContainerLogs(ctx.Request.Context(), container, opts)
+	waiter, stdout, err := c.service.StartContainerLogs(ctx.Request.Context(), container, opts)
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeHostLogsFailed, "failed to stream docker logs")
+		respond.Err(ctx, err, errs.CodeHostLogsFailed, "failed to stream docker logs")
 		return
 	}
 	defer stdout.Close()
@@ -104,30 +158,17 @@ func (c *HostController) StreamDockerLogs(ctx *gin.Context) {
 		httpx.SendSSEEvent(ctx, flusher, "error", gin.H{"code": errs.CodeHostLogsFailed, "message": err.Error()})
 		return
 	}
-	if err := cmd.Wait(); err != nil {
+	if err := waiter.Wait(); err != nil {
 		httpx.SendSSEEvent(ctx, flusher, "error", gin.H{"code": errs.CodeHostLogsFailed, "message": err.Error()})
 		return
 	}
 	httpx.SendSSEEvent(ctx, flusher, "done", gin.H{"status": "closed"})
 }
 
-type containerActionRequest struct {
-	Container string `json:"container"`
-}
-
-type removeContainerRequest struct {
-	Container     string `json:"container"`
-	RemoveVolumes bool   `json:"removeVolumes"`
-}
-
-type projectActionRequest struct {
-	Project string `json:"project"`
-}
-
 func (c *HostController) StopDocker(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeHostAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeHostAdminRequired, "admin role required"), errs.CodeHostAdminRequired, "admin role required")
 		return
 	}
 	container, ok := c.parseContainerAction(ctx)
@@ -135,17 +176,17 @@ func (c *HostController) StopDocker(ctx *gin.Context) {
 		return
 	}
 	if err := c.service.StopContainer(ctx.Request.Context(), container); err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeHostDockerFailed, "failed to stop container")
+		respond.Err(ctx, err, errs.CodeHostDockerFailed, "failed to stop container")
 		return
 	}
 	c.logAudit(ctx, "host.container.stop", container, nil)
-	ctx.JSON(http.StatusOK, gin.H{"status": "stopped"})
+	respond.OK(ctx, gin.H{"status": "stopped"})
 }
 
 func (c *HostController) RestartDocker(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeHostAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeHostAdminRequired, "admin role required"), errs.CodeHostAdminRequired, "admin role required")
 		return
 	}
 	container, ok := c.parseContainerAction(ctx)
@@ -153,17 +194,17 @@ func (c *HostController) RestartDocker(ctx *gin.Context) {
 		return
 	}
 	if err := c.service.RestartContainer(ctx.Request.Context(), container); err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeHostDockerFailed, "failed to restart container")
+		respond.Err(ctx, err, errs.CodeHostDockerFailed, "failed to restart container")
 		return
 	}
 	c.logAudit(ctx, "host.container.restart", container, nil)
-	ctx.JSON(http.StatusOK, gin.H{"status": "restarted"})
+	respond.OK(ctx, gin.H{"status": "restarted"})
 }
 
 func (c *HostController) RemoveDocker(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeHostAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeHostAdminRequired, "admin role required"), errs.CodeHostAdminRequired, "admin role required")
 		return
 	}
 	req, ok := c.parseRemoveContainerAction(ctx)
@@ -171,19 +212,19 @@ func (c *HostController) RemoveDocker(ctx *gin.Context) {
 		return
 	}
 	if err := c.service.RemoveContainer(ctx.Request.Context(), req.Container, req.RemoveVolumes); err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeHostDockerFailed, "failed to remove container")
+		respond.Err(ctx, err, errs.CodeHostDockerFailed, "failed to remove container")
 		return
 	}
 	c.logAudit(ctx, "host.container.remove", req.Container, map[string]any{
 		"removeVolumes": req.RemoveVolumes,
 	})
-	ctx.JSON(http.StatusOK, gin.H{"status": "removed"})
+	respond.OK(ctx, gin.H{"status": "removed"})
 }
 
 func (c *HostController) RestartDockerProject(ctx *gin.Context) {
 	session, ok := middleware.SessionFromContext(ctx)
 	if !ok || !isAdminRole(session.Role) {
-		apierror.Respond(ctx, http.StatusForbidden, errs.CodeHostAdminRequired, "admin role required", nil)
+		respond.Err(ctx, errs.New(errs.CodeHostAdminRequired, "admin role required"), errs.CodeHostAdminRequired, "admin role required")
 		return
 	}
 	project, ok := c.parseProjectAction(ctx)
@@ -191,14 +232,14 @@ func (c *HostController) RestartDockerProject(ctx *gin.Context) {
 		return
 	}
 	if c.jobs == nil {
-		apierror.Respond(ctx, http.StatusInternalServerError, errs.CodeHostDockerFailed, "job service unavailable", nil)
+		respond.Err(ctx, errs.New(errs.CodeHostDockerFailed, "job service unavailable"), errs.CodeHostDockerFailed, "job service unavailable")
 		return
 	}
 	job, err := c.jobs.Create(ctx.Request.Context(), service.JobTypeHostRestart, service.RestartProjectStackRequest{
 		Project: project,
 	})
 	if err != nil {
-		apierror.RespondWithError(ctx, http.StatusInternalServerError, err, errs.CodeHostDockerFailed, "failed to queue project restart")
+		respond.Err(ctx, err, errs.CodeHostDockerFailed, "failed to queue project restart")
 		return
 	}
 	c.logAudit(ctx, "host.project.restart", project, map[string]any{
@@ -206,82 +247,5 @@ func (c *HostController) RestartDockerProject(ctx *gin.Context) {
 		"operation": "docker_compose_up_build_async",
 		"jobId":     job.ID,
 	})
-	ctx.JSON(http.StatusAccepted, gin.H{"job": newJobResponse(*job)})
-}
-
-func (c *HostController) parseContainerAction(ctx *gin.Context) (string, bool) {
-	var req containerActionRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidBody, "invalid request body", nil)
-		return "", false
-	}
-	container := strings.TrimSpace(req.Container)
-	if container == "" {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidContainer, "container is required", nil)
-		return "", false
-	}
-	if !httpx.IsSafeRef(container) {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidContainer, "invalid container name", nil)
-		return "", false
-	}
-	return container, true
-}
-
-func (c *HostController) parseRemoveContainerAction(ctx *gin.Context) (removeContainerRequest, bool) {
-	var req removeContainerRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidBody, "invalid request body", nil)
-		return removeContainerRequest{}, false
-	}
-	container := strings.TrimSpace(req.Container)
-	if container == "" {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidContainer, "container is required", nil)
-		return removeContainerRequest{}, false
-	}
-	if !httpx.IsSafeRef(container) {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidContainer, "invalid container name", nil)
-		return removeContainerRequest{}, false
-	}
-	req.Container = container
-	return req, true
-}
-
-func (c *HostController) parseProjectAction(ctx *gin.Context) (string, bool) {
-	var req projectActionRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidBody, "invalid request body", nil)
-		return "", false
-	}
-	project := strings.TrimSpace(req.Project)
-	if project == "" {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidProject, "project is required", nil)
-		return "", false
-	}
-	if project == "." || project == ".." || !httpx.IsSafeRef(project) {
-		apierror.Respond(ctx, http.StatusBadRequest, errs.CodeHostInvalidProject, "invalid project name", nil)
-		return "", false
-	}
-	return project, true
-}
-
-func (c *HostController) logAudit(ctx *gin.Context, action, target string, metadata map[string]any) {
-	if c.audit == nil {
-		return
-	}
-	if metadata == nil {
-		metadata = map[string]any{}
-	}
-	if _, ok := metadata["container"]; !ok {
-		if _, hasProject := metadata["project"]; !hasProject {
-			metadata["container"] = target
-		}
-	}
-	session, _ := middleware.SessionFromContext(ctx)
-	_ = c.audit.Log(ctx.Request.Context(), service.AuditEntry{
-		UserID:    session.UserID,
-		UserLogin: session.Login,
-		Action:    action,
-		Target:    target,
-		Metadata:  metadata,
-	})
+	respond.Accepted(ctx, gin.H{"job": models.NewJobResponse(*job)})
 }

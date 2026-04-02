@@ -10,8 +10,10 @@ import (
 	"strings"
 
 	"go-notes/internal/errs"
+	"go-notes/internal/infra/contract"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
+	"go-notes/internal/validate"
 )
 
 var projectComposeFileCandidates = []string{
@@ -32,15 +34,26 @@ type projectPathResolution struct {
 	ProjectRecord  *models.Project
 }
 
+type infraDockerMetadataClient interface {
+	DockerListContainers(ctx context.Context, requestID string, includeAll bool) (contract.Result, error)
+}
+
+type infraProjectFileMutationClient interface {
+	ProjectFileWriteAtomic(ctx context.Context, requestID string, payload contract.ProjectFileWriteAtomicPayload) (contract.Result, error)
+	ProjectFileCopy(ctx context.Context, requestID string, payload contract.ProjectFileCopyPayload) (contract.Result, error)
+	ProjectFileRemove(ctx context.Context, requestID string, payload contract.ProjectFileRemovePayload) (contract.Result, error)
+}
+
 func resolveProjectPath(
 	ctx context.Context,
 	repo repository.ProjectRepository,
 	templatesDir string,
 	projectName string,
+	runtimeMetaClient infraDockerMetadataClient,
 ) (projectPathResolution, error) {
 	requested := strings.TrimSpace(projectName)
 	normalized := strings.ToLower(requested)
-	if err := ValidateProjectName(normalized); err != nil {
+	if err := validate.ProjectName(normalized); err != nil {
 		return projectPathResolution{}, errs.New(errs.CodeProjectInvalidName, "project name must be lowercase alphanumerics or dashes")
 	}
 
@@ -64,7 +77,7 @@ func resolveProjectPath(
 			resolution.ProjectDir = templateDir
 			resolution.Source = "templates_scan"
 		} else {
-			runtimeDir, runtimeComposeFiles, runtimeErr := resolveDirFromRuntimeCompose(ctx, templatesDir, normalized)
+			runtimeDir, runtimeComposeFiles, runtimeErr := resolveDirFromRuntimeCompose(ctx, templatesDir, normalized, runtimeMetaClient)
 			if runtimeErr != nil {
 				return projectPathResolution{}, templateErr
 			}
@@ -86,8 +99,9 @@ func resolveDirFromRuntimeCompose(
 	ctx context.Context,
 	templatesDir string,
 	normalizedName string,
+	runtimeMetaClient infraDockerMetadataClient,
 ) (string, []string, error) {
-	meta, err := readComposeProjectMeta(ctx, normalizedName)
+	meta, err := readComposeProjectMeta(ctx, runtimeMetaClient, normalizedName)
 	if err != nil {
 		return "", nil, err
 	}

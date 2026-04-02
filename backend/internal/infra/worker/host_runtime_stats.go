@@ -35,31 +35,59 @@ type hostRuntimeGPU struct {
 	SpeedMHz float64 `json:"speedMHz,omitempty"`
 }
 
-type hostRuntimeWorkloadUsage struct {
-	Containers         int     `json:"containers"`
-	RunningContainers  int     `json:"runningContainers"`
-	CPUUsedPercent     float64 `json:"cpuUsedPercent"`
-	MemoryUsedBytes    int64   `json:"memoryUsedBytes"`
-	DiskUsedBytes      int64   `json:"diskUsedBytes"`
-	MemorySharePercent float64 `json:"memorySharePercent"`
-	DiskSharePercent   float64 `json:"diskSharePercent"`
+type hostRuntimeMemorySnapshot struct {
+	TotalBytes     int64 `json:"totalBytes"`
+	FreeBytes      int64 `json:"freeBytes"`
+	AvailableBytes int64 `json:"availableBytes,omitempty"`
+	SpeedMTs       int   `json:"speedMTs,omitempty"`
 }
 
-type hostRuntimeStats struct {
-	CollectedAt    string                              `json:"collectedAt"`
-	Hostname       string                              `json:"hostname,omitempty"`
-	UptimeSeconds  int64                               `json:"uptimeSeconds"`
-	UptimeHuman    string                              `json:"uptimeHuman"`
-	SystemImage    string                              `json:"systemImage"`
-	Kernel         string                              `json:"kernel"`
-	CPU            hostRuntimeCPU                      `json:"cpu"`
-	GPU            *hostRuntimeGPU                     `json:"gpu,omitempty"`
-	Memory         hostRuntimeResource                 `json:"memory"`
-	Disk           hostRuntimeResource                 `json:"disk"`
-	PanelUsage     hostRuntimeWorkloadUsage            `json:"panelUsage"`
-	ProjectsUsage  hostRuntimeWorkloadUsage            `json:"projectsUsage"`
-	ProjectsByName map[string]hostRuntimeWorkloadUsage `json:"projectsByName,omitempty"`
-	Warnings       []string                            `json:"warnings,omitempty"`
+type hostRuntimeWorkloadSnapshot struct {
+	Containers        int     `json:"containers"`
+	RunningContainers int     `json:"runningContainers"`
+	DiskUsedBytes     int64   `json:"diskUsedBytes"`
+	DiskSharePercent  float64 `json:"diskSharePercent"`
+}
+
+type hostRuntimeSnapshot struct {
+	CollectedAt    string                                 `json:"collectedAt"`
+	Hostname       string                                 `json:"hostname,omitempty"`
+	UptimeSeconds  int64                                  `json:"uptimeSeconds"`
+	UptimeHuman    string                                 `json:"uptimeHuman"`
+	SystemImage    string                                 `json:"systemImage"`
+	Kernel         string                                 `json:"kernel"`
+	CPU            hostRuntimeCPU                         `json:"cpu"`
+	GPU            *hostRuntimeGPU                        `json:"gpu,omitempty"`
+	Memory         hostRuntimeMemorySnapshot              `json:"memory"`
+	Disk           hostRuntimeResource                    `json:"disk"`
+	Panel          hostRuntimeWorkloadSnapshot            `json:"panel"`
+	Projects       hostRuntimeWorkloadSnapshot            `json:"projects"`
+	ProjectsByName map[string]hostRuntimeWorkloadSnapshot `json:"projectsByName,omitempty"`
+	Warnings       []string                               `json:"warnings,omitempty"`
+}
+
+type hostRuntimeHostStreamUsage struct {
+	MemoryUsedBytes      int64   `json:"memoryUsedBytes"`
+	MemoryUsedPercent    float64 `json:"memoryUsedPercent"`
+	MemoryFreeBytes      int64   `json:"memoryFreeBytes"`
+	MemoryAvailableBytes int64   `json:"memoryAvailableBytes,omitempty"`
+}
+
+type hostRuntimeWorkloadStreamUsage struct {
+	CPUUsedPercent     float64 `json:"cpuUsedPercent"`
+	MemoryUsedBytes    int64   `json:"memoryUsedBytes"`
+	MemorySharePercent float64 `json:"memorySharePercent"`
+}
+
+type hostRuntimeStreamSample struct {
+	CollectedAt    string                                    `json:"collectedAt"`
+	Mode           string                                    `json:"mode"`
+	IntervalMs     int                                       `json:"intervalMs"`
+	Host           hostRuntimeHostStreamUsage                `json:"host"`
+	Panel          hostRuntimeWorkloadStreamUsage            `json:"panel"`
+	Projects       hostRuntimeWorkloadStreamUsage            `json:"projects"`
+	ProjectsByName map[string]hostRuntimeWorkloadStreamUsage `json:"projectsByName,omitempty"`
+	Warnings       []string                                  `json:"warnings,omitempty"`
 }
 
 type runtimeUsageCategory string
@@ -102,8 +130,13 @@ type dockerContainerSizeLine struct {
 	Size  string `json:"Size"`
 }
 
+const (
+	hostRuntimeStreamModeDebounced = "debounced"
+	hostRuntimeStreamIntervalMs    = 100
+)
+
 func (r *Runner) handleHostRuntimeStats(ctx context.Context, _ contract.Intent) taskOutcome {
-	snapshot, warnings, err := collectHostRuntimeStats(ctx, r.exec, r.templatesDir)
+	snapshot, warnings, err := collectHostRuntimeSnapshot(ctx, r.exec, r.templatesDir)
 	if err != nil {
 		return taskOutcome{err: err, logTail: warnings}
 	}
@@ -120,9 +153,27 @@ func (r *Runner) handleHostRuntimeStats(ctx context.Context, _ contract.Intent) 
 	}
 }
 
-func collectHostRuntimeStats(ctx context.Context, exec commandExecutor, templatesDir string) (hostRuntimeStats, []string, error) {
+func (r *Runner) handleHostRuntimeStream(ctx context.Context, _ contract.Intent) taskOutcome {
+	sample, warnings, err := collectHostRuntimeStreamSample(ctx, r.exec, r.templatesDir)
+	if err != nil {
+		return taskOutcome{err: err, logTail: warnings}
+	}
+	data, err := structToMap(sample)
+	if err != nil {
+		return taskOutcome{
+			err:     fmt.Errorf("encode host runtime stream payload: %w", err),
+			logTail: warnings,
+		}
+	}
+	return taskOutcome{
+		logTail: warnings,
+		data:    data,
+	}
+}
+
+func collectHostRuntimeSnapshot(ctx context.Context, exec commandExecutor, templatesDir string) (hostRuntimeSnapshot, []string, error) {
 	now := time.Now().UTC()
-	stats := hostRuntimeStats{
+	stats := hostRuntimeSnapshot{
 		CollectedAt: now.Format(time.RFC3339),
 		Hostname:    "Unknown host",
 		CPU: hostRuntimeCPU{
@@ -187,7 +238,7 @@ func collectHostRuntimeStats(ctx context.Context, exec commandExecutor, template
 	}
 
 	if totalMemory, usedMemory, availableMemory, err := readMemoryUsageBytes(); err == nil {
-		stats.Memory = buildResourceUsage(totalMemory, usedMemory, availableMemory)
+		stats.Memory = buildMemorySnapshot(totalMemory, usedMemory, availableMemory)
 		if speedMTs, ok := readMemorySpeedMTs(ctx, exec); ok {
 			stats.Memory.SpeedMTs = speedMTs
 		}
@@ -201,16 +252,54 @@ func collectHostRuntimeStats(ctx context.Context, exec commandExecutor, template
 		appendWarning("disk probe failed: %v", err)
 	}
 
-	panelUsage, projectsUsage, projectsByName, usageWarnings := readRuntimeUsageFromDocker(ctx, exec, templatesDir, stats.Memory.TotalBytes, stats.Disk.TotalBytes)
+	panelUsage, projectsUsage, projectsByName, usageWarnings := readRuntimeSnapshotUsageFromDocker(ctx, exec, templatesDir, stats.Disk.TotalBytes)
 	warnings = append(warnings, usageWarnings...)
-	stats.PanelUsage = panelUsage
-	stats.ProjectsUsage = projectsUsage
+	stats.Panel = panelUsage
+	stats.Projects = projectsUsage
 	stats.ProjectsByName = projectsByName
 	if len(warnings) > 0 {
 		stats.Warnings = warnings
 	}
 
 	return stats, tailStrings(warnings, 25), nil
+}
+
+func collectHostRuntimeStreamSample(ctx context.Context, exec commandExecutor, templatesDir string) (hostRuntimeStreamSample, []string, error) {
+	now := time.Now().UTC()
+	sample := hostRuntimeStreamSample{
+		CollectedAt: now.Format(time.RFC3339Nano),
+		Mode:        hostRuntimeStreamModeDebounced,
+		IntervalMs:  hostRuntimeStreamIntervalMs,
+	}
+
+	warnings := make([]string, 0)
+	appendWarning := func(format string, args ...any) {
+		warnings = append(warnings, fmt.Sprintf(format, args...))
+	}
+
+	totalMemory := int64(0)
+	if total, used, available, err := readMemoryUsageBytes(); err == nil {
+		totalMemory = total
+		sample.Host = hostRuntimeHostStreamUsage{
+			MemoryUsedBytes:      used,
+			MemoryUsedPercent:    percentOf(used, total),
+			MemoryFreeBytes:      maxInt64(total-used, 0),
+			MemoryAvailableBytes: available,
+		}
+	} else {
+		appendWarning("memory probe failed: %v", err)
+	}
+
+	panelUsage, projectsUsage, projectsByName, usageWarnings := readRuntimeStreamUsageFromDocker(ctx, exec, templatesDir, totalMemory)
+	warnings = append(warnings, usageWarnings...)
+	sample.Panel = panelUsage
+	sample.Projects = projectsUsage
+	sample.ProjectsByName = projectsByName
+	if len(warnings) > 0 {
+		sample.Warnings = warnings
+	}
+
+	return sample, tailStrings(warnings, 25), nil
 }
 
 func structToMap(input any) (map[string]any, error) {
@@ -250,10 +339,10 @@ func readSystemImageAndKernel(exec commandExecutor, ctx context.Context) (string
 
 	// Prefer docker daemon identity because it reflects the host runtime in containerized deployments.
 	if exec != nil {
-		if output, err := exec.Run(ctx, "", "docker", "info", "--format", "{{.OperatingSystem}}"); err == nil {
+		if output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "info", "--format", "{{.OperatingSystem}}"); err == nil {
 			image = strings.TrimSpace(string(output))
 		}
-		if output, err := exec.Run(ctx, "", "docker", "info", "--format", "{{.KernelVersion}}"); err == nil {
+		if output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "info", "--format", "{{.KernelVersion}}"); err == nil {
 			kernel = strings.TrimSpace(string(output))
 		}
 	}
@@ -265,7 +354,7 @@ func readSystemImageAndKernel(exec commandExecutor, ctx context.Context) (string
 	}
 
 	if kernel == "" && exec != nil {
-		if output, err := exec.Run(ctx, "", "uname", "-sr"); err == nil {
+		if output, err := runExecutorCommand(ctx, exec, "", nil, "uname", "-sr"); err == nil {
 			kernel = strings.TrimSpace(string(output))
 		}
 	}
@@ -277,7 +366,7 @@ func readSystemImageAndKernel(exec commandExecutor, ctx context.Context) (string
 
 func readHostName(ctx context.Context, exec commandExecutor) string {
 	if exec != nil {
-		if output, err := exec.Run(ctx, "", "docker", "info", "--format", "{{.Name}}"); err == nil {
+		if output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "info", "--format", "{{.Name}}"); err == nil {
 			value := strings.TrimSpace(string(output))
 			if value != "" {
 				return value
@@ -424,7 +513,7 @@ func detectGPUInfo(ctx context.Context, exec commandExecutor) (*hostRuntimeGPU, 
 	if exec == nil {
 		return nil, false
 	}
-	if output, err := exec.Run(ctx, "", "nvidia-smi", "--query-gpu=name,clocks.current.graphics", "--format=csv,noheader,nounits"); err == nil {
+	if output, err := runExecutorCommand(ctx, exec, "", nil, "nvidia-smi", "--query-gpu=name,clocks.current.graphics", "--format=csv,noheader,nounits"); err == nil {
 		lines := parseOutputLines(output)
 		if len(lines) > 0 {
 			model, speedMHz := parseNvidiaGPUInfoLine(lines[0])
@@ -433,7 +522,7 @@ func detectGPUInfo(ctx context.Context, exec commandExecutor) (*hostRuntimeGPU, 
 			}
 		}
 	}
-	if output, err := exec.Run(ctx, "", "nvidia-smi", "--query-gpu=name", "--format=csv,noheader"); err == nil {
+	if output, err := runExecutorCommand(ctx, exec, "", nil, "nvidia-smi", "--query-gpu=name", "--format=csv,noheader"); err == nil {
 		lines := parseOutputLines(output)
 		if len(lines) > 0 {
 			model := strings.TrimSpace(lines[0])
@@ -442,7 +531,7 @@ func detectGPUInfo(ctx context.Context, exec commandExecutor) (*hostRuntimeGPU, 
 			}
 		}
 	}
-	output, err := exec.Run(ctx, "", "lspci")
+	output, err := runExecutorCommand(ctx, exec, "", nil, "lspci")
 	if err != nil {
 		return nil, false
 	}
@@ -513,7 +602,7 @@ func readMemorySpeedMTs(ctx context.Context, exec commandExecutor) (int, bool) {
 	if exec == nil {
 		return 0, false
 	}
-	output, err := exec.Run(ctx, "", "dmidecode", "-t", "memory")
+	output, err := runExecutorCommand(ctx, exec, "", nil, "dmidecode", "-t", "memory")
 	if err != nil {
 		return 0, false
 	}
@@ -542,9 +631,9 @@ func readRootDiskUsageBytes(ctx context.Context, exec commandExecutor, templates
 		return 0, 0, 0, fmt.Errorf("executor unavailable")
 	}
 	probePath := resolveDiskProbePath(templatesDir)
-	output, err := exec.Run(ctx, "", "df", "-B1", probePath)
+	output, err := runExecutorCommand(ctx, exec, "", nil, "df", "-B1", probePath)
 	if err != nil && probePath != "/" {
-		output, err = exec.Run(ctx, "", "df", "-B1", "/")
+		output, err = runExecutorCommand(ctx, exec, "", nil, "df", "-B1", "/")
 	}
 	if err != nil {
 		return 0, 0, 0, err
@@ -593,13 +682,12 @@ func resolveDiskProbePath(templatesDir string) string {
 	return "/"
 }
 
-func readRuntimeUsageFromDocker(
+func readRuntimeSnapshotUsageFromDocker(
 	ctx context.Context,
 	exec commandExecutor,
 	templatesDir string,
-	totalMemoryBytes int64,
 	totalDiskBytes int64,
-) (hostRuntimeWorkloadUsage, hostRuntimeWorkloadUsage, map[string]hostRuntimeWorkloadUsage, []string) {
+) (hostRuntimeWorkloadSnapshot, hostRuntimeWorkloadSnapshot, map[string]hostRuntimeWorkloadSnapshot, []string) {
 	panelAccum := runtimeUsageAccumulator{}
 	projectAccum := runtimeUsageAccumulator{}
 	projectAccumByName := make(map[string]*runtimeUsageAccumulator)
@@ -607,7 +695,7 @@ func readRuntimeUsageFromDocker(
 
 	if exec == nil {
 		warnings = append(warnings, "docker usage probe skipped: executor unavailable")
-		return finalizeRuntimeUsage(panelAccum, totalMemoryBytes, totalDiskBytes), finalizeRuntimeUsage(projectAccum, totalMemoryBytes, totalDiskBytes), finalizeRuntimeUsageByProject(projectAccumByName, totalMemoryBytes, totalDiskBytes), warnings
+		return finalizeRuntimeSnapshotUsage(panelAccum, totalDiskBytes), finalizeRuntimeSnapshotUsage(projectAccum, totalDiskBytes), finalizeRuntimeSnapshotUsageByProject(projectAccumByName, totalDiskBytes), warnings
 	}
 
 	localProjectNames := listLocalProjectNames(templatesDir)
@@ -629,7 +717,45 @@ func readRuntimeUsageFromDocker(
 		warnings = append(warnings, fmt.Sprintf("docker disk probe failed: %v", err))
 	}
 
-	return finalizeRuntimeUsage(panelAccum, totalMemoryBytes, totalDiskBytes), finalizeRuntimeUsage(projectAccum, totalMemoryBytes, totalDiskBytes), finalizeRuntimeUsageByProject(projectAccumByName, totalMemoryBytes, totalDiskBytes), warnings
+	return finalizeRuntimeSnapshotUsage(panelAccum, totalDiskBytes), finalizeRuntimeSnapshotUsage(projectAccum, totalDiskBytes), finalizeRuntimeSnapshotUsageByProject(projectAccumByName, totalDiskBytes), warnings
+}
+
+func readRuntimeStreamUsageFromDocker(
+	ctx context.Context,
+	exec commandExecutor,
+	templatesDir string,
+	totalMemoryBytes int64,
+) (hostRuntimeWorkloadStreamUsage, hostRuntimeWorkloadStreamUsage, map[string]hostRuntimeWorkloadStreamUsage, []string) {
+	panelAccum := runtimeUsageAccumulator{}
+	projectAccum := runtimeUsageAccumulator{}
+	projectAccumByName := make(map[string]*runtimeUsageAccumulator)
+	warnings := make([]string, 0)
+
+	if exec == nil {
+		warnings = append(warnings, "docker usage probe skipped: executor unavailable")
+		return finalizeRuntimeStreamUsage(panelAccum, totalMemoryBytes), finalizeRuntimeStreamUsage(projectAccum, totalMemoryBytes), finalizeRuntimeStreamUsageByProject(projectAccumByName, totalMemoryBytes), warnings
+	}
+
+	localProjectNames := listLocalProjectNames(templatesDir)
+	inventoryByName, panelRunning, projectsRunning, runningByProject, err := readRunningDockerInventory(ctx, exec, localProjectNames)
+	if err != nil {
+		warnings = append(warnings, fmt.Sprintf("docker inventory probe failed: %v", err))
+	} else {
+		panelAccum.runningContainers = panelRunning
+		projectAccum.runningContainers = projectsRunning
+		for projectName, runningCount := range runningByProject {
+			project := ensureProjectAccumulator(projectAccumByName, projectName)
+			if project != nil {
+				project.runningContainers = runningCount
+			}
+		}
+	}
+
+	if err := readDockerMemoryUsage(ctx, exec, inventoryByName, &panelAccum, &projectAccum, projectAccumByName); err != nil {
+		warnings = append(warnings, fmt.Sprintf("docker memory probe failed: %v", err))
+	}
+
+	return finalizeRuntimeStreamUsage(panelAccum, totalMemoryBytes), finalizeRuntimeStreamUsage(projectAccum, totalMemoryBytes), finalizeRuntimeStreamUsageByProject(projectAccumByName, totalMemoryBytes), warnings
 }
 
 func readDockerInventory(
@@ -637,7 +763,7 @@ func readDockerInventory(
 	exec commandExecutor,
 	localProjectNames map[string]struct{},
 ) (map[string]runtimeUsageContainerMeta, map[string]runtimeUsageContainerMeta, runtimeUsageAccumulator, runtimeUsageAccumulator, map[string]*runtimeUsageAccumulator, error) {
-	output, err := exec.Run(ctx, "", "docker", "ps", "-a", "--format", "{{json .}}")
+	output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "ps", "-a", "--format", "{{json .}}")
 	if err != nil {
 		return nil, nil, runtimeUsageAccumulator{}, runtimeUsageAccumulator{}, nil, err
 	}
@@ -695,6 +821,52 @@ func readDockerInventory(
 	return inventoryByName, inventoryByID, panel, projects, projectAccums, nil
 }
 
+func readRunningDockerInventory(
+	ctx context.Context,
+	exec commandExecutor,
+	localProjectNames map[string]struct{},
+) (map[string]runtimeUsageContainerMeta, int, int, map[string]int, error) {
+	output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "ps", "--format", "{{json .}}")
+	if err != nil {
+		return nil, 0, 0, nil, err
+	}
+
+	inventoryByName := make(map[string]runtimeUsageContainerMeta)
+	panelRunning := 0
+	projectsRunning := 0
+	runningByProject := make(map[string]int)
+
+	for _, line := range parseOutputLines(output) {
+		var row dockerPSInventoryLine
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			continue
+		}
+		labels := parseDockerLabelString(row.Labels)
+		composeProject := strings.ToLower(strings.TrimSpace(labels["com.docker.compose.project"]))
+		containerName := strings.ToLower(strings.TrimSpace(row.Names))
+		category := classifyRuntimeUsageContainer(containerName, composeProject, localProjectNames)
+		if category == runtimeUsageUnknown {
+			continue
+		}
+		meta := runtimeUsageContainerMeta{category: category}
+		if category == runtimeUsageProjects {
+			meta.project = composeProject
+		}
+		if containerName != "" {
+			inventoryByName[containerName] = meta
+		}
+		switch category {
+		case runtimeUsagePanel:
+			panelRunning++
+		case runtimeUsageProjects:
+			projectsRunning++
+			runningByProject[composeProject]++
+		}
+	}
+
+	return inventoryByName, panelRunning, projectsRunning, runningByProject, nil
+}
+
 func readDockerMemoryUsage(
 	ctx context.Context,
 	exec commandExecutor,
@@ -703,7 +875,7 @@ func readDockerMemoryUsage(
 	projects *runtimeUsageAccumulator,
 	projectAccums map[string]*runtimeUsageAccumulator,
 ) error {
-	output, err := exec.Run(ctx, "", "docker", "stats", "--no-stream", "--format", "{{json .}}")
+	output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "stats", "--no-stream", "--format", "{{json .}}")
 	if err != nil {
 		return err
 	}
@@ -764,7 +936,7 @@ func readDockerDiskUsage(
 	projects *runtimeUsageAccumulator,
 	projectAccums map[string]*runtimeUsageAccumulator,
 ) error {
-	output, err := exec.Run(ctx, "", "docker", "ps", "-as", "--format", "{{json .}}")
+	output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "ps", "-as", "--format", "{{json .}}")
 	if err != nil {
 		return err
 	}
@@ -938,32 +1110,65 @@ func buildResourceUsage(total, used, available int64) hostRuntimeResource {
 	}
 }
 
-func finalizeRuntimeUsage(accum runtimeUsageAccumulator, totalMemoryBytes, totalDiskBytes int64) hostRuntimeWorkloadUsage {
-	return hostRuntimeWorkloadUsage{
-		Containers:         accum.containers,
-		RunningContainers:  accum.runningContainers,
-		CPUUsedPercent:     clampRuntimePercent(accum.cpuUsedPercent),
-		MemoryUsedBytes:    accum.memoryUsedBytes,
-		DiskUsedBytes:      accum.diskUsedBytes,
-		MemorySharePercent: percentOf(accum.memoryUsedBytes, totalMemoryBytes),
-		DiskSharePercent:   percentOf(accum.diskUsedBytes, totalDiskBytes),
+func buildMemorySnapshot(total, used, available int64) hostRuntimeMemorySnapshot {
+	resource := buildResourceUsage(total, used, available)
+	return hostRuntimeMemorySnapshot{
+		TotalBytes:     resource.TotalBytes,
+		FreeBytes:      resource.FreeBytes,
+		AvailableBytes: resource.AvailableBytes,
 	}
 }
 
-func finalizeRuntimeUsageByProject(
+func finalizeRuntimeSnapshotUsage(accum runtimeUsageAccumulator, totalDiskBytes int64) hostRuntimeWorkloadSnapshot {
+	return hostRuntimeWorkloadSnapshot{
+		Containers:        accum.containers,
+		RunningContainers: accum.runningContainers,
+		DiskUsedBytes:     accum.diskUsedBytes,
+		DiskSharePercent:  percentOf(accum.diskUsedBytes, totalDiskBytes),
+	}
+}
+
+func finalizeRuntimeSnapshotUsageByProject(
 	projectAccums map[string]*runtimeUsageAccumulator,
-	totalMemoryBytes int64,
 	totalDiskBytes int64,
-) map[string]hostRuntimeWorkloadUsage {
+) map[string]hostRuntimeWorkloadSnapshot {
 	if len(projectAccums) == 0 {
 		return nil
 	}
-	usage := make(map[string]hostRuntimeWorkloadUsage, len(projectAccums))
+	usage := make(map[string]hostRuntimeWorkloadSnapshot, len(projectAccums))
 	for projectName, projectAccum := range projectAccums {
 		if projectAccum == nil {
 			continue
 		}
-		usage[projectName] = finalizeRuntimeUsage(*projectAccum, totalMemoryBytes, totalDiskBytes)
+		usage[projectName] = finalizeRuntimeSnapshotUsage(*projectAccum, totalDiskBytes)
+	}
+	if len(usage) == 0 {
+		return nil
+	}
+	return usage
+}
+
+func finalizeRuntimeStreamUsage(accum runtimeUsageAccumulator, totalMemoryBytes int64) hostRuntimeWorkloadStreamUsage {
+	return hostRuntimeWorkloadStreamUsage{
+		CPUUsedPercent:     clampRuntimePercent(accum.cpuUsedPercent),
+		MemoryUsedBytes:    accum.memoryUsedBytes,
+		MemorySharePercent: percentOf(accum.memoryUsedBytes, totalMemoryBytes),
+	}
+}
+
+func finalizeRuntimeStreamUsageByProject(
+	projectAccums map[string]*runtimeUsageAccumulator,
+	totalMemoryBytes int64,
+) map[string]hostRuntimeWorkloadStreamUsage {
+	if len(projectAccums) == 0 {
+		return nil
+	}
+	usage := make(map[string]hostRuntimeWorkloadStreamUsage, len(projectAccums))
+	for projectName, projectAccum := range projectAccums {
+		if projectAccum == nil {
+			continue
+		}
+		usage[projectName] = finalizeRuntimeStreamUsage(*projectAccum, totalMemoryBytes)
 	}
 	if len(usage) == 0 {
 		return nil
@@ -1037,6 +1242,13 @@ func mathRound(value float64, precision int) float64 {
 		pow *= 10
 	}
 	return float64(int64(value*pow+0.5)) / pow
+}
+
+func maxInt64(value, minimum int64) int64 {
+	if value < minimum {
+		return minimum
+	}
+	return value
 }
 
 func formatUptime(seconds int64) string {

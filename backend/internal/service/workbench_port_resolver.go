@@ -400,7 +400,7 @@ func workbenchResolvePortCandidate(
 		}
 	}
 
-	if moduleDefault, ok := workbenchResolveModuleDefaultPort(snapshot.Modules, serviceName); ok {
+	if moduleDefault, ok := workbenchResolveManagedServiceDefaultPort(snapshot.ManagedServices, serviceName); ok {
 		return workbenchPortResolveCandidate{
 			port:   moduleDefault,
 			source: workbenchPortSourceModuleDefault,
@@ -445,6 +445,30 @@ func workbenchResolveModuleDefaultPort(modules []WorkbenchStackModule, serviceNa
 		if !hasDefault || candidate < best {
 			hasDefault = true
 			best = candidate
+		}
+	}
+	return best, hasDefault
+}
+
+func workbenchResolveManagedServiceDefaultPort(services []WorkbenchManagedService, serviceName string) (int, bool) {
+	normalizedService := strings.TrimSpace(serviceName)
+	best := 0
+	hasDefault := false
+	for _, managedService := range services {
+		if !strings.EqualFold(strings.TrimSpace(managedService.ServiceName), normalizedService) {
+			continue
+		}
+
+		definition, ok := workbenchOptionalServiceDefinitionByKey(managedService.EntryKey)
+		if !ok {
+			definition, ok = workbenchOptionalServiceDefinitionByServiceName(managedService.ServiceName)
+		}
+		if !ok || definition.defaultContainerPort < 1 || definition.defaultContainerPort > 65535 {
+			continue
+		}
+		if !hasDefault || definition.defaultContainerPort < best {
+			hasDefault = true
+			best = definition.defaultContainerPort
 		}
 	}
 	return best, hasDefault

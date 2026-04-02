@@ -95,7 +95,10 @@ func (c *Client) WaitResult(ctx context.Context, intentID string) (contract.Resu
 	waitCtx := ctx
 	cancel := func() {}
 	if c.waitTimeout > 0 {
-		waitCtx, cancel = context.WithTimeout(ctx, c.waitTimeout)
+		// Keep explicit caller deadlines; apply the client default only when none was provided.
+		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+			waitCtx, cancel = context.WithTimeout(ctx, c.waitTimeout)
+		}
 	}
 	defer cancel()
 
@@ -181,8 +184,178 @@ func (c *Client) RemoveContainer(ctx context.Context, requestID, container strin
 	return c.runTask(ctx, requestID, contract.TaskTypeDockerRemoveContainer, payload)
 }
 
+func (c *Client) DockerListContainers(ctx context.Context, requestID string, includeAll bool) (contract.Result, error) {
+	payload := map[string]any{}
+	if includeAll {
+		payload["include_all"] = true
+	}
+	return c.runTask(ctx, requestID, contract.TaskTypeDockerListContainers, payload)
+}
+
+func (c *Client) DockerSystemDF(ctx context.Context, requestID string) (contract.Result, error) {
+	return c.runTask(ctx, requestID, contract.TaskTypeDockerSystemDF, map[string]any{})
+}
+
+func (c *Client) DockerListVolumes(ctx context.Context, requestID string) (contract.Result, error) {
+	return c.runTask(ctx, requestID, contract.TaskTypeDockerListVolumes, map[string]any{})
+}
+
+func (c *Client) DockerContainerLogs(ctx context.Context, requestID string, payload contract.DockerContainerLogsPayload) (contract.Result, error) {
+	payload.Container = strings.TrimSpace(payload.Container)
+	if payload.Container == "" {
+		return contract.Result{}, fmt.Errorf("container is required")
+	}
+
+	intentPayload := map[string]any{
+		"container": payload.Container,
+	}
+	if payload.Tail > 0 {
+		intentPayload["tail"] = payload.Tail
+	}
+	if payload.Follow {
+		intentPayload["follow"] = true
+	}
+	if payload.Timestamps {
+		intentPayload["timestamps"] = true
+	}
+	if strings.TrimSpace(payload.Since) != "" {
+		intentPayload["since"] = strings.TrimSpace(payload.Since)
+	}
+	return c.runTask(ctx, requestID, contract.TaskTypeDockerContainerLogs, intentPayload)
+}
+
+func (c *Client) DockerRuntimeCheck(ctx context.Context, requestID string) (contract.Result, error) {
+	return c.runTask(ctx, requestID, contract.TaskTypeDockerRuntimeCheck, map[string]any{})
+}
+
+func (c *Client) DockerRunQuickService(ctx context.Context, requestID string, payload contract.DockerRunQuickServicePayload) (contract.Result, error) {
+	payload.Image = strings.TrimSpace(payload.Image)
+	payload.ContainerName = strings.TrimSpace(payload.ContainerName)
+	payload.ExposureMode = contract.NormalizeQuickServiceExposureMode(payload.ExposureMode)
+	payload.PublishHost = contract.NormalizeQuickServicePublishHost(payload.PublishHost)
+	payload.NetworkName = strings.TrimSpace(payload.NetworkName)
+	if payload.Image == "" {
+		return contract.Result{}, fmt.Errorf("image is required")
+	}
+	if payload.ExposureMode == "" {
+		return contract.Result{}, fmt.Errorf("exposure_mode must be internal or host_published")
+	}
+	if payload.NetworkName == "" {
+		return contract.Result{}, fmt.Errorf("network_name is required")
+	}
+	if !isValidPort(payload.HostPort) {
+		return contract.Result{}, fmt.Errorf("host_port must be between 1 and 65535")
+	}
+	if payload.PublishHost == "" {
+		return contract.Result{}, fmt.Errorf("publish_host must be loopback-only")
+	}
+	if !isValidPort(payload.ContainerPort) {
+		return contract.Result{}, fmt.Errorf("container_port must be between 1 and 65535")
+	}
+
+	intentPayload := map[string]any{
+		"image":          payload.Image,
+		"host_port":      payload.HostPort,
+		"container_port": payload.ContainerPort,
+		"exposure_mode":  payload.ExposureMode,
+		"network_name":   payload.NetworkName,
+		"publish_host":   payload.PublishHost,
+	}
+	if payload.ContainerName != "" {
+		intentPayload["container_name"] = payload.ContainerName
+	}
+	return c.runTask(ctx, requestID, contract.TaskTypeDockerRunQuickService, intentPayload)
+}
+
+func (c *Client) ProjectFileWriteAtomic(ctx context.Context, requestID string, payload contract.ProjectFileWriteAtomicPayload) (contract.Result, error) {
+	payload.BasePath = strings.TrimSpace(payload.BasePath)
+	payload.Path = strings.TrimSpace(payload.Path)
+	if payload.BasePath == "" {
+		return contract.Result{}, fmt.Errorf("base_path is required")
+	}
+	if payload.Path == "" {
+		return contract.Result{}, fmt.Errorf("path is required")
+	}
+
+	intentPayload := map[string]any{
+		"base_path": payload.BasePath,
+		"path":      payload.Path,
+		"content":   payload.Content,
+	}
+	if payload.Mode > 0 {
+		intentPayload["mode"] = payload.Mode
+	}
+	if payload.PreserveMode {
+		intentPayload["preserve_mode"] = true
+	}
+	if payload.CreateParents {
+		intentPayload["create_parents"] = true
+	}
+	return c.runTask(ctx, requestID, contract.TaskTypeProjectFileWriteAtomic, intentPayload)
+}
+
+func (c *Client) ProjectFileCopy(ctx context.Context, requestID string, payload contract.ProjectFileCopyPayload) (contract.Result, error) {
+	payload.BasePath = strings.TrimSpace(payload.BasePath)
+	payload.SourcePath = strings.TrimSpace(payload.SourcePath)
+	payload.DestinationPath = strings.TrimSpace(payload.DestinationPath)
+	if payload.BasePath == "" {
+		return contract.Result{}, fmt.Errorf("base_path is required")
+	}
+	if payload.SourcePath == "" {
+		return contract.Result{}, fmt.Errorf("source_path is required")
+	}
+	if payload.DestinationPath == "" {
+		return contract.Result{}, fmt.Errorf("destination_path is required")
+	}
+
+	intentPayload := map[string]any{
+		"base_path":        payload.BasePath,
+		"source_path":      payload.SourcePath,
+		"destination_path": payload.DestinationPath,
+	}
+	if payload.Mode > 0 {
+		intentPayload["mode"] = payload.Mode
+	}
+	if payload.CreateParents {
+		intentPayload["create_parents"] = true
+	}
+	return c.runTask(ctx, requestID, contract.TaskTypeProjectFileCopy, intentPayload)
+}
+
+func (c *Client) ProjectFileRemove(ctx context.Context, requestID string, payload contract.ProjectFileRemovePayload) (contract.Result, error) {
+	payload.BasePath = strings.TrimSpace(payload.BasePath)
+	payload.Path = strings.TrimSpace(payload.Path)
+	if payload.BasePath == "" {
+		return contract.Result{}, fmt.Errorf("base_path is required")
+	}
+	if payload.Path == "" {
+		return contract.Result{}, fmt.Errorf("path is required")
+	}
+
+	intentPayload := map[string]any{
+		"base_path": payload.BasePath,
+		"path":      payload.Path,
+	}
+	if payload.IgnoreNotExist {
+		intentPayload["ignore_not_exist"] = true
+	}
+	return c.runTask(ctx, requestID, contract.TaskTypeProjectFileRemove, intentPayload)
+}
+
+func (c *Client) HostListenTCPPorts(ctx context.Context, requestID string) (contract.Result, error) {
+	return c.runTask(ctx, requestID, contract.TaskTypeHostListenTCPPorts, map[string]any{})
+}
+
+func (c *Client) DockerPublishedPorts(ctx context.Context, requestID string) (contract.Result, error) {
+	return c.runTask(ctx, requestID, contract.TaskTypeDockerPublishedPorts, map[string]any{})
+}
+
 func (c *Client) HostRuntimeStats(ctx context.Context, requestID string) (contract.Result, error) {
 	return c.runTask(ctx, requestID, contract.TaskTypeHostRuntimeStats, map[string]any{})
+}
+
+func (c *Client) HostRuntimeStream(ctx context.Context, requestID string) (contract.Result, error) {
+	return c.runTask(ctx, requestID, contract.TaskTypeHostRuntimeStream, map[string]any{})
 }
 
 func (c *Client) ComposeUpStack(ctx context.Context, requestID string, payload contract.ComposeUpStackPayload) (contract.Result, error) {
@@ -209,6 +382,10 @@ func (c *Client) ComposeUpStack(ctx context.Context, requestID string, payload c
 	}
 
 	return c.runTask(ctx, requestID, contract.TaskTypeComposeUpStack, intentPayload)
+}
+
+func isValidPort(port int) bool {
+	return port >= 1 && port <= 65535
 }
 
 func (c *Client) runTask(ctx context.Context, requestID string, taskType contract.TaskType, payload map[string]any) (contract.Result, error) {

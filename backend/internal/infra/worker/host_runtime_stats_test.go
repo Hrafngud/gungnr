@@ -11,6 +11,7 @@ import (
 
 type scriptedExecCall struct {
 	dir  string
+	env  []string
 	name string
 	args []string
 }
@@ -20,18 +21,21 @@ type scriptedExecutor struct {
 	run   func(name string, args []string) ([]byte, error)
 }
 
-func (s *scriptedExecutor) Run(_ context.Context, dir string, name string, args ...string) ([]byte, error) {
-	copied := make([]string, len(args))
-	copy(copied, args)
+func (s *scriptedExecutor) Run(_ context.Context, req commandRequest) ([]byte, error) {
+	copiedArgs := make([]string, len(req.Args))
+	copy(copiedArgs, req.Args)
+	copiedEnv := make([]string, len(req.Env))
+	copy(copiedEnv, req.Env)
 	s.calls = append(s.calls, scriptedExecCall{
-		dir:  dir,
-		name: name,
-		args: copied,
+		dir:  req.Dir,
+		env:  copiedEnv,
+		name: req.Name,
+		args: copiedArgs,
 	})
 	if s.run == nil {
-		return nil, fmt.Errorf("unexpected command: %s", name)
+		return nil, fmt.Errorf("unexpected command: %s", req.Name)
 	}
-	return s.run(name, copied)
+	return s.run(req.Name, copiedArgs)
 }
 
 func TestReadSystemImageAndKernelPrefersDockerDaemonIdentity(t *testing.T) {
