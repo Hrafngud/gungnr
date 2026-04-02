@@ -18,7 +18,7 @@ import { projectsApi } from '@/services/projects'
 import { useToastStore } from '@/stores/toasts'
 import { clampPercent, formatBytes, formatPercent } from '@/utils/runtimeMetrics'
 import type { HostRuntimeWorkloadUsage } from '@/types/host'
-import type { ProjectContainer } from '@/types/projects'
+import type { ProjectContainer, ProjectDetailDiagnostic } from '@/types/projects'
 
 type ContainerActionKind = 'stop' | 'restart' | 'remove'
 
@@ -33,6 +33,7 @@ const props = defineProps<{
   projectName: string
   projectRuntimeKey: string
   containers: ProjectContainer[]
+  runtimeDiagnostics: ProjectDetailDiagnostic[]
   projectStatus: string
   isAdmin: boolean
   stackRestarting: boolean
@@ -101,6 +102,14 @@ const activeUsageProjectKey = computed(() => {
 const usageContainerSignature = computed(() =>
   props.containers.map((container) => `${container.id}:${container.status}`).join('|'),
 )
+
+const runtimeDiagnosticsMessage = computed(() => {
+  const messages = props.runtimeDiagnostics
+    .map((diagnostic) => diagnostic.message.trim())
+    .filter((message, index, items) => message.length > 0 && items.indexOf(message) === index)
+
+  return messages.join(' · ')
+})
 
 const usageIndicators = computed(() => {
   const usage = projectUsage.value
@@ -405,6 +414,9 @@ watch(usageContainerSignature, () => {
 
     <UiInlineFeedback v-if="props.stackRestartError" tone="error">
       {{ props.stackRestartError }}
+    </UiInlineFeedback>
+    <UiInlineFeedback v-if="runtimeDiagnosticsMessage" tone="warn">
+      {{ runtimeDiagnosticsMessage }}
     </UiInlineFeedback>
     <UiState v-if="containers.length === 0">No containers currently match this compose project label.</UiState>
     <div v-else class="grid gap-4 xl:grid-cols-2">

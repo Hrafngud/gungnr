@@ -105,6 +105,9 @@ func (c *ProjectsController) WorkbenchGraph(ctx *gin.Context) {
 			runtimeWarning = "runtime container state unavailable; graph statuses are based on snapshot-only data"
 		} else {
 			containers = detail.Containers
+			if detail.HasDiagnosticScope("containers") {
+				runtimeWarning = "runtime container state unavailable; graph statuses are based on snapshot-only data"
+			}
 		}
 	}
 

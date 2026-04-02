@@ -53,7 +53,7 @@ import { useToastStore } from '@/stores/toasts'
 import { useWorkbenchStore, type WorkbenchRequestStatus } from '@/stores/workbench'
 import type { Job } from '@/types/jobs'
 import { isCopyValueAllowed, writeTextToClipboard } from '@/utils/clipboard'
-import type { ProjectDetail } from '@/types/projects'
+import type { ProjectDetail, ProjectDetailDiagnostic } from '@/types/projects'
 import {
   buildWorkbenchPortSelectorKey,
   type WorkbenchComposeBackupMetadata,
@@ -121,6 +121,14 @@ const projectName = computed(() => {
   return decodeURIComponent(raw).trim()
 })
 const projectRepositoryUrl = computed(() => detail.value?.project.record?.repoUrl?.trim() ?? '')
+const projectRuntimeDiagnostics = computed<ProjectDetailDiagnostic[]>(() => detail.value?.diagnostics ?? [])
+const projectRuntimeDegraded = computed(() =>
+  projectRuntimeDiagnostics.value.some((diagnostic) => diagnostic.status.trim().toLowerCase() === 'degraded'),
+)
+const projectRuntimeStatus = computed(() => {
+  if (projectRuntimeDegraded.value) return 'degraded'
+  return detail.value?.project.record?.status || ''
+})
 
 const workbenchComposeSupported = computed(() => (detail.value?.runtime.composeFiles?.length ?? 0) > 0)
 const workbenchQueryEnabled = computed(
@@ -2918,7 +2926,8 @@ watch(projectName, () => {
         :project-name="projectName"
         :project-runtime-key="detail.project.normalizedName"
         :containers="detail.containers"
-        :project-status="detail.project.record?.status || ''"
+        :runtime-diagnostics="projectRuntimeDiagnostics"
+        :project-status="projectRuntimeStatus"
         :is-admin="isAdmin"
         :stack-restarting="stackRestarting"
         :stack-restart-error="stackRestartError"

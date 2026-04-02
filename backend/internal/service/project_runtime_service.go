@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"go-notes/internal/errs"
+	"go-notes/internal/infra/contract"
 	"go-notes/internal/models"
 	"go-notes/internal/repository"
 	"go-notes/internal/validate"
@@ -33,10 +35,11 @@ type ProjectSummary struct {
 }
 
 type ProjectDetail struct {
-	Project    ProjectDetailProject `json:"project"`
-	Runtime    ProjectDetailRuntime `json:"runtime"`
-	Network    ProjectDetailNetwork `json:"network"`
-	Containers []DockerContainer    `json:"containers"`
+	Project     ProjectDetailProject      `json:"project"`
+	Runtime     ProjectDetailRuntime      `json:"runtime"`
+	Network     ProjectDetailNetwork      `json:"network"`
+	Containers  []DockerContainer         `json:"containers"`
+	Diagnostics []ProjectDetailDiagnostic `json:"diagnostics,omitempty"`
 }
 
 type ProjectDetailProject struct {
@@ -67,6 +70,23 @@ type ProjectDetailNetwork struct {
 	DBPort         int                    `json:"dbPort"`
 	PublishedPorts []ProjectPublishedPort `json:"publishedPorts"`
 }
+
+type ProjectDetailDiagnostic struct {
+	Scope      string `json:"scope"`
+	Status     string `json:"status"`
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+	SourceCode string `json:"sourceCode,omitempty"`
+	TaskType   string `json:"taskType,omitempty"`
+}
+
+const (
+	projectDetailDiagnosticStatusDegraded             = "degraded"
+	projectDetailDiagnosticScopeContainers            = "containers"
+	projectDetailDiagnosticScopePublishedPorts        = "network.publishedPorts"
+	projectDetailDiagnosticCodeContainersDegraded     = "PROJECT-RUNTIME-CONTAINERS-DEGRADED"
+	projectDetailDiagnosticCodePublishedPortsDegraded = "PROJECT-RUNTIME-PUBLISHED-PORTS-DEGRADED"
+)
 
 func NewProjectRuntimeService(
 	templatesDir string,
@@ -143,11 +163,6 @@ func (s *ProjectRuntimeService) Detail(ctx context.Context, projectName string) 
 		return ProjectDetail{}, err
 	}
 
-	filtered, err := s.projectContainers(ctx, resolved.NormalizedName)
-	if err != nil {
-		return ProjectDetail{}, err
-	}
-
 	detail := ProjectDetail{
 		Project: ProjectDetailProject{
 			Name:           resolved.RequestedName,
@@ -163,7 +178,7 @@ func (s *ProjectRuntimeService) Detail(ctx context.Context, projectName string) 
 		Network: ProjectDetailNetwork{
 			PublishedPorts: make([]ProjectPublishedPort, 0),
 		},
-		Containers: filtered,
+		Containers: make([]DockerContainer, 0),
 	}
 
 	if resolved.ProjectRecord != nil {
@@ -182,6 +197,13 @@ func (s *ProjectRuntimeService) Detail(ctx context.Context, projectName string) 
 		detail.Network.ProxyPort = record.ProxyPort
 		detail.Network.DBPort = record.DBPort
 	}
+
+	filtered, err := s.projectContainers(ctx, resolved.NormalizedName)
+	if err != nil {
+		detail.Diagnostics = degradedProjectRuntimeDiagnostics(err)
+		return detail, nil
+	}
+	detail.Containers = filtered
 
 	for _, container := range filtered {
 		for _, binding := range container.PortBindings {
@@ -217,6 +239,19 @@ func (s *ProjectRuntimeService) Detail(ctx context.Context, projectName string) 
 	})
 
 	return detail, nil
+}
+
+func (d ProjectDetail) HasDiagnosticScope(scope string) bool {
+	normalizedScope := strings.TrimSpace(scope)
+	if normalizedScope == "" {
+		return false
+	}
+	for _, diagnostic := range d.Diagnostics {
+		if strings.EqualFold(strings.TrimSpace(diagnostic.Scope), normalizedScope) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *ProjectRuntimeService) EnsureContainerInProject(
@@ -456,4 +491,71 @@ func envFileInfo(path string) (exists bool, sizeBytes int64, updatedAt *time.Tim
 	}
 	modified := info.ModTime().UTC()
 	return true, info.Size(), &modified
+}
+
+func degradedProjectRuntimeDiagnostics(err error) []ProjectDetailDiagnostic {
+	sourceCode := projectRuntimeDiagnosticSourceCode(err)
+	taskType := projectRuntimeDiagnosticTaskType(err)
+
+	return []ProjectDetailDiagnostic{
+		{
+			Scope:      projectDetailDiagnosticScopeContainers,
+			Status:     projectDetailDiagnosticStatusDegraded,
+			Code:       projectDetailDiagnosticCodeContainersDegraded,
+			Message:    "Docker-backed container inventory is unavailable; showing project metadata only.",
+			SourceCode: sourceCode,
+			TaskType:   taskType,
+		},
+		{
+			Scope:      projectDetailDiagnosticScopePublishedPorts,
+			Status:     projectDetailDiagnosticStatusDegraded,
+			Code:       projectDetailDiagnosticCodePublishedPortsDegraded,
+			Message:    "Docker-backed published port inventory is unavailable; published port data may be incomplete.",
+			SourceCode: sourceCode,
+			TaskType:   taskType,
+		},
+	}
+}
+
+func projectRuntimeDiagnosticSourceCode(err error) string {
+	for current := errors.Unwrap(err); current != nil; current = errors.Unwrap(current) {
+		typed, ok := errs.From(current)
+		if !ok {
+			continue
+		}
+		code := strings.TrimSpace(string(typed.Code))
+		if code != "" {
+			return code
+		}
+	}
+
+	typed, ok := errs.From(err)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(string(typed.Code))
+}
+
+func projectRuntimeDiagnosticTaskType(err error) string {
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		typed, ok := errs.From(current)
+		if !ok {
+			continue
+		}
+		details, ok := typed.Details.(map[string]any)
+		if !ok {
+			continue
+		}
+		rawTaskType, exists := details["task_type"]
+		if !exists {
+			continue
+		}
+		switch value := rawTaskType.(type) {
+		case contract.TaskType:
+			return strings.TrimSpace(string(value))
+		case string:
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

@@ -29,6 +29,15 @@ export interface ProjectDetailRuntime {
   envExists: boolean
 }
 
+export interface ProjectDetailDiagnostic {
+  scope: string
+  status: string
+  code: string
+  message: string
+  sourceCode?: string
+  taskType?: string
+}
+
 export interface ProjectPublishedPort {
   container: string
   service: string
@@ -68,6 +77,7 @@ export interface ProjectDetail {
   runtime: ProjectDetailRuntime
   network: ProjectDetailNetwork
   containers: ProjectContainer[]
+  diagnostics?: ProjectDetailDiagnostic[]
 }
 
 export interface ProjectEnvRead {
