@@ -27,7 +27,7 @@ import { useFieldGuidance } from '@/composables/useFieldGuidance'
 import { usePageLoadingStore } from '@/stores/pageLoading'
 import { clampPercent, formatBytes, formatPercent } from '@/utils/runtimeMetrics'
 import type { CloudflaredPreview, Settings, SettingsSources } from '@/types/settings'
-import type { DockerContainer, DockerUsageSummary, HostRuntimeStats } from '@/types/host'
+import type { DockerContainer, DockerReadDiagnostic, DockerUsageSummary, HostRuntimeStats } from '@/types/host'
 import type { LocalProject } from '@/types/projects'
 import type { DockerHealth, TunnelHealth } from '@/types/health'
 
@@ -72,9 +72,11 @@ const tunnelHealth = ref<TunnelHealth | null>(null)
 const healthLoading = ref(false)
 
 const containers = ref<DockerContainer[]>([])
+const containerDiagnostics = ref<DockerReadDiagnostic[]>([])
 const containersLoading = ref(false)
 const containersError = ref<string | null>(null)
 const usageSummary = ref<DockerUsageSummary | null>(null)
+const usageDiagnostics = ref<DockerReadDiagnostic[]>([])
 const usageLoading = ref(false)
 const usageError = ref<string | null>(null)
 const runtimeStats = ref<HostRuntimeStats | null>(null)
@@ -327,6 +329,18 @@ const runtimeWarnings = computed(() => {
   return warnings.slice(0, 3)
 })
 
+const containerDiagnosticMessage = computed(() => {
+  const diagnostics = containerDiagnostics.value
+  if (diagnostics.length === 0) return ''
+  return diagnostics.map((diagnostic) => diagnostic.message).join(' ')
+})
+
+const usageDiagnosticMessage = computed(() => {
+  const diagnostics = usageDiagnostics.value
+  if (diagnostics.length === 0) return ''
+  return diagnostics.map((diagnostic) => diagnostic.message).join(' ')
+})
+
 const statusTone = (status: string): BadgeTone => {
   const normalized = status.toLowerCase()
   if (isRunningStatus(normalized)) return 'ok'
@@ -441,12 +455,15 @@ const loadHealth = async () => {
 const loadContainers = async () => {
   containersLoading.value = true
   containersError.value = null
+  containerDiagnostics.value = []
   try {
     const { data } = await hostApi.listDocker()
     containers.value = Array.isArray(data.containers) ? data.containers : []
+    containerDiagnostics.value = Array.isArray(data.diagnostics) ? data.diagnostics : []
   } catch (err) {
     containersError.value = apiErrorMessage(err)
     containers.value = []
+    containerDiagnostics.value = []
   } finally {
     containersLoading.value = false
   }
@@ -455,13 +472,16 @@ const loadContainers = async () => {
 const loadDockerUsage = async () => {
   usageLoading.value = true
   usageError.value = null
+  usageDiagnostics.value = []
   try {
     const project = projectFilter.value === 'all' ? undefined : projectFilter.value
     const { data } = await hostApi.dockerUsage(project)
     usageSummary.value = data.summary
+    usageDiagnostics.value = Array.isArray(data.diagnostics) ? data.diagnostics : []
   } catch (err) {
     usageError.value = apiErrorMessage(err)
     usageSummary.value = null
+    usageDiagnostics.value = []
   } finally {
     usageLoading.value = false
   }
@@ -803,6 +823,9 @@ watch(projectFilter, () => {
         <UiState v-if="usageError" tone="error">
           {{ usageError }}
         </UiState>
+        <UiInlineFeedback v-else-if="usageDiagnosticMessage" tone="warn">
+          {{ usageDiagnosticMessage }}
+        </UiInlineFeedback>
 
         <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
           <UiPanel variant="soft" class="space-y-2 p-3">
@@ -911,6 +934,9 @@ watch(projectFilter, () => {
         <UiState v-if="containersError" tone="error">
           {{ containersError }}
         </UiState>
+        <UiInlineFeedback v-else-if="containerDiagnosticMessage" tone="warn">
+          {{ containerDiagnosticMessage }}
+        </UiInlineFeedback>
 
         <UiState v-else-if="containersLoading" loading>
           Loading Docker containers...

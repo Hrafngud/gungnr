@@ -1,13 +1,14 @@
 import { api } from '@/services/api'
-import type { DockerContainer, DockerUsageSummary, HostRuntimeStats } from '@/types/host'
+import type { DockerContainer, DockerReadDiagnostic, DockerUsageSummary, HostRuntimeStats } from '@/types/host'
 import type { Job } from '@/types/jobs'
 
 const restartProjectTimeoutMs = 10 * 60 * 1000
 
 export const hostApi = {
-  listDocker: () => api.get<{ containers: DockerContainer[] }>('/api/v1/host/docker'),
+  listDocker: () =>
+    api.get<{ containers: DockerContainer[]; diagnostics?: DockerReadDiagnostic[] }>('/api/v1/host/docker'),
   dockerUsage: (project?: string) =>
-    api.get<{ summary: DockerUsageSummary }>('/api/v1/host/docker/usage', {
+    api.get<{ summary: DockerUsageSummary; diagnostics?: DockerReadDiagnostic[] }>('/api/v1/host/docker/usage', {
       params: project ? { project } : undefined,
     }),
   runtimeStats: () =>

@@ -27,7 +27,10 @@ func NewHostController(service *service.HostService, jobs *service.JobService, a
 func (c *HostController) ListDocker(ctx *gin.Context) {
 	containers, err := c.service.ListContainers(ctx.Request.Context(), true)
 	if err != nil {
-		respond.Err(ctx, err, errs.CodeHostDockerFailed, "failed to list docker containers")
+		respond.OK(ctx, gin.H{
+			"containers":  []service.DockerContainer{},
+			"diagnostics": service.DegradedDockerContainerDiagnostics(err),
+		})
 		return
 	}
 	respond.OK(ctx, gin.H{"containers": containers})
@@ -41,7 +44,14 @@ func (c *HostController) DockerUsage(ctx *gin.Context) {
 	}
 	usage, err := c.service.DockerUsage(ctx.Request.Context(), project)
 	if err != nil {
-		respond.Err(ctx, err, errs.CodeHostUsageFailed, "failed to load docker usage")
+		summary := service.DegradedDockerUsageSummary(project)
+		if service.IsDockerUsageProjectCountsDegraded(err) {
+			summary = usage
+		}
+		respond.OK(ctx, gin.H{
+			"summary":     summary,
+			"diagnostics": service.DegradedDockerUsageDiagnostics(project, err),
+		})
 		return
 	}
 	respond.OK(ctx, gin.H{"summary": usage})

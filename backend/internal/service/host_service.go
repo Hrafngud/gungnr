@@ -204,10 +204,12 @@ func (s *HostService) DockerUsage(ctx context.Context, project string) (DockerUs
 	if project == "" {
 		return summary, nil
 	}
+	summary.Project = project
 
 	containers, err := s.listContainersForUsage(ctx, true)
 	if err != nil {
-		return DockerUsageSummary{}, err
+		summary.ProjectCounts = &DockerUsageProjectCounts{}
+		return summary, wrapDockerUsageProjectCountsDegraded(err)
 	}
 
 	normalizedProject := strings.ToLower(project)
@@ -228,7 +230,8 @@ func (s *HostService) DockerUsage(ctx context.Context, project string) (DockerUs
 
 	volumes, err := s.listVolumes(ctx)
 	if err != nil {
-		return DockerUsageSummary{}, err
+		summary.ProjectCounts = &DockerUsageProjectCounts{}
+		return summary, wrapDockerUsageProjectCountsDegraded(err)
 	}
 	volumeCount := 0
 	for _, volume := range volumes {
@@ -238,7 +241,6 @@ func (s *HostService) DockerUsage(ctx context.Context, project string) (DockerUs
 		}
 	}
 
-	summary.Project = project
 	summary.ProjectCounts = &DockerUsageProjectCounts{
 		Containers: len(projectContainers),
 		Images:     len(imageSet),

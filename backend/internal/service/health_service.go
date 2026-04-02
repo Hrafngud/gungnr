@@ -24,6 +24,7 @@ type DockerHealth struct {
 	DBHostPublish     DBHostPublishHealthRef           `json:"dbHostPublish"`
 	NetworkGuardrails DockerNetworkGuardrailsHealthRef `json:"networkGuardrails"`
 	DaemonIsolation   DockerDaemonIsolationHealthRef   `json:"daemonIsolation"`
+	Diagnostics       []DockerReadDiagnostic           `json:"diagnostics,omitempty"`
 }
 
 type DBHostPublishHealthRef struct {
@@ -148,13 +149,15 @@ func (s *HealthService) Docker(ctx context.Context) DockerHealth {
 	runtimeInfo, err := s.host.DockerRuntime(runtimeCtx)
 	if err != nil {
 		daemonIsolation.PreflightStatus = "error"
-		daemonIsolation.Blockers = []string{err.Error()}
+		daemonIsolation.Blockers = []string{"live Docker runtime confirmation is unavailable"}
+		daemonIsolation.Warnings = append(daemonIsolation.Warnings, err.Error())
 		return DockerHealth{
-			Status:            "error",
-			Detail:            err.Error(),
+			Status:            "warning",
+			Detail:            "Docker runtime visibility is unavailable; showing configured Docker posture only.",
 			DBHostPublish:     dbPublish,
 			NetworkGuardrails: networkGuardrails,
 			DaemonIsolation:   daemonIsolation,
+			Diagnostics:       degradedDockerRuntimeDiagnostics(err),
 		}
 	}
 	daemonIsolation = evaluateDockerDaemonIsolationHealth(s.daemonMode, runtimeInfo)
@@ -165,11 +168,12 @@ func (s *HealthService) Docker(ctx context.Context) DockerHealth {
 	count, err := s.host.CountRunningContainers(countCtx)
 	if err != nil {
 		return DockerHealth{
-			Status:            "error",
-			Detail:            err.Error(),
+			Status:            "warning",
+			Detail:            "Docker container inventory is unavailable; showing configured Docker posture only.",
 			DBHostPublish:     dbPublish,
 			NetworkGuardrails: networkGuardrails,
 			DaemonIsolation:   daemonIsolation,
+			Diagnostics:       degradedDockerContainerDiagnostics(err),
 		}
 	}
 

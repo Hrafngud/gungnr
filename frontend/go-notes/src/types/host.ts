@@ -19,6 +19,15 @@ export interface DockerContainer {
   portBindings: DockerPortBinding[]
 }
 
+export interface DockerReadDiagnostic {
+  scope: string
+  status: string
+  code: string
+  message: string
+  sourceCode?: string
+  taskType?: string
+}
+
 export interface DockerUsageEntry {
   count: number
   size: string

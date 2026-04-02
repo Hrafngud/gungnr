@@ -405,6 +405,45 @@ func TestHostServiceDockerUsageBridgeSuccess(t *testing.T) {
 	require.Equal(t, 5, summary.Volumes.Count)
 }
 
+func TestHostServiceDockerUsagePreservesGlobalSummaryWhenProjectCountsFail(t *testing.T) {
+	t.Parallel()
+
+	bridge := &stubHostInfraBridgeClient{
+		systemDFResult: contract.Result{
+			Status: contract.StatusSucceeded,
+			Data: map[string]any{
+				"lines": []string{
+					`{"Type":"Images","TotalCount":"8","Active":"2","Size":"3.2GB","Reclaimable":"1.1GB (34%)"}`,
+					`{"Type":"Containers","TotalCount":"6","Active":"3","Size":"512MB","Reclaimable":"0B (0%)"}`,
+					`{"Type":"Local Volumes","TotalCount":"5","Active":"4","Size":"1.5GB","Reclaimable":"0B (0%)"}`,
+				},
+			},
+		},
+		listContainersResult: contract.Result{
+			Status:   contract.StatusFailed,
+			IntentID: "intent-docker-list-fail",
+			Error: &contract.Error{
+				Code:    "DOCKER-500",
+				Message: "docker ps failed",
+			},
+		},
+	}
+	svc := &HostService{infraClient: bridge}
+
+	summary, err := svc.DockerUsage(context.Background(), "demo")
+	require.Error(t, err)
+	require.True(t, IsDockerUsageProjectCountsDegraded(err))
+	require.Equal(t, "demo", summary.Project)
+	require.Equal(t, "5.2GiB", summary.TotalSize)
+	require.Equal(t, 8, summary.Images.Count)
+	require.Equal(t, 6, summary.Containers.Count)
+	require.Equal(t, 5, summary.Volumes.Count)
+	require.NotNil(t, summary.ProjectCounts)
+	require.Zero(t, summary.ProjectCounts.Containers)
+	require.Zero(t, summary.ProjectCounts.Images)
+	require.Zero(t, summary.ProjectCounts.Volumes)
+}
+
 func TestHostServiceDockerRuntimeBridgeSuccess(t *testing.T) {
 	t.Parallel()
 

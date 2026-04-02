@@ -1,3 +1,6 @@
+import type { DockerReadDiagnostic } from '@/types/host'
+import type { SettingsSources } from '@/types/settings'
+
 export type HealthStatus = 'ok' | 'warning' | 'error' | 'missing'
 
 export interface DockerHealth {
@@ -6,6 +9,7 @@ export interface DockerHealth {
   containers?: number
   dbHostPublish?: DBHostPublishHealthRef
   networkGuardrails?: DockerNetworkGuardrailsHealthRef
+  diagnostics?: DockerReadDiagnostic[]
 }
 
 export interface DBHostPublishHealthRef {
@@ -32,8 +36,6 @@ export interface TunnelHealth {
   configPath?: string
   diagnostics?: TunnelDiagnostics
 }
-
-import type { SettingsSources } from '@/types/settings'
 
 export interface TunnelDiagnostics {
   accountId?: string
