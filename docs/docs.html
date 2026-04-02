@@ -177,6 +177,7 @@
                 <div class="sidebar-sub">
                   <a data-nav-link href="#usage-first-login">First login</a>
                   <a data-nav-link href="#usage-deploy">Deploy flows</a>
+                  <a data-nav-link href="#usage-docker-visibility">Docker visibility</a>
                   <a data-nav-link href="#usage-project-workspace">Project workspace</a>
                   <a data-nav-link href="#usage-workbench">Workbench</a>
                   <a data-nav-link href="#usage-netbird">NetBird</a>
@@ -765,6 +766,52 @@
                   <li>Use the Jobs page to monitor deployments and tunnel changes.</li>
                   <li>Container logs stream under Host Settings.</li>
                   <li>Audit log records each system action.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div
+              id="usage-docker-visibility"
+              class="mt-6 card p-6"
+              data-doc-section
+              data-doc-title="Docker visibility states"
+              data-doc-group="usage"
+              data-doc-tags="docker warning degraded inventory usage health host settings overview"
+            >
+              <h3 class="text-xl font-semibold">Docker visibility states</h3>
+              <p class="mt-2 text-sm text-[color:var(--muted)]">
+                Docker-facing views now distinguish between a healthy empty daemon and degraded Docker visibility.
+                A warning does not automatically mean Docker is empty or stopped.
+              </p>
+              <div class="mt-4 grid gap-4 lg:grid-cols-2">
+                <div class="card-soft p-5">
+                  <h4 class="text-base font-semibold">Healthy empty state</h4>
+                  <ul class="mt-3 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                    <li><code>/health/docker</code> stays <code>ok</code> and can show a real container count of <code>0</code>.</li>
+                    <li><code>/api/v1/host/docker</code> returns an empty container list without degraded diagnostics.</li>
+                    <li><code>/api/v1/host/docker/usage</code> shows real totals, even if those totals are small.</li>
+                  </ul>
+                </div>
+                <div class="card-soft p-5">
+                  <h4 class="text-base font-semibold">Degraded visibility</h4>
+                  <ul class="mt-3 flex flex-col gap-2 text-sm text-[color:var(--muted)] list-disc pl-4">
+                    <li><code>/health/docker</code> can return <code>warning</code> while still showing configured Docker posture such as DB publish and network guardrail state.</li>
+                    <li><code>/api/v1/host/docker</code> can return <code>200</code> with <code>containers: []</code> plus <code>diagnostics[]</code>; treat that as an empty inventory shell, not proof the daemon has no containers.</li>
+                    <li><code>/api/v1/host/docker/usage</code> can return a zeroed summary shell with diagnostics, or preserve global totals while degrading only <code>projectCounts</code> for a project-scoped read.</li>
+                  </ul>
+                </div>
+              </div>
+              <p class="mt-4 text-sm text-[color:var(--muted)]">
+                In the panel, these warnings surface through the Home header, Overview, Host Settings, and Container
+                Logs views. When diagnostics are present, prefer the warning text over the placeholder counts.
+              </p>
+              <div class="mt-4 rounded-xl bg-[color:var(--surface-2)] p-5 text-sm text-[color:var(--muted)]">
+                <p class="font-semibold text-[color:var(--text)]">First remediation checks</p>
+                <ul class="mt-3 flex flex-col gap-2 list-disc pl-4">
+                  <li>Compare the panel warning with host commands: <code>docker version</code>, <code>docker ps</code>, and <code>docker system df</code>.</li>
+                  <li>If the host commands work but the panel still warns, check the Docker socket contract first. The hardened panel depends on the live <code>/var/run/docker.sock</code> group id matching the generated runtime env.</li>
+                  <li>Run <code>gungnr restart</code> to refresh the panel runtime env and rebuild the panel stack when socket-group drift is suspected.</li>
+                  <li>If the warning persists, inspect API and worker logs because bridge-backed Docker reads may be failing even though the daemon itself is healthy.</li>
                 </ul>
               </div>
             </div>
