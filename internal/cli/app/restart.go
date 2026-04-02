@@ -35,20 +35,8 @@ func Restart() error {
 		return fmt.Errorf("unable to create state directory: %w", err)
 	}
 	logPath := filepath.Join(stateDir, "docker-compose.log")
-	infraQueueRoot := filepath.Join(paths.DataDir, "templates", ".infra")
-
-	socketGID, err := docker.DockerSocketGID()
-	if err != nil {
+	if err := RefreshPanelRuntimeEnvEntries(envPath, paths.DataDir); err != nil {
 		return err
-	}
-	if err := filesystem.UpsertEnvFileEntry(envPath, "INFRA_QUEUE_ROOT", infraQueueRoot); err != nil {
-		return fmt.Errorf("unable to update INFRA_QUEUE_ROOT in %s: %w", envPath, err)
-	}
-	if err := filesystem.UpsertEnvFileEntry(envPath, "DOCKER_SOCKET_GID", socketGID); err != nil {
-		return fmt.Errorf("unable to update DOCKER_SOCKET_GID in %s: %w", envPath, err)
-	}
-	if err := filesystem.UpsertEnvFileEntry(envPath, "DOCKER_NETWORK_GUARDRAILS_MODE", "compat"); err != nil {
-		return fmt.Errorf("unable to update DOCKER_NETWORK_GUARDRAILS_MODE in %s: %w", envPath, err)
 	}
 
 	if err := docker.StopCompose(composeFile, envPath); err != nil {

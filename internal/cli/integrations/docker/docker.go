@@ -101,6 +101,10 @@ func DockerSocketGID() (string, error) {
 }
 
 func StartCompose(composeFile, envFile, logPath string) error {
+	if err := ValidateComposeRuntimeEnv(envFile); err != nil {
+		return err
+	}
+
 	commandName, baseArgs, err := ResolveComposeCommand()
 	if err != nil {
 		return err
@@ -116,6 +120,10 @@ func StartCompose(composeFile, envFile, logPath string) error {
 }
 
 func RebuildCompose(composeFile, envFile, logPath string) error {
+	if err := ValidateComposeRuntimeEnv(envFile); err != nil {
+		return err
+	}
+
 	commandName, baseArgs, err := ResolveComposeCommand()
 	if err != nil {
 		return err
@@ -131,6 +139,10 @@ func RebuildCompose(composeFile, envFile, logPath string) error {
 }
 
 func EnsureComposeRunning(composeFile, envFile, logPath string) error {
+	if err := ValidateComposeRuntimeEnv(envFile); err != nil {
+		return err
+	}
+
 	commandName, baseArgs, err := ResolveComposeCommand()
 	if err != nil {
 		return err
@@ -158,6 +170,22 @@ func StopCompose(composeFile, envFile string) error {
 	}
 	args = append(args, "down")
 	return command.RunInteractiveInDir(composeDir, commandName, args...)
+}
+
+func ValidateComposeRuntimeEnv(envFile string) error {
+	expectedGID, err := DockerSocketGID()
+	if err != nil {
+		return err
+	}
+
+	configuredGID, err := readEnvValue(envFile, "DOCKER_SOCKET_GID")
+	if err != nil {
+		return err
+	}
+	if err := validateDockerSocketGroupValue(configuredGID, expectedGID); err != nil {
+		return fmt.Errorf("compose runtime env validation failed: %w", err)
+	}
+	return nil
 }
 
 func composeArgs(baseArgs []string, composeFile, envFile string) ([]string, error) {
@@ -195,6 +223,52 @@ func dockerNetworkModeFromEnvFile(envFile string) (string, error) {
 		}
 		value := strings.TrimSpace(strings.TrimPrefix(line, "DOCKER_NETWORK_GUARDRAILS_MODE="))
 		return strings.Trim(value, "\""), nil
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("unable to read env file %s: %w", envFile, err)
+	}
+	return "", nil
+}
+
+func validateDockerSocketGroupValue(configuredGID, expectedGID string) error {
+	configuredGID = strings.TrimSpace(configuredGID)
+	expectedGID = strings.TrimSpace(expectedGID)
+
+	if expectedGID == "" {
+		return errors.New("current /var/run/docker.sock group id is empty")
+	}
+	if configuredGID == "" {
+		return errors.New("DOCKER_SOCKET_GID is missing from the panel .env; rerun `gungnr restart` to refresh the hardened runtime contract")
+	}
+	if configuredGID != expectedGID {
+		return fmt.Errorf("DOCKER_SOCKET_GID=%s does not match the current /var/run/docker.sock group id %s; rerun `gungnr restart` to refresh the hardened runtime contract", configuredGID, expectedGID)
+	}
+	return nil
+}
+
+func readEnvValue(envFile, key string) (string, error) {
+	file, err := os.Open(envFile)
+	if err != nil {
+		return "", fmt.Errorf("unable to open env file %s: %w", envFile, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if !strings.HasPrefix(line, key+"=") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(line, key+"="))
+		if strings.HasPrefix(value, "\"") || strings.HasPrefix(value, "'") {
+			if parsed, parseErr := strconv.Unquote(value); parseErr == nil {
+				value = parsed
+			}
+		}
+		return value, nil
 	}
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("unable to read env file %s: %w", envFile, err)

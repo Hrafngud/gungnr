@@ -137,27 +137,33 @@ func WriteEnvFile(path string, entries []EnvEntry) error {
 }
 
 func UpsertEnvFileEntry(path, key, value string) error {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return errors.New("env key is required")
-	}
+	return UpsertEnvFileEntries(path, []EnvEntry{{Key: key, Value: value}})
+}
 
+func UpsertEnvFileEntries(path string, entries []EnvEntry) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
 
 	lines := strings.Split(string(content), "\n")
-	replaced := false
-	for i, line := range lines {
-		if !strings.HasPrefix(line, key+"=") {
-			continue
+	for _, entry := range entries {
+		key := strings.TrimSpace(entry.Key)
+		if key == "" {
+			return errors.New("env key is required")
 		}
-		lines[i] = key + "=" + formatEnvValue(value)
-		replaced = true
-	}
-	if !replaced {
-		lines = append(lines, key+"="+formatEnvValue(value))
+
+		replaced := false
+		for i, line := range lines {
+			if !strings.HasPrefix(line, key+"=") {
+				continue
+			}
+			lines[i] = key + "=" + formatEnvValue(entry.Value)
+			replaced = true
+		}
+		if !replaced {
+			lines = append(lines, key+"="+formatEnvValue(entry.Value))
+		}
 	}
 
 	updated := strings.Join(lines, "\n")

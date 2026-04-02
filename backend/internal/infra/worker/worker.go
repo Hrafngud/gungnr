@@ -26,10 +26,11 @@ const (
 	tunnelMetricsAddress    = "127.0.0.1:20241"
 	tunnelReadyURL          = "http://127.0.0.1:20241/ready"
 	tunnelReadyProbeTimeout = 20 * time.Second
+	defaultDockerConfigDir  = "gungnr-docker-config"
 )
 
 type commandExecutor interface {
-	Run(ctx context.Context, dir string, name string, args ...string) ([]byte, error)
+	Run(ctx context.Context, req commandRequest) ([]byte, error)
 }
 
 type tunnelLifecycle interface {
@@ -38,6 +39,13 @@ type tunnelLifecycle interface {
 
 type defaultCommandExecutor struct{}
 
+type commandRequest struct {
+	Dir  string
+	Env  []string
+	Name string
+	Args []string
+}
+
 type dockerRuntimeInfo struct {
 	DockerRootDir   string   `json:"DockerRootDir"`
 	SecurityOptions []string `json:"SecurityOptions"`
@@ -45,10 +53,13 @@ type dockerRuntimeInfo struct {
 	Rootless        bool     `json:"Rootless"`
 }
 
-func (defaultCommandExecutor) Run(ctx context.Context, dir string, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	if dir != "" {
-		cmd.Dir = dir
+func (defaultCommandExecutor) Run(ctx context.Context, req commandRequest) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, req.Name, req.Args...)
+	if req.Dir != "" {
+		cmd.Dir = req.Dir
+	}
+	if len(req.Env) > 0 {
+		cmd.Env = req.Env
 	}
 	return cmd.CombinedOutput()
 }
@@ -58,6 +69,7 @@ type Runner struct {
 	pollInterval time.Duration
 	owner        string
 	templatesDir string
+	dockerTmpDir string
 	logger       *log.Logger
 	exec         commandExecutor
 	tunnel       tunnelLifecycle
@@ -77,6 +89,7 @@ func New(q *queue.Filesystem, pollInterval time.Duration, templatesDir string, l
 		pollInterval: pollInterval,
 		owner:        owner,
 		templatesDir: strings.TrimSpace(templatesDir),
+		dockerTmpDir: os.TempDir(),
 		logger:       logger,
 		exec:         defaultCommandExecutor{},
 		tunnel:       newCloudflaredTunnelLifecycle(logger),
@@ -333,7 +346,7 @@ func (r *Runner) handleDockerStop(ctx context.Context, intent contract.Intent) t
 	if container == "" {
 		return taskOutcome{err: fmt.Errorf("container is required")}
 	}
-	output, err := r.exec.Run(ctx, "", "docker", "stop", container)
+	output, err := r.runDockerCommand(ctx, "", "stop", container)
 	return taskOutcome{
 		err:     commandError(err, output, "docker stop %s", container),
 		logTail: tailLines(output, 25),
@@ -349,7 +362,7 @@ func (r *Runner) handleDockerRestart(ctx context.Context, intent contract.Intent
 	if container == "" {
 		return taskOutcome{err: fmt.Errorf("container is required")}
 	}
-	output, err := r.exec.Run(ctx, "", "docker", "restart", container)
+	output, err := r.runDockerCommand(ctx, "", "restart", container)
 	return taskOutcome{
 		err:     commandError(err, output, "docker restart %s", container),
 		logTail: tailLines(output, 25),
@@ -370,7 +383,7 @@ func (r *Runner) handleDockerRemove(ctx context.Context, intent contract.Intent)
 		args = append(args, "-v")
 	}
 	args = append(args, container)
-	output, err := r.exec.Run(ctx, "", "docker", args...)
+	output, err := r.runDockerCommand(ctx, "", args...)
 	return taskOutcome{
 		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
 		logTail: tailLines(output, 25),
@@ -389,7 +402,7 @@ func (r *Runner) handleDockerListContainers(ctx context.Context, intent contract
 	}
 	args = append(args, "--format", "{{json .}}")
 
-	output, err := r.exec.Run(ctx, "", "docker", args...)
+	output, err := r.runDockerCommand(ctx, "", args...)
 	return taskOutcome{
 		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
 		logTail: tailLines(output, 25),
@@ -401,7 +414,7 @@ func (r *Runner) handleDockerListContainers(ctx context.Context, intent contract
 
 func (r *Runner) handleDockerSystemDF(ctx context.Context, _ contract.Intent) taskOutcome {
 	args := []string{"system", "df", "--format", "{{json .}}"}
-	output, err := r.exec.Run(ctx, "", "docker", args...)
+	output, err := r.runDockerCommand(ctx, "", args...)
 	return taskOutcome{
 		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
 		logTail: tailLines(output, 25),
@@ -413,7 +426,7 @@ func (r *Runner) handleDockerSystemDF(ctx context.Context, _ contract.Intent) ta
 
 func (r *Runner) handleDockerListVolumes(ctx context.Context, _ contract.Intent) taskOutcome {
 	args := []string{"volume", "ls", "--format", "{{json .}}"}
-	output, err := r.exec.Run(ctx, "", "docker", args...)
+	output, err := r.runDockerCommand(ctx, "", args...)
 	return taskOutcome{
 		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
 		logTail: tailLines(output, 25),
@@ -462,7 +475,7 @@ func (r *Runner) handleDockerContainerLogs(ctx context.Context, intent contract.
 	}
 	args = append(args, container)
 
-	output, err := r.exec.Run(ctx, "", "docker", args...)
+	output, err := r.runDockerCommand(ctx, "", args...)
 	return taskOutcome{
 		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
 		logTail: tailLines(output, 40),
@@ -474,7 +487,7 @@ func (r *Runner) handleDockerContainerLogs(ctx context.Context, intent contract.
 
 func (r *Runner) handleDockerRuntimeCheck(ctx context.Context, _ contract.Intent) taskOutcome {
 	versionArgs := []string{"version", "--format", "{{.Server.Version}}"}
-	versionOutput, err := r.exec.Run(ctx, "", "docker", versionArgs...)
+	versionOutput, err := r.runDockerCommand(ctx, "", versionArgs...)
 	if err != nil {
 		return taskOutcome{
 			err:     commandError(err, versionOutput, "docker %s", strings.Join(versionArgs, " ")),
@@ -483,7 +496,7 @@ func (r *Runner) handleDockerRuntimeCheck(ctx context.Context, _ contract.Intent
 	}
 
 	infoArgs := []string{"info", "--format", "{{json .}}"}
-	infoOutput, err := r.exec.Run(ctx, "", "docker", infoArgs...)
+	infoOutput, err := r.runDockerCommand(ctx, "", infoArgs...)
 	if err != nil {
 		return taskOutcome{
 			err:     commandError(err, infoOutput, "docker %s", strings.Join(infoArgs, " ")),
@@ -641,7 +654,7 @@ func (r *Runner) handleDockerRunQuickService(ctx context.Context, intent contrac
 	}
 	args = append(args, payload.Image)
 
-	output, err := r.exec.Run(ctx, "", "docker", args...)
+	output, err := r.runDockerCommand(ctx, "", args...)
 	return taskOutcome{
 		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
 		logTail: tailLines(output, 40),
@@ -652,7 +665,7 @@ func (r *Runner) handleDockerRunQuickService(ctx context.Context, intent contrac
 }
 
 func (r *Runner) ensureQuickServiceNetwork(ctx context.Context, networkName string) error {
-	inspectOutput, inspectErr := r.exec.Run(ctx, "", "docker", "network", "inspect", networkName)
+	inspectOutput, inspectErr := r.runDockerCommand(ctx, "", "network", "inspect", networkName)
 	if inspectErr == nil {
 		return nil
 	}
@@ -672,7 +685,7 @@ func (r *Runner) ensureQuickServiceNetwork(ctx context.Context, networkName stri
 		contract.QuickServiceNetworkLabelKey + "=" + contract.QuickServiceNetworkLabelValue,
 		networkName,
 	}
-	createOutput, createErr := r.exec.Run(ctx, "", "docker", createArgs...)
+	createOutput, createErr := r.runDockerCommand(ctx, "", createArgs...)
 	if createErr != nil {
 		if dockerNetworkAlreadyExists(createErr, createOutput) {
 			return nil
@@ -855,7 +868,7 @@ func (r *Runner) handleProjectFileRemove(_ context.Context, intent contract.Inte
 
 func (r *Runner) handleHostListenTCPPorts(ctx context.Context, _ contract.Intent) taskOutcome {
 	args := []string{"-ltnH"}
-	output, err := r.exec.Run(ctx, "", "ss", args...)
+	output, err := r.runCommand(ctx, "", nil, "ss", args...)
 	return taskOutcome{
 		err:     commandError(err, output, "ss %s", strings.Join(args, " ")),
 		logTail: tailLines(output, 25),
@@ -867,7 +880,7 @@ func (r *Runner) handleHostListenTCPPorts(ctx context.Context, _ contract.Intent
 
 func (r *Runner) handleDockerPublishedPorts(ctx context.Context, _ contract.Intent) taskOutcome {
 	args := []string{"ps", "--format", "{{.Ports}}"}
-	output, err := r.exec.Run(ctx, "", "docker", args...)
+	output, err := r.runDockerCommand(ctx, "", args...)
 	return taskOutcome{
 		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
 		logTail: tailLines(output, 25),
@@ -910,11 +923,19 @@ func (r *Runner) handleComposeUpStack(ctx context.Context, intent contract.Inten
 	}
 	args = append(args, "-d")
 
-	output, err := r.exec.Run(ctx, projectDir, "docker", args...)
+	output, err := r.runDockerCommand(ctx, projectDir, args...)
 	return taskOutcome{
 		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
 		logTail: tailLines(output, 40),
 	}
+}
+
+func (r *Runner) runCommand(ctx context.Context, dir string, env []string, name string, args ...string) ([]byte, error) {
+	return runExecutorCommand(ctx, r.exec, dir, env, name, args...)
+}
+
+func (r *Runner) runDockerCommand(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	return runExecutorDockerCommand(ctx, r.exec, dir, r.dockerTmpDir, args...)
 }
 
 func (r *Runner) resolveProjectDir(project, projectDir string) (string, error) {
@@ -1102,6 +1123,98 @@ func decodePayload(payload map[string]any, out any) error {
 		return fmt.Errorf("decode payload: %w", err)
 	}
 	return nil
+}
+
+func runExecutorCommand(ctx context.Context, exec commandExecutor, dir string, env []string, name string, args ...string) ([]byte, error) {
+	if exec == nil {
+		return nil, fmt.Errorf("executor unavailable")
+	}
+	request := commandRequest{
+		Dir:  dir,
+		Env:  cloneEnv(env),
+		Name: name,
+		Args: append([]string(nil), args...),
+	}
+	return exec.Run(ctx, request)
+}
+
+func runExecutorDockerCommand(ctx context.Context, exec commandExecutor, dir, dockerTmpDir string, args ...string) ([]byte, error) {
+	env, err := prepareDockerCommandEnv(os.Environ(), dockerTmpDir)
+	if err != nil {
+		return nil, err
+	}
+	return runExecutorCommand(ctx, exec, dir, env, "docker", args...)
+}
+
+func prepareDockerCommandEnv(baseEnv []string, dockerTmpDir string) ([]string, error) {
+	env := cloneEnv(baseEnv)
+	if value, ok := envValue(env, "DOCKER_CONFIG"); ok && strings.TrimSpace(value) != "" {
+		return env, nil
+	}
+	if hasDefaultDockerConfig(env) {
+		return env, nil
+	}
+
+	root := strings.TrimSpace(dockerTmpDir)
+	if root == "" {
+		root = os.TempDir()
+	}
+	configDir := filepath.Join(root, defaultDockerConfigDir)
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		return nil, fmt.Errorf("ensure docker config dir: %w", err)
+	}
+	return setEnvValue(env, "DOCKER_CONFIG", configDir), nil
+}
+
+func hasDefaultDockerConfig(env []string) bool {
+	homeDir, ok := envValue(env, "HOME")
+	homeDir = strings.TrimSpace(homeDir)
+	if !ok || homeDir == "" {
+		return false
+	}
+
+	configPath := filepath.Join(homeDir, ".docker", "config.json")
+	info, err := os.Stat(configPath)
+	return err == nil && !info.IsDir()
+}
+
+func cloneEnv(baseEnv []string) []string {
+	if len(baseEnv) == 0 {
+		return nil
+	}
+	cloned := make([]string, len(baseEnv))
+	copy(cloned, baseEnv)
+	return cloned
+}
+
+func envValue(env []string, key string) (string, bool) {
+	for _, raw := range env {
+		currentKey, value, ok := strings.Cut(raw, "=")
+		if ok && currentKey == key {
+			return value, true
+		}
+	}
+	return "", false
+}
+
+func setEnvValue(env []string, key, value string) []string {
+	updated := make([]string, 0, len(env)+1)
+	replaced := false
+	for _, raw := range env {
+		currentKey, _, ok := strings.Cut(raw, "=")
+		if ok && currentKey == key {
+			if !replaced {
+				updated = append(updated, key+"="+value)
+				replaced = true
+			}
+			continue
+		}
+		updated = append(updated, raw)
+	}
+	if !replaced {
+		updated = append(updated, key+"="+value)
+	}
+	return updated
 }
 
 func commandError(runErr error, output []byte, format string, args ...any) error {

@@ -44,6 +44,24 @@ func TestComposeFilesNarrowAPIMountScope(t *testing.T) {
 	}
 }
 
+func TestComposeFilesRequireDockerSocketGroupContract(t *testing.T) {
+	repoRoot := repoRootFromServiceTest(t)
+	composeFiles := []string{
+		filepath.Join(repoRoot, "docker-compose.yml"),
+		filepath.Join(repoRoot, "docker-compose.release.yml"),
+	}
+
+	for _, path := range composeFiles {
+		contentBytes, err := os.ReadFile(path)
+		require.NoError(t, err)
+		content := string(contentBytes)
+		apiSection := composeServiceSection(t, content, "api", "web")
+
+		require.Contains(t, apiSection, `"${DOCKER_SOCKET_GID:?`, "%s api must fail closed when the docker socket group contract is missing", filepath.Base(path))
+		require.NotContains(t, apiSection, "${DOCKER_SOCKET_GID:-0}", "%s api must not silently fall back to root group for docker socket access", filepath.Base(path))
+	}
+}
+
 func TestComposeFilesDisableDBHostPublishByDefault(t *testing.T) {
 	repoRoot := repoRootFromServiceTest(t)
 	composeFiles := []string{

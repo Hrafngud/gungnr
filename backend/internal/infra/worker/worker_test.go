@@ -29,6 +29,7 @@ func decodeDataLines(t *testing.T, data map[string]any) []string {
 
 type fakeExecCall struct {
 	dir  string
+	env  []string
 	name string
 	args []string
 }
@@ -41,13 +42,16 @@ type fakeExecutor struct {
 	errs    []error
 }
 
-func (f *fakeExecutor) Run(_ context.Context, dir string, name string, args ...string) ([]byte, error) {
-	copiedArgs := make([]string, len(args))
-	copy(copiedArgs, args)
+func (f *fakeExecutor) Run(_ context.Context, req commandRequest) ([]byte, error) {
+	copiedArgs := make([]string, len(req.Args))
+	copy(copiedArgs, req.Args)
+	copiedEnv := make([]string, len(req.Env))
+	copy(copiedEnv, req.Env)
 	callIndex := len(f.calls)
 	f.calls = append(f.calls, fakeExecCall{
-		dir:  dir,
-		name: name,
+		dir:  req.Dir,
+		env:  copiedEnv,
+		name: req.Name,
 		args: copiedArgs,
 	})
 	output := f.output
@@ -695,6 +699,7 @@ func TestProcessOnceHandlesComposeFailure(t *testing.T) {
 		err:    errors.New("exit status 1"),
 	}
 	r := New(q, 10*time.Millisecond, templatesDir, nil)
+	r.dockerTmpDir = t.TempDir()
 	r.exec = exec
 
 	err = r.ProcessOnce(context.Background())
@@ -703,6 +708,13 @@ func TestProcessOnceHandlesComposeFailure(t *testing.T) {
 	require.Len(t, exec.calls, 1)
 	require.Equal(t, "docker", exec.calls[0].name)
 	require.Equal(t, projectDir, exec.calls[0].dir)
+	joinedEnv := strings.Join(exec.calls[0].env, "\n")
+	defaultConfigPath := filepath.Join(os.Getenv("HOME"), ".docker", "config.json")
+	if info, statErr := os.Stat(defaultConfigPath); statErr == nil && !info.IsDir() {
+		require.NotContains(t, joinedEnv, "DOCKER_CONFIG="+filepath.Join(r.dockerTmpDir, defaultDockerConfigDir))
+	} else {
+		require.Contains(t, joinedEnv, "DOCKER_CONFIG="+filepath.Join(r.dockerTmpDir, defaultDockerConfigDir))
+	}
 
 	result, err := q.ReadResult(context.Background(), intent.IntentID)
 	require.NoError(t, err)
@@ -957,6 +969,58 @@ func TestWithTunnelRunIdentityEnv(t *testing.T) {
 	require.Contains(t, joined, "LOGNAME=joaod")
 	require.Contains(t, joined, "HOME=/home/joaod")
 	require.Contains(t, joined, "PATH=/usr/bin")
+}
+
+func TestPrepareDockerCommandEnvInjectsWritableFallback(t *testing.T) {
+	dockerTmpDir := t.TempDir()
+
+	env, err := prepareDockerCommandEnv([]string{
+		"HOME=/home/appuser",
+		"PATH=/usr/bin",
+	}, dockerTmpDir)
+	require.NoError(t, err)
+
+	expected := filepath.Join(dockerTmpDir, defaultDockerConfigDir)
+	require.Contains(t, strings.Join(env, "\n"), "DOCKER_CONFIG="+expected)
+
+	info, err := os.Stat(expected)
+	require.NoError(t, err)
+	require.True(t, info.IsDir())
+}
+
+func TestPrepareDockerCommandEnvPreservesExplicitConfig(t *testing.T) {
+	dockerTmpDir := t.TempDir()
+	explicit := filepath.Join(dockerTmpDir, "operator-config")
+
+	env, err := prepareDockerCommandEnv([]string{
+		"HOME=/home/appuser",
+		"DOCKER_CONFIG=" + explicit,
+	}, dockerTmpDir)
+	require.NoError(t, err)
+	require.Contains(t, strings.Join(env, "\n"), "DOCKER_CONFIG="+explicit)
+
+	_, statErr := os.Stat(filepath.Join(dockerTmpDir, defaultDockerConfigDir))
+	require.Error(t, statErr)
+	require.True(t, os.IsNotExist(statErr))
+}
+
+func TestPrepareDockerCommandEnvPreservesDefaultHomeConfig(t *testing.T) {
+	dockerTmpDir := t.TempDir()
+	homeDir := t.TempDir()
+	defaultConfigDir := filepath.Join(homeDir, ".docker")
+	require.NoError(t, os.MkdirAll(defaultConfigDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(defaultConfigDir, "config.json"), []byte(`{"currentContext":"remote"}`), 0o600))
+
+	env, err := prepareDockerCommandEnv([]string{
+		"HOME=" + homeDir,
+		"PATH=/usr/bin",
+	}, dockerTmpDir)
+	require.NoError(t, err)
+	require.NotContains(t, strings.Join(env, "\n"), "DOCKER_CONFIG=")
+
+	_, statErr := os.Stat(filepath.Join(dockerTmpDir, defaultDockerConfigDir))
+	require.Error(t, statErr)
+	require.True(t, os.IsNotExist(statErr))
 }
 
 func TestResolveTunnelRunIdentityMissingConfig(t *testing.T) {

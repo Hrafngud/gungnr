@@ -250,10 +250,10 @@ func readSystemImageAndKernel(exec commandExecutor, ctx context.Context) (string
 
 	// Prefer docker daemon identity because it reflects the host runtime in containerized deployments.
 	if exec != nil {
-		if output, err := exec.Run(ctx, "", "docker", "info", "--format", "{{.OperatingSystem}}"); err == nil {
+		if output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "info", "--format", "{{.OperatingSystem}}"); err == nil {
 			image = strings.TrimSpace(string(output))
 		}
-		if output, err := exec.Run(ctx, "", "docker", "info", "--format", "{{.KernelVersion}}"); err == nil {
+		if output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "info", "--format", "{{.KernelVersion}}"); err == nil {
 			kernel = strings.TrimSpace(string(output))
 		}
 	}
@@ -265,7 +265,7 @@ func readSystemImageAndKernel(exec commandExecutor, ctx context.Context) (string
 	}
 
 	if kernel == "" && exec != nil {
-		if output, err := exec.Run(ctx, "", "uname", "-sr"); err == nil {
+		if output, err := runExecutorCommand(ctx, exec, "", nil, "uname", "-sr"); err == nil {
 			kernel = strings.TrimSpace(string(output))
 		}
 	}
@@ -277,7 +277,7 @@ func readSystemImageAndKernel(exec commandExecutor, ctx context.Context) (string
 
 func readHostName(ctx context.Context, exec commandExecutor) string {
 	if exec != nil {
-		if output, err := exec.Run(ctx, "", "docker", "info", "--format", "{{.Name}}"); err == nil {
+		if output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "info", "--format", "{{.Name}}"); err == nil {
 			value := strings.TrimSpace(string(output))
 			if value != "" {
 				return value
@@ -424,7 +424,7 @@ func detectGPUInfo(ctx context.Context, exec commandExecutor) (*hostRuntimeGPU, 
 	if exec == nil {
 		return nil, false
 	}
-	if output, err := exec.Run(ctx, "", "nvidia-smi", "--query-gpu=name,clocks.current.graphics", "--format=csv,noheader,nounits"); err == nil {
+	if output, err := runExecutorCommand(ctx, exec, "", nil, "nvidia-smi", "--query-gpu=name,clocks.current.graphics", "--format=csv,noheader,nounits"); err == nil {
 		lines := parseOutputLines(output)
 		if len(lines) > 0 {
 			model, speedMHz := parseNvidiaGPUInfoLine(lines[0])
@@ -433,7 +433,7 @@ func detectGPUInfo(ctx context.Context, exec commandExecutor) (*hostRuntimeGPU, 
 			}
 		}
 	}
-	if output, err := exec.Run(ctx, "", "nvidia-smi", "--query-gpu=name", "--format=csv,noheader"); err == nil {
+	if output, err := runExecutorCommand(ctx, exec, "", nil, "nvidia-smi", "--query-gpu=name", "--format=csv,noheader"); err == nil {
 		lines := parseOutputLines(output)
 		if len(lines) > 0 {
 			model := strings.TrimSpace(lines[0])
@@ -442,7 +442,7 @@ func detectGPUInfo(ctx context.Context, exec commandExecutor) (*hostRuntimeGPU, 
 			}
 		}
 	}
-	output, err := exec.Run(ctx, "", "lspci")
+	output, err := runExecutorCommand(ctx, exec, "", nil, "lspci")
 	if err != nil {
 		return nil, false
 	}
@@ -513,7 +513,7 @@ func readMemorySpeedMTs(ctx context.Context, exec commandExecutor) (int, bool) {
 	if exec == nil {
 		return 0, false
 	}
-	output, err := exec.Run(ctx, "", "dmidecode", "-t", "memory")
+	output, err := runExecutorCommand(ctx, exec, "", nil, "dmidecode", "-t", "memory")
 	if err != nil {
 		return 0, false
 	}
@@ -542,9 +542,9 @@ func readRootDiskUsageBytes(ctx context.Context, exec commandExecutor, templates
 		return 0, 0, 0, fmt.Errorf("executor unavailable")
 	}
 	probePath := resolveDiskProbePath(templatesDir)
-	output, err := exec.Run(ctx, "", "df", "-B1", probePath)
+	output, err := runExecutorCommand(ctx, exec, "", nil, "df", "-B1", probePath)
 	if err != nil && probePath != "/" {
-		output, err = exec.Run(ctx, "", "df", "-B1", "/")
+		output, err = runExecutorCommand(ctx, exec, "", nil, "df", "-B1", "/")
 	}
 	if err != nil {
 		return 0, 0, 0, err
@@ -637,7 +637,7 @@ func readDockerInventory(
 	exec commandExecutor,
 	localProjectNames map[string]struct{},
 ) (map[string]runtimeUsageContainerMeta, map[string]runtimeUsageContainerMeta, runtimeUsageAccumulator, runtimeUsageAccumulator, map[string]*runtimeUsageAccumulator, error) {
-	output, err := exec.Run(ctx, "", "docker", "ps", "-a", "--format", "{{json .}}")
+	output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "ps", "-a", "--format", "{{json .}}")
 	if err != nil {
 		return nil, nil, runtimeUsageAccumulator{}, runtimeUsageAccumulator{}, nil, err
 	}
@@ -703,7 +703,7 @@ func readDockerMemoryUsage(
 	projects *runtimeUsageAccumulator,
 	projectAccums map[string]*runtimeUsageAccumulator,
 ) error {
-	output, err := exec.Run(ctx, "", "docker", "stats", "--no-stream", "--format", "{{json .}}")
+	output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "stats", "--no-stream", "--format", "{{json .}}")
 	if err != nil {
 		return err
 	}
@@ -764,7 +764,7 @@ func readDockerDiskUsage(
 	projects *runtimeUsageAccumulator,
 	projectAccums map[string]*runtimeUsageAccumulator,
 ) error {
-	output, err := exec.Run(ctx, "", "docker", "ps", "-as", "--format", "{{json .}}")
+	output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "ps", "-as", "--format", "{{json .}}")
 	if err != nil {
 		return err
 	}

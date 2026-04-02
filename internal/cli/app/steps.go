@@ -321,7 +321,7 @@ func runEnvSetup(ctx context.Context, state *State, ui UI) error {
 	if err != nil {
 		return err
 	}
-	dockerSocketGID, err := docker.DockerSocketGID()
+	runtimeEnv, err := ResolvePanelRuntimeEnv(dataPaths.Root)
 	if err != nil {
 		return err
 	}
@@ -354,13 +354,13 @@ func runEnvSetup(ctx context.Context, state *State, ui UI) error {
 		CloudflaredConfig:   state.CloudflaredConfig,
 		CloudflaredTunnel:   state.Tunnel.Name,
 		CloudflaredDir:      state.Paths.CloudflaredDir,
-		InfraQueueRoot:      filepath.Join(dataPaths.TemplatesDir, ".infra"),
-		DockerSocketGID:     dockerSocketGID,
-		DockerNetworkMode:   "compat",
 		PostgresUser:        DefaultPostgresUser,
 		PostgresPassword:    DefaultPostgresPassword,
 		PostgresDB:          DefaultPostgresDB,
 		ViteAPIBaseURL:      "/",
+	}
+	if err := runtimeEnv.Apply(&state.Env); err != nil {
+		return err
 	}
 
 	if err := state.Env.Validate(); err != nil {
