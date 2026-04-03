@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"net/http"
 	"os"
@@ -27,6 +28,7 @@ const (
 	tunnelReadyURL          = "http://127.0.0.1:20241/ready"
 	tunnelReadyProbeTimeout = 20 * time.Second
 	defaultDockerConfigDir  = "gungnr-docker-config"
+	defaultTunnelLogDir     = "gungnr-cloudflared"
 )
 
 type commandExecutor interface {
@@ -1293,7 +1295,7 @@ func newCloudflaredTunnelLifecycle(logger *log.Logger) tunnelLifecycle {
 
 func (l *cloudflaredTunnelLifecycle) Restart(ctx context.Context, configPath string) (string, []string, error) {
 	configPath = expandUserPath(configPath)
-	logPath := filepath.Join(filepath.Dir(configPath), "cloudflared-restart-worker.log")
+	logPath := restartTunnelLogPath(configPath)
 	runAs, err := resolveTunnelRunIdentity(configPath, os.Geteuid())
 	if err != nil {
 		return logPath, nil, err
@@ -1407,7 +1409,10 @@ func startTunnelProcess(configPath, logPath, metricsAddress string, runAs *tunne
 	if strings.TrimSpace(metricsAddress) == "" {
 		return fmt.Errorf("metrics address is required")
 	}
-	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		return fmt.Errorf("create cloudflared log directory: %w", err)
+	}
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("open cloudflared log file: %w", err)
 	}
@@ -1472,6 +1477,16 @@ func readLogTail(logPath string, max int) []string {
 		return nil
 	}
 	return tailLines(payload, max)
+}
+
+func restartTunnelLogPath(configPath string) string {
+	hasher := fnv.New64a()
+	_, _ = hasher.Write([]byte(strings.TrimSpace(configPath)))
+	return filepath.Join(
+		os.TempDir(),
+		defaultTunnelLogDir,
+		fmt.Sprintf("cloudflared-restart-%016x.log", hasher.Sum64()),
+	)
 }
 
 func expandUserPath(raw string) string {

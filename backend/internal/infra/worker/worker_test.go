@@ -668,6 +668,34 @@ func TestProcessOnceHandlesRestartTunnel(t *testing.T) {
 	require.Equal(t, []string{"restart ok"}, result.LogTail)
 }
 
+func TestRestartTunnelLogPathUsesTmpDir(t *testing.T) {
+	t.Parallel()
+
+	configPath := "/home/tester/.cloudflared/config.yml"
+	logPath := restartTunnelLogPath(configPath)
+
+	require.Equal(t, logPath, restartTunnelLogPath(configPath))
+	require.NotEqual(t, logPath, restartTunnelLogPath("/home/tester/.cloudflared/other.yml"))
+	require.Equal(t, filepath.Join(os.TempDir(), defaultTunnelLogDir), filepath.Dir(logPath))
+	require.Contains(t, filepath.Base(logPath), "cloudflared-restart-")
+	require.True(t, strings.HasSuffix(logPath, ".log"))
+}
+
+func TestStartTunnelProcessCreatesLogDirectory(t *testing.T) {
+	binDir := t.TempDir()
+	fakeCloudflared := filepath.Join(binDir, "cloudflared")
+	require.NoError(t, os.WriteFile(fakeCloudflared, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	configPath := filepath.Join(t.TempDir(), "config.yml")
+	require.NoError(t, os.WriteFile(configPath, []byte("tunnel: demo\n"), 0o600))
+
+	logPath := filepath.Join(t.TempDir(), "nested", "cloudflared", "restart.log")
+	require.NoError(t, startTunnelProcess(configPath, logPath, tunnelMetricsAddress, nil))
+	require.DirExists(t, filepath.Dir(logPath))
+	require.FileExists(t, logPath)
+}
+
 func TestProcessOnceHandlesComposeFailure(t *testing.T) {
 	t.Parallel()
 
