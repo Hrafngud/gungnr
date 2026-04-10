@@ -1071,7 +1071,7 @@
     }
   },
   "GET /api/v1/host/stats": {
-    "stats": {
+    "snapshot": {
       "collectedAt": "2026-03-19T13:30:00Z",
       "hostname": "mock-host",
       "uptimeSeconds": 987654,
@@ -1103,37 +1103,57 @@
         "availableBytes": 312147001344,
         "usedPercent": 39.6
       },
-      "panelUsage": {
+      "panel": {
         "containers": 2,
         "runningContainers": 2,
-        "cpuUsedPercent": 3.6,
-        "memoryUsedBytes": 734003200,
         "diskUsedBytes": 3481272320,
-        "memorySharePercent": 2.14,
         "diskSharePercent": 0.65
       },
-      "projectsUsage": {
+      "projects": {
         "containers": 4,
         "runningContainers": 4,
-        "cpuUsedPercent": 18.4,
-        "memoryUsedBytes": 2436890624,
         "diskUsedBytes": 8589934592,
-        "memorySharePercent": 7.09,
         "diskSharePercent": 1.6
       },
       "projectsByName": {
         "mock-service": {
           "containers": 4,
           "runningContainers": 4,
-          "cpuUsedPercent": 18.4,
-          "memoryUsedBytes": 2436890624,
           "diskUsedBytes": 8589934592,
-          "memorySharePercent": 7.09,
           "diskSharePercent": 1.6
         }
       },
       "warnings": []
     }
+  },
+  "GET /api/v1/host/stats/stream": {
+    "collectedAt": "2026-03-19T13:30:00Z",
+    "mode": "mock",
+    "intervalMs": 500,
+    "host": {
+      "memoryUsedBytes": 16012345678,
+      "memoryUsedPercent": 46.6,
+      "memoryFreeBytes": 18347391290,
+      "memoryAvailableBytes": 18347391290
+    },
+    "panel": {
+      "cpuUsedPercent": 3.8,
+      "memoryUsedBytes": 754003200,
+      "memorySharePercent": 2.19
+    },
+    "projects": {
+      "cpuUsedPercent": 19.2,
+      "memoryUsedBytes": 2536890624,
+      "memorySharePercent": 7.38
+    },
+    "projectsByName": {
+      "mock-service": {
+        "cpuUsedPercent": 19.2,
+        "memoryUsedBytes": 2536890624,
+        "memorySharePercent": 7.38
+      }
+    },
+    "warnings": ["mock runtime data is synthetic"]
   },
   "GET /api/v1/users": {
     "users": [

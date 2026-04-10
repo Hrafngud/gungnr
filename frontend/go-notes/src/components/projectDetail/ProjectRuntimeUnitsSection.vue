@@ -12,7 +12,7 @@ import UiRuntimeLedMeter from '@/components/ui/UiRuntimeLedMeter.vue'
 import UiState from '@/components/ui/UiState.vue'
 import NavIcon from '@/components/NavIcon.vue'
 import type { BadgeTone } from '@/components/workbench/projectDetailWorkbenchTypes'
-import { apiErrorMessage } from '@/services/api'
+import { apiErrorMessage, isMockEnabled } from '@/services/api'
 import { hostApi } from '@/services/host'
 import { projectsApi } from '@/services/projects'
 import { useToastStore } from '@/stores/toasts'
@@ -304,7 +304,13 @@ const loadProjectUsageSnapshot = async () => {
   }
 }
 
+let mockUsageStreamInterval: ReturnType<typeof setInterval> | null = null
+
 const closeUsageStream = () => {
+  if (mockUsageStreamInterval) {
+    clearInterval(mockUsageStreamInterval)
+    mockUsageStreamInterval = null
+  }
   if (!usageStreamSource) return
   usageStreamSource.close()
   usageStreamSource = null
@@ -314,6 +320,44 @@ const startUsageStream = () => {
   closeUsageStream()
   usageStreamState.value = 'connecting'
   usageStreamError.value = null
+
+  if (isMockEnabled()) {
+    usageStreamState.value = 'live'
+    mockUsageStreamInterval = setInterval(() => {
+      const baseSample: HostRuntimeStreamSample = {
+        collectedAt: new Date().toISOString(),
+        mode: 'mock',
+        intervalMs: 500,
+        host: {
+          memoryUsedBytes: 16012345678,
+          memoryUsedPercent: 46.6,
+          memoryFreeBytes: 18347391290,
+          memoryAvailableBytes: 18347391290,
+        },
+        panel: {
+          cpuUsedPercent: 3.8,
+          memoryUsedBytes: 754003200,
+          memorySharePercent: 2.19,
+        },
+        projects: {
+          cpuUsedPercent: 19.2,
+          memoryUsedBytes: 2536890624,
+          memorySharePercent: 7.38,
+        },
+        projectsByName: {
+          'mock-service': {
+            cpuUsedPercent: 19.2,
+            memoryUsedBytes: 2536890624,
+            memorySharePercent: 7.38,
+          },
+        },
+        warnings: ['mock runtime data is synthetic'],
+      }
+      usageStreamSample.value = resolveProjectUsage(baseSample.projectsByName)
+      usageStreamWarnings.value = (baseSample.warnings ?? []).slice(0, 2)
+    }, 500)
+    return
+  }
 
   const source = new EventSource(hostApi.runtimeStatsStreamUrl(), { withCredentials: true })
   usageStreamSource = source

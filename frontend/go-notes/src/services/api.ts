@@ -154,7 +154,7 @@ interface MockWorkbenchState {
 
 const mockWorkbenchStateByProject = new Map<string, MockWorkbenchState>()
 
-function isMockEnabled(): boolean {
+export function isMockEnabled(): boolean {
   if (typeof window === 'undefined') return false
   try {
     return window.localStorage.getItem(mockFlagKey) === '1'
