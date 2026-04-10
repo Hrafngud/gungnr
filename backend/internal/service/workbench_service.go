@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"go-notes/internal/errs"
+	"go-notes/internal/infra/contract"
 	"go-notes/internal/repository"
 	"go-notes/internal/validate"
 )
@@ -37,6 +38,7 @@ type WorkbenchService struct {
 	sessionSecret     string
 	hostPortScanner   workbenchHostPortScanner
 	runtimeMetaClient infraDockerMetadataClient
+	hostReadClient    infraProjectFileReadClient
 	fileClient        infraProjectFileMutationClient
 	lockManager       *workbenchProjectLockManager
 	lockWaitTimeout   time.Duration
@@ -62,6 +64,7 @@ func NewWorkbenchServiceWithStorage(
 		sessionSecret:     strings.TrimSpace(sessionSecret),
 		hostPortScanner:   workbenchScanOccupiedHostPortsWithProbeClient(nil),
 		runtimeMetaClient: nil,
+		hostReadClient:    nil,
 		fileClient:        nil,
 		lockManager:       newWorkbenchProjectLockManager(),
 		lockWaitTimeout:   defaultWorkbenchLockWaitTimeout,
@@ -77,6 +80,10 @@ func (s *WorkbenchService) SetPortProbeClient(probeClient infraPortProbeClient) 
 
 func (s *WorkbenchService) SetRuntimeMetaClient(runtimeMetaClient infraDockerMetadataClient) {
 	s.runtimeMetaClient = runtimeMetaClient
+}
+
+func (s *WorkbenchService) SetHostFileReadClient(fileClient infraProjectFileReadClient) {
+	s.hostReadClient = fileClient
 }
 
 func (s *WorkbenchService) SetFileMutationClient(fileClient infraProjectFileMutationClient) {
@@ -102,7 +109,7 @@ func (s *WorkbenchService) ResolveComposeSource(ctx context.Context, projectName
 		return WorkbenchComposeSource{}, err
 	}
 
-	raw, err := os.ReadFile(composePath)
+	raw, err := readProjectFile(ctx, s.hostReadClient, resolved.ProjectDir, composePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return WorkbenchComposeSource{}, workbenchSourceNotFoundError(resolved)
@@ -199,31 +206,23 @@ func resolveWorkbenchComposePath(resolution projectPathResolution) (string, erro
 		}
 	}
 
+	for _, candidate := range resolution.ComposeFiles {
+		path, err := normalizeWorkbenchProjectPath(resolution.ProjectDir, candidate)
+		if err != nil {
+			return "", workbenchSourceInvalidError(resolution, candidate, "invalid compose source path", err)
+		}
+		if path != "" {
+			return path, nil
+		}
+	}
+
 	return "", workbenchSourceNotFoundError(resolution)
 }
 
 func sanitizeWorkbenchComposePath(projectDir, composePath string) (string, bool, error) {
-	cleaned := filepath.Clean(strings.TrimSpace(composePath))
-	if cleaned == "" {
-		return "", false, nil
-	}
-
-	projectRoot := filepath.Clean(strings.TrimSpace(projectDir))
-	if projectRoot == "" {
-		return "", false, fmt.Errorf("project root is empty")
-	}
-	if rootResolved, err := filepath.EvalSymlinks(projectRoot); err == nil {
-		projectRoot = rootResolved
-	}
-
-	if !filepath.IsAbs(cleaned) {
-		cleaned = filepath.Join(projectRoot, cleaned)
-	}
-	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
-		cleaned = resolved
-	}
-	if !isPathWithinBase(projectRoot, cleaned) {
-		return "", false, fmt.Errorf("compose source path resolves outside project root")
+	cleaned, err := normalizeWorkbenchProjectPath(projectDir, composePath)
+	if err != nil || cleaned == "" {
+		return cleaned, false, err
 	}
 
 	info, err := os.Stat(cleaned)
@@ -238,6 +237,60 @@ func sanitizeWorkbenchComposePath(projectDir, composePath string) (string, bool,
 	}
 
 	return cleaned, true, nil
+}
+
+func normalizeWorkbenchProjectPath(projectDir, filePath string) (string, error) {
+	cleaned := filepath.Clean(strings.TrimSpace(filePath))
+	if cleaned == "" {
+		return "", nil
+	}
+
+	projectRoot := filepath.Clean(strings.TrimSpace(projectDir))
+	if projectRoot == "" {
+		return "", fmt.Errorf("project root is empty")
+	}
+	if rootResolved, err := filepath.EvalSymlinks(projectRoot); err == nil {
+		projectRoot = rootResolved
+	}
+
+	if !filepath.IsAbs(cleaned) {
+		cleaned = filepath.Join(projectRoot, cleaned)
+	}
+	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
+		cleaned = resolved
+	}
+	if !isPathWithinBase(projectRoot, cleaned) {
+		return "", fmt.Errorf("compose source path resolves outside project root")
+	}
+	return cleaned, nil
+}
+
+func readProjectFile(
+	ctx context.Context,
+	fileClient infraProjectFileReadClient,
+	projectDir string,
+	filePath string,
+) ([]byte, error) {
+	raw, err := os.ReadFile(filePath)
+	if err == nil || fileClient == nil {
+		return raw, err
+	}
+
+	result, bridgeErr := fileClient.ProjectFileRead(ctx, "", contract.ProjectFileReadPayload{
+		BasePath: projectDir,
+		Path:     filePath,
+	})
+	if bridgeErr != nil {
+		return nil, err
+	}
+	if result.Status != contract.StatusSucceeded {
+		return nil, err
+	}
+	content, ok := result.Data["content"].(string)
+	if !ok {
+		return nil, fmt.Errorf("infra bridge project_file_read returned invalid content payload")
+	}
+	return []byte(content), nil
 }
 
 func workbenchSourceNotFoundError(resolution projectPathResolution) error {

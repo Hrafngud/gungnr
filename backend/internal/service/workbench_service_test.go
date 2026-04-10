@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -12,8 +13,26 @@ import (
 
 	"go-notes/internal/config"
 	"go-notes/internal/errs"
+	"go-notes/internal/infra/contract"
 	"go-notes/internal/models"
 )
+
+type stubWorkbenchRuntimeMetaClient struct {
+	lines []string
+	err   error
+}
+
+func (s stubWorkbenchRuntimeMetaClient) DockerListContainers(_ context.Context, _ string, _ bool) (contract.Result, error) {
+	if s.err != nil {
+		return contract.Result{}, s.err
+	}
+	return contract.Result{
+		Status: contract.StatusSucceeded,
+		Data: map[string]any{
+			"lines": append([]string(nil), s.lines...),
+		},
+	}, nil
+}
 
 func TestWorkbenchSourceFingerprintEquivalentInput(t *testing.T) {
 	t.Parallel()
@@ -99,6 +118,58 @@ func TestWorkbenchResolveComposeSourceSuccess(t *testing.T) {
 	}
 	if source.ProjectName != "demo" {
 		t.Fatalf("expected normalized project name demo, got %q", source.ProjectName)
+	}
+}
+
+func TestWorkbenchResolveComposeSourceFallsBackToBridgeReadForRuntimeHostPath(t *testing.T) {
+	t.Parallel()
+
+	templatesDir := t.TempDir()
+	composeBody := "services:\n  api:\n    image: nginx:stable\n"
+	projectDir := "/host/projects/Galidor"
+	composePath := filepath.Join(projectDir, "docker-compose.yml")
+
+	runtimeLineBytes, err := json.Marshal(dockerPSLine{
+		Names:  "galidor-api-1",
+		Labels: "com.docker.compose.project=demo,com.docker.compose.project.working_dir=" + projectDir + ",com.docker.compose.project.config_files=" + composePath,
+	})
+	if err != nil {
+		t.Fatalf("marshal docker ps line: %v", err)
+	}
+
+	fileClient := &stubProjectFileMutationClient{
+		readContentByPath: map[string]string{
+			composePath: composeBody,
+		},
+	}
+	svc := NewWorkbenchService(templatesDir, nil)
+	svc.SetRuntimeMetaClient(stubWorkbenchRuntimeMetaClient{
+		lines: []string{string(runtimeLineBytes)},
+	})
+	svc.SetHostFileReadClient(fileClient)
+
+	source, err := svc.ResolveComposeSource(context.Background(), "demo")
+	if err != nil {
+		t.Fatalf("ResolveComposeSource: %v", err)
+	}
+
+	if source.ProjectDir != projectDir {
+		t.Fatalf("expected runtime-resolved project dir %q, got %q", projectDir, source.ProjectDir)
+	}
+	if source.ComposePath != composePath {
+		t.Fatalf("expected compose path %q, got %q", composePath, source.ComposePath)
+	}
+	if string(source.Raw) != composeBody {
+		t.Fatalf("expected bridge-read compose body %q, got %q", composeBody, string(source.Raw))
+	}
+	if len(fileClient.readCalls) != 1 {
+		t.Fatalf("expected one bridge read call, got %d", len(fileClient.readCalls))
+	}
+	if fileClient.readCalls[0].BasePath != projectDir {
+		t.Fatalf("expected read base path %q, got %q", projectDir, fileClient.readCalls[0].BasePath)
+	}
+	if fileClient.readCalls[0].Path != composePath {
+		t.Fatalf("expected read path %q, got %q", composePath, fileClient.readCalls[0].Path)
 	}
 }
 

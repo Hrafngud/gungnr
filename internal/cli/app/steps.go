@@ -40,6 +40,7 @@ func BootstrapSteps() []Step {
 		stepFunc{id: "cloudflare_dns", title: "Cloudflare DNS", run: runCloudflareDNS},
 		stepFunc{id: "cloudflared_run", title: "Cloudflared config + run", run: runCloudflaredRun},
 		stepFunc{id: "env_setup", title: "Data + env setup", run: runEnvSetup},
+		stepFunc{id: "host_worker_setup", title: "Host worker setup", run: runHostWorkerSetup},
 		stepFunc{id: "keepalive_setup", title: "Reboot fallback setup", run: runKeepaliveSetup},
 		stepFunc{id: "compose_start", title: "Start services", run: runComposeStart},
 	}
@@ -426,6 +427,23 @@ func runKeepaliveSetup(ctx context.Context, state *State, ui UI) error {
 
 	state.KeepaliveStatus = "enabled with warning (" + detail + ")"
 	ui.Warn("Reboot fallback: " + detail)
+	return nil
+}
+
+func runHostWorkerSetup(ctx context.Context, state *State, ui UI) error {
+	_ = ctx
+	if strings.TrimSpace(state.DataPaths.EnvPath) == "" {
+		return errors.New("bootstrap env path missing before host worker setup")
+	}
+
+	ui.StepProgress("host_worker_setup", "Installing host worker service")
+	result, err := SetupHostWorker()
+	if err != nil {
+		return err
+	}
+
+	ui.Info(fmt.Sprintf("Host worker supervisor: %s", result.Supervisor))
+	ui.Info(fmt.Sprintf("Host worker unit: %s", result.ServiceUnit))
 	return nil
 }
 

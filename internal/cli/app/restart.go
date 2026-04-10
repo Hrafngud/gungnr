@@ -38,6 +38,9 @@ func Restart() error {
 	if err := RefreshPanelRuntimeEnvEntries(envPath, paths.DataDir); err != nil {
 		return err
 	}
+	if _, err := SetupHostWorker(); err != nil {
+		return err
+	}
 
 	if err := docker.StopCompose(composeFile, envPath); err != nil {
 		return err

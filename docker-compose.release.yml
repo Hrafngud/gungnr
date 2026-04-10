@@ -40,10 +40,11 @@ services:
     image: alpine:3.20
     environment:
       INFRA_QUEUE_ROOT: ${INFRA_QUEUE_ROOT:-/templates/.infra}
+      HOST_INFRA_QUEUE_ROOT: ${HOST_INFRA_QUEUE_ROOT:-/templates/.host-infra}
     command:
       - sh
       - -lc
-      - mkdir -p "$INFRA_QUEUE_ROOT/intents" "$INFRA_QUEUE_ROOT/results" "$INFRA_QUEUE_ROOT/claims" && chown -R 1000:1000 "$INFRA_QUEUE_ROOT"
+      - mkdir -p "$INFRA_QUEUE_ROOT/intents" "$INFRA_QUEUE_ROOT/results" "$INFRA_QUEUE_ROOT/claims" "$HOST_INFRA_QUEUE_ROOT/intents" "$HOST_INFRA_QUEUE_ROOT/results" "$HOST_INFRA_QUEUE_ROOT/claims" && chown -R 1000:1000 "$INFRA_QUEUE_ROOT" "$HOST_INFRA_QUEUE_ROOT"
     restart: "no"
     networks:
       - core
@@ -84,6 +85,7 @@ services:
       CLOUDFLARED_CONFIG: ${CLOUDFLARED_CONFIG:-}
       CLOUDFLARED_TUNNEL_NAME: ${CLOUDFLARED_TUNNEL_NAME:-}
       INFRA_QUEUE_ROOT: ${INFRA_QUEUE_ROOT:-/templates/.infra}
+      HOST_INFRA_QUEUE_ROOT: ${HOST_INFRA_QUEUE_ROOT:-/templates/.host-infra}
       INFRA_POLL_INTERVAL_MS: ${INFRA_POLL_INTERVAL_MS:-500}
       INFRA_RESULT_TIMEOUT_SEC: ${INFRA_RESULT_TIMEOUT_SEC:-120}
       INFRA_RETENTION_INTENT_HOURS: ${INFRA_RETENTION_INTENT_HOURS:-168}

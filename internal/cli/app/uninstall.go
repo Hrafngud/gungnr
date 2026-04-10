@@ -48,6 +48,10 @@ func BuildUninstallPlan() (UninstallPlan, error) {
 }
 
 func ExecuteUninstall(plan UninstallPlan) error {
+	if _, err := TeardownHostWorker(); err != nil {
+		return err
+	}
+
 	for _, target := range plan.Targets {
 		info, err := os.Stat(target)
 		if err != nil {

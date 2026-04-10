@@ -64,23 +64,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to initialize infra queue: %v", err)
 	}
-	cleanupReport, cleanupErr := bridgeQueue.CleanupStale(context.Background(), time.Now().UTC(), infraqueue.RetentionPolicy{
-		IntentMaxAge: cfg.InfraIntentMaxAge,
-		ResultMaxAge: cfg.InfraResultMaxAge,
-		ClaimMaxAge:  cfg.InfraClaimMaxAge,
-	})
-	if cleanupErr != nil {
-		log.Printf("warn: infra queue cleanup failed: %v", cleanupErr)
-	} else if cleanupReport.TotalRemoved() > 0 {
-		log.Printf(
-			"infra queue cleanup removed intents=%d results=%d claims=%d protected=%d",
-			cleanupReport.RemovedIntents,
-			cleanupReport.RemovedResults,
-			cleanupReport.RemovedClaims,
-			cleanupReport.ProtectedTasks,
-		)
+	logQueueCleanup("infra queue", bridgeQueue, cfg)
+	hostBridgeQueue, err := infraqueue.NewFilesystem(cfg.HostInfraQueueRoot)
+	if err != nil {
+		log.Fatalf("failed to initialize host infra queue: %v", err)
 	}
+	logQueueCleanup("host infra queue", hostBridgeQueue, cfg)
 	bridgeClient := infraclient.New(bridgeQueue, cfg.InfraPollInterval, cfg.InfraResultTimeout)
+	hostBridgeClient := infraclient.New(hostBridgeQueue, cfg.InfraPollInterval, cfg.InfraResultTimeout)
 	dockerRunner := service.NewDockerRunner(bridgeClient)
 	bridgeWorker := infraworker.New(bridgeQueue, cfg.InfraPollInterval, cfg.TemplatesDir, log.Default())
 	if err := bridgeWorker.ValidateTaskCoverage([]contract.TaskType{
@@ -112,6 +103,7 @@ func main() {
 	workbenchService := service.NewWorkbenchServiceWithStorage(cfg.TemplatesDir, projectRepo, settingsRepo, cfg.SessionSecret)
 	workbenchService.SetPortProbeClient(bridgeClient)
 	workbenchService.SetRuntimeMetaClient(bridgeClient)
+	workbenchService.SetHostFileReadClient(hostBridgeClient)
 	workbenchService.SetFileMutationClient(bridgeClient)
 	projectArchiveService := service.NewProjectArchiveService(cfg, projectRepo, settingsService, jobService, hostService)
 	projectRuntimeService := service.NewProjectRuntimeService(cfg.TemplatesDir, projectRepo, hostService)
@@ -165,6 +157,29 @@ func main() {
 	if err := r.Run(":" + cfg.Port); err != nil {
 		log.Fatalf("server exited: %v", err)
 	}
+}
+
+func logQueueCleanup(label string, q *infraqueue.Filesystem, cfg config.Config) {
+	cleanupReport, cleanupErr := q.CleanupStale(context.Background(), time.Now().UTC(), infraqueue.RetentionPolicy{
+		IntentMaxAge: cfg.InfraIntentMaxAge,
+		ResultMaxAge: cfg.InfraResultMaxAge,
+		ClaimMaxAge:  cfg.InfraClaimMaxAge,
+	})
+	if cleanupErr != nil {
+		log.Printf("warn: %s cleanup failed: %v", label, cleanupErr)
+		return
+	}
+	if cleanupReport.TotalRemoved() == 0 {
+		return
+	}
+	log.Printf(
+		"%s cleanup removed intents=%d results=%d claims=%d protected=%d",
+		label,
+		cleanupReport.RemovedIntents,
+		cleanupReport.RemovedResults,
+		cleanupReport.RemovedClaims,
+		cleanupReport.ProtectedTasks,
+	)
 }
 
 func logStartupDockerHealth(healthService *service.HealthService) {

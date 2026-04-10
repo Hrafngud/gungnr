@@ -37,6 +37,8 @@ func main() {
 		runTunnel(os.Args[2:])
 	case "keepalive":
 		runKeepalive(os.Args[2:])
+	case "host-worker":
+		runHostWorker(os.Args[2:])
 	case "netbird":
 		runNetBird(os.Args[2:])
 	case "uninstall":
@@ -55,6 +57,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  gungnr restart")
 	fmt.Fprintln(os.Stderr, "  gungnr tunnel run")
 	fmt.Fprintln(os.Stderr, "  gungnr keepalive")
+	fmt.Fprintln(os.Stderr, "  gungnr host-worker [--queue-root PATH]")
 	fmt.Fprintln(os.Stderr, "  gungnr netbird mode --set <legacy|mode_a|mode_b> [--allow-localhost]")
 	fmt.Fprintln(os.Stderr, "  gungnr netbird status")
 	fmt.Fprintln(os.Stderr, "  gungnr uninstall [--yes]")
@@ -187,6 +190,26 @@ func runKeepalive(args []string) {
 func printKeepaliveUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  gungnr keepalive")
+}
+
+func runHostWorker(args []string) {
+	flags := flag.NewFlagSet("host-worker", flag.ExitOnError)
+	queueRoot := flags.String("queue-root", "", "Host infra queue root (default: $HOST_INFRA_QUEUE_ROOT or ~/gungnr/templates/.host-infra)")
+	_ = flags.Parse(args)
+
+	if flags.NArg() > 0 {
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "  gungnr host-worker [--queue-root PATH]")
+		os.Exit(2)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := app.RunHostWorker(ctx, *queueRoot); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }
 
 func runNetBird(args []string) {
