@@ -38,7 +38,6 @@ const formatMemorySpeed = (value: number | null | undefined) => {
 const runtimeIdentityCards = () => {
   const stats = runtimeSnapshot.value
   if (!stats) return []
-  const diskAvailableBytes = stats.disk.availableBytes ?? stats.disk.freeBytes
   return [
     {
       key: 'uptime',
