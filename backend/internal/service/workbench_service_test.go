@@ -215,7 +215,7 @@ services:
     networks:
       - backplane
     ports:
-      - "5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - type: volume
@@ -317,6 +317,9 @@ services:
 	}
 	if parsed.Ports[2].ServiceName != "db" || parsed.Ports[2].ContainerPort != 5432 {
 		t.Fatalf("unexpected third parsed port: %#v", parsed.Ports[2])
+	}
+	if parsed.Ports[2].HostPortRaw != "${DB_PORT:-5432}" {
+		t.Fatalf("expected db env-backed host port raw value, got %q", parsed.Ports[2].HostPortRaw)
 	}
 
 	if got, want := len(parsed.Resources), 2; got != want {
@@ -513,6 +516,36 @@ services:
 		if warning.Code == workbenchWarningInvalidPort {
 			t.Fatalf("did not expect invalid port warning for valid $VAR interpolation: %#v", warning)
 		}
+	}
+}
+
+func TestParseWorkbenchComposeCoreAcceptsBracedEnvInterpolationWithDefaultInShortPorts(t *testing.T) {
+	t.Parallel()
+
+	source := `
+services:
+  db:
+    image: postgres:16
+    ports:
+      - "${DB_PORT:-5432}:5432"
+`
+
+	parsed, err := ParseWorkbenchComposeCore(source)
+	if err != nil {
+		t.Fatalf("ParseWorkbenchComposeCore: %v", err)
+	}
+
+	if got, want := len(parsed.Ports), 1; got != want {
+		t.Fatalf("expected %d parsed port, got %d", want, got)
+	}
+	if parsed.Ports[0].ContainerPort != 5432 {
+		t.Fatalf("expected container port 5432, got %#v", parsed.Ports[0].ContainerPort)
+	}
+	if parsed.Ports[0].HostPortRaw != "${DB_PORT:-5432}" {
+		t.Fatalf("expected host port raw ${DB_PORT:-5432}, got %q", parsed.Ports[0].HostPortRaw)
+	}
+	if parsed.Ports[0].HostIP != "" {
+		t.Fatalf("expected empty host IP, got %q", parsed.Ports[0].HostIP)
 	}
 }
 

@@ -2,6 +2,7 @@ import { api, getApiBaseUrl } from '@/services/api'
 import type {
   LocalProject,
   Project,
+  ProjectStatus,
   ProjectArchiveOptions,
   ProjectArchivePlan,
   ProjectDetail,
@@ -14,6 +15,7 @@ const restartProjectTimeoutMs = 10 * 60 * 1000
 
 export const projectsApi = {
   list: () => api.get<{ projects: Project[] }>('/api/v1/projects'),
+  listStatuses: () => api.get<{ statuses: ProjectStatus[] }>('/api/v1/projects/status'),
   getDetail: (name: string) => api.get<ProjectDetail>(`/api/v1/projects/${encodeURIComponent(name)}`),
   listJobs: (name: string, params?: { page?: number; limit?: number }) =>
     api.get<JobListResponse>(`/api/v1/projects/${encodeURIComponent(name)}/jobs`, { params }),

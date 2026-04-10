@@ -10,6 +10,11 @@ export interface Project {
   updatedAt: string
 }
 
+export interface ProjectStatus {
+  name: string
+  status: string
+}
+
 export interface LocalProject {
   name: string
   path: string

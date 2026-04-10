@@ -126,6 +126,18 @@
       }
     ]
   },
+  "GET /api/v1/projects/status": {
+    "statuses": [
+      {
+        "name": "mock-service",
+        "status": "running"
+      },
+      {
+        "name": "edge-proxy",
+        "status": "degraded"
+      }
+    ]
+  },
   "GET /api/v1/projects/local": {
     "projects": [
       {

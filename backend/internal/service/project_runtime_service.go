@@ -34,6 +34,11 @@ type ProjectSummary struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+type ProjectStatus struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
 type ProjectDetail struct {
 	Project     ProjectDetailProject      `json:"project"`
 	Runtime     ProjectDetailRuntime      `json:"runtime"`
@@ -104,50 +109,31 @@ func (s *ProjectRuntimeService) Resolve(ctx context.Context, projectName string)
 	return resolveProjectPath(ctx, s.projects, s.templatesDir, projectName, s.runtimeMetaClient())
 }
 
-func (s *ProjectRuntimeService) ListSummaries(ctx context.Context) ([]ProjectSummary, error) {
-	projectContainers, runtimeAvailable := s.groupProjectContainers(ctx)
-	if runtimeAvailable {
-		if _, err := s.syncRuntimeProjects(ctx, projectContainers); err != nil {
-			return nil, err
-		}
-	}
-
+func (s *ProjectRuntimeService) ListStatuses(ctx context.Context) ([]ProjectStatus, error) {
 	projects, err := s.projects.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	summaries := make([]ProjectSummary, 0, len(projects))
-	for _, project := range projects {
-		key := strings.ToLower(strings.TrimSpace(project.Name))
-
-		status := strings.TrimSpace(project.Status)
-		if runtimeAvailable {
-			status = deriveProjectRuntimeStatus(projectContainers[key])
-		}
-
-		summary := ProjectSummary{
-			ID:        project.ID,
-			Name:      project.Name,
-			RepoURL:   project.RepoURL,
-			Path:      project.Path,
-			ProxyPort: project.ProxyPort,
-			DBPort:    project.DBPort,
-			Status:    status,
-			CreatedAt: project.CreatedAt,
-			UpdatedAt: project.UpdatedAt,
-		}
-
-		if runtimeAvailable && strings.TrimSpace(summary.Path) == "" {
-			if runtimeDir, _, runtimeErr := resolveDirFromRuntimeCompose(ctx, s.templatesDir, key, s.runtimeMetaClient()); runtimeErr == nil {
-				summary.Path = runtimeDir
-			}
-		}
-
-		summaries = append(summaries, summary)
+	if s.host == nil {
+		return nil, errs.New(errs.CodeProjectStatusFailed, "host service unavailable")
 	}
 
-	return summaries, nil
+	projectContainers, err := s.listProjectContainers(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	statuses := make([]ProjectStatus, 0, len(projects))
+	for _, project := range projects {
+		key := strings.ToLower(strings.TrimSpace(project.Name))
+		statuses = append(statuses, ProjectStatus{
+			Name:   project.Name,
+			Status: deriveProjectRuntimeStatus(projectContainers[key]),
+		})
+	}
+
+	return statuses, nil
 }
 
 func (s *ProjectRuntimeService) runtimeMetaClient() infraDockerMetadataClient {
@@ -329,6 +315,28 @@ func (s *ProjectRuntimeService) groupProjectContainers(ctx context.Context) (map
 	}
 
 	return grouped, true
+}
+
+func (s *ProjectRuntimeService) listProjectContainers(ctx context.Context) (map[string][]DockerContainer, error) {
+	if s.host == nil {
+		return nil, errs.New(errs.CodeProjectStatusFailed, "host service unavailable")
+	}
+
+	containers, err := s.host.ListContainers(ctx, true)
+	if err != nil {
+		return nil, errs.Wrap(errs.CodeProjectStatusFailed, "failed to list project containers", err)
+	}
+
+	grouped := make(map[string][]DockerContainer)
+	for _, container := range containers {
+		project := strings.ToLower(strings.TrimSpace(container.Project))
+		if project == "" {
+			continue
+		}
+		grouped[project] = append(grouped[project], container)
+	}
+
+	return grouped, nil
 }
 
 func deriveProjectRuntimeStatus(containers []DockerContainer) string {

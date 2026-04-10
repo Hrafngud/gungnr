@@ -1080,7 +1080,9 @@ func splitPortSegments(input string) []string {
 	parts := make([]string, 0, 4)
 	var builder strings.Builder
 	bracketDepth := 0
-	for _, r := range input {
+	interpolationDepth := 0
+	for idx := 0; idx < len(input); idx++ {
+		r := rune(input[idx])
 		switch r {
 		case '[':
 			bracketDepth++
@@ -1090,8 +1092,18 @@ func splitPortSegments(input string) []string {
 				bracketDepth--
 			}
 			builder.WriteRune(r)
+		case '$':
+			if idx+1 < len(input) && input[idx+1] == '{' {
+				interpolationDepth++
+			}
+			builder.WriteRune(r)
+		case '}':
+			if interpolationDepth > 0 {
+				interpolationDepth--
+			}
+			builder.WriteRune(r)
 		case ':':
-			if bracketDepth > 0 {
+			if bracketDepth > 0 || interpolationDepth > 0 {
 				builder.WriteRune(r)
 				continue
 			}

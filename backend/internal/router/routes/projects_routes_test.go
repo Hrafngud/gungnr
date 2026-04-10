@@ -25,6 +25,23 @@ func TestRegisterProjectsIncludesWorkbenchSnapshotRoute(t *testing.T) {
 	t.Fatal("expected GET /projects/:name/workbench route to be registered")
 }
 
+func TestRegisterProjectsIncludesProjectStatusRoute(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+
+	RegisterProjects(router, &controller.ProjectsController{})
+
+	for _, route := range router.Routes() {
+		if route.Method == "GET" && route.Path == "/projects/status" {
+			return
+		}
+	}
+
+	t.Fatal("expected GET /projects/status route to be registered")
+}
+
 func TestRegisterProjectsIncludesWorkbenchCatalogRoute(t *testing.T) {
 	t.Parallel()
 

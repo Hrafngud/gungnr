@@ -27,6 +27,8 @@ const pageSize = 9
 
 const normalizeStatus = (status: string) => status.trim().toLowerCase()
 
+const statusForProject = (project: Project) => projectsStore.projectStatuses[project.name] ?? project.status
+
 const isHealthyStatus = (status: string) => {
   const normalized = normalizeStatus(status)
   if (!normalized) return false
@@ -70,7 +72,7 @@ const isRunningOrDegradedStatus = (status: string) => {
 }
 
 const projectTone = (project: Project): BadgeTone => {
-  const normalized = normalizeStatus(project.status)
+  const normalized = normalizeStatus(statusForProject(project))
   if (!normalized) return 'neutral'
   if (isDownStatus(normalized)) return 'error'
   if (isDegradedStatus(normalized)) return 'warn'
@@ -87,11 +89,11 @@ const fmtDate = (value: string) => {
 }
 
 const runningProjects = computed(() =>
-  projectsStore.projects.filter((project) => isRunningOrDegradedStatus(project.status)),
+  projectsStore.projects.filter((project) => isRunningOrDegradedStatus(statusForProject(project))),
 )
 
 const archivedProjects = computed(() =>
-  projectsStore.projects.filter((project) => !isRunningOrDegradedStatus(project.status)),
+  projectsStore.projects.filter((project) => !isRunningOrDegradedStatus(statusForProject(project))),
 )
 
 const scopedProjects = computed(() =>
@@ -143,13 +145,13 @@ const statusOptions = computed<SelectOption[]>(() => {
 const filteredProjects = computed(() => {
   const needle = searchQuery.value.trim().toLowerCase()
   return scopedProjects.value.filter((project) => {
-    const normalizedStatus = normalizeStatus(project.status)
+    const normalizedStatus = normalizeStatus(statusForProject(project))
     if (statusFilter.value !== 'all' && normalizedStatus !== statusFilter.value) return false
     if (!needle) return true
 
     const haystack = [
       project.name,
-      project.status,
+      statusForProject(project),
       project.path,
       project.repoUrl,
       String(project.proxyPort || ''),
@@ -205,6 +207,9 @@ const load = async () => {
   pageLoading.start('Loading projects...')
   await projectsStore.fetchProjects()
   pageLoading.stop()
+  if (!projectsStore.error) {
+    void projectsStore.fetchProjectStatuses()
+  }
 }
 
 watch([searchQuery, statusFilter, activeTab], () => {
@@ -298,6 +303,13 @@ onMounted(load)
       </UiState>
 
       <div v-else class="space-y-4">
+        <UiState v-if="projectsStore.statusesError" tone="warn">
+          {{ projectsStore.statusesError }} Showing saved project statuses.
+        </UiState>
+        <UiState v-else-if="projectsStore.statusesLoading" loading>
+          Refreshing live project statuses.
+        </UiState>
+
         <TransitionGroup
           name="project-list"
           tag="div"
@@ -316,7 +328,7 @@ onMounted(load)
                   <h2 class="text-lg font-semibold text-[color:var(--text)]">{{ project.name }}</h2>
                 </div>
                 <UiBadge :tone="projectTone(project)">
-                  {{ project.status || 'unknown' }}
+                  {{ statusForProject(project) || 'unknown' }}
                 </UiBadge>
               </div>
 

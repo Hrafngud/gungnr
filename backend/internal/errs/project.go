@@ -4,6 +4,7 @@ import "net/http"
 
 var (
 	CodeProjectListFailed                    = RegisterHTTPStatus("PROJECT-500-LIST", http.StatusInternalServerError)
+	CodeProjectStatusFailed                  = RegisterHTTPStatus("PROJECT-500-STATUS", http.StatusInternalServerError)
 	CodeProjectLocalListFailed               = RegisterHTTPStatus("PROJECT-500-LOCAL", http.StatusInternalServerError)
 	CodeProjectInvalidBody                   = RegisterHTTPStatus("PROJECT-400-BODY", http.StatusBadRequest)
 	CodeProjectAdminRequired                 = RegisterHTTPStatus("PROJECT-403-ADMIN", http.StatusForbidden)

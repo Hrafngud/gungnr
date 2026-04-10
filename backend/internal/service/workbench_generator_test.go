@@ -26,7 +26,7 @@ services:
   db:
     image: postgres:16
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     networks:
       - backplane
   api:
@@ -76,6 +76,7 @@ networks:
 
 	for _, want := range []string{
 		"${API_TAG:-latest}",
+		`"${DB_PORT:-5432}:5432"`,
 		"127.0.0.1:${API_PORT}:8080",
 		"${API_CPU_LIMIT:-1.00}",
 	} {
@@ -1034,6 +1035,56 @@ volumes:
 	}
 	if result.Metadata.SourceFingerprint == imported.SourceFingerprint {
 		t.Fatalf("expected compose fingerprint to change after port mutation")
+	}
+}
+
+func TestWorkbenchApplyComposeFromStoredSnapshotPreservesInterpolatedPortMappings(t *testing.T) {
+	t.Parallel()
+
+	templatesDir := t.TempDir()
+	projectDir := filepath.Join(templatesDir, "demo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+
+	composePath := filepath.Join(projectDir, "docker-compose.yml")
+	original := `
+services:
+  db:
+    image: postgres:16
+    ports:
+      - "${DB_PORT:-5432}:5432"
+  api:
+    image: nginx:1.25
+`
+	if err := os.WriteFile(composePath, []byte(original), 0o644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+
+	svc := NewWorkbenchServiceWithStorage(templatesDir, nil, &fakeSettingsRepo{}, "test-session-secret")
+	imported, _, err := svc.ImportComposeSnapshot(context.Background(), "demo", "manual")
+	if err != nil {
+		t.Fatalf("import snapshot: %v", err)
+	}
+
+	expectedRevision := imported.Revision
+	if _, err := svc.ApplyComposeFromStoredSnapshot(context.Background(), "demo", WorkbenchComposeApplyRequest{
+		ExpectedRevision:          &expectedRevision,
+		ExpectedSourceFingerprint: imported.SourceFingerprint,
+	}); err != nil {
+		t.Fatalf("apply compose: %v", err)
+	}
+
+	updatedSource, err := os.ReadFile(composePath)
+	if err != nil {
+		t.Fatalf("read updated compose: %v", err)
+	}
+	updated := string(updatedSource)
+	if !strings.Contains(updated, `- "${DB_PORT:-5432}:5432"`) {
+		t.Fatalf("expected quoted interpolated port mapping to be preserved, got:\n%s", updated)
+	}
+	if strings.Contains(updated, "${DB_PORT:5432:5432") {
+		t.Fatalf("expected invalid interpolation form to be absent, got:\n%s", updated)
 	}
 }
 

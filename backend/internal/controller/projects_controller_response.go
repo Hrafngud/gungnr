@@ -26,3 +26,18 @@ func newProjectResponsesFromSummaries(projects []service.ProjectSummary) []model
 	}
 	return response
 }
+
+func newProjectStatusResponse(project service.ProjectStatus) models.ProjectStatusResponse {
+	return models.ProjectStatusResponse{
+		Name:   project.Name,
+		Status: project.Status,
+	}
+}
+
+func newProjectStatusResponses(projects []service.ProjectStatus) []models.ProjectStatusResponse {
+	response := make([]models.ProjectStatusResponse, 0, len(projects))
+	for _, project := range projects {
+		response = append(response, newProjectStatusResponse(project))
+	}
+	return response
+}

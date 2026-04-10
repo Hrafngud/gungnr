@@ -11,6 +11,7 @@ func RegisterProjects(r gin.IRoutes, c *controller.ProjectsController) {
 		return
 	}
 	r.GET("/projects", c.List)
+	r.GET("/projects/status", c.ListStatuses)
 	r.GET("/projects/local", c.ListLocal)
 	r.GET("/projects/:name", c.Detail)
 	r.GET("/projects/:name/jobs", c.ListJobs)
