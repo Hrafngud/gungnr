@@ -29,7 +29,6 @@ write_checksums() {
 }
 
 VERSION="${1:-${VERSION:-}}"
-OWNER="${OWNER:-hrafngud}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLI_BUILD_SCRIPT="${ROOT_DIR}/scripts/build_gungnr.sh"
 
@@ -40,12 +39,6 @@ fi
 
 require_cmd git
 require_cmd go
-require_cmd docker
-
-if ! docker buildx version >/dev/null 2>&1; then
-  echo "Error: docker buildx is required." >&2
-  exit 1
-fi
 
 mkdir -p dist
 
@@ -62,26 +55,6 @@ done
 write_checksums dist/gungnr_linux_* dist/gungnr_darwin_* > dist/checksums.txt
 
 echo "Checksums written to dist/checksums.txt"
-
-if ! docker buildx inspect >/dev/null 2>&1; then
-  docker buildx create --use
-fi
-
-API_IMAGE="ghcr.io/${OWNER}/gungnr-api"
-WEB_IMAGE="ghcr.io/${OWNER}/gungnr-web"
-
-echo "Pushing ${API_IMAGE}:${VERSION} and :latest"
-docker buildx build --platform linux/amd64,linux/arm64 \
-  -t "${API_IMAGE}:${VERSION}" \
-  -t "${API_IMAGE}:latest" \
-  -f backend/Dockerfile backend --push
-
-echo "Pushing ${WEB_IMAGE}:${VERSION} and :latest"
-docker buildx build --platform linux/amd64,linux/arm64 \
-  --build-arg VITE_API_BASE_URL=/ \
-  -t "${WEB_IMAGE}:${VERSION}" \
-  -t "${WEB_IMAGE}:latest" \
-  -f frontend/go-notes/Dockerfile frontend/go-notes --push
 
 echo "Done. Native CLI builds are available in dist/ for:"
 echo "  linux/amd64"

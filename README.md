@@ -109,8 +109,8 @@ Local source: `docs/index.html` (landing), `docs/docs.html` (docs), `docs/errors
 
 ## Release distribution
 - SemVer tags build native CLI artifacts for `linux` and `darwin` (`amd64` and `arm64`) as GitHub Actions workflow artifacts.
-- SemVer tags publish `ghcr.io/hrafngud/gungnr-api` and `ghcr.io/hrafngud/gungnr-web` for `linux/amd64` and `linux/arm64`.
 - The release workflow does not create or upload GitHub release assets.
+- The release workflow does not publish container images.
 - `install.sh` builds the CLI locally from source by default, so bootstrap installs do not depend on release-asset publication.
 
 ## Roadmap
