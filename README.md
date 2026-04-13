@@ -54,9 +54,11 @@ Reboot fallback is available via keepalive tooling and bootstrap-installed watch
 
 **1)** Run:
   ```
-   wget -qO /tmp/gungnr-install.sh https://raw.githubusercontent.com/Hrafngud/gungnr/main/install.sh && chmd +x /tmp/gungnr-install.sh && /tmp/gungnr-install.sh
+   wget -qO /tmp/gungnr-install.sh https://raw.githubusercontent.com/Hrafngud/gungnr/main/install.sh && chmod +x /tmp/gungnr-install.sh && /tmp/gungnr-install.sh
   ```
-   to install the CLI and prerequisites.
+   to install the prerequisites and build the native CLI locally from source.
+
+   The installer no longer depends on GitHub release assets. If you host your own native binary, set `GUNGNR_CLI_URL` before running the installer.
 
 **2)** Run `gungnr bootstrap` and follow the prompts to configure the application.
 
@@ -104,6 +106,12 @@ Live: https://docs.jdoss.pro
 
 Local source: `docs/index.html` (landing), `docs/docs.html` (docs), `docs/errors.html` (errors).
 (If you forked the repo, you can continue to document new features there.)
+
+## Release distribution
+- SemVer tags build native CLI artifacts for `linux` and `darwin` (`amd64` and `arm64`) as GitHub Actions workflow artifacts.
+- SemVer tags publish `ghcr.io/hrafngud/gungnr-api` and `ghcr.io/hrafngud/gungnr-web` for `linux/amd64` and `linux/arm64`.
+- The release workflow does not create or upload GitHub release assets.
+- `install.sh` builds the CLI locally from source by default, so bootstrap installs do not depend on release-asset publication.
 
 ## Roadmap
 
