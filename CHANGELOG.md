@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.15] - 2026-04-13
+
+### Changed
+- Merged the latest `development` changes into `main`.
+- Tag-driven release automation no longer creates or uploads GitHub release assets.
+- Tag-driven release automation keeps native CLI builds for `linux` and `darwin` (`amd64` and `arm64`) as GitHub Actions workflow artifacts.
+- `install.sh` now installs prerequisites and builds the native CLI locally from source by default, so bootstrap installs do not depend on GitHub release assets.
+- `release_local.sh` now builds both `linux` and `darwin` CLI binaries and no longer instructs operators to upload GitHub release assets.
+
+### Added
+- `README.md` now documents the workflow-artifact plus GHCR release policy explicitly.
+
 ## [1.0.12] - 2026-03-24
 
 ### Fixed

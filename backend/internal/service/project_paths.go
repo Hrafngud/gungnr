@@ -38,6 +38,10 @@ type infraDockerMetadataClient interface {
 	DockerListContainers(ctx context.Context, requestID string, includeAll bool) (contract.Result, error)
 }
 
+type infraProjectFileReadClient interface {
+	ProjectFileRead(ctx context.Context, requestID string, payload contract.ProjectFileReadPayload) (contract.Result, error)
+}
+
 type infraProjectFileMutationClient interface {
 	ProjectFileWriteAtomic(ctx context.Context, requestID string, payload contract.ProjectFileWriteAtomicPayload) (contract.Result, error)
 	ProjectFileCopy(ctx context.Context, requestID string, payload contract.ProjectFileCopyPayload) (contract.Result, error)
@@ -114,7 +118,7 @@ func resolveDirFromRuntimeCompose(
 		}
 		// Runtime label metadata can point to host paths unavailable inside the API
 		// container; keep the hint so project detail can resolve consistently.
-		return hint, nil, nil
+		return hint, append([]string(nil), meta.ConfigFiles...), nil
 	}
 
 	composeFiles := resolveComposeConfigFiles(projectDir, meta.ConfigFiles)

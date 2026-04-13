@@ -568,7 +568,7 @@ func workbenchPatchServicePorts(serviceNode *yaml.Node, ports []WorkbenchCompose
 
 	portSequence := workbenchYAMLSequenceNode()
 	for _, port := range ports {
-		portSequence.Content = append(portSequence.Content, workbenchYAMLScalarNode(formatWorkbenchComposePort(port)))
+		portSequence.Content = append(portSequence.Content, workbenchYAMLQuotedPortNode(formatWorkbenchComposePort(port)))
 	}
 	workbenchYAMLSetMapEntry(serviceNode, "ports", portSequence)
 }
@@ -780,7 +780,7 @@ func workbenchBuildServiceNode(
 	if len(ports) > 0 {
 		portSequence := workbenchYAMLSequenceNode()
 		for _, port := range ports {
-			portSequence.Content = append(portSequence.Content, workbenchYAMLScalarNode(formatWorkbenchComposePort(port)))
+			portSequence.Content = append(portSequence.Content, workbenchYAMLQuotedPortNode(formatWorkbenchComposePort(port)))
 		}
 		workbenchYAMLAddMapEntry(serviceNode, "ports", portSequence)
 	}
@@ -1795,6 +1795,15 @@ func workbenchYAMLScalarNode(value string) *yaml.Node {
 		Kind:  yaml.ScalarNode,
 		Tag:   "!!str",
 		Value: value,
+	}
+}
+
+func workbenchYAMLQuotedPortNode(value string) *yaml.Node {
+	return &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Tag:   "!!str",
+		Value: value,
+		Style: yaml.DoubleQuotedStyle,
 	}
 }
 

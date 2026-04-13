@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +49,7 @@ type Config struct {
 	NetBirdMode           string
 	NetBirdAllowLocalhost bool
 	InfraQueueRoot        string
+	HostInfraQueueRoot    string
 	InfraPollInterval     time.Duration
 	InfraResultTimeout    time.Duration
 	InfraIntentMaxAge     time.Duration
@@ -94,6 +96,7 @@ func Load() (Config, error) {
 	v.SetDefault("NETBIRD_MODE", "legacy")
 	v.SetDefault("NETBIRD_ALLOW_LOCALHOST", false)
 	v.SetDefault("INFRA_QUEUE_ROOT", "/templates/.infra")
+	v.SetDefault("HOST_INFRA_QUEUE_ROOT", "")
 	v.SetDefault("INFRA_POLL_INTERVAL_MS", 500)
 	v.SetDefault("INFRA_RESULT_TIMEOUT_SEC", 120)
 	v.SetDefault("INFRA_RETENTION_INTENT_HOURS", 168)
@@ -147,6 +150,7 @@ func Load() (Config, error) {
 		NetBirdMode:           v.GetString("NETBIRD_MODE"),
 		NetBirdAllowLocalhost: v.GetBool("NETBIRD_ALLOW_LOCALHOST"),
 		InfraQueueRoot:        v.GetString("INFRA_QUEUE_ROOT"),
+		HostInfraQueueRoot:    v.GetString("HOST_INFRA_QUEUE_ROOT"),
 		InfraPollInterval:     time.Duration(v.GetInt("INFRA_POLL_INTERVAL_MS")) * time.Millisecond,
 		InfraResultTimeout:    time.Duration(v.GetInt("INFRA_RESULT_TIMEOUT_SEC")) * time.Second,
 		InfraIntentMaxAge:     time.Duration(v.GetInt("INFRA_RETENTION_INTENT_HOURS")) * time.Hour,
@@ -156,6 +160,9 @@ func Load() (Config, error) {
 
 	if cfg.InfraPollInterval <= 0 {
 		cfg.InfraPollInterval = 500 * time.Millisecond
+	}
+	if strings.TrimSpace(cfg.HostInfraQueueRoot) == "" && strings.TrimSpace(cfg.TemplatesDir) != "" {
+		cfg.HostInfraQueueRoot = filepath.Join(strings.TrimSpace(cfg.TemplatesDir), ".host-infra")
 	}
 	if cfg.InfraResultTimeout <= 0 {
 		cfg.InfraResultTimeout = 120 * time.Second

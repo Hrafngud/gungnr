@@ -36,6 +36,7 @@ const (
 	systemdSystemServiceUnit = "gungnr.service"
 	systemdSystemTimerUnit   = "gungnr-keepalive.timer"
 	systemdSystemUnitDir     = "/etc/systemd/system"
+	hostWorkerServiceUnit    = "gungnr-host-worker.service"
 )
 
 type SetupResult struct {
@@ -68,6 +69,20 @@ type StatusResult struct {
 	SystemdSystem      SystemdStatus
 	Systemd            SystemdStatus
 	Cron               CronStatus
+}
+
+type HostWorkerSetupResult struct {
+	Supervisor  Kind
+	ServiceUnit string
+	ServicePath string
+	Installed   bool
+	Detail      string
+}
+
+type HostWorkerTeardownResult struct {
+	Source                      Kind
+	SystemdSystemServiceRemoved bool
+	SystemdServiceRemoved       bool
 }
 
 type SystemdStatus struct {
@@ -163,6 +178,52 @@ func Setup(configPath, stateDir string) (SetupResult, error) {
 	}, nil
 }
 
+func SetupHostWorker() (HostWorkerSetupResult, error) {
+	executable, err := resolveKeepaliveExecutable()
+	if err != nil {
+		return HostWorkerSetupResult{}, err
+	}
+
+	systemResult, systemErr := installHostWorkerSystemService(executable)
+	if systemErr == nil {
+		_, _ = teardownHostWorkerUserService()
+		return systemResult, nil
+	}
+
+	userResult, userErr := installHostWorkerUserService(executable)
+	if userErr == nil {
+		return userResult, nil
+	}
+
+	return HostWorkerSetupResult{}, fmt.Errorf("install host worker service: %v; user fallback failed: %w", systemErr, userErr)
+}
+
+func TeardownHostWorker() (HostWorkerTeardownResult, error) {
+	result := HostWorkerTeardownResult{}
+
+	systemRemoved, systemErr := teardownHostWorkerSystemService()
+	if systemErr != nil {
+		return HostWorkerTeardownResult{}, systemErr
+	}
+	result.SystemdSystemServiceRemoved = systemRemoved
+
+	userRemoved, userErr := teardownHostWorkerUserService()
+	if userErr != nil {
+		return HostWorkerTeardownResult{}, userErr
+	}
+	result.SystemdServiceRemoved = userRemoved
+
+	switch {
+	case systemRemoved:
+		result.Source = SupervisorSystemdSystem
+	case userRemoved:
+		result.Source = SupervisorSystemd
+	default:
+		result.Source = SupervisorNone
+	}
+	return result, nil
+}
+
 func resolveKeepaliveExecutable() (string, error) {
 	if path, err := exec.LookPath("gungnr"); err == nil {
 		abs, absErr := filepath.Abs(path)
@@ -186,6 +247,131 @@ func resolveKeepaliveExecutable() (string, error) {
 	}
 
 	return executable, nil
+}
+
+func installHostWorkerSystemService(executable string) (HostWorkerSetupResult, error) {
+	available, reason := systemdSystemAvailable()
+	if !available {
+		return HostWorkerSetupResult{}, fmt.Errorf("system-level systemd is unavailable: %s", reason)
+	}
+	if err := ensureSystemPrivileges(); err != nil {
+		return HostWorkerSetupResult{}, err
+	}
+
+	servicePath := filepath.Join(systemdSystemUnitDir, hostWorkerServiceUnit)
+	content, err := buildHostWorkerSystemServiceUnit(executable)
+	if err != nil {
+		return HostWorkerSetupResult{}, err
+	}
+	if err := writeSystemUnitFile(servicePath, content); err != nil {
+		return HostWorkerSetupResult{}, fmt.Errorf("write host worker service unit %s: %w", servicePath, err)
+	}
+	if _, err := runSystemctlSystemPrivileged("daemon-reload"); err != nil {
+		return HostWorkerSetupResult{}, err
+	}
+	if _, err := runSystemctlSystemPrivileged("enable", "--now", hostWorkerServiceUnit); err != nil {
+		return HostWorkerSetupResult{}, err
+	}
+	if _, err := runSystemctlSystemPrivileged("restart", hostWorkerServiceUnit); err != nil {
+		return HostWorkerSetupResult{}, err
+	}
+	return HostWorkerSetupResult{
+		Supervisor:  SupervisorSystemdSystem,
+		ServiceUnit: hostWorkerServiceUnit,
+		ServicePath: servicePath,
+		Installed:   true,
+		Detail:      "installed system-level host worker service",
+	}, nil
+}
+
+func installHostWorkerUserService(executable string) (HostWorkerSetupResult, error) {
+	available, reason := systemdUserAvailable()
+	if !available {
+		return HostWorkerSetupResult{}, fmt.Errorf("user-level systemd is unavailable: %s", reason)
+	}
+
+	servicePath, err := hostWorkerUserUnitPath()
+	if err != nil {
+		return HostWorkerSetupResult{}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(servicePath), 0o755); err != nil {
+		return HostWorkerSetupResult{}, fmt.Errorf("create host worker user unit directory: %w", err)
+	}
+	if err := os.WriteFile(servicePath, []byte(buildHostWorkerUserServiceUnit(executable)), 0o644); err != nil {
+		return HostWorkerSetupResult{}, fmt.Errorf("write host worker service unit %s: %w", servicePath, err)
+	}
+	if _, err := runSystemctlUser("daemon-reload"); err != nil {
+		return HostWorkerSetupResult{}, err
+	}
+	if _, err := runSystemctlUser("enable", "--now", hostWorkerServiceUnit); err != nil {
+		return HostWorkerSetupResult{}, err
+	}
+	if _, err := runSystemctlUser("restart", hostWorkerServiceUnit); err != nil {
+		return HostWorkerSetupResult{}, err
+	}
+	return HostWorkerSetupResult{
+		Supervisor:  SupervisorSystemd,
+		ServiceUnit: hostWorkerServiceUnit,
+		ServicePath: servicePath,
+		Installed:   true,
+		Detail:      "installed user-level host worker service",
+	}, nil
+}
+
+func teardownHostWorkerSystemService() (bool, error) {
+	servicePath := filepath.Join(systemdSystemUnitDir, hostWorkerServiceUnit)
+	serviceExists, err := fileExists(servicePath)
+	if err != nil {
+		return false, err
+	}
+	if !serviceExists {
+		if _, err := runSystemctlSystem("is-active", hostWorkerServiceUnit); err != nil {
+			return false, nil
+		}
+	}
+
+	if err := ensureSystemPrivileges(); err != nil {
+		return false, err
+	}
+	_ = runSystemctlSystemBestEffortPrivileged("disable", "--now", hostWorkerServiceUnit)
+	_ = runSystemctlSystemBestEffortPrivileged("stop", hostWorkerServiceUnit)
+
+	removed, err := removeSystemFileIfExists(servicePath)
+	if err != nil {
+		return false, err
+	}
+	if removed {
+		_ = runSystemctlSystemBestEffortPrivileged("daemon-reload")
+	}
+	return removed || serviceExists, nil
+}
+
+func teardownHostWorkerUserService() (bool, error) {
+	servicePath, err := hostWorkerUserUnitPath()
+	if err != nil {
+		return false, err
+	}
+	serviceExists, err := fileExists(servicePath)
+	if err != nil {
+		return false, err
+	}
+	if !serviceExists {
+		if _, err := runSystemctlUser("is-active", hostWorkerServiceUnit); err != nil {
+			return false, nil
+		}
+	}
+
+	_ = runSystemctlUserBestEffort("disable", "--now", hostWorkerServiceUnit)
+	_ = runSystemctlUserBestEffort("stop", hostWorkerServiceUnit)
+
+	removed, err := removeFileIfExists(servicePath)
+	if err != nil {
+		return false, err
+	}
+	if removed {
+		_ = runSystemctlUserBestEffort("daemon-reload")
+	}
+	return removed || serviceExists, nil
 }
 
 func Teardown(stateDir string) (TeardownResult, error) {
@@ -418,23 +604,29 @@ ExecStart=/usr/bin/env bash -lc %s
 `, strconv.Quote(ensureScript))
 }
 
+func buildHostWorkerUserServiceUnit(executable string) string {
+	command := fmt.Sprintf("exec %s host-worker", strconv.Quote(executable))
+	return fmt.Sprintf(`[Unit]
+Description=Gungnr host infra worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Restart=always
+RestartSec=2
+ExecStart=/usr/bin/env bash -lc %s
+
+[Install]
+WantedBy=default.target
+`, strconv.Quote(command))
+}
+
 func buildSystemdSystemServiceUnit(ensureScript string) (string, error) {
-	var username, homeDir string
-	if current, err := user.Current(); err == nil {
-		username = strings.TrimSpace(current.Username)
-		homeDir = strings.TrimSpace(current.HomeDir)
-	}
-	if username == "" {
-		username = strings.TrimSpace(os.Getenv("USER"))
-	}
-	if homeDir == "" {
-		homeDir = strings.TrimSpace(os.Getenv("HOME"))
-	}
-	if username == "" {
-		return "", errors.New("resolve current user for system-level unit: username is empty")
-	}
-	if homeDir == "" {
-		return "", errors.New("resolve current user for system-level unit: home directory is empty")
+	username, homeDir, err := currentUserIdentity()
+	if err != nil {
+		return "", err
 	}
 
 	return fmt.Sprintf(`[Unit]
@@ -449,6 +641,31 @@ Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 TimeoutStartSec=0
 ExecStart=/usr/bin/env bash -lc %s
 `, username, homeDir, strconv.Quote(ensureScript)), nil
+}
+
+func buildHostWorkerSystemServiceUnit(executable string) (string, error) {
+	username, homeDir, err := currentUserIdentity()
+	if err != nil {
+		return "", err
+	}
+	command := fmt.Sprintf("exec %s host-worker", strconv.Quote(executable))
+	return fmt.Sprintf(`[Unit]
+Description=Gungnr host infra worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%s
+Environment=HOME=%s
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Restart=always
+RestartSec=2
+ExecStart=/usr/bin/env bash -lc %s
+
+[Install]
+WantedBy=multi-user.target
+`, username, homeDir, strconv.Quote(command)), nil
 }
 
 func buildSystemdTimerUnit(serviceUnit string) string {
@@ -641,8 +858,40 @@ func systemdUnitPaths() (servicePath, timerPath string, err error) {
 	return filepath.Join(unitDir, systemdServiceUnit), filepath.Join(unitDir, systemdTimerUnit), nil
 }
 
+func hostWorkerUserUnitPath() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory for host worker unit: %w", err)
+	}
+	if strings.TrimSpace(homeDir) == "" {
+		return "", errors.New("home directory is empty")
+	}
+	return filepath.Join(homeDir, ".config", "systemd", "user", hostWorkerServiceUnit), nil
+}
+
 func systemdSystemUnitPaths() (servicePath, timerPath string) {
 	return filepath.Join(systemdSystemUnitDir, systemdSystemServiceUnit), filepath.Join(systemdSystemUnitDir, systemdSystemTimerUnit)
+}
+
+func currentUserIdentity() (string, string, error) {
+	var username, homeDir string
+	if current, err := user.Current(); err == nil {
+		username = strings.TrimSpace(current.Username)
+		homeDir = strings.TrimSpace(current.HomeDir)
+	}
+	if username == "" {
+		username = strings.TrimSpace(os.Getenv("USER"))
+	}
+	if homeDir == "" {
+		homeDir = strings.TrimSpace(os.Getenv("HOME"))
+	}
+	if username == "" {
+		return "", "", errors.New("resolve current user for system-level unit: username is empty")
+	}
+	if homeDir == "" {
+		return "", "", errors.New("resolve current user for system-level unit: home directory is empty")
+	}
+	return username, homeDir, nil
 }
 
 func systemdUserAvailable() (bool, string) {

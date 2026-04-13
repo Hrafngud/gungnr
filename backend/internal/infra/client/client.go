@@ -267,6 +267,23 @@ func (c *Client) DockerRunQuickService(ctx context.Context, requestID string, pa
 	return c.runTask(ctx, requestID, contract.TaskTypeDockerRunQuickService, intentPayload)
 }
 
+func (c *Client) ProjectFileRead(ctx context.Context, requestID string, payload contract.ProjectFileReadPayload) (contract.Result, error) {
+	payload.BasePath = strings.TrimSpace(payload.BasePath)
+	payload.Path = strings.TrimSpace(payload.Path)
+	if payload.BasePath == "" {
+		return contract.Result{}, fmt.Errorf("base_path is required")
+	}
+	if payload.Path == "" {
+		return contract.Result{}, fmt.Errorf("path is required")
+	}
+
+	intentPayload := map[string]any{
+		"base_path": payload.BasePath,
+		"path":      payload.Path,
+	}
+	return c.runTask(ctx, requestID, contract.TaskTypeProjectFileRead, intentPayload)
+}
+
 func (c *Client) ProjectFileWriteAtomic(ctx context.Context, requestID string, payload contract.ProjectFileWriteAtomicPayload) (contract.Result, error) {
 	payload.BasePath = strings.TrimSpace(payload.BasePath)
 	payload.Path = strings.TrimSpace(payload.Path)

@@ -50,6 +50,7 @@ type BootstrapEnv struct {
 	CloudflaredTunnel   string
 	CloudflaredDir      string
 	InfraQueueRoot      string
+	HostInfraQueueRoot  string
 	DockerSocketGID     string
 	DockerNetworkMode   string
 	PostgresUser        string
@@ -59,9 +60,10 @@ type BootstrapEnv struct {
 }
 
 type PanelRuntimeEnv struct {
-	InfraQueueRoot    string
-	DockerSocketGID   string
-	DockerNetworkMode string
+	InfraQueueRoot     string
+	HostInfraQueueRoot string
+	DockerSocketGID    string
+	DockerNetworkMode  string
 }
 
 func ResolvePanelRuntimeEnv(dataDir string) (PanelRuntimeEnv, error) {
@@ -87,9 +89,10 @@ func resolvePanelRuntimeEnv(dataDir string, socketGIDResolver func() (string, er
 	}
 
 	runtimeEnv := PanelRuntimeEnv{
-		InfraQueueRoot:    filepath.Join(dataDir, "templates", ".infra"),
-		DockerSocketGID:   socketGID,
-		DockerNetworkMode: "compat",
+		InfraQueueRoot:     filepath.Join(dataDir, "templates", ".infra"),
+		HostInfraQueueRoot: filepath.Join(dataDir, "templates", ".host-infra"),
+		DockerSocketGID:    socketGID,
+		DockerNetworkMode:  "compat",
 	}
 	if err := runtimeEnv.Validate(); err != nil {
 		return PanelRuntimeEnv{}, err
@@ -117,6 +120,9 @@ func (env PanelRuntimeEnv) Validate() error {
 	if strings.TrimSpace(env.InfraQueueRoot) == "" {
 		return errors.New("INFRA_QUEUE_ROOT is required")
 	}
+	if strings.TrimSpace(env.HostInfraQueueRoot) == "" {
+		return errors.New("HOST_INFRA_QUEUE_ROOT is required")
+	}
 	if strings.TrimSpace(env.DockerSocketGID) == "" {
 		return errors.New("DOCKER_SOCKET_GID is required")
 	}
@@ -129,6 +135,7 @@ func (env PanelRuntimeEnv) Validate() error {
 func (env PanelRuntimeEnv) Entries() []filesystem.EnvEntry {
 	return []filesystem.EnvEntry{
 		{Key: "INFRA_QUEUE_ROOT", Value: env.InfraQueueRoot},
+		{Key: "HOST_INFRA_QUEUE_ROOT", Value: env.HostInfraQueueRoot},
 		{Key: "DOCKER_SOCKET_GID", Value: env.DockerSocketGID},
 		{Key: "DOCKER_NETWORK_GUARDRAILS_MODE", Value: env.DockerNetworkMode},
 	}
@@ -142,6 +149,7 @@ func (env PanelRuntimeEnv) Apply(target *BootstrapEnv) error {
 		return err
 	}
 	target.InfraQueueRoot = env.InfraQueueRoot
+	target.HostInfraQueueRoot = env.HostInfraQueueRoot
 	target.DockerSocketGID = env.DockerSocketGID
 	target.DockerNetworkMode = env.DockerNetworkMode
 	return nil
@@ -165,6 +173,7 @@ func (env BootstrapEnv) Validate() error {
 		"CLOUDFLARED_TUNNEL_NAME":        env.CloudflaredTunnel,
 		"CLOUDFLARED_DIR":                env.CloudflaredDir,
 		"INFRA_QUEUE_ROOT":               env.InfraQueueRoot,
+		"HOST_INFRA_QUEUE_ROOT":          env.HostInfraQueueRoot,
 		"DOCKER_SOCKET_GID":              env.DockerSocketGID,
 		"DOCKER_NETWORK_GUARDRAILS_MODE": env.DockerNetworkMode,
 	}
@@ -217,6 +226,7 @@ func (env BootstrapEnv) Entries() []filesystem.EnvEntry {
 		{Key: "CLOUDFLARED_TUNNEL_NAME", Value: env.CloudflaredTunnel},
 		{Key: "CLOUDFLARED_DIR", Value: env.CloudflaredDir},
 		{Key: "INFRA_QUEUE_ROOT", Value: env.InfraQueueRoot},
+		{Key: "HOST_INFRA_QUEUE_ROOT", Value: env.HostInfraQueueRoot},
 		{Key: "DOCKER_SOCKET_GID", Value: env.DockerSocketGID},
 		{Key: "DOCKER_NETWORK_GUARDRAILS_MODE", Value: env.DockerNetworkMode},
 		{Key: "VITE_API_BASE_URL", Value: env.ViteAPIBaseURL},

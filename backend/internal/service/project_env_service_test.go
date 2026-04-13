@@ -13,12 +13,46 @@ import (
 )
 
 type stubProjectFileMutationClient struct {
-	writeCalls  []contract.ProjectFileWriteAtomicPayload
-	copyCalls   []contract.ProjectFileCopyPayload
-	removeCalls []contract.ProjectFileRemovePayload
-	writeErr    error
-	copyErr     error
-	removeErr   error
+	readCalls         []contract.ProjectFileReadPayload
+	writeCalls        []contract.ProjectFileWriteAtomicPayload
+	copyCalls         []contract.ProjectFileCopyPayload
+	removeCalls       []contract.ProjectFileRemovePayload
+	readContentByPath map[string]string
+	readErr           error
+	writeErr          error
+	copyErr           error
+	removeErr         error
+}
+
+func (s *stubProjectFileMutationClient) ProjectFileRead(_ context.Context, _ string, payload contract.ProjectFileReadPayload) (contract.Result, error) {
+	s.readCalls = append(s.readCalls, payload)
+	if s.readErr != nil {
+		return contract.Result{}, s.readErr
+	}
+	if s.readContentByPath != nil {
+		if content, ok := s.readContentByPath[payload.Path]; ok {
+			return contract.Result{
+				Status: contract.StatusSucceeded,
+				Data: map[string]any{
+					"path":       payload.Path,
+					"content":    content,
+					"size_bytes": len(content),
+				},
+			}, nil
+		}
+	}
+	raw, err := os.ReadFile(payload.Path)
+	if err != nil {
+		return contract.Result{}, err
+	}
+	return contract.Result{
+		Status: contract.StatusSucceeded,
+		Data: map[string]any{
+			"path":       payload.Path,
+			"content":    string(raw),
+			"size_bytes": len(raw),
+		},
+	}, nil
 }
 
 func (s *stubProjectFileMutationClient) ProjectFileWriteAtomic(_ context.Context, _ string, payload contract.ProjectFileWriteAtomicPayload) (contract.Result, error) {

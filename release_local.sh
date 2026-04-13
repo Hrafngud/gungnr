@@ -13,6 +13,21 @@ require_cmd() {
   fi
 }
 
+write_checksums() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$@"
+    return
+  fi
+
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$@"
+    return
+  fi
+
+  echo "Error: missing required command: sha256sum or shasum" >&2
+  exit 1
+}
+
 VERSION="${1:-${VERSION:-}}"
 OWNER="${OWNER:-hrafngud}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,7 +41,6 @@ fi
 require_cmd git
 require_cmd go
 require_cmd docker
-require_cmd sha256sum
 
 if ! docker buildx version >/dev/null 2>&1; then
   echo "Error: docker buildx is required." >&2
@@ -35,16 +49,17 @@ fi
 
 mkdir -p dist
 
-for GOARCH in amd64 arm64; do
-  GOOS=linux
-  CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH \
-    GUNGNR_VERSION="$VERSION" \
-    EXTRA_LDFLAGS="-s -w" \
-    OUTPUT="${ROOT_DIR}/dist/gungnr_${GOOS}_${GOARCH}" \
-    "$CLI_BUILD_SCRIPT"
+for GOOS in linux darwin; do
+  for GOARCH in amd64 arm64; do
+    CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH \
+      GUNGNR_VERSION="$VERSION" \
+      EXTRA_LDFLAGS="-s -w" \
+      OUTPUT="${ROOT_DIR}/dist/gungnr_${GOOS}_${GOARCH}" \
+      "$CLI_BUILD_SCRIPT"
+  done
 done
 
-sha256sum dist/gungnr_linux_* > dist/checksums.txt
+write_checksums dist/gungnr_linux_* dist/gungnr_darwin_* > dist/checksums.txt
 
 echo "Checksums written to dist/checksums.txt"
 
@@ -68,7 +83,10 @@ docker buildx build --platform linux/amd64,linux/arm64 \
   -t "${WEB_IMAGE}:latest" \
   -f frontend/go-notes/Dockerfile frontend/go-notes --push
 
-echo "Done. Upload these assets to the GitHub release ${VERSION}:"
-echo "  dist/gungnr_linux_amd64"
-echo "  dist/gungnr_linux_arm64"
+echo "Done. Native CLI builds are available in dist/ for:"
+echo "  linux/amd64"
+echo "  linux/arm64"
+echo "  darwin/amd64"
+echo "  darwin/arm64"
+echo "Checksums:"
 echo "  dist/checksums.txt"

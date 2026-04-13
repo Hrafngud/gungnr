@@ -18,6 +18,9 @@ func TestResolvePanelRuntimeEnv(t *testing.T) {
 	if runtimeEnv.InfraQueueRoot != "/home/tester/gungnr/templates/.infra" {
 		t.Fatalf("expected InfraQueueRoot %q, got %q", "/home/tester/gungnr/templates/.infra", runtimeEnv.InfraQueueRoot)
 	}
+	if runtimeEnv.HostInfraQueueRoot != "/home/tester/gungnr/templates/.host-infra" {
+		t.Fatalf("expected HostInfraQueueRoot %q, got %q", "/home/tester/gungnr/templates/.host-infra", runtimeEnv.HostInfraQueueRoot)
+	}
 	if runtimeEnv.DockerSocketGID != "952" {
 		t.Fatalf("expected DockerSocketGID %q, got %q", "952", runtimeEnv.DockerSocketGID)
 	}
@@ -62,6 +65,7 @@ func TestBootstrapEnvValidateRequiresDockerSocketGID(t *testing.T) {
 		CloudflaredTunnel:   "panel",
 		CloudflaredDir:      "/home/tester/.cloudflared",
 		InfraQueueRoot:      "/templates/.infra",
+		HostInfraQueueRoot:  "/templates/.host-infra",
 		DockerNetworkMode:   "compat",
 		DatabaseURL:         "postgres://notes:notes@db:5432/notes?sslmode=disable",
 	}
@@ -79,6 +83,7 @@ func TestRefreshPanelRuntimeEnvEntries(t *testing.T) {
 		"SESSION_SECRET=secret",
 		"DOCKER_SOCKET_GID=0",
 		"INFRA_QUEUE_ROOT=/stale",
+		"HOST_INFRA_QUEUE_ROOT=/stale-host",
 		"",
 	}, "\n")), 0o600); err != nil {
 		t.Fatalf("write env: %v", err)
@@ -101,6 +106,9 @@ func TestRefreshPanelRuntimeEnvEntries(t *testing.T) {
 	}
 	if !strings.Contains(updated, "INFRA_QUEUE_ROOT="+filepath.Join(dataDir, "templates", ".infra")) {
 		t.Fatalf("expected refreshed infra queue root in env, got %q", updated)
+	}
+	if !strings.Contains(updated, "HOST_INFRA_QUEUE_ROOT="+filepath.Join(dataDir, "templates", ".host-infra")) {
+		t.Fatalf("expected refreshed host infra queue root in env, got %q", updated)
 	}
 	if !strings.Contains(updated, "DOCKER_NETWORK_GUARDRAILS_MODE=compat") {
 		t.Fatalf("expected refreshed docker network mode in env, got %q", updated)

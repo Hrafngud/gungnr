@@ -49,17 +49,6 @@ func NewProjectsController(
 }
 
 func (c *ProjectsController) List(ctx *gin.Context) {
-	if c.runtime != nil {
-		summaries, err := c.runtime.ListSummaries(ctx.Request.Context())
-		if err != nil {
-			respond.Err(ctx, err, errs.CodeProjectListFailed, "failed to load projects")
-			return
-		}
-
-		respond.OK(ctx, gin.H{"projects": newProjectResponsesFromSummaries(summaries)})
-		return
-	}
-
 	projects, err := c.service.List(ctx.Request.Context())
 	if err != nil {
 		respond.Err(ctx, err, errs.CodeProjectListFailed, "failed to load projects")
@@ -67,6 +56,21 @@ func (c *ProjectsController) List(ctx *gin.Context) {
 	}
 
 	respond.OK(ctx, gin.H{"projects": models.NewProjectResponses(projects)})
+}
+
+func (c *ProjectsController) ListStatuses(ctx *gin.Context) {
+	if c.runtime == nil {
+		respond.Err(ctx, errs.New(errs.CodeProjectStatusFailed, "project runtime service unavailable"), errs.CodeProjectStatusFailed, "project runtime service unavailable")
+		return
+	}
+
+	statuses, err := c.runtime.ListStatuses(ctx.Request.Context())
+	if err != nil {
+		respond.Err(ctx, err, errs.CodeProjectStatusFailed, "failed to load project statuses")
+		return
+	}
+
+	respond.OK(ctx, gin.H{"statuses": newProjectStatusResponses(statuses)})
 }
 
 func (c *ProjectsController) ListLocal(ctx *gin.Context) {

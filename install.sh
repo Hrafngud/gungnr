@@ -22,6 +22,23 @@ require_command() {
   command -v "$1" >/dev/null 2>&1
 }
 
+download_file() {
+  local url="$1"
+  local output_path="$2"
+
+  if require_command curl; then
+    curl -fsSL "$url" -o "$output_path"
+    return
+  fi
+
+  if require_command wget; then
+    wget -qO "$output_path" "$url"
+    return
+  fi
+
+  die "curl or wget is required to download the CLI."
+}
+
 ensure_sudo() {
   if [ "$(id -u)" -eq 0 ]; then
     echo ""
@@ -233,6 +250,46 @@ ensure_cloudflared() {
   fi
 }
 
+ensure_go() {
+  if require_command go; then
+    return
+  fi
+
+  log "Go not found. Installing..."
+  detect_pkg_manager
+
+  case "$OS:$PKG_MANAGER" in
+    darwin:brew)
+      brew install go
+      ;;
+    linux:apt)
+      install_packages golang-go
+      ;;
+    linux:dnf)
+      install_packages golang
+      ;;
+    linux:yum)
+      install_packages golang
+      ;;
+    linux:pacman)
+      install_packages go
+      ;;
+    linux:apk)
+      install_packages go
+      ;;
+    linux:zypper)
+      install_packages go
+      ;;
+    *)
+      die "Unable to install Go automatically. Install Go and retry."
+      ;;
+  esac
+
+  if ! require_command go; then
+    die "Go installation did not provide the go command. Install Go and retry."
+  fi
+}
+
 detect_release_repo() {
   if [ -n "${GUNGNR_CLI_REPO:-}" ]; then
     return
@@ -256,50 +313,81 @@ detect_release_repo() {
   log_stderr "Using default release repo ${GUNGNR_CLI_REPO} (set GUNGNR_CLI_REPO to override)."
 }
 
-download_cli() {
-  local tmp_dir url version asset_name release_base
+download_cli_binary() {
+  local tmp_dir url
   tmp_dir="$(mktemp -d)"
-  version="${GUNGNR_CLI_VERSION:-latest}"
-  asset_name="${GUNGNR_CLI_ASSET:-gungnr_${OS}_${ARCH}}"
 
-  if [ -n "${GUNGNR_CLI_URL:-}" ]; then
-    url="$GUNGNR_CLI_URL"
-  else
-    detect_release_repo
-    if [ -z "$GUNGNR_CLI_REPO" ]; then
-      die "Set GUNGNR_CLI_URL to the CLI download URL."
-    fi
-
-    if [ "$version" = "latest" ]; then
-      release_base="https://github.com/${GUNGNR_CLI_REPO}/releases/latest/download"
-    else
-      release_base="https://github.com/${GUNGNR_CLI_REPO}/releases/download/${version}"
-    fi
-
-    url="${release_base}/${asset_name}"
+  if [ -z "${GUNGNR_CLI_URL:-}" ]; then
+    rm -rf "$tmp_dir"
+    return 1
   fi
 
+  url="$GUNGNR_CLI_URL"
   log_stderr "Downloading Gungnr CLI from ${url}"
-  if require_command curl; then
-    curl -fsSL "$url" -o "${tmp_dir}/gungnr"
-  elif require_command wget; then
-    wget -qO "${tmp_dir}/gungnr" "$url"
-  else
-    die "curl or wget is required to download the CLI."
-  fi
+  download_file "$url" "${tmp_dir}/gungnr"
 
   echo "$tmp_dir"
+}
+
+download_cli_source() {
+  local tmp_dir version repo source_url archive_path extract_root
+  tmp_dir="$(mktemp -d)"
+  version="${GUNGNR_CLI_VERSION:-latest}"
+
+  detect_release_repo
+  repo="${GUNGNR_CLI_REPO:-}"
+  if [ -z "$repo" ]; then
+    die "Set GUNGNR_CLI_REPO or GUNGNR_CLI_SOURCE_URL to the CLI source repository."
+  fi
+
+  if [ -n "${GUNGNR_CLI_SOURCE_URL:-}" ]; then
+    source_url="$GUNGNR_CLI_SOURCE_URL"
+  elif [ "$version" = "latest" ]; then
+    source_url="https://codeload.github.com/${repo}/tar.gz/refs/heads/main"
+  else
+    source_url="https://codeload.github.com/${repo}/tar.gz/refs/tags/${version}"
+  fi
+
+  archive_path="${tmp_dir}/gungnr.tar.gz"
+  log_stderr "Downloading Gungnr source from ${source_url}"
+  download_file "$source_url" "$archive_path"
+
+  tar -xzf "$archive_path" -C "$tmp_dir"
+  extract_root="$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+  if [ -z "$extract_root" ]; then
+    die "Failed to extract the Gungnr source archive."
+  fi
+
+  echo "$extract_root"
 }
 
 install_cli() {
   detect_os_arch
 
-  local tmp_dir sudo_cmd
-  tmp_dir="$(download_cli)"
+  local tmp_dir sudo_cmd build_version
   sudo_cmd="$(ensure_sudo)"
 
-  $sudo_cmd install -m 0755 "${tmp_dir}/gungnr" /usr/local/bin/gungnr
-  rm -rf "$tmp_dir"
+  if tmp_dir="$(download_cli_binary)"; then
+    $sudo_cmd install -m 0755 "${tmp_dir}/gungnr" /usr/local/bin/gungnr
+    rm -rf "$tmp_dir"
+  else
+    ensure_go
+    tmp_dir="$(download_cli_source)"
+    build_version="${GUNGNR_CLI_VERSION:-dev}"
+    if [ "$build_version" = "latest" ]; then
+      build_version="dev"
+    fi
+
+    (
+      cd "$tmp_dir"
+      GUNGNR_VERSION="$build_version" \
+      OUTPUT="${tmp_dir}/gungnr" \
+      ./scripts/build_gungnr.sh
+    )
+
+    $sudo_cmd install -m 0755 "${tmp_dir}/gungnr" /usr/local/bin/gungnr
+    rm -rf "$tmp_dir"
+  fi
 
   if ! require_command gungnr; then
     die "Failed to install gungnr to /usr/local/bin/gungnr."

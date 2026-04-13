@@ -113,6 +113,12 @@ type ProjectResponse struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+// ProjectStatusResponse is the runtime status response shape for a project.
+type ProjectStatusResponse struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
 // NewProjectResponse builds a ProjectResponse from a Project model.
 func NewProjectResponse(project Project) ProjectResponse {
 	return ProjectResponse{

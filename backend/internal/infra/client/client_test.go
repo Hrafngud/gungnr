@@ -427,7 +427,7 @@ func TestProjectFileTaskPayloads(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	ack := make(chan struct{}, 3)
+	ack := make(chan struct{}, 4)
 	go func() {
 		for {
 			ids, listErr := q.ListIntentIDs(ctx)
@@ -456,12 +456,18 @@ func TestProjectFileTaskPayloads(t *testing.T) {
 				})
 				ack <- struct{}{}
 			}
-			if len(ack) >= 3 {
+			if len(ack) >= 4 {
 				return
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
+
+	_, err = c.ProjectFileRead(ctx, "req-file-read", contract.ProjectFileReadPayload{
+		BasePath: "/templates/demo",
+		Path:     "/templates/demo/.env",
+	})
+	require.NoError(t, err)
 
 	_, err = c.ProjectFileWriteAtomic(ctx, "req-file-write", contract.ProjectFileWriteAtomicPayload{
 		BasePath:      "/templates/demo",
@@ -492,11 +498,13 @@ func TestProjectFileTaskPayloads(t *testing.T) {
 	<-ack
 	<-ack
 	<-ack
+	<-ack
 
 	ids, err := q.ListIntentIDs(context.Background())
 	require.NoError(t, err)
-	require.Len(t, ids, 3)
+	require.Len(t, ids, 4)
 
+	readFound := false
 	writeFound := false
 	copyFound := false
 	removeFound := false
@@ -504,6 +512,11 @@ func TestProjectFileTaskPayloads(t *testing.T) {
 		intent, readErr := q.ReadIntent(context.Background(), id)
 		require.NoError(t, readErr)
 		switch intent.TaskType {
+		case contract.TaskTypeProjectFileRead:
+			readFound = true
+			require.Equal(t, "req-file-read", intent.RequestID)
+			require.Equal(t, "/templates/demo", intent.Payload["base_path"])
+			require.Equal(t, "/templates/demo/.env", intent.Payload["path"])
 		case contract.TaskTypeProjectFileWriteAtomic:
 			writeFound = true
 			require.Equal(t, "req-file-write", intent.RequestID)
@@ -528,6 +541,7 @@ func TestProjectFileTaskPayloads(t *testing.T) {
 			require.Equal(t, true, intent.Payload["ignore_not_exist"])
 		}
 	}
+	require.True(t, readFound)
 	require.True(t, writeFound)
 	require.True(t, copyFound)
 	require.True(t, removeFound)

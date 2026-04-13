@@ -46,6 +46,7 @@ const (
 	TaskTypeHostRuntimeStats       TaskType = "host_runtime_stats"
 	TaskTypeHostRuntimeStream      TaskType = "host_runtime_stream"
 	TaskTypeDockerRunQuickService  TaskType = "docker_run_quick_service"
+	TaskTypeProjectFileRead        TaskType = "project_file_read"
 	TaskTypeProjectFileWriteAtomic TaskType = "project_file_write_atomic"
 	TaskTypeProjectFileCopy        TaskType = "project_file_copy"
 	TaskTypeProjectFileRemove      TaskType = "project_file_remove"
@@ -167,6 +168,11 @@ type DockerRunQuickServicePayload struct {
 	ExposureMode  string `json:"exposure_mode,omitempty"`
 	PublishHost   string `json:"publish_host,omitempty"`
 	NetworkName   string `json:"network_name,omitempty"`
+}
+
+type ProjectFileReadPayload struct {
+	BasePath string `json:"base_path"`
+	Path     string `json:"path"`
 }
 
 type ProjectFileWriteAtomicPayload struct {
