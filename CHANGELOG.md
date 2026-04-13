@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.17] - 2026-04-13
+
+### Changed
+- Recut the CLI-only release after the `v1.0.16` immutable-release dead end so the GitHub Release can be published in one shot with all native artifacts attached.
+- The release remains darwin/linux only (`amd64` and `arm64`).
+- GitHub release assets are attached only through the manual one-shot release publish step for this tag; the workflow itself remains CLI-builds-only.
+- GHCR/container-image publication remains disabled.
+
 ## [1.0.16] - 2026-04-13
 
 ### Changed
