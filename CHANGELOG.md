@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.16] - 2026-04-13
+
+### Changed
+- Recut the release from the CLI-only distribution workflow so the SemVer tag publishes only darwin/linux native build artifacts as GitHub Actions workflow artifacts.
+- GitHub release assets remain disabled.
+- GHCR/container-image publication remains disabled.
+
 ## [1.0.15] - 2026-04-13
 
 ### Changed
