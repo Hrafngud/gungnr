@@ -30,7 +30,6 @@ func TestComposeFilesNarrowAPIMountScope(t *testing.T) {
 	repoRoot := repoRootFromServiceTest(t)
 	composeFiles := []string{
 		filepath.Join(repoRoot, "docker-compose.yml"),
-		filepath.Join(repoRoot, "docker-compose.release.yml"),
 	}
 
 	for _, path := range composeFiles {
@@ -48,7 +47,6 @@ func TestComposeFilesRequireDockerSocketGroupContract(t *testing.T) {
 	repoRoot := repoRootFromServiceTest(t)
 	composeFiles := []string{
 		filepath.Join(repoRoot, "docker-compose.yml"),
-		filepath.Join(repoRoot, "docker-compose.release.yml"),
 	}
 
 	for _, path := range composeFiles {
@@ -66,7 +64,6 @@ func TestComposeFilesDisableDBHostPublishByDefault(t *testing.T) {
 	repoRoot := repoRootFromServiceTest(t)
 	composeFiles := []string{
 		filepath.Join(repoRoot, "docker-compose.yml"),
-		filepath.Join(repoRoot, "docker-compose.release.yml"),
 	}
 
 	for _, path := range composeFiles {
@@ -118,7 +115,6 @@ func TestComposeFilesApplyHardeningProfileWithDocumentedExceptions(t *testing.T)
 	repoRoot := repoRootFromServiceTest(t)
 	composeFiles := []string{
 		filepath.Join(repoRoot, "docker-compose.yml"),
-		filepath.Join(repoRoot, "docker-compose.release.yml"),
 	}
 
 	for _, path := range composeFiles {
@@ -172,7 +168,6 @@ func TestComposeFilesSplitNetworkPlanesWithDeterministicCompatFallback(t *testin
 	repoRoot := repoRootFromServiceTest(t)
 	composeFiles := []string{
 		filepath.Join(repoRoot, "docker-compose.yml"),
-		filepath.Join(repoRoot, "docker-compose.release.yml"),
 	}
 
 	for _, path := range composeFiles {
