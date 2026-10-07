@@ -50,7 +50,7 @@ Reboot fallback is available via keepalive tooling and bootstrap-installed watch
 
 ### Method 1 - Install Script (Recommended)
 
-**0)** Do all Cloudflare and Github prerequisite config [as instructed on docs](https://docs.jdoss.pro/docs.html#install-steps)!!
+**0)** Do all Cloudflare and Github prerequisite config [as instructed on docs](https://docs.gungnr.org/docs.html#install-steps)!!
 
 **1)** Run:
   ```
@@ -71,7 +71,7 @@ Reboot fallback is available via keepalive tooling and bootstrap-installed watch
 
 ### Method 2 - Build From Source (For Development)
 
-**0)** Do all Cloudflare and Github prerequisite config [as instructed on docs](https://docs.jdoss.pro/docs.html#install-steps)!!
+**0)** Do all Cloudflare and Github prerequisite config [as instructed on docs](https://docs.gungnr.org/docs.html#install-steps)!!
 
 **1)** Create a directory:
   ```
@@ -102,7 +102,7 @@ Reboot fallback is available via keepalive tooling and bootstrap-installed watch
 **5)** Configure GitHub App settings in the UI if you want to enable template creation (optional).
 
 ## Documentation
-Live: https://docs.jdoss.pro
+Live: https://docs.gungnr.org
 
 Local source: `docs/index.html` (landing), `docs/docs.html` (docs), `docs/errors.html` (errors).
 (If you forked the repo, you can continue to document new features there.)
