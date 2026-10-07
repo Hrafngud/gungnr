@@ -67,7 +67,7 @@ volumes:
 		"demo",
 		workbenchImportReasonAutoDeploy,
 		[]workbenchRequestedPortAssignment{
-			{Label: "proxy", ContainerPort: 80, HostPort: 8088, Required: true},
+			{Label: "proxy", DetectIngress: true, HostPort: 8088, Required: true},
 			{Label: "db", ContainerPort: 5432, HostPort: 15432, Required: false},
 		},
 	)

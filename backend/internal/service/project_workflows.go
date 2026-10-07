@@ -228,7 +228,7 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 		req.Name,
 		workbenchImportReasonAutoDeploy,
 		[]workbenchRequestedPortAssignment{
-			{Label: "proxy", ContainerPort: 80, HostPort: proxyPort, Required: true},
+			{Label: "proxy", DetectIngress: true, HostPort: proxyPort, Required: true},
 			{Label: "db", ContainerPort: 5432, HostPort: dbPort, Required: false},
 		},
 	); err != nil {
@@ -344,6 +344,7 @@ type workbenchRequestedPortAssignment struct {
 	ContainerPort int
 	HostPort      int
 	Required      bool
+	DetectIngress bool
 }
 
 func (w *ProjectWorkflows) prepareWorkbenchManagedCompose(
@@ -363,7 +364,20 @@ func (w *ProjectWorkflows) prepareWorkbenchManagedCompose(
 			continue
 		}
 
-		selector, extraMatches, ok := workbenchSelectPortByContainerPort(snapshot, assignment.ContainerPort)
+		var selector WorkbenchPortSelector
+		var extraMatches int
+		var ok bool
+		if assignment.DetectIngress {
+			var selectionErr error
+			selector, selectionErr = workbenchSelectIngressPort(snapshot)
+			if selectionErr != nil {
+				return WorkbenchComposeApplyResult{}, w.workbenchJobError(logger, "ingress port detection", selectionErr)
+			}
+			extraMatches, ok = 0, true
+			logger.Logf("workbench ingress detected: service=%s container=%d protocol=%s", selector.ServiceName, selector.ContainerPort, selector.Protocol)
+		} else {
+			selector, extraMatches, ok = workbenchSelectPortByContainerPort(snapshot, assignment.ContainerPort)
+		}
 		if !ok {
 			if assignment.Required {
 				return WorkbenchComposeApplyResult{}, w.workbenchJobError(
