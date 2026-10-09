@@ -31,6 +31,32 @@ func NewJobService(repo repository.JobRepository, runner *jobs.Runner) *JobServi
 	return &JobService{repo: repo, runner: runner}
 }
 
+// RecoverInterruptedJobs runs before the API accepts work. Jobs execute in
+// process, so non-terminal records from a previous API instance have no runner.
+// Fail them explicitly; replaying a create-template job could duplicate external
+// side effects and must remain an operator decision.
+func (s *JobService) RecoverInterruptedJobs(ctx context.Context) (int, error) {
+	stored, err := s.repo.List(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("load interrupted jobs: %w", err)
+	}
+	const message = "interrupted by panel restart; inspect partial deployment before retrying"
+	recovered := 0
+	for _, job := range stored {
+		if job.Status != "running" && job.Status != "pending" {
+			continue
+		}
+		if err := s.repo.MarkFinished(ctx, job.ID, "failed", time.Now(), message); err != nil {
+			return recovered, fmt.Errorf("finish interrupted job %d: %w", job.ID, err)
+		}
+		if err := s.repo.AppendLog(ctx, job.ID, fmt.Sprintf("job %d failed: %s\n", job.ID, message)); err != nil {
+			return recovered, fmt.Errorf("log interrupted job %d: %w", job.ID, err)
+		}
+		recovered++
+	}
+	return recovered, nil
+}
+
 func (s *JobService) List(ctx context.Context) ([]models.Job, error) {
 	return s.repo.List(ctx)
 }

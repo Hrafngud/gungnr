@@ -1145,11 +1145,38 @@ func runExecutorCommand(ctx context.Context, exec commandExecutor, dir string, e
 }
 
 func runExecutorDockerCommand(ctx context.Context, exec commandExecutor, dir, dockerTmpDir string, args ...string) ([]byte, error) {
-	env, err := prepareDockerCommandEnv(os.Environ(), dockerTmpDir)
+	baseEnv := os.Environ()
+	if len(args) > 0 && args[0] == "compose" {
+		baseEnv = projectComposeCommandEnv(baseEnv)
+	}
+	env, err := prepareDockerCommandEnv(baseEnv, dockerTmpDir)
 	if err != nil {
 		return nil, err
 	}
 	return runExecutorCommand(ctx, exec, dir, env, "docker", args...)
+}
+
+// Compose interpolates process variables before the project's .env. Keep only
+// CLI/runtime settings so panel credentials and ports cannot override a project.
+func projectComposeCommandEnv(baseEnv []string) []string {
+	env := make([]string, 0, len(baseEnv))
+	for _, raw := range baseEnv {
+		key, _, ok := strings.Cut(raw, "=")
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(key, "DOCKER_") || strings.HasPrefix(key, "LC_") {
+			env = append(env, raw)
+			continue
+		}
+		switch key {
+		case "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "TERM", "LANG",
+			"XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "SSH_AUTH_SOCK", "SSL_CERT_FILE", "SSL_CERT_DIR",
+			"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy":
+			env = append(env, raw)
+		}
+	}
+	return env
 }
 
 func prepareDockerCommandEnv(baseEnv []string, dockerTmpDir string) ([]string, error) {

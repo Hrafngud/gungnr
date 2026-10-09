@@ -170,13 +170,13 @@ func (r *DockerRunner) ComposeUp(ctx context.Context, logger jobs.Logger, req Do
 		ProjectDir: dir,
 		Build:      true,
 	})
+	logBridgeResultTail(logger, result)
 	if err != nil {
 		return bridgeTaskError("failed to start docker compose stack", contract.TaskTypeComposeUpStack, project, err)
 	}
 	if err := bridgeResultError("failed to start docker compose stack", contract.TaskTypeComposeUpStack, project, result); err != nil {
 		return err
 	}
-	logBridgeResultTail(logger, result)
 	return nil
 }
 

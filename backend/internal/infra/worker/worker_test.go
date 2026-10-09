@@ -1000,6 +1000,28 @@ func TestWithTunnelRunIdentityEnv(t *testing.T) {
 	require.Contains(t, joined, "PATH=/usr/bin")
 }
 
+func TestComposeExecutionDoesNotInheritPanelApplicationEnvironment(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://panel@db/panel")
+	t.Setenv("JWT_SECRET", "panel-secret")
+	t.Setenv("PORT", "8080")
+	t.Setenv("COMPOSE_PROJECT_NAME", "warp-panel")
+	t.Setenv("DOCKER_HOST", "unix:///var/run/docker.sock")
+	executor := &fakeExecutor{}
+	_, err := runExecutorDockerCommand(context.Background(), executor, t.TempDir(), t.TempDir(), "compose", "up", "-d")
+	require.NoError(t, err)
+	require.Len(t, executor.calls, 1)
+	env := executor.calls[0].env
+	for _, key := range []string{"DATABASE_URL", "JWT_SECRET", "PORT", "COMPOSE_PROJECT_NAME"} {
+		_, exists := envValue(env, key)
+		require.False(t, exists, "panel variable %s must not override project .env", key)
+	}
+	host, exists := envValue(env, "DOCKER_HOST")
+	require.True(t, exists)
+	require.Equal(t, "unix:///var/run/docker.sock", host)
+	_, exists = envValue(env, "PATH")
+	require.True(t, exists)
+}
+
 func TestPrepareDockerCommandEnvInjectsWritableFallback(t *testing.T) {
 	dockerTmpDir := t.TempDir()
 

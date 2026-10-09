@@ -53,6 +53,11 @@ func main() {
 	authService := service.NewAuthService(cfg, userRepo)
 	jobRunner := jobs.NewRunner(jobRepo)
 	jobService := service.NewJobService(jobRepo, jobRunner)
+	if recovered, err := jobService.RecoverInterruptedJobs(context.Background()); err != nil {
+		log.Fatalf("failed to recover interrupted jobs: %v", err)
+	} else if recovered > 0 {
+		log.Printf("marked %d interrupted jobs failed after panel restart", recovered)
+	}
 	settingsService := service.NewSettingsService(cfg, settingsRepo)
 	userService := service.NewUserService(userRepo)
 	githubService := service.NewGitHubService(cfg, settingsService)

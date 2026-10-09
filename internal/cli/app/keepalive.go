@@ -59,6 +59,7 @@ type keepaliveRunControls struct {
 
 type keepaliveRecovery struct {
 	PanelRecovered           bool              `json:"panelRecovered"`
+	PanelRebuildSkipped      bool              `json:"panelRebuildSkipped"`
 	TunnelRestarted          bool              `json:"tunnelRestarted"`
 	APIHealthy               bool              `json:"apiHealthy"`
 	ProjectRecoveryAttempted bool              `json:"projectRecoveryAttempted"`
@@ -415,21 +416,34 @@ func runKeepaliveRecovery(ctx keepaliveContext, trigger string, controls keepali
 		logger.Error("panel", result.PanelError)
 		return result
 	}
-	dataDir := filepath.Dir(ctx.EnvPath)
-	logger.Info("panel", fmt.Sprintf("refreshing panel runtime env entries in %s", ctx.EnvPath))
-	if err := RefreshPanelRuntimeEnvEntries(ctx.EnvPath, dataDir); err != nil {
-		result.PanelError = err.Error()
-		logger.Error("panel", result.PanelError)
-		return result
+	// Timer checks must not recreate a healthy API: its job runners are in memory.
+	// Explicit recovery and recovery after a failed health gate still rebuild.
+	if strings.EqualFold(strings.TrimSpace(trigger), "supervisor") {
+		if err := health.WaitForHTTPHealth(keepaliveHealthURL, 15*time.Second); err == nil {
+			result.PanelRecovered = true
+			result.PanelRebuildSkipped = true
+			logger.Info("panel", "panel is healthy; skipping compose rebuild and project recovery")
+		} else {
+			logger.Warn("panel", fmt.Sprintf("panel health gate failed; recovering compose stack: %v", err))
+		}
 	}
+	if !result.PanelRebuildSkipped {
+		dataDir := filepath.Dir(ctx.EnvPath)
+		logger.Info("panel", fmt.Sprintf("refreshing panel runtime env entries in %s", ctx.EnvPath))
+		if err := RefreshPanelRuntimeEnvEntries(ctx.EnvPath, dataDir); err != nil {
+			result.PanelError = err.Error()
+			logger.Error("panel", result.PanelError)
+			return result
+		}
 
-	logger.Info("panel", fmt.Sprintf("rebuilding panel compose stack with %s", composeFile))
-	if err := docker.RebuildCompose(composeFile, ctx.EnvPath, ctx.DockerLog); err != nil {
-		result.PanelError = err.Error()
-		logger.Error("panel", result.PanelError)
-		return result
+		logger.Info("panel", fmt.Sprintf("rebuilding panel compose stack with %s", composeFile))
+		if err := docker.RebuildCompose(composeFile, ctx.EnvPath, ctx.DockerLog); err != nil {
+			result.PanelError = err.Error()
+			logger.Error("panel", result.PanelError)
+			return result
+		}
+		result.PanelRecovered = true
 	}
-	result.PanelRecovered = true
 
 	logger.Info("tunnel", fmt.Sprintf("ensuring cloudflared tunnel process from %s", ctx.ConfigPath))
 	startedTunnel, tunnelLogPath, err := cloudflared.EnsureTunnelRunning(ctx.ConfigPath)
@@ -453,6 +467,9 @@ func runKeepaliveRecovery(ctx keepaliveContext, trigger string, controls keepali
 		return result
 	}
 	result.APIHealthy = true
+	if result.PanelRebuildSkipped {
+		return result
+	}
 
 	projects, err := docker.DiscoverComposeProjects(true)
 	if err != nil {
@@ -1039,6 +1056,7 @@ func recoverySummaryLines(run keepaliveLastRun) []string {
 	lines := []string{
 		"Result: " + run.Result,
 		"Panel recovered: " + boolLabel(run.Recovery.PanelRecovered),
+		"Panel rebuild skipped: " + boolLabel(run.Recovery.PanelRebuildSkipped),
 		"Tunnel ensured: " + boolLabel(run.Recovery.TunnelRestarted),
 		"Panel API healthy: " + boolLabel(run.Recovery.APIHealthy),
 		fmt.Sprintf("Project recovery attempted: %s", boolLabel(run.Recovery.ProjectRecoveryAttempted)),
