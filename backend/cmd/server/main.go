@@ -92,6 +92,7 @@ func main() {
 		contract.TaskTypeDockerRunQuickService,
 		contract.TaskTypeHostListenTCPPorts,
 		contract.TaskTypeDockerPublishedPorts,
+		contract.TaskTypeDockerNetworkSubnets,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
 		contract.TaskTypeHostRuntimeStream,

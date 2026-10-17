@@ -43,6 +43,7 @@ const (
 	TaskTypeDockerRuntimeCheck     TaskType = "docker_runtime_check"
 	TaskTypeHostListenTCPPorts     TaskType = "host_listen_tcp_ports"
 	TaskTypeDockerPublishedPorts   TaskType = "docker_published_ports"
+	TaskTypeDockerNetworkSubnets   TaskType = "docker_network_subnets"
 	TaskTypeHostRuntimeStats       TaskType = "host_runtime_stats"
 	TaskTypeHostRuntimeStream      TaskType = "host_runtime_stream"
 	TaskTypeDockerRunQuickService  TaskType = "docker_run_quick_service"
@@ -155,6 +156,8 @@ type DockerRuntimeCheckPayload struct{}
 type HostListenTCPPortsPayload struct{}
 
 type DockerPublishedPortsPayload struct{}
+
+type DockerNetworkSubnetsPayload struct{}
 
 type HostRuntimeStatsPayload struct{}
 

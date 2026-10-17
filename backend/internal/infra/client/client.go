@@ -367,6 +367,10 @@ func (c *Client) DockerPublishedPorts(ctx context.Context, requestID string) (co
 	return c.runTask(ctx, requestID, contract.TaskTypeDockerPublishedPorts, map[string]any{})
 }
 
+func (c *Client) DockerNetworkSubnets(ctx context.Context, requestID string) (contract.Result, error) {
+	return c.runTask(ctx, requestID, contract.TaskTypeDockerNetworkSubnets, map[string]any{})
+}
+
 func (c *Client) HostRuntimeStats(ctx context.Context, requestID string) (contract.Result, error) {
 	return c.runTask(ctx, requestID, contract.TaskTypeHostRuntimeStats, map[string]any{})
 }

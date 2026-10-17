@@ -251,7 +251,7 @@ func TestProbeTaskPayloads(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	ack := make(chan struct{}, 2)
+	ack := make(chan struct{}, 3)
 	go func() {
 		for {
 			ids, listErr := q.ListIntentIDs(ctx)
@@ -283,7 +283,7 @@ func TestProbeTaskPayloads(t *testing.T) {
 				})
 				ack <- struct{}{}
 			}
-			if len(ack) >= 2 {
+			if len(ack) >= 3 {
 				return
 			}
 			time.Sleep(10 * time.Millisecond)
@@ -294,16 +294,20 @@ func TestProbeTaskPayloads(t *testing.T) {
 	require.NoError(t, err)
 	_, err = c.DockerPublishedPorts(ctx, "req-docker-published")
 	require.NoError(t, err)
+	_, err = c.DockerNetworkSubnets(ctx, "req-network-subnets")
+	require.NoError(t, err)
 
+	<-ack
 	<-ack
 	<-ack
 
 	ids, err := q.ListIntentIDs(context.Background())
 	require.NoError(t, err)
-	require.Len(t, ids, 2)
+	require.Len(t, ids, 3)
 
 	hostIntentFound := false
 	dockerIntentFound := false
+	networkIntentFound := false
 	for _, id := range ids {
 		intent, readErr := q.ReadIntent(context.Background(), id)
 		require.NoError(t, readErr)
@@ -316,10 +320,15 @@ func TestProbeTaskPayloads(t *testing.T) {
 			dockerIntentFound = true
 			require.Equal(t, "req-docker-published", intent.RequestID)
 			require.Empty(t, intent.Payload)
+		case contract.TaskTypeDockerNetworkSubnets:
+			networkIntentFound = true
+			require.Equal(t, "req-network-subnets", intent.RequestID)
+			require.Empty(t, intent.Payload)
 		}
 	}
 	require.True(t, hostIntentFound)
 	require.True(t, dockerIntentFound)
+	require.True(t, networkIntentFound)
 }
 
 func TestDockerRunnerTaskPayloads(t *testing.T) {

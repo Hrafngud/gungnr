@@ -206,7 +206,25 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 	proxyPort := req.ProxyPort
 	dbPort := req.DBPort
 	reserved := map[int]bool{}
-	addDockerReservedPorts(ctx, w.infraClient, reserved)
+	// Unlike the API's network namespace, Docker's published ports describe
+	// the host. A failed inventory must not silently assign the panel's port.
+	if w.infraClient == nil {
+		return fmt.Errorf("infra bridge probe client unavailable")
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	portResult, err := w.infraClient.DockerPublishedPorts(probeCtx, "")
+	cancel()
+	if err != nil {
+		return fmt.Errorf("read host published ports: %w", err)
+	}
+	portLines, err := decodeBridgeLinesPayload(portResult)
+	if err != nil {
+		return err
+	}
+	for _, port := range parsePublishedPorts(strings.Join(portLines, "\n")) {
+		reserved[port] = true
+	}
+	addHostReservedPorts(ctx, w.infraClient, reserved)
 	if proxyPort == 0 {
 		proxyPort, err = findFreePort(80, reserved)
 		if err != nil {
@@ -221,6 +239,9 @@ func (w *ProjectWorkflows) handleCreateTemplate(ctx context.Context, job models.
 		}
 	}
 	logger.Logf("using proxy port %d and db port %d", proxyPort, dbPort)
+	if err := prepareTemplateEnvironment(ctx, w.infraClient, logger, templateOwner, templateRepo, projectDir, req.Name, proxyPort, dbPort); err != nil {
+		return err
+	}
 
 	if _, err := w.prepareWorkbenchManagedCompose(
 		ctx,

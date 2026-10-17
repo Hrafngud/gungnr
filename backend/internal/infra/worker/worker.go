@@ -181,6 +181,7 @@ func (r *Runner) supportsTask(taskType contract.TaskType) bool {
 		contract.TaskTypeDockerRunQuickService,
 		contract.TaskTypeHostListenTCPPorts,
 		contract.TaskTypeDockerPublishedPorts,
+		contract.TaskTypeDockerNetworkSubnets,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
 		contract.TaskTypeHostRuntimeStream,
@@ -207,6 +208,7 @@ func (r *Runner) SupportedTasks() []contract.TaskType {
 		contract.TaskTypeDockerRunQuickService,
 		contract.TaskTypeHostListenTCPPorts,
 		contract.TaskTypeDockerPublishedPorts,
+		contract.TaskTypeDockerNetworkSubnets,
 		contract.TaskTypeComposeUpStack,
 		contract.TaskTypeHostRuntimeStats,
 		contract.TaskTypeHostRuntimeStream,
@@ -277,6 +279,8 @@ func (r *Runner) handleIntent(ctx context.Context, intent contract.Intent) error
 		outcome = r.handleHostListenTCPPorts(ctx, intent)
 	case contract.TaskTypeDockerPublishedPorts:
 		outcome = r.handleDockerPublishedPorts(ctx, intent)
+	case contract.TaskTypeDockerNetworkSubnets:
+		outcome = r.handleDockerNetworkSubnets(ctx, intent)
 	case contract.TaskTypeComposeUpStack:
 		outcome = r.handleComposeUpStack(ctx, intent)
 	case contract.TaskTypeHostRuntimeStats:
@@ -894,6 +898,24 @@ func (r *Runner) handleDockerPublishedPorts(ctx context.Context, _ contract.Inte
 			"lines": parseLines(output),
 		},
 	}
+}
+
+func (r *Runner) handleDockerNetworkSubnets(ctx context.Context, _ contract.Intent) taskOutcome {
+	output, err := r.runDockerCommand(ctx, "", "network", "ls", "-q")
+	if err != nil {
+		return taskOutcome{err: commandError(err, output, "docker network ls")}
+	}
+	ids := strings.Fields(string(output))
+	lines := []string{}
+	if len(ids) > 0 {
+		args := append([]string{"network", "inspect", "--format", "{{range .IPAM.Config}}{{println .Subnet}}{{end}}"}, ids...)
+		output, err = r.runDockerCommand(ctx, "", args...)
+		if err != nil {
+			return taskOutcome{err: commandError(err, output, "docker network inspect")}
+		}
+		lines = parseLines(output)
+	}
+	return taskOutcome{data: map[string]any{"lines": lines}}
 }
 
 func (r *Runner) handleComposeUpStack(ctx context.Context, intent contract.Intent) taskOutcome {
