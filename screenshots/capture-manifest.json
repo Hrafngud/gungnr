@@ -4,9 +4,14 @@
   "browser": "Firefox",
   "viewportWidthCssPixels": 1600,
   "privacy": "Sensitive values replaced with neutral blocks and blurred before capture; PNGs contain only rendered pixels.",
+  "captureNotes": [
+    "Retried slow reads and waited for populated data; no timeout or network-error captures retained.",
+    "Updated captures used longer request timeouts and serialized reads in the temporary browser only.",
+    "Continuous metrics streams were paused for still captures; finite animations were completed.",
+    "No application code, server configuration, settings, or returned data was changed."
+  ],
   "limitations": [
-    "Project detail requests timed out; its tabs were unavailable.",
-    "Host and integration screens include live timeout and HTTP 502 states.",
+    "NetBird retains its actual disconnected and prior policy-operation failure status.",
     "Paginated lists show their first page."
   ],
   "screenshots": [
@@ -36,21 +41,21 @@
     },
     {
       "file": "04-container-logs.png",
-      "width": 1600,
-      "height": 914,
-      "sha256": "853be07697b9b9ece556b43fe9ac706a0b389fa5d4e4dd2e9aade01389474cb3"
+      "width": 1588,
+      "height": 967,
+      "sha256": "f0508f013b9c65c566716512027d03901590804bb258b3a034206c25d25ba934"
     },
     {
       "file": "05-netbird.png",
       "width": 1588,
       "height": 2001,
-      "sha256": "505fb8dab5eb1f46a745d4c42f28841569e790900e707eb09910d8ac9d0b0607"
+      "sha256": "4e5db578b94ba81fea6c7d8e6ae4fc27e8f84e5f4e089f0c12ef31055ca7d921"
     },
     {
       "file": "06-host-settings.png",
       "width": 1588,
-      "height": 966,
-      "sha256": "f7b07de3957af53bfe0af1755d5f9dd05cbd7bbab0704bdf9a1a27d3bbfbdf75"
+      "height": 18759,
+      "sha256": "4036a8308d4f5f94cc2441bc83d50b07bb24563fef5ac436c94bc4fb9db64f47"
     },
     {
       "file": "07-networking.png",
@@ -77,22 +82,46 @@
       "sha256": "3c9fd43f281c00b875d3b549f7b60e1a094948e6f87fcc1b78962819808c3154"
     },
     {
-      "file": "11-project-detail-unavailable.png",
-      "width": 1600,
+      "file": "11-project-workbench.png",
+      "width": 1639,
+      "height": 1792,
+      "sha256": "55e5c685fedb8cd2ba979ec0edf904cc1c0414202b2bcb44ee20872c80afe350"
+    },
+    {
+      "file": "12-project-runtime.png",
+      "width": 1639,
+      "height": 1724,
+      "sha256": "97ee71e8a031e6d6dee1bf8a284b1ab119da8a43c4ed8163ff929261e74a2117"
+    },
+    {
+      "file": "13-project-environment.png",
+      "width": 1639,
+      "height": 2632,
+      "sha256": "732536f35cfc9d8af031ca46bd2e202593b4de132d21cc04ed192f608cabaac8"
+    },
+    {
+      "file": "14-project-archive.png",
+      "width": 1639,
+      "height": 2058,
+      "sha256": "ea69ae1b7083f78f3f6c27435a840cc74aa30bd80519f1bddffe1883269ababf"
+    },
+    {
+      "file": "15-project-activity.png",
+      "width": 1639,
       "height": 914,
-      "sha256": "6969afd7f473e74f3126f286523890f88cab1208787fc973361be50c54e076c4"
+      "sha256": "c89191d49fe3352638c85069fd6ef969c24a9c1001d0a816d7bcbb3b7cee33a0"
     },
     {
       "file": "16-template-settings-dialog.png",
-      "width": 1588,
-      "height": 1048,
-      "sha256": "c46d164e22c303fb3cd9226e35a7abfe3e1c5829b0658d018d09fd9d11b8a866"
+      "width": 1600,
+      "height": 914,
+      "sha256": "2632d1d9fd1d02b8dba5d7e7fbb8ee120299ba6b0a2becc46c12b32dcb558d9b"
     },
     {
       "file": "17-ingress-preview-dialog.png",
-      "width": 1588,
-      "height": 1048,
-      "sha256": "15df0933a42eded51a24b5bd7f365dcf6c6aa2aebd168b55a0aee0d86c3168fb"
+      "width": 1600,
+      "height": 914,
+      "sha256": "90ef91bd4005205d4918e34d7c19bc0a9a96260f3210f46e6c52da2273ab62aa"
     },
     {
       "file": "18-create-template-dialog.png",
