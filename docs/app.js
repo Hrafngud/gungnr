@@ -28,7 +28,37 @@ const updateBaseLinks = () => {
 
 updateBaseLinks();
 
+// Anchor offsets follow the actual header when its navigation wraps on mobile.
+const siteHeader = document.querySelector('.site-header');
+if (siteHeader && typeof ResizeObserver !== 'undefined') {
+  new ResizeObserver(([entry]) => {
+    document.documentElement.style.setProperty('--header-height', `${entry.target.offsetHeight}px`);
+  }).observe(siteHeader);
+}
+
+const sidebarToggle = document.querySelector('[data-sidebar-toggle]');
+if (sidebarToggle) {
+  const sidebar = sidebarToggle.closest('.sidebar');
+  const mobileNavigation = window.matchMedia('(max-width: 1023px)');
+  const setNavigationExpanded = (expanded) => {
+    sidebarToggle.setAttribute('aria-expanded', String(expanded));
+    sidebar.dataset.collapsed = String(!expanded);
+  };
+  sidebarToggle.hidden = false;
+  setNavigationExpanded(!mobileNavigation.matches);
+  mobileNavigation.addEventListener('change', () => setNavigationExpanded(!mobileNavigation.matches));
+  sidebarToggle.addEventListener('click', () => {
+    setNavigationExpanded(sidebarToggle.getAttribute('aria-expanded') !== 'true');
+  });
+  sidebar.querySelectorAll('[data-nav-link]').forEach((link) => {
+    link.addEventListener('click', () => {
+      if (mobileNavigation.matches) setNavigationExpanded(false);
+    });
+  });
+}
+
 copyButtons.forEach((button) => {
+  button.setAttribute('aria-live', 'polite');
   const original = button.textContent;
   button.addEventListener('click', async () => {
     const target = button.getAttribute('data-copy-target');
@@ -84,208 +114,275 @@ const docSections = Array.from(document.querySelectorAll('[data-doc-section]'));
 const openDetailsFromHash = () => {
   const hash = window.location.hash;
   if (!hash) return;
-  const target = document.querySelector(hash);
-  if (target && target.tagName === 'DETAILS') {
-    target.open = true;
+  let id;
+  try {
+    id = decodeURIComponent(hash.slice(1));
+  } catch {
+    return;
   }
+  const target = document.getElementById(id);
+  for (let element = target; element; element = element.parentElement) {
+    if (element.tagName === 'DETAILS') element.open = true;
+  }
+  if (target) requestAnimationFrame(() => target.scrollIntoView({ block: 'start' }));
 };
 
 openDetailsFromHash();
 window.addEventListener('hashchange', openDetailsFromHash);
 
-const heroLogoMark = document.querySelector('.hero-logo-mark');
-if (heroLogoMark) {
-  const heroSpear = heroLogoMark.querySelector('.hero-spear');
-  if (heroSpear) {
-    let spearRunning = false;
-
-    const triggerSpearPulse = () => {
-      if (spearRunning) return;
-      spearRunning = true;
-      heroLogoMark.classList.remove('spear-pulse');
-      void heroLogoMark.offsetWidth;
-      heroLogoMark.classList.add('spear-pulse');
-    };
-
-    heroSpear.addEventListener('animationend', (event) => {
-      if (event.animationName !== 'hero-spear-wobble') return;
-      spearRunning = false;
-      heroLogoMark.classList.remove('spear-pulse');
-    });
-
-    document.addEventListener('mousemove', triggerSpearPulse);
-  }
-}
-
 if (sections.length > 0) {
-  const observer = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (!entry.isIntersecting) return;
-        const id = entry.target.getAttribute('id');
-        navLinks.forEach((link) => {
-          const active = link.getAttribute('href') === `#${id}`;
-          link.setAttribute('data-active', active ? 'true' : 'false');
-        });
-      });
-    },
-    {
-      rootMargin: '-40% 0px -50% 0px',
-      threshold: 0.1,
+  let currentId;
+  let framePending = false;
+  const updateCurrentSection = () => {
+    framePending = false;
+    const offset = (siteHeader?.offsetHeight || 0) + 64;
+    let current = sections[0];
+    for (const section of sections) {
+      if (section.getBoundingClientRect().top <= offset) current = section;
     }
-  );
-
-  sections.forEach((section) => observer.observe(section));
+    if (current.id === currentId) return;
+    currentId = current.id;
+    navLinks.forEach((link) => {
+      const active = link.getAttribute('href') === `#${currentId}`;
+      link.setAttribute('data-active', String(active));
+      if (active) link.setAttribute('aria-current', 'location');
+      else link.removeAttribute('aria-current');
+    });
+  };
+  const scheduleSectionUpdate = () => {
+    if (framePending) return;
+    framePending = true;
+    requestAnimationFrame(updateCurrentSection);
+  };
+  window.addEventListener('scroll', scheduleSectionUpdate, { passive: true });
+  window.addEventListener('resize', scheduleSectionUpdate);
+  updateCurrentSection();
 }
 
 const docSearch = document.querySelector('#doc-search');
 const searchResults = document.querySelector('#doc-search-results');
 
 if (docSearch && searchResults) {
-  const searchField = docSearch.closest('.search-field');
-  const triggerSearchPulse = () => {
-    if (!searchField) return;
-    searchField.classList.remove('search-field-pulse');
-    void searchField.offsetWidth;
-    searchField.classList.add('search-field-pulse');
-  };
-
-  if (searchField) {
-    searchField.addEventListener('animationend', (event) => {
-      if (event.animationName === 'search-pulse') {
-        searchField.classList.remove('search-field-pulse');
-      }
-    });
-  }
-
-  const searchForm = docSearch.closest('form');
-  if (searchForm) {
-    searchForm.addEventListener('submit', (event) => {
-      event.preventDefault();
-    });
-  }
+  const searchRoot = docSearch.closest('.header-search');
+  const searchPanel = searchRoot.querySelector('.search-panel');
+  const searchCaption = searchRoot.querySelector('[data-search-caption]');
+  const searchStatus = document.querySelector('#doc-search-status');
+  const shortcutHint = searchRoot.querySelector('.search-key');
+  shortcutHint.textContent = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘ K' : 'Ctrl K';
+  let activeIndex = -1;
+  let matches = [];
 
   const searchItems = docSections.map((section) => {
-    const title =
-      section.dataset.docTitle ||
-      section.querySelector('h2, h3')?.textContent?.trim() ||
-      section.id;
-    const group = section.dataset.docGroup || '';
-    const tags = section.dataset.docTags || '';
+    const title = section.dataset.docTitle || section.querySelector('h2, h3')?.textContent?.trim() || section.id;
     const code = (section.dataset.docCode || '').trim();
-    const codeKey = code.toLowerCase();
-    const groupLabel = group
-      ? group.replace(/-/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase())
-      : '';
-    const label =
-      groupLabel && groupLabel !== title ? `${groupLabel} / ${title}` : title;
-    const searchable = `${code} ${title} ${groupLabel} ${tags} ${section.textContent || ''}`.toLowerCase();
-
-    return { id: section.id, title, group, groupLabel, label, code, codeKey, searchable };
+    const group = (section.dataset.docGroup || '').replace(/-/g, ' ');
+    const groupLabel = group.replace(/\b\w/g, (letter) => letter.toUpperCase());
+    // Parent sections must not outrank a specific topic by inheriting all its text.
+    const content = section.cloneNode(true);
+    content.querySelectorAll('[data-doc-section], button').forEach((child) => child.remove());
+    const fields = [
+      { text: normalizeSearch(code), weight: 0 },
+      { text: normalizeSearch(title), weight: 1 },
+      { text: normalizeSearch(section.dataset.docTags || ''), weight: 3 },
+      { text: normalizeSearch(group), weight: 5 },
+      { text: normalizeSearch(content.textContent || ''), weight: 12 },
+    ].map((field) => ({ ...field, words: [...new Set(field.text.split(' ').filter(Boolean))] }));
+    return { id: section.id, title, code, groupLabel, fields };
   });
 
-  const renderResults = (query) => {
-    const trimmed = query.trim().toLowerCase();
-    searchResults.innerHTML = '';
-
-    if (!trimmed) {
-      searchResults.hidden = true;
-      return;
+  const setResultsVisible = (visible) => {
+    searchPanel.hidden = !visible;
+    docSearch.setAttribute('aria-expanded', String(visible));
+    if (!visible) {
+      docSearch.removeAttribute('aria-activedescendant');
+      activeIndex = -1;
     }
-
-    const matches = searchItems
-      .map((item) => ({ item, score: matchScore(item, trimmed) }))
-      .filter((entry) => entry.score < Number.POSITIVE_INFINITY)
-      .sort((a, b) => {
-        if (a.score !== b.score) return a.score - b.score;
-        return a.item.title.localeCompare(b.item.title);
-      })
-      .slice(0, 6)
-      .map((entry) => entry.item);
-
-    if (matches.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'search-result-empty';
-      empty.textContent = 'No matches. Try "AUTH-401" or "tunnel".';
-      searchResults.appendChild(empty);
-      searchResults.hidden = false;
-      return;
-    }
-
-    matches.forEach((item) => {
-      const link = document.createElement('a');
-      link.href = `#${item.id}`;
-      link.className = 'search-result';
-
-      const title = document.createElement('strong');
-      title.textContent = item.title;
-
-      const meta = document.createElement('span');
-      const metaParts = [];
-      if (item.code) metaParts.push(item.code);
-      if (item.groupLabel && item.groupLabel !== item.title) {
-        metaParts.push(item.groupLabel);
-      }
-      meta.textContent = metaParts.length > 0 ? metaParts.join(' · ') : 'Section';
-
-      link.appendChild(title);
-      link.appendChild(meta);
-      searchResults.appendChild(link);
-    });
-
-    searchResults.hidden = false;
   };
 
-  docSearch.addEventListener('input', () => renderResults(docSearch.value));
+  const setActive = (index, scroll = false) => {
+    const options = [...searchResults.querySelectorAll('[role="option"]')];
+    activeIndex = index;
+    options.forEach((option, position) => option.setAttribute('aria-selected', String(position === index)));
+    const active = options[index];
+    if (active) {
+      docSearch.setAttribute('aria-activedescendant', active.id);
+      if (scroll) active.scrollIntoView({ block: 'nearest' });
+    } else {
+      docSearch.removeAttribute('aria-activedescendant');
+    }
+  };
 
-  docSearch.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      const first = searchResults.querySelector('a.search-result');
-      if (first) {
+  const openResult = (item) => {
+    if (!item) return;
+    setResultsVisible(false);
+    const hash = `#${item.id}`;
+    if (window.location.hash === hash) openDetailsFromHash();
+    else window.location.hash = hash;
+    const target = document.getElementById(item.id);
+    if (target) {
+      if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+      target.focus({ preventScroll: true });
+    }
+  };
+
+  const renderResults = () => {
+    const query = normalizeSearch(docSearch.value);
+    const terms = query.split(' ').filter(Boolean).slice(0, 12);
+    matches = query
+      ? searchItems.map((item) => ({ item, score: matchScore(item, query, terms) }))
+          .filter((entry) => Number.isFinite(entry.score))
+          .sort((a, b) => a.score - b.score || a.item.title.localeCompare(b.item.title))
+          .slice(0, 8).map((entry) => entry.item)
+      : searchItems.slice(0, 6);
+    searchResults.replaceChildren();
+    activeIndex = -1;
+    docSearch.removeAttribute('aria-activedescendant');
+    searchCaption.textContent = query ? `${matches.length} matching section${matches.length === 1 ? '' : 's'}` : 'Suggested sections';
+    searchStatus.textContent = matches.length ? `${matches.length} suggestions available. Use up and down arrows to navigate.` : 'No matching sections.';
+
+    if (!matches.length) {
+      const empty = document.createElement('div');
+      empty.className = 'search-result-empty';
+      empty.setAttribute('role', 'presentation');
+      empty.textContent = 'No matching sections. Try a topic or error code.';
+      searchResults.appendChild(empty);
+    }
+
+    matches.forEach((item, index) => {
+      const option = document.createElement('a');
+      option.id = `search-option-${index}`;
+      option.href = `#${item.id}`;
+      option.className = 'search-result';
+      option.setAttribute('role', 'option');
+      option.setAttribute('aria-selected', 'false');
+      option.tabIndex = -1;
+      const title = document.createElement('strong');
+      title.textContent = item.title;
+      const meta = document.createElement('span');
+      meta.textContent = [item.code, item.groupLabel !== item.title ? item.groupLabel : ''].filter(Boolean).join(' · ') || 'Section';
+      option.append(title, meta);
+      option.addEventListener('pointermove', () => setActive(index));
+      // Keep typing focus in the combobox until a result is chosen.
+      option.addEventListener('mousedown', (event) => event.preventDefault());
+      option.addEventListener('click', (event) => {
+        if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
-        window.location.hash = first.getAttribute('href') || '#docs';
-        searchResults.hidden = true;
-      }
+        openResult(item);
+      });
+      searchResults.appendChild(option);
+    });
+    setResultsVisible(true);
+  };
+
+  docSearch.closest('form')?.addEventListener('submit', (event) => event.preventDefault());
+  docSearch.addEventListener('input', renderResults);
+  docSearch.addEventListener('focus', renderResults);
+  docSearch.addEventListener('click', () => { if (searchPanel.hidden) renderResults(); });
+  searchRoot.querySelector('.search-field').addEventListener('click', () => docSearch.focus());
+  docSearch.addEventListener('keydown', (event) => {
+    if (event.isComposing) return;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (searchPanel.hidden) renderResults();
+      if (!matches.length) return;
+      const direction = event.key === 'ArrowDown' ? 1 : -1;
+      const next = activeIndex < 0 ? (direction > 0 ? 0 : matches.length - 1) : (activeIndex + direction + matches.length) % matches.length;
+      setActive(next, true);
+    } else if (event.key === 'Enter' && !searchPanel.hidden) {
+      event.preventDefault();
+      openResult(matches[Math.max(0, activeIndex)]);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      setResultsVisible(false);
+    } else if (event.key === 'Tab') {
+      setResultsVisible(false);
     }
   });
 
-  window.addEventListener('hashchange', () => {
-    searchResults.hidden = true;
+  window.addEventListener('hashchange', () => setResultsVisible(false));
+  document.addEventListener('pointerdown', (event) => {
+    if (!searchRoot.contains(event.target)) setResultsVisible(false);
   });
-
-  document.addEventListener('click', (event) => {
-    if (event.target === docSearch || searchResults.contains(event.target)) {
-      return;
-    }
-    searchResults.hidden = true;
+  document.addEventListener('focusin', (event) => {
+    if (!searchRoot.contains(event.target)) setResultsVisible(false);
   });
-
   document.addEventListener('keydown', (event) => {
-    if (event.key === '/' && document.activeElement !== docSearch) {
+    if (event.isComposing) return;
+    const shortcut = (event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'k';
+    const editing = event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"]');
+    const slash = event.key === '/' && !editing && !event.ctrlKey && !event.metaKey && !event.altKey;
+    if (shortcut || slash) {
       event.preventDefault();
       docSearch.focus();
-    }
-  });
-
-  document.addEventListener('keydown', (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
-      event.preventDefault();
-      docSearch.focus();
-      docSearch.select();
-      triggerSearchPulse();
+      if (shortcut) docSearch.select();
+      renderResults();
     }
   });
 }
 
-function matchScore(item, query) {
-  if (!query) return Number.POSITIVE_INFINITY;
+function normalizeSearch(value) {
+  return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
 
-  if (item.codeKey) {
-    if (item.codeKey === query) return 0;
-    if (item.codeKey.startsWith(query)) return 1;
-    if (item.codeKey.includes(query)) return 2;
+function matchScore(item, query, terms) {
+  const compactCode = item.fields[0].text.replace(/ /g, '');
+  const compactQuery = query.replace(/ /g, '');
+  if (compactCode && compactCode === compactQuery) return -100;
+  if (compactCode && compactCode.startsWith(compactQuery)) return -75;
+  let score = 0;
+  for (const term of terms) {
+    let best = Infinity;
+    for (const field of item.fields) {
+      for (const word of field.words) {
+        const cost = fuzzyWordScore(term, word);
+        best = Math.min(best, cost + field.weight);
+      }
+    }
+    if (!Number.isFinite(best)) return Infinity;
+    score += best;
   }
+  if (item.fields[1].text === query) score -= 10;
+  else if (item.fields[1].text.includes(query)) score -= 5;
+  return score / terms.length;
+}
 
-  if (item.searchable.includes(query)) return 10;
-  return Number.POSITIVE_INFINITY;
+function fuzzyWordScore(term, word) {
+  if (word === term) return 0;
+  if (word.startsWith(term)) return 1 + (word.length - term.length) / 100;
+  if (term.length >= 3 && word.includes(term)) return 3;
+  if (term.length < 3) return Infinity;
+  const allowedEdits = term.length >= 8 ? 2 : 1;
+  if (Math.abs(term.length - word.length) <= allowedEdits) {
+    const distance = editDistance(term, word);
+    if (distance <= allowedEdits) return 4 + distance;
+  }
+  // Abbreviations such as "wrkbnch" still match "workbench".
+  if (term.length >= 4 && word.length <= term.length * 2) {
+    let cursor = 0;
+    for (const letter of word) if (letter === term[cursor]) cursor += 1;
+    if (cursor === term.length) return 8 + (word.length - term.length) / term.length;
+  }
+  return Infinity;
+}
+
+// Optimal string alignment includes a single adjacent-letter transposition.
+function editDistance(left, right) {
+  let previousPrevious;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= left.length; row += 1) {
+    const current = [row];
+    for (let column = 1; column <= right.length; column += 1) {
+      current[column] = Math.min(
+        current[column - 1] + 1,
+        previous[column] + 1,
+        previous[column - 1] + (left[row - 1] === right[column - 1] ? 0 : 1)
+      );
+      if (row > 1 && column > 1 && left[row - 1] === right[column - 2] && left[row - 2] === right[column - 1]) {
+        current[column] = Math.min(current[column], previousPrevious[column - 2] + 1);
+      }
+    }
+    previousPrevious = previous;
+    previous = current;
+  }
+  return previous[right.length];
 }
