@@ -15,9 +15,9 @@ export const hostApi = {
     api.get<{ snapshot: HostRuntimeSnapshot }>('/api/v1/host/stats'),
   runtimeStatsStreamUrl: () => `${getApiBaseUrl().replace(/\/$/, '')}/api/v1/host/stats/stream`,
   stopContainer: (container: string) =>
-    api.post('/api/v1/host/docker/stop', { container }),
+    api.post('/api/v1/host/docker/stop', { container }, { timeout: 120_000 }),
   restartContainer: (container: string) =>
-    api.post('/api/v1/host/docker/restart', { container }),
+    api.post('/api/v1/host/docker/restart', { container }, { timeout: 120_000 }),
   restartProject: (project: string) =>
     api.post<{ job: Job }>(
       '/api/v1/host/docker/project/restart',
@@ -25,5 +25,5 @@ export const hostApi = {
       { timeout: restartProjectTimeoutMs },
     ),
   removeContainer: (container: string, removeVolumes = false) =>
-    api.post('/api/v1/host/docker/remove', { container, removeVolumes }),
+    api.post('/api/v1/host/docker/remove', { container, removeVolumes }, { timeout: 120_000 }),
 }

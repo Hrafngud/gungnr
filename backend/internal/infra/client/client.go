@@ -117,6 +117,7 @@ func (c *Client) WaitResult(ctx context.Context, intentID string) (contract.Resu
 
 		select {
 		case <-waitCtx.Done():
+			_ = c.queue.CancelRead(context.Background(), intentID)
 			if errors.Is(waitCtx.Err(), context.DeadlineExceeded) {
 				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 					return contract.Result{}, ctx.Err()

@@ -144,7 +144,7 @@ func TestProcessOnceHandlesDockerListContainers(t *testing.T) {
 
 	require.Len(t, exec.calls, 1)
 	require.Equal(t, "docker", exec.calls[0].name)
-	require.Equal(t, []string{"ps", "-a", "--format", "{{json .}}"}, exec.calls[0].args)
+	require.Equal(t, []string{"ps", "-a", "--size=false", "--format", "{{json .}}"}, exec.calls[0].args)
 
 	result, err := q.ReadResult(context.Background(), intent.IntentID)
 	require.NoError(t, err)

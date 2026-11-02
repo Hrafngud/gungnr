@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"bufio"
 	"math"
 	"strings"
 
@@ -80,6 +79,23 @@ func (c *ProjectsController) ListLocal(ctx *gin.Context) {
 		return
 	}
 	respond.OK(ctx, gin.H{"projects": projects})
+}
+
+func (c *ProjectsController) Metadata(ctx *gin.Context) {
+	project, ok := c.parseProjectParam(ctx)
+	if !ok {
+		return
+	}
+	if c.runtime == nil {
+		respond.Err(ctx, errs.New(errs.CodeProjectDetailFailed, "project runtime service unavailable"), errs.CodeProjectDetailFailed, "failed to load project metadata")
+		return
+	}
+	detail, err := c.runtime.Metadata(ctx.Request.Context(), project)
+	if err != nil {
+		respond.Err(ctx, err, errs.CodeProjectDetailFailed, "failed to load project metadata")
+		return
+	}
+	respond.OK(ctx, detail)
 }
 
 func (c *ProjectsController) Detail(ctx *gin.Context) {
@@ -302,28 +318,7 @@ func (c *ProjectsController) StreamLogs(ctx *gin.Context) {
 	}
 	defer stdout.Close()
 
-	scanner := bufio.NewScanner(stdout)
-	buffer := make([]byte, 0, 64*1024)
-	scanner.Buffer(buffer, 1024*1024)
-
-	for scanner.Scan() {
-		line := strings.TrimRight(scanner.Text(), "\r")
-		if line == "" {
-			continue
-		}
-		httpx.SendSSEEvent(ctx, flusher, "log", gin.H{"line": line})
-	}
-
-	if err := scanner.Err(); err != nil {
-		httpx.SendSSEEvent(ctx, flusher, "error", gin.H{"code": errs.CodeProjectLogsFailed, "message": err.Error()})
-		return
-	}
-	if err := waiter.Wait(); err != nil {
-		httpx.SendSSEEvent(ctx, flusher, "error", gin.H{"code": errs.CodeProjectLogsFailed, "message": err.Error()})
-		return
-	}
-
-	httpx.SendSSEEvent(ctx, flusher, "done", gin.H{"status": "closed"})
+	httpx.StreamLogLines(ctx, flusher, stdout, waiter.Wait, string(errs.CodeProjectLogsFailed))
 }
 
 func (c *ProjectsController) ReadEnv(ctx *gin.Context) {

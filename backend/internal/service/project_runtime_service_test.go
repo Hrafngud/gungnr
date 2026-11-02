@@ -156,3 +156,20 @@ func TestProjectRuntimeServiceListStatusesReturnsRuntimeStatusesWithoutPersisten
 	require.Zero(t, repo.createCalls)
 	require.Zero(t, repo.updateCalls)
 }
+
+func TestProjectMetadataDoesNotWaitForDockerEnrichment(t *testing.T) {
+	templates := t.TempDir()
+	projectDir := filepath.Join(templates, "demo")
+	require.NoError(t, os.Mkdir(projectDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "compose.yml"), []byte("services: {}"), 0o600))
+	repo := &stubProjectRepository{projects: []models.Project{{Name: "demo", Path: projectDir}}}
+	// No host service is available: saved project metadata must still load.
+	svc := NewProjectRuntimeService(templates, repo, nil)
+	detail, err := svc.Metadata(context.Background(), "demo")
+	require.NoError(t, err)
+	require.True(t, detail.RuntimePending)
+	require.Equal(t, projectDir, detail.Runtime.Path)
+	require.NotEmpty(t, detail.Runtime.ComposeFiles)
+	require.Empty(t, detail.Containers)
+	require.Empty(t, detail.Diagnostics)
+}

@@ -15,7 +15,7 @@ FROM alpine:3.20
 ARG TARGETARCH
 
 RUN adduser -D -g '' appuser \
-  && apk add --no-cache ca-certificates tzdata curl git docker-cli docker-cli-compose \
+  && apk add --no-cache ca-certificates tzdata curl git docker-cli docker-cli-compose iproute2 \
   && ARCH="${TARGETARCH:-}" \
   && if [ -z "$ARCH" ]; then ARCH="$(uname -m)"; fi \
   && case "$ARCH" in \

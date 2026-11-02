@@ -40,11 +40,12 @@ type ProjectStatus struct {
 }
 
 type ProjectDetail struct {
-	Project     ProjectDetailProject      `json:"project"`
-	Runtime     ProjectDetailRuntime      `json:"runtime"`
-	Network     ProjectDetailNetwork      `json:"network"`
-	Containers  []DockerContainer         `json:"containers"`
-	Diagnostics []ProjectDetailDiagnostic `json:"diagnostics,omitempty"`
+	RuntimePending bool                      `json:"runtimePending,omitempty"`
+	Project        ProjectDetailProject      `json:"project"`
+	Runtime        ProjectDetailRuntime      `json:"runtime"`
+	Network        ProjectDetailNetwork      `json:"network"`
+	Containers     []DockerContainer         `json:"containers"`
+	Diagnostics    []ProjectDetailDiagnostic `json:"diagnostics,omitempty"`
 }
 
 type ProjectDetailProject struct {
@@ -144,6 +145,16 @@ func (s *ProjectRuntimeService) runtimeMetaClient() infraDockerMetadataClient {
 }
 
 func (s *ProjectRuntimeService) Detail(ctx context.Context, projectName string) (ProjectDetail, error) {
+	return s.detail(ctx, projectName, true)
+}
+
+// Metadata does not wait for container enrichment, so configuration remains usable
+// when the Docker daemon or runtime worker is temporarily unavailable.
+func (s *ProjectRuntimeService) Metadata(ctx context.Context, projectName string) (ProjectDetail, error) {
+	return s.detail(ctx, projectName, false)
+}
+
+func (s *ProjectRuntimeService) detail(ctx context.Context, projectName string, enrich bool) (ProjectDetail, error) {
 	resolved, err := s.Resolve(ctx, projectName)
 	if err != nil {
 		return ProjectDetail{}, err
@@ -184,7 +195,13 @@ func (s *ProjectRuntimeService) Detail(ctx context.Context, projectName string) 
 		detail.Network.DBPort = record.DBPort
 	}
 
-	filtered, err := s.projectContainers(ctx, resolved.NormalizedName)
+	if !enrich {
+		detail.RuntimePending = true
+		return detail, nil
+	}
+	runtimeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	filtered, err := s.projectContainers(runtimeCtx, resolved.NormalizedName)
 	if err != nil {
 		detail.Diagnostics = degradedProjectRuntimeDiagnostics(err)
 		return detail, nil

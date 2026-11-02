@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -50,20 +51,22 @@ type hostRuntimeWorkloadSnapshot struct {
 }
 
 type hostRuntimeSnapshot struct {
-	CollectedAt    string                                 `json:"collectedAt"`
-	Hostname       string                                 `json:"hostname,omitempty"`
-	UptimeSeconds  int64                                  `json:"uptimeSeconds"`
-	UptimeHuman    string                                 `json:"uptimeHuman"`
-	SystemImage    string                                 `json:"systemImage"`
-	Kernel         string                                 `json:"kernel"`
-	CPU            hostRuntimeCPU                         `json:"cpu"`
-	GPU            *hostRuntimeGPU                        `json:"gpu,omitempty"`
-	Memory         hostRuntimeMemorySnapshot              `json:"memory"`
-	Disk           hostRuntimeResource                    `json:"disk"`
-	Panel          hostRuntimeWorkloadSnapshot            `json:"panel"`
-	Projects       hostRuntimeWorkloadSnapshot            `json:"projects"`
-	ProjectsByName map[string]hostRuntimeWorkloadSnapshot `json:"projectsByName,omitempty"`
-	Warnings       []string                               `json:"warnings,omitempty"`
+	DiskUsagePending     bool                                   `json:"diskUsagePending,omitempty"`
+	DiskUsageCollectedAt string                                 `json:"diskUsageCollectedAt,omitempty"`
+	CollectedAt          string                                 `json:"collectedAt"`
+	Hostname             string                                 `json:"hostname,omitempty"`
+	UptimeSeconds        int64                                  `json:"uptimeSeconds"`
+	UptimeHuman          string                                 `json:"uptimeHuman"`
+	SystemImage          string                                 `json:"systemImage"`
+	Kernel               string                                 `json:"kernel"`
+	CPU                  hostRuntimeCPU                         `json:"cpu"`
+	GPU                  *hostRuntimeGPU                        `json:"gpu,omitempty"`
+	Memory               hostRuntimeMemorySnapshot              `json:"memory"`
+	Disk                 hostRuntimeResource                    `json:"disk"`
+	Panel                hostRuntimeWorkloadSnapshot            `json:"panel"`
+	Projects             hostRuntimeWorkloadSnapshot            `json:"projects"`
+	ProjectsByName       map[string]hostRuntimeWorkloadSnapshot `json:"projectsByName,omitempty"`
+	Warnings             []string                               `json:"warnings,omitempty"`
 }
 
 type hostRuntimeHostStreamUsage struct {
@@ -132,11 +135,25 @@ type dockerContainerSizeLine struct {
 
 const (
 	hostRuntimeStreamModeDebounced = "debounced"
-	hostRuntimeStreamIntervalMs    = 100
+	hostRuntimeStreamIntervalMs    = 2000
 )
 
 func (r *Runner) handleHostRuntimeStats(ctx context.Context, _ contract.Intent) taskOutcome {
-	snapshot, warnings, err := collectHostRuntimeSnapshot(ctx, r.exec, r.templatesDir)
+	executor := r.exec
+	if r.diskCache != nil {
+		executor = cachedDiskExecutor{base: r.exec, cache: r.diskCache}
+	}
+	snapshot, warnings, err := collectHostRuntimeSnapshot(ctx, executor, r.templatesDir)
+	if r.diskCache != nil {
+		at, refreshErr := r.diskCache.state(containerDiskCacheKey)
+		snapshot.DiskUsagePending = at.IsZero()
+		if !at.IsZero() {
+			snapshot.DiskUsageCollectedAt = at.Format(time.RFC3339)
+		}
+		if refreshErr != nil {
+			snapshot.Warnings = append(snapshot.Warnings, "Disk accounting refresh is unavailable; showing the last successful scan when available.")
+		}
+	}
 	if err != nil {
 		return taskOutcome{err: err, logTail: warnings}
 	}
@@ -710,11 +727,12 @@ func readRuntimeSnapshotUsageFromDocker(
 		projectAccumByName = countsByProject
 	}
 
-	if err := readDockerMemoryUsage(ctx, exec, inventoryByName, &panelAccum, &projectAccum, projectAccumByName); err != nil {
-		warnings = append(warnings, fmt.Sprintf("docker memory probe failed: %v", err))
-	}
 	if err := readDockerDiskUsage(ctx, exec, inventoryByName, inventoryByID, &panelAccum, &projectAccum, projectAccumByName); err != nil {
-		warnings = append(warnings, fmt.Sprintf("docker disk probe failed: %v", err))
+		if errors.Is(err, errDiskCollectionPending) {
+			warnings = append(warnings, "Container disk usage is being collected in the background.")
+		} else {
+			warnings = append(warnings, fmt.Sprintf("docker disk probe failed: %v", err))
+		}
 	}
 
 	return finalizeRuntimeSnapshotUsage(panelAccum, totalDiskBytes), finalizeRuntimeSnapshotUsage(projectAccum, totalDiskBytes), finalizeRuntimeSnapshotUsageByProject(projectAccumByName, totalDiskBytes), warnings
@@ -763,7 +781,7 @@ func readDockerInventory(
 	exec commandExecutor,
 	localProjectNames map[string]struct{},
 ) (map[string]runtimeUsageContainerMeta, map[string]runtimeUsageContainerMeta, runtimeUsageAccumulator, runtimeUsageAccumulator, map[string]*runtimeUsageAccumulator, error) {
-	output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "ps", "-a", "--format", "{{json .}}")
+	output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "ps", "-a", "--size=false", "--format", "{{json .}}")
 	if err != nil {
 		return nil, nil, runtimeUsageAccumulator{}, runtimeUsageAccumulator{}, nil, err
 	}
@@ -826,7 +844,7 @@ func readRunningDockerInventory(
 	exec commandExecutor,
 	localProjectNames map[string]struct{},
 ) (map[string]runtimeUsageContainerMeta, int, int, map[string]int, error) {
-	output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "ps", "--format", "{{json .}}")
+	output, err := runExecutorDockerCommand(ctx, exec, "", os.TempDir(), "ps", "--size=false", "--format", "{{json .}}")
 	if err != nil {
 		return nil, 0, 0, nil, err
 	}

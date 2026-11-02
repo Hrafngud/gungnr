@@ -55,6 +55,20 @@ const (
 	TaskTypeAPIHealthProbe         TaskType = "api_health_probe"
 )
 
+// ReadOnly identifies tasks that may be abandoned when their requester leaves.
+// Lifecycle and file mutations always run to a terminal result once submitted.
+func (t TaskType) ReadOnly() bool {
+	switch t {
+	case TaskTypeDockerListContainers, TaskTypeDockerSystemDF, TaskTypeDockerListVolumes,
+		TaskTypeDockerContainerLogs, TaskTypeDockerRuntimeCheck, TaskTypeHostListenTCPPorts,
+		TaskTypeDockerPublishedPorts, TaskTypeDockerNetworkSubnets, TaskTypeHostRuntimeStats,
+		TaskTypeHostRuntimeStream, TaskTypeProjectFileRead:
+		return true
+	default:
+		return false
+	}
+}
+
 type Status string
 
 const (

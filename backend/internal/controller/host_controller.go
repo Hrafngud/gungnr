@@ -1,7 +1,7 @@
 package controller
 
 import (
-	"bufio"
+	"context"
 	"strings"
 	"time"
 
@@ -69,42 +69,53 @@ func (c *HostController) RuntimeStats(ctx *gin.Context) {
 
 func (c *HostController) StreamRuntimeStats(ctx *gin.Context) {
 	httpx.SetSSEHeaders(ctx)
-
 	flusher, ok := httpx.SSEFlusher(ctx)
 	if !ok {
 		respond.Err(ctx, errs.New(errs.CodeHostStreamUnsupported, "streaming unsupported"), errs.CodeHostStreamUnsupported, "streaming unsupported")
 		return
 	}
-
-	httpx.SendSSEEvent(ctx, flusher, "meta", gin.H{
-		"mode":       "debounced",
-		"intervalMs": int(service.HostRuntimeStreamInterval / time.Millisecond),
-	})
-
-	sendSample := func() bool {
-		sample, err := c.service.RuntimeStreamSample(ctx.Request.Context())
-		if err != nil {
-			httpx.SendSSEEvent(ctx, flusher, "error", gin.H{"code": errs.CodeHostStatsFailed, "message": err.Error()})
-			return false
+	httpx.SendSSEEvent(ctx, flusher, "meta", gin.H{"mode": "shared", "intervalMs": int(service.HostRuntimeStreamInterval / time.Millisecond)})
+	streamCtx, cancel := context.WithCancel(ctx.Request.Context())
+	defer cancel()
+	type sampleResult struct {
+		sample service.HostRuntimeStreamSample
+		err    error
+	}
+	results := make(chan sampleResult)
+	go func() {
+		ticker := time.NewTicker(service.HostRuntimeStreamInterval)
+		defer ticker.Stop()
+		for {
+			sample, err := c.service.RuntimeStreamSample(streamCtx)
+			select {
+			case results <- sampleResult{sample, err}:
+			case <-streamCtx.Done():
+				return
+			}
+			select {
+			case <-ticker.C:
+			case <-streamCtx.Done():
+				return
+			}
 		}
-		httpx.SendSSEEvent(ctx, flusher, "sample", sample)
-		return true
-	}
-
-	if !sendSample() {
-		return
-	}
-
-	ticker := time.NewTicker(service.HostRuntimeStreamInterval)
-	defer ticker.Stop()
-
+	}()
+	heartbeat := time.NewTicker(10 * time.Second)
+	defer heartbeat.Stop()
+	lastCollected := ""
 	for {
 		select {
-		case <-ctx.Request.Context().Done():
+		case <-streamCtx.Done():
 			return
-		case <-ticker.C:
-			if !sendSample() {
-				return
+		case <-heartbeat.C:
+			httpx.SendSSEEvent(ctx, flusher, "heartbeat", gin.H{"time": time.Now().UTC()})
+		case result := <-results:
+			if result.err != nil {
+				httpx.SendSSEEvent(ctx, flusher, "error", gin.H{"code": errs.CodeHostStatsFailed, "message": "Runtime collection is temporarily unavailable; retrying."})
+				continue
+			}
+			if result.sample.CollectedAt != lastCollected {
+				httpx.SendSSEEvent(ctx, flusher, "sample", result.sample)
+				lastCollected = result.sample.CollectedAt
 			}
 		}
 	}
@@ -142,27 +153,7 @@ func (c *HostController) StreamDockerLogs(ctx *gin.Context) {
 	}
 	defer stdout.Close()
 
-	scanner := bufio.NewScanner(stdout)
-	buffer := make([]byte, 0, 64*1024)
-	scanner.Buffer(buffer, 1024*1024)
-
-	for scanner.Scan() {
-		line := strings.TrimRight(scanner.Text(), "\r")
-		if line == "" {
-			continue
-		}
-		httpx.SendSSEEvent(ctx, flusher, "log", gin.H{"line": line})
-	}
-
-	if err := scanner.Err(); err != nil {
-		httpx.SendSSEEvent(ctx, flusher, "error", gin.H{"code": errs.CodeHostLogsFailed, "message": err.Error()})
-		return
-	}
-	if err := waiter.Wait(); err != nil {
-		httpx.SendSSEEvent(ctx, flusher, "error", gin.H{"code": errs.CodeHostLogsFailed, "message": err.Error()})
-		return
-	}
-	httpx.SendSSEEvent(ctx, flusher, "done", gin.H{"status": "closed"})
+	httpx.StreamLogLines(ctx, flusher, stdout, waiter.Wait, string(errs.CodeHostLogsFailed))
 }
 
 func (c *HostController) StopDocker(ctx *gin.Context) {

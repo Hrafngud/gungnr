@@ -1641,38 +1641,44 @@ const refreshWorkbenchReadState = async (selection: {
   await refetchWorkbenchReadQueries(queryClient, name, selection)
 }
 
+let detailLoadSequence = 0
+
+const loadRuntimeDetail = async (name: string, sequence: number) => {
+  try {
+    const { data } = await projectsApi.getDetail(name)
+    if (sequence === detailLoadSequence && projectName.value === name) detail.value = data
+  } catch (err) {
+    if (sequence !== detailLoadSequence || !detail.value) return
+    detail.value = {
+      ...detail.value,
+      runtimePending: false,
+      diagnostics: [{ scope: 'containers', status: 'degraded', code: 'PROJECT-RUNTIME-DELAYED', message: apiErrorMessage(err) }],
+    }
+  }
+}
+
 const load = async () => {
   const name = projectName.value
-  if (!name) {
-    error.value = 'Invalid project name.'
-    detail.value = null
-    workbenchStore.reset()
-    return
-  }
-
+  const sequence = ++detailLoadSequence
+  if (!name) { error.value = 'Invalid project name.'; detail.value = null; workbenchStore.reset(); return }
+  const refreshExisting = detail.value?.project.normalizedName === name
   loading.value = true
   error.value = null
   pageLoading.start(`Loading project ${name}...`)
   try {
-    const { data } = await projectsApi.getDetail(name)
+    const { data } = await projectsApi.getMetadata(name)
+    if (sequence !== detailLoadSequence) return
     detail.value = data
-    if (!workbenchComposeSupported.value) {
-      workbenchStore.reset()
-    } else {
-      void refreshWorkbenchReadState({
-        snapshot: true,
-        graph: true,
-        catalog: true,
-        backups: isAdmin.value,
-      })
-    }
+    if (!workbenchComposeSupported.value) workbenchStore.reset()
+    else if (refreshExisting) void refreshWorkbenchReadState({ snapshot: true, graph: true, catalog: true, backups: isAdmin.value })
+    void loadRuntimeDetail(name, sequence)
   } catch (err) {
+    if (sequence !== detailLoadSequence) return
     detail.value = null
     error.value = apiErrorMessage(err)
     workbenchStore.reset()
   } finally {
-    loading.value = false
-    pageLoading.stop()
+    if (sequence === detailLoadSequence) { loading.value = false; pageLoading.stop() }
   }
 }
 
@@ -2267,6 +2273,7 @@ watch(workbenchRestorePanelOpen, (isOpen) => {
 
 onMounted(load)
 onBeforeUnmount(() => {
+  ++detailLoadSequence
   if (!runtimeCopyFeedbackTimer) return
   clearTimeout(runtimeCopyFeedbackTimer)
   runtimeCopyFeedbackTimer = null
@@ -2922,6 +2929,7 @@ watch(projectName, () => {
       </UiFormSidePanel>
 
       <ProjectRuntimeUnitsSection
+        :runtime-loading="detail?.runtimePending ?? false"
         v-else-if="activeSectionTab === 'runtime'"
         :project-name="projectName"
         :project-runtime-key="detail.project.normalizedName"

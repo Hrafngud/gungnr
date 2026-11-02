@@ -11,16 +11,19 @@ import type {
 } from '@/types/projects'
 import type { Job, JobListResponse } from '@/types/jobs'
 
+const containerActionTimeoutMs = 120_000
+
 const restartProjectTimeoutMs = 10 * 60 * 1000
 
 export const projectsApi = {
   list: () => api.get<{ projects: Project[] }>('/api/v1/projects'),
   listStatuses: () => api.get<{ statuses: ProjectStatus[] }>('/api/v1/projects/status'),
+  getMetadata: (name: string) => api.get<ProjectDetail>(`/api/v1/projects/${encodeURIComponent(name)}/metadata`),
   getDetail: (name: string) => api.get<ProjectDetail>(`/api/v1/projects/${encodeURIComponent(name)}`),
   listJobs: (name: string, params?: { page?: number; limit?: number }) =>
     api.get<JobListResponse>(`/api/v1/projects/${encodeURIComponent(name)}/jobs`, { params }),
   getArchivePlan: (name: string) =>
-    api.get<{ plan: ProjectArchivePlan }>(`/api/v1/projects/${encodeURIComponent(name)}/archive/plan`),
+    api.get<{ plan: ProjectArchivePlan }>(`/api/v1/projects/${encodeURIComponent(name)}/archive/plan`, { timeout: 45_000 }),
   archiveProject: (name: string, payload: Partial<ProjectArchiveOptions>) =>
     api.post<{ job: Job; plan: ProjectArchivePlan }>(`/api/v1/projects/${encodeURIComponent(name)}/archive`, payload),
   listLocal: () => api.get<{ projects: LocalProject[] }>('/api/v1/projects/local'),
@@ -31,11 +34,11 @@ export const projectsApi = {
       { timeout: restartProjectTimeoutMs },
     ),
   stopContainer: (name: string, container: string) =>
-    api.post<{ status: string }>(`/api/v1/projects/${encodeURIComponent(name)}/containers/stop`, { container }),
+    api.post<{ status: string }>(`/api/v1/projects/${encodeURIComponent(name)}/containers/stop`, { container }, { timeout: containerActionTimeoutMs }),
   restartContainer: (name: string, container: string) =>
-    api.post<{ status: string }>(`/api/v1/projects/${encodeURIComponent(name)}/containers/restart`, { container }),
+    api.post<{ status: string }>(`/api/v1/projects/${encodeURIComponent(name)}/containers/restart`, { container }, { timeout: containerActionTimeoutMs }),
   removeContainer: (name: string, container: string, removeVolumes = false) =>
-    api.post<{ status: string }>(`/api/v1/projects/${encodeURIComponent(name)}/containers/remove`, { container, removeVolumes }),
+    api.post<{ status: string }>(`/api/v1/projects/${encodeURIComponent(name)}/containers/remove`, { container, removeVolumes }, { timeout: containerActionTimeoutMs }),
   projectLogsUrl: (
     name: string,
     container: string,

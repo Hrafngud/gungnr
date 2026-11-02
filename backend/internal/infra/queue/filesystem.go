@@ -164,6 +164,7 @@ func (q *Filesystem) CleanupStale(ctx context.Context, now time.Time, policy Ret
 			} else {
 				state.intentPath = ""
 				report.RemovedIntents++
+				q.ClearCancellation(id)
 			}
 			continue
 		}
@@ -569,4 +570,98 @@ func expandUserPath(raw string) string {
 	default:
 		return filepath.Join(home, strings.TrimPrefix(trimmed, "~/"))
 	}
+}
+
+// CancelRead records requester cancellation without racing the worker's result writes.
+func (q *Filesystem) CancelRead(ctx context.Context, intentID string) error {
+	intent, err := q.ReadIntent(ctx, intentID)
+	if err != nil || !intent.TaskType.ReadOnly() {
+		return err
+	}
+	if result, err := q.ReadResult(ctx, intentID); err == nil && result.Terminal() {
+		return nil
+	}
+	return os.WriteFile(q.IntentPath(intentID)+".cancel", []byte("canceled"), 0o644)
+}
+
+func (q *Filesystem) ReadCanceled(intentID string) bool {
+	_, err := os.Stat(q.IntentPath(intentID) + ".cancel")
+	return err == nil
+}
+
+func (q *Filesystem) ClearCancellation(intentID string) {
+	_ = os.Remove(q.IntentPath(intentID) + ".cancel")
+}
+
+// Only terminal read results may use the short retention path. Lifecycle
+// results continue to use the configured, longer audit retention policy.
+func (q *Filesystem) PruneReadResult(ctx context.Context, intentID string, before time.Time) error {
+	result, err := q.ReadResult(ctx, intentID)
+	if err != nil {
+		return err
+	}
+	if !result.Terminal() || result.FinishedAt.IsZero() || !result.FinishedAt.Before(before) {
+		return fmt.Errorf("read result is still active or recent")
+	}
+	if !result.TaskType.ReadOnly() {
+		return fmt.Errorf("result is not a read")
+	}
+	for _, path := range []string{q.IntentPath(intentID), q.ResultPath(intentID), q.ClaimPath(intentID)} {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	q.ClearCancellation(intentID)
+	return nil
+}
+
+// RecoverInterrupted is called only for the API-owned queue before its sole
+// dispatcher starts. Never replay a claimed mutation after a process restart.
+func (q *Filesystem) RecoverInterrupted(ctx context.Context) (int, error) {
+	ids, err := q.ListIntentIDs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	recovered := 0
+	for _, id := range ids {
+		result, resultErr := q.ReadResult(ctx, id)
+		if resultErr == nil && result.Terminal() {
+			continue
+		}
+		if resultErr != nil && !errors.Is(resultErr, os.ErrNotExist) {
+			return recovered, resultErr
+		}
+		_, claimErr := os.Stat(q.ClaimPath(id))
+		if claimErr != nil && !errors.Is(claimErr, os.ErrNotExist) {
+			return recovered, claimErr
+		}
+		if errors.Is(claimErr, os.ErrNotExist) && result.Status != contract.StatusRunning {
+			continue
+		}
+		intent, err := q.ReadIntent(ctx, id)
+		if err != nil {
+			return recovered, err
+		}
+		now := time.Now().UTC()
+		if result.StartedAt.IsZero() {
+			result.StartedAt = now
+		}
+		result.Version = contract.VersionV1
+		result.IntentID = id
+		result.RequestID = intent.RequestID
+		result.TaskType = intent.TaskType
+		result.CreatedAt = intent.CreatedAt
+		result.Status = contract.StatusFailed
+		result.FinishedAt = now
+		result.Error = &contract.Error{Code: "INFRA-503-INTERRUPTED", Message: "The API restarted while this task was running; it was not replayed.", Retryable: intent.TaskType.ReadOnly()}
+		if _, err := q.WriteResult(ctx, result); err != nil {
+			return recovered, err
+		}
+		if err := os.Remove(q.ClaimPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return recovered, err
+		}
+		q.ClearCancellation(id)
+		recovered++
+	}
+	return recovered, nil
 }

@@ -8,6 +8,7 @@ import UiPanel from '@/components/ui/UiPanel.vue'
 import UiRuntimeLedMeter from '@/components/ui/UiRuntimeLedMeter.vue'
 import UiState from '@/components/ui/UiState.vue'
 import NavIcon from '@/components/NavIcon.vue'
+import { useRuntimeStreamFreshness } from '@/composables/useRuntimeStreamFreshness'
 import { hostApi } from '@/services/host'
 import { apiErrorMessage, isMockEnabled } from '@/services/api'
 import { clampPercent, formatBytes, formatPercent } from '@/utils/runtimeMetrics'
@@ -22,6 +23,9 @@ const runtimeStreamSample = ref<HostRuntimeStreamSample | null>(null)
 const runtimeStreamState = ref<'idle' | 'connecting' | 'live' | 'error'>('idle')
 const runtimeStreamError = ref<string | null>(null)
 
+const { ageLabel: streamAgeLabel } = useRuntimeStreamFreshness(() => runtimeStreamSample.value?.collectedAt, runtimeStreamState, runtimeStreamError)
+let snapshotTimer: ReturnType<typeof setTimeout> | undefined
+let snapshotActive = true
 let runtimeStreamSource: EventSource | null = null
 
 const formatClockSpeed = (value: number | null | undefined) => {
@@ -150,16 +154,16 @@ const runtimeSnapshotIndicators = () => {
       key: 'panel-disk',
       scope: 'Gungnr panel',
       metric: 'Disk',
-      value: formatBytes(snapshot.panel.diskUsedBytes),
-      meta: `${formatPercent(snapshot.panel.diskSharePercent)} of host disk`,
+      value: snapshot.diskUsagePending ? '—' : formatBytes(snapshot.panel.diskUsedBytes),
+      meta: snapshot.diskUsagePending ? 'Collecting disk usage…' : `Collected ${new Date(snapshot.diskUsageCollectedAt ?? snapshot.collectedAt).toLocaleTimeString()}`,
       percent: clampPercent(snapshot.panel.diskSharePercent),
     },
     {
       key: 'projects-disk',
       scope: 'Projects',
       metric: 'Disk',
-      value: formatBytes(snapshot.projects.diskUsedBytes),
-      meta: `${formatPercent(snapshot.projects.diskSharePercent)} of host disk`,
+      value: snapshot.diskUsagePending ? '—' : formatBytes(snapshot.projects.diskUsedBytes),
+      meta: snapshot.diskUsagePending ? 'Collecting disk usage…' : `Collected ${new Date(snapshot.diskUsageCollectedAt ?? snapshot.collectedAt).toLocaleTimeString()}`,
       percent: clampPercent(snapshot.projects.diskSharePercent),
     },
   ]
@@ -176,10 +180,9 @@ const runtimeStreamWarnings = () => {
 }
 
 const runtimeStreamBadge = () => {
-  const intervalMs = runtimeStreamSample.value?.intervalMs ?? 100
   switch (runtimeStreamState.value) {
     case 'live':
-      return { tone: 'ok' as BadgeTone, label: `Live · ${intervalMs}ms` }
+      return { tone: 'ok' as BadgeTone, label: `Live · ${streamAgeLabel.value}` }
     case 'connecting':
       return { tone: 'warn' as BadgeTone, label: 'Connecting…' }
     case 'error':
@@ -190,6 +193,8 @@ const runtimeStreamBadge = () => {
 }
 
 const loadRuntimeSnapshot = async () => {
+  if (runtimeSnapshotLoading.value || !snapshotActive) return
+  if (snapshotTimer) clearTimeout(snapshotTimer)
   runtimeSnapshotLoading.value = true
   runtimeSnapshotError.value = null
   try {
@@ -199,6 +204,7 @@ const loadRuntimeSnapshot = async () => {
     runtimeSnapshotError.value = apiErrorMessage(err)
   } finally {
     runtimeSnapshotLoading.value = false
+    if (snapshotActive) snapshotTimer = setTimeout(loadRuntimeSnapshot, runtimeSnapshot.value?.diskUsagePending ? 3000 : 30_000)
   }
 }
 
@@ -261,7 +267,7 @@ const startRuntimeSignalStream = () => {
 
   source.onopen = () => {
     if (runtimeStreamSource !== source) return
-    runtimeStreamState.value = 'live'
+    runtimeStreamState.value = 'connecting'
   }
 
   source.addEventListener('sample', (event) => {
@@ -292,6 +298,8 @@ const startRuntimeSignalStream = () => {
     }
     if (source.readyState === EventSource.CLOSED) {
       runtimeStreamState.value = 'idle'
+    } else {
+      runtimeStreamState.value = 'connecting'
     }
   })
 }
@@ -302,6 +310,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  snapshotActive = false
+  if (snapshotTimer) clearTimeout(snapshotTimer)
   closeRuntimeSignalStream()
 })
 

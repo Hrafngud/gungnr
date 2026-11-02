@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"go-notes/internal/integrations/cloudflare"
 )
@@ -31,6 +32,8 @@ func NewCloudflareService(settings *SettingsService) *CloudflareService {
 }
 
 func (s *CloudflareService) Preflight(ctx context.Context) (CloudflarePreflight, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	if s.settings == nil {
 		return CloudflarePreflight{}, fmt.Errorf("settings service unavailable")
 	}
@@ -136,6 +139,8 @@ func (s *CloudflareService) Preflight(ctx context.Context) (CloudflarePreflight,
 }
 
 func (s *CloudflareService) Zones(ctx context.Context) ([]cloudflare.ZoneInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	if s.settings == nil {
 		return nil, fmt.Errorf("settings service unavailable")
 	}

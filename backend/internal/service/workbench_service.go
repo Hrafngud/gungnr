@@ -16,7 +16,7 @@ import (
 	"go-notes/internal/validate"
 )
 
-const defaultWorkbenchLockWaitTimeout = 15 * time.Second
+const defaultWorkbenchLockWaitTimeout = 2 * time.Second
 const (
 	defaultWorkbenchBackupMaxCount = 10
 	defaultWorkbenchBackupMaxAge   = 30 * 24 * time.Hour

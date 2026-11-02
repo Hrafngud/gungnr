@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -75,6 +76,8 @@ type Runner struct {
 	logger       *log.Logger
 	exec         commandExecutor
 	tunnel       tunnelLifecycle
+	diskCache    *diskCommandCache
+	terminal     sync.Map
 }
 
 func New(q *queue.Filesystem, pollInterval time.Duration, templatesDir string, logger *log.Logger) *Runner {
@@ -98,24 +101,32 @@ func New(q *queue.Filesystem, pollInterval time.Duration, templatesDir string, l
 	}
 }
 
+// Run dispatches independent reads concurrently while preserving mutation order.
 func (r *Runner) Run(ctx context.Context) {
 	if r == nil || r.queue == nil {
 		return
 	}
+	r.diskCache = newDiskCommandCache(ctx)
+	lanes := map[string]chan struct{}{"read": make(chan struct{}, 4), "telemetry": make(chan struct{}, 1), "mutation": make(chan struct{}, 1)}
 	ticker := time.NewTicker(r.pollInterval)
 	defer ticker.Stop()
-
+	maintenance := time.NewTicker(time.Minute)
+	defer maintenance.Stop()
+	var active sync.WaitGroup
+	defer active.Wait()
 	for {
-		if err := ctx.Err(); err != nil {
+		if ctx.Err() != nil {
 			return
 		}
-		if err := r.ProcessOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			r.logger.Printf("warn: infra worker cycle failed: %v", err)
+		if err := r.dispatch(ctx, lanes, &active); err != nil && !errors.Is(err, context.Canceled) {
+			r.logger.Printf("warn: infra dispatch failed: %v", err)
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		case <-maintenance.C:
+			r.pruneReadHistory(ctx)
 		}
 	}
 }
@@ -241,7 +252,35 @@ type taskOutcome struct {
 
 func (r *Runner) handleIntent(ctx context.Context, intent contract.Intent) error {
 	startedAt := time.Now().UTC()
-	if _, err := r.queue.WriteResult(ctx, contract.Result{
+	resultCtx := ctx
+	if intent.TaskType.ReadOnly() {
+		readCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		defer cancel()
+		ctx = readCtx
+		if r.queue.ReadCanceled(intent.IntentID) {
+			cancel()
+		}
+		done := make(chan struct{})
+		defer close(done)
+		go func() {
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				if r.queue.ReadCanceled(intent.IntentID) {
+					cancel()
+					return
+				}
+				select {
+				case <-done:
+					return
+				case <-readCtx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+	}
+	if _, err := r.queue.WriteResult(resultCtx, contract.Result{
 		Version:   contract.VersionV1,
 		IntentID:  intent.IntentID,
 		RequestID: intent.RequestID,
@@ -254,49 +293,53 @@ func (r *Runner) handleIntent(ctx context.Context, intent contract.Intent) error
 	}
 
 	outcome := taskOutcome{}
-	switch intent.TaskType {
-	case contract.TaskTypeRestartTunnel:
-		outcome = r.handleRestartTunnel(ctx, intent)
-	case contract.TaskTypeDockerStopContainer:
-		outcome = r.handleDockerStop(ctx, intent)
-	case contract.TaskTypeDockerRestartContainer:
-		outcome = r.handleDockerRestart(ctx, intent)
-	case contract.TaskTypeDockerRemoveContainer:
-		outcome = r.handleDockerRemove(ctx, intent)
-	case contract.TaskTypeDockerListContainers:
-		outcome = r.handleDockerListContainers(ctx, intent)
-	case contract.TaskTypeDockerSystemDF:
-		outcome = r.handleDockerSystemDF(ctx, intent)
-	case contract.TaskTypeDockerListVolumes:
-		outcome = r.handleDockerListVolumes(ctx, intent)
-	case contract.TaskTypeDockerContainerLogs:
-		outcome = r.handleDockerContainerLogs(ctx, intent)
-	case contract.TaskTypeDockerRuntimeCheck:
-		outcome = r.handleDockerRuntimeCheck(ctx, intent)
-	case contract.TaskTypeDockerRunQuickService:
-		outcome = r.handleDockerRunQuickService(ctx, intent)
-	case contract.TaskTypeHostListenTCPPorts:
-		outcome = r.handleHostListenTCPPorts(ctx, intent)
-	case contract.TaskTypeDockerPublishedPorts:
-		outcome = r.handleDockerPublishedPorts(ctx, intent)
-	case contract.TaskTypeDockerNetworkSubnets:
-		outcome = r.handleDockerNetworkSubnets(ctx, intent)
-	case contract.TaskTypeComposeUpStack:
-		outcome = r.handleComposeUpStack(ctx, intent)
-	case contract.TaskTypeHostRuntimeStats:
-		outcome = r.handleHostRuntimeStats(ctx, intent)
-	case contract.TaskTypeHostRuntimeStream:
-		outcome = r.handleHostRuntimeStream(ctx, intent)
-	case contract.TaskTypeProjectFileWriteAtomic:
-		outcome = r.handleProjectFileWriteAtomic(ctx, intent)
-	case contract.TaskTypeProjectFileCopy:
-		outcome = r.handleProjectFileCopy(ctx, intent)
-	case contract.TaskTypeProjectFileRemove:
-		outcome = r.handleProjectFileRemove(ctx, intent)
-	default:
-		outcome.err = fmt.Errorf("unsupported task type: %s", intent.TaskType)
-	}
+	if ctx.Err() != nil {
+		outcome.err = ctx.Err()
+	} else {
+		switch intent.TaskType {
+		case contract.TaskTypeRestartTunnel:
+			outcome = r.handleRestartTunnel(ctx, intent)
+		case contract.TaskTypeDockerStopContainer:
+			outcome = r.handleDockerStop(ctx, intent)
+		case contract.TaskTypeDockerRestartContainer:
+			outcome = r.handleDockerRestart(ctx, intent)
+		case contract.TaskTypeDockerRemoveContainer:
+			outcome = r.handleDockerRemove(ctx, intent)
+		case contract.TaskTypeDockerListContainers:
+			outcome = r.handleDockerListContainers(ctx, intent)
+		case contract.TaskTypeDockerSystemDF:
+			outcome = r.handleDockerSystemDF(ctx, intent)
+		case contract.TaskTypeDockerListVolumes:
+			outcome = r.handleDockerListVolumes(ctx, intent)
+		case contract.TaskTypeDockerContainerLogs:
+			outcome = r.handleDockerContainerLogs(ctx, intent)
+		case contract.TaskTypeDockerRuntimeCheck:
+			outcome = r.handleDockerRuntimeCheck(ctx, intent)
+		case contract.TaskTypeDockerRunQuickService:
+			outcome = r.handleDockerRunQuickService(ctx, intent)
+		case contract.TaskTypeHostListenTCPPorts:
+			outcome = r.handleHostListenTCPPorts(ctx, intent)
+		case contract.TaskTypeDockerPublishedPorts:
+			outcome = r.handleDockerPublishedPorts(ctx, intent)
+		case contract.TaskTypeDockerNetworkSubnets:
+			outcome = r.handleDockerNetworkSubnets(ctx, intent)
+		case contract.TaskTypeComposeUpStack:
+			outcome = r.handleComposeUpStack(ctx, intent)
+		case contract.TaskTypeHostRuntimeStats:
+			outcome = r.handleHostRuntimeStats(ctx, intent)
+		case contract.TaskTypeHostRuntimeStream:
+			outcome = r.handleHostRuntimeStream(ctx, intent)
+		case contract.TaskTypeProjectFileWriteAtomic:
+			outcome = r.handleProjectFileWriteAtomic(ctx, intent)
+		case contract.TaskTypeProjectFileCopy:
+			outcome = r.handleProjectFileCopy(ctx, intent)
+		case contract.TaskTypeProjectFileRemove:
+			outcome = r.handleProjectFileRemove(ctx, intent)
+		default:
+			outcome.err = fmt.Errorf("unsupported task type: %s", intent.TaskType)
+		}
 
+	}
 	final := contract.Result{
 		Version:    contract.VersionV1,
 		IntentID:   intent.IntentID,
@@ -316,11 +359,15 @@ func (r *Runner) handleIntent(ctx context.Context, intent contract.Intent) error
 			Code:    "INFRA-500-EXEC",
 			Message: outcome.err.Error(),
 		}
+		if intent.TaskType.ReadOnly() && (errors.Is(outcome.err, context.Canceled) || errors.Is(outcome.err, context.DeadlineExceeded)) {
+			final.Error.Code = "INFRA-408-CANCELED"
+		}
 	}
 
-	if _, err := r.queue.WriteResult(ctx, final); err != nil {
+	if _, err := r.queue.WriteResult(resultCtx, final); err != nil {
 		return fmt.Errorf("write final result for %s: %w", intent.IntentID, err)
 	}
+	r.queue.ClearCancellation(intent.IntentID)
 	if err := os.Remove(r.queue.ClaimPath(intent.IntentID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		r.logger.Printf("warn: remove claim for %s failed: %v", intent.IntentID, err)
 	}
@@ -410,7 +457,7 @@ func (r *Runner) handleDockerListContainers(ctx context.Context, intent contract
 	if payload.IncludeAll {
 		args = append(args, "-a")
 	}
-	args = append(args, "--format", "{{json .}}")
+	args = append(args, "--size=false", "--format", "{{json .}}")
 
 	output, err := r.runDockerCommand(ctx, "", args...)
 	return taskOutcome{
@@ -424,14 +471,27 @@ func (r *Runner) handleDockerListContainers(ctx context.Context, intent contract
 
 func (r *Runner) handleDockerSystemDF(ctx context.Context, _ contract.Intent) taskOutcome {
 	args := []string{"system", "df", "--format", "{{json .}}"}
-	output, err := r.runDockerCommand(ctx, "", args...)
-	return taskOutcome{
-		err:     commandError(err, output, "docker %s", strings.Join(args, " ")),
-		logTail: tailLines(output, 25),
-		data: map[string]any{
-			"lines": parseLines(output),
-		},
+	var output []byte
+	var err error
+	var collectedAt time.Time
+	if r.diskCache == nil {
+		output, err = r.runDockerCommand(ctx, "", args...)
+	} else {
+		output, collectedAt, err = r.diskCache.get(systemDiskCacheKey, func(background context.Context) ([]byte, error) { return r.runDockerCommand(background, "", args...) })
 	}
+	if errors.Is(err, errDiskCollectionPending) {
+		return taskOutcome{data: map[string]any{"lines": []string{}, "pending": true}}
+	}
+	data := map[string]any{"lines": parseLines(output)}
+	if !collectedAt.IsZero() {
+		data["collected_at"] = collectedAt.Format(time.RFC3339)
+	}
+	if r.diskCache != nil {
+		if _, refreshErr := r.diskCache.state(systemDiskCacheKey); refreshErr != nil {
+			data["warning"] = "Disk accounting refresh failed; showing the last successful scan."
+		}
+	}
+	return taskOutcome{err: commandError(err, output, "docker %s", strings.Join(args, " ")), logTail: tailLines(output, 25), data: data}
 }
 
 func (r *Runner) handleDockerListVolumes(ctx context.Context, _ contract.Intent) taskOutcome {

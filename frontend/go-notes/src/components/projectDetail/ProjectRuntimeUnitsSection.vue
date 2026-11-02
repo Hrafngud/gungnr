@@ -13,6 +13,7 @@ import UiState from '@/components/ui/UiState.vue'
 import NavIcon from '@/components/NavIcon.vue'
 import type { BadgeTone } from '@/components/workbench/projectDetailWorkbenchTypes'
 import { apiErrorMessage, isMockEnabled } from '@/services/api'
+import { useRuntimeStreamFreshness } from '@/composables/useRuntimeStreamFreshness'
 import { hostApi } from '@/services/host'
 import { projectsApi } from '@/services/projects'
 import { useToastStore } from '@/stores/toasts'
@@ -34,6 +35,7 @@ type ContainerActionState = {
 }
 
 const props = defineProps<{
+  runtimeLoading?: boolean
   projectName: string
   projectRuntimeKey: string
   containers: ProjectContainer[]
@@ -62,6 +64,12 @@ const usageStreamSample = ref<HostRuntimeWorkloadStreamUsage | null>(null)
 const usageStreamWarnings = ref<string[]>([])
 const usageStreamState = ref<'idle' | 'connecting' | 'live' | 'error'>('idle')
 const usageStreamError = ref<string | null>(null)
+const usageCollectedAt = ref<string>()
+const usageDiskPending = ref(false)
+const usageDiskCollectedAt = ref<string>()
+const { ageLabel: usageAgeLabel } = useRuntimeStreamFreshness(() => usageCollectedAt.value, usageStreamState, usageStreamError)
+let usageSnapshotTimer: ReturnType<typeof setTimeout> | undefined
+let usageSnapshotActive = true
 let usageStreamSource: EventSource | null = null
 
 function containerTone(container: ProjectContainer): BadgeTone {
@@ -146,9 +154,9 @@ const usageIndicators = computed(() => {
     {
       key: 'source',
       label: 'Disk usage',
-      value: formatBytes(snapshotUsage.diskUsedBytes),
+      value: usageDiskPending.value ? '—' : formatBytes(snapshotUsage.diskUsedBytes),
       percent: clampPercent(snapshotUsage.diskSharePercent),
-      meta: `${formatPercent(snapshotUsage.diskSharePercent)} of host disk · refresh-only snapshot`,
+      meta: usageDiskPending.value ? 'Collecting disk usage…' : `Collected ${usageDiskCollectedAt.value ? new Date(usageDiskCollectedAt.value).toLocaleTimeString() : 'recently'}`,
     },
   ]
 })
@@ -167,7 +175,7 @@ const resolveProjectUsage = <T,>(projectsByName: Record<string, T> | undefined) 
 const usageSourceMeta = computed(() => {
   switch (usageStreamState.value) {
     case 'live':
-      return 'CPU and RAM on 100ms live stream · Disk on refresh'
+      return `CPU and RAM · ${usageAgeLabel.value} · Disk cached separately`
     case 'connecting':
       return 'CPU and RAM stream connecting · Disk on refresh'
     case 'error':
@@ -290,10 +298,14 @@ const confirmLifecycleAction = async () => {
 }
 
 const loadProjectUsageSnapshot = async () => {
+  if (usageSnapshotLoading.value || !usageSnapshotActive) return
+  if (usageSnapshotTimer) clearTimeout(usageSnapshotTimer)
   usageSnapshotLoading.value = true
   usageSnapshotError.value = null
   try {
     const { data } = await hostApi.runtimeSnapshot()
+    usageDiskPending.value = Boolean(data.snapshot.diskUsagePending)
+    usageDiskCollectedAt.value = data.snapshot.diskUsageCollectedAt
     usageSnapshot.value = resolveProjectUsage(data.snapshot.projectsByName)
     usageSnapshotWarnings.value = (data.snapshot.warnings ?? []).slice(0, 2)
   } catch (err) {
@@ -301,6 +313,7 @@ const loadProjectUsageSnapshot = async () => {
     usageSnapshotWarnings.value = []
   } finally {
     usageSnapshotLoading.value = false
+    if (usageSnapshotActive) usageSnapshotTimer = setTimeout(loadProjectUsageSnapshot, usageDiskPending.value ? 3000 : 30_000)
   }
 }
 
@@ -353,6 +366,7 @@ const startUsageStream = () => {
         },
         warnings: ['mock runtime data is synthetic'],
       }
+      usageCollectedAt.value = baseSample.collectedAt
       usageStreamSample.value = resolveProjectUsage(baseSample.projectsByName)
       usageStreamWarnings.value = (baseSample.warnings ?? []).slice(0, 2)
     }, 500)
@@ -364,7 +378,7 @@ const startUsageStream = () => {
 
   source.onopen = () => {
     if (usageStreamSource !== source) return
-    usageStreamState.value = 'live'
+    usageStreamState.value = 'connecting'
   }
 
   source.addEventListener('sample', (event) => {
@@ -372,6 +386,7 @@ const startUsageStream = () => {
     const message = event as MessageEvent
     try {
       const sample = JSON.parse(message.data) as HostRuntimeStreamSample
+      usageCollectedAt.value = sample.collectedAt
       usageStreamSample.value = resolveProjectUsage(sample.projectsByName)
       usageStreamWarnings.value = (sample.warnings ?? []).slice(0, 2)
       usageStreamError.value = null
@@ -397,6 +412,8 @@ const startUsageStream = () => {
     }
     if (source.readyState === EventSource.CLOSED) {
       usageStreamState.value = 'idle'
+    } else {
+      usageStreamState.value = 'connecting'
     }
   })
 }
@@ -413,6 +430,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  usageSnapshotActive = false
+  if (usageSnapshotTimer) clearTimeout(usageSnapshotTimer)
   closeUsageStream()
 })
 
@@ -432,6 +451,7 @@ watch(usageContainerSignature, () => {
         <p class="text-xs uppercase tracking-[0.3em] text-[color:var(--muted-2)]">Containers</p>
         <h2 class="mt-2 text-xl font-semibold text-[color:var(--text)]">
           Runtime units ({{ containers.length }})
+          <span v-if="runtimeLoading" class="text-sm text-[color:var(--muted)]">Checking runtime…</span>
         </h2>
       </div>
       <UiPanel

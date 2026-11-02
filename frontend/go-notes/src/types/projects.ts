@@ -78,6 +78,7 @@ export interface ProjectContainer {
 }
 
 export interface ProjectDetail {
+  runtimePending?: boolean
   project: ProjectDetailProject
   runtime: ProjectDetailRuntime
   network: ProjectDetailNetwork

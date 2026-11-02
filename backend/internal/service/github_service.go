@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"strings"
+	"time"
 
 	"go-notes/internal/config"
 	gh "go-notes/internal/integrations/github"
@@ -48,6 +49,8 @@ func NewGitHubService(cfg config.Config, settings *SettingsService) *GitHubServi
 }
 
 func (s *GitHubService) Catalog(ctx context.Context) (GitHubCatalog, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	cfg := s.cfg
 	var templates []GitHubTemplateSource
 	var defaultTemplate *GitHubTemplateSource
@@ -121,8 +124,8 @@ func (s *GitHubService) Catalog(ctx context.Context) (GitHubCatalog, error) {
 		TokenConfigured: tokenConfigured,
 		Template:        template,
 		Templates:       templates,
-		App:            appStatus,
-		TemplateAccess: templateAccess,
+		App:             appStatus,
+		TemplateAccess:  templateAccess,
 	}, nil
 }
 

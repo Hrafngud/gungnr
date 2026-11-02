@@ -40,6 +40,9 @@ export interface DockerUsageProjectCounts {
 }
 
 export interface DockerUsageSummary {
+  pending?: boolean
+  collectedAt?: string
+  warning?: string
   totalSize: string
   images: DockerUsageEntry
   containers: DockerUsageEntry
@@ -84,6 +87,8 @@ export interface HostRuntimeWorkloadSnapshot {
 }
 
 export interface HostRuntimeSnapshot {
+  diskUsagePending?: boolean
+  diskUsageCollectedAt?: string
   collectedAt: string
   hostname?: string
   uptimeSeconds: number

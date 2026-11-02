@@ -144,6 +144,8 @@ func DefaultProjectArchiveOptions() ProjectArchiveOptions {
 }
 
 func (s *ProjectArchiveService) Plan(ctx context.Context, projectName string) (ProjectArchivePlan, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	runtimeCfg, err := s.resolveRuntimeConfig(ctx)
 	if err != nil {
 		return ProjectArchivePlan{}, err
@@ -316,7 +318,9 @@ func (s *ProjectArchiveService) planContainers(
 		return []ProjectArchivePlanContainer{}
 	}
 
-	containers, err := s.host.ListContainers(ctx, true)
+	inventoryCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	containers, err := s.host.ListContainers(inventoryCtx, true)
 	if err != nil {
 		addArchiveWarning(warnings, fmt.Sprintf("failed to list project containers: %v", err))
 		return []ProjectArchivePlanContainer{}

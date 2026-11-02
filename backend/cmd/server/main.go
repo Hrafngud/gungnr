@@ -69,6 +69,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to initialize infra queue: %v", err)
 	}
+	if recovered, err := bridgeQueue.RecoverInterrupted(context.Background()); err != nil {
+		log.Fatalf("infra task recovery failed: %v", err)
+	} else if recovered > 0 {
+		log.Printf("marked %d interrupted infra tasks failed", recovered)
+	}
 	logQueueCleanup("infra queue", bridgeQueue, cfg)
 	hostBridgeQueue, err := infraqueue.NewFilesystem(cfg.HostInfraQueueRoot)
 	if err != nil {
@@ -103,6 +108,14 @@ func main() {
 		log.Fatalf("infra worker readiness check failed: %v", err)
 	}
 	go bridgeWorker.Run(context.Background())
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			logQueueCleanup("infra queue", bridgeQueue, cfg)
+			logQueueCleanup("host infra queue", hostBridgeQueue, cfg)
+		}
+	}()
 
 	hostService := service.NewHostService(cfg.TemplatesDir, projectRepo, bridgeClient)
 	projectService := service.NewProjectService(cfg, projectRepo, jobService, settingsService, bridgeClient)

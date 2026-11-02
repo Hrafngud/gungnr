@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiButton from '@/components/ui/UiButton.vue'
@@ -191,8 +191,8 @@ const filteredContainers = computed(() => {
 
 const usageCounts = computed(() => {
   const summary = usageSummary.value
-  if (!summary) {
-    return { containers: 0, images: 0, volumes: 0 }
+  if (!summary || summary.pending) {
+    return { containers: '—', images: '—', volumes: '—' }
   }
   if (projectFilter.value !== 'all' && summary.projectCounts) {
     return summary.projectCounts
@@ -348,7 +348,13 @@ const loadContainers = async () => {
   }
 }
 
+let usageRefreshTimer: ReturnType<typeof setTimeout> | undefined
+let usageActive = true
+onBeforeUnmount(() => { usageActive = false; if (usageRefreshTimer) clearTimeout(usageRefreshTimer) })
+
 const loadDockerUsage = async () => {
+  if (!usageActive) return
+  if (usageRefreshTimer) clearTimeout(usageRefreshTimer)
   usageLoading.value = true
   usageError.value = null
   usageDiagnostics.value = []
@@ -363,6 +369,7 @@ const loadDockerUsage = async () => {
     usageDiagnostics.value = []
   } finally {
     usageLoading.value = false
+    if (usageActive && usageSummary.value?.pending) usageRefreshTimer = setTimeout(loadDockerUsage, 3000)
   }
 }
 
@@ -601,6 +608,7 @@ watch(projectFilter, () => {
           {{ usageDiagnosticMessage }}
         </UiInlineFeedback>
 
+        <UiInlineFeedback v-if="usageSummary?.warning" tone="warn">{{ usageSummary.warning }}</UiInlineFeedback>
         <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
           <UiPanel variant="soft" class="space-y-2 p-3">
             <div class="flex flex-wrap items-center justify-between gap-2 break-words">
@@ -613,7 +621,7 @@ watch(projectFilter, () => {
               {{ usageSummary?.totalSize || '—' }}
             </p>
             <p class="text-xs text-[color:var(--muted)]">
-              Overall Docker footprint.
+              {{ usageSummary?.pending ? 'Collecting disk usage…' : usageSummary?.collectedAt ? `Collected ${new Date(usageSummary.collectedAt).toLocaleTimeString()}` : 'Overall Docker footprint.' }}
             </p>
           </UiPanel>
           <UiPanel variant="soft" class="space-y-2 p-3">

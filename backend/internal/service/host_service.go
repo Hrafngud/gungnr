@@ -50,9 +50,11 @@ type DockerRuntimeInfo struct {
 }
 
 type HostService struct {
-	templatesDir string
-	projects     repository.ProjectRepository
-	infraClient  hostInfraBridgeClient
+	templatesDir  string
+	projects      repository.ProjectRepository
+	infraClient   hostInfraBridgeClient
+	snapshotCache cachedHostRead[HostRuntimeSnapshot]
+	streamCache   cachedHostRead[HostRuntimeStreamSample]
 }
 
 type hostInfraBridgeClient interface {
@@ -123,6 +125,9 @@ type DockerUsageProjectCounts struct {
 }
 
 type DockerUsageSummary struct {
+	Pending       bool                      `json:"pending,omitempty"`
+	CollectedAt   string                    `json:"collectedAt,omitempty"`
+	Warning       string                    `json:"warning,omitempty"`
 	TotalSize     string                    `json:"totalSize"`
 	Images        DockerUsageEntry          `json:"images"`
 	Containers    DockerUsageEntry          `json:"containers"`
@@ -168,20 +173,22 @@ type HostRuntimeWorkloadSnapshot struct {
 }
 
 type HostRuntimeSnapshot struct {
-	CollectedAt    string                                 `json:"collectedAt"`
-	Hostname       string                                 `json:"hostname,omitempty"`
-	UptimeSeconds  int64                                  `json:"uptimeSeconds"`
-	UptimeHuman    string                                 `json:"uptimeHuman"`
-	SystemImage    string                                 `json:"systemImage"`
-	Kernel         string                                 `json:"kernel"`
-	CPU            HostRuntimeCPU                         `json:"cpu"`
-	GPU            *HostRuntimeGPU                        `json:"gpu,omitempty"`
-	Memory         HostRuntimeMemorySnapshot              `json:"memory"`
-	Disk           HostRuntimeResource                    `json:"disk"`
-	Panel          HostRuntimeWorkloadSnapshot            `json:"panel"`
-	Projects       HostRuntimeWorkloadSnapshot            `json:"projects"`
-	ProjectsByName map[string]HostRuntimeWorkloadSnapshot `json:"projectsByName,omitempty"`
-	Warnings       []string                               `json:"warnings,omitempty"`
+	DiskUsagePending     bool                                   `json:"diskUsagePending,omitempty"`
+	DiskUsageCollectedAt string                                 `json:"diskUsageCollectedAt,omitempty"`
+	CollectedAt          string                                 `json:"collectedAt"`
+	Hostname             string                                 `json:"hostname,omitempty"`
+	UptimeSeconds        int64                                  `json:"uptimeSeconds"`
+	UptimeHuman          string                                 `json:"uptimeHuman"`
+	SystemImage          string                                 `json:"systemImage"`
+	Kernel               string                                 `json:"kernel"`
+	CPU                  HostRuntimeCPU                         `json:"cpu"`
+	GPU                  *HostRuntimeGPU                        `json:"gpu,omitempty"`
+	Memory               HostRuntimeMemorySnapshot              `json:"memory"`
+	Disk                 HostRuntimeResource                    `json:"disk"`
+	Panel                HostRuntimeWorkloadSnapshot            `json:"panel"`
+	Projects             HostRuntimeWorkloadSnapshot            `json:"projects"`
+	ProjectsByName       map[string]HostRuntimeWorkloadSnapshot `json:"projectsByName,omitempty"`
+	Warnings             []string                               `json:"warnings,omitempty"`
 }
 
 type HostRuntimeHostStreamUsage struct {
@@ -208,7 +215,7 @@ type HostRuntimeStreamSample struct {
 	Warnings       []string                                  `json:"warnings,omitempty"`
 }
 
-const HostRuntimeStreamInterval = 100 * time.Millisecond
+const HostRuntimeStreamInterval = 2 * time.Second
 
 type dockerSystemDFLine struct {
 	Type        string `json:"Type"`
@@ -229,7 +236,9 @@ func (s *HostService) DockerUsage(ctx context.Context, project string) (DockerUs
 	if err != nil {
 		return DockerUsageSummary{}, err
 	}
-	summary.TotalSize = formatDockerBytes(totalBytes)
+	if !summary.Pending {
+		summary.TotalSize = formatDockerBytes(totalBytes)
+	}
 
 	project = strings.TrimSpace(project)
 	if project == "" {
@@ -353,7 +362,7 @@ func parseDockerPSLinesToContainers(lines []string) ([]DockerContainer, error) {
 	return containers, nil
 }
 
-func (s *HostService) RuntimeSnapshot(ctx context.Context) (HostRuntimeSnapshot, error) {
+func (s *HostService) loadRuntimeSnapshot(ctx context.Context) (HostRuntimeSnapshot, error) {
 	if s.infraClient == nil {
 		return HostRuntimeSnapshot{}, errs.New(errs.CodeHostStatsFailed, "infra bridge client unavailable")
 	}
@@ -386,7 +395,7 @@ func (s *HostService) RuntimeSnapshot(ctx context.Context) (HostRuntimeSnapshot,
 	return stats, nil
 }
 
-func (s *HostService) RuntimeStreamSample(ctx context.Context) (HostRuntimeStreamSample, error) {
+func (s *HostService) loadRuntimeStreamSample(ctx context.Context) (HostRuntimeStreamSample, error) {
 	if s.infraClient == nil {
 		return HostRuntimeStreamSample{}, errs.New(errs.CodeHostStatsFailed, "infra bridge client unavailable")
 	}
@@ -1008,6 +1017,9 @@ func (s *HostService) readDockerUsage(ctx context.Context) (DockerUsageSummary, 
 	}
 
 	var summary DockerUsageSummary
+	summary.Pending, _ = result.Data["pending"].(bool)
+	summary.CollectedAt, _ = result.Data["collected_at"].(string)
+	summary.Warning, _ = result.Data["warning"].(string)
 	var totalBytes int64
 
 	for _, line := range lines {

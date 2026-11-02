@@ -139,11 +139,9 @@ func (s *HealthService) Docker(ctx context.Context) DockerHealth {
 		}
 	}
 
-	// Keep host probe execution independent from request-context cancellation.
-	// Some callers/proxies can apply short request deadlines that would
-	// otherwise kill the docker command before it returns. Each bridge-backed
-	// probe gets its own timeout budget so one slow read does not starve the next.
-	runtimeCtx, runtimeCancel := context.WithTimeout(context.Background(), 8*time.Second)
+	// Keep the combined health budget below the browser deadline and cancel
+	// abandoned reads; worker lanes keep these probes independent of disk scans.
+	runtimeCtx, runtimeCancel := context.WithTimeout(ctx, 6*time.Second)
 	defer runtimeCancel()
 
 	runtimeInfo, err := s.host.DockerRuntime(runtimeCtx)
@@ -162,7 +160,7 @@ func (s *HealthService) Docker(ctx context.Context) DockerHealth {
 	}
 	daemonIsolation = evaluateDockerDaemonIsolationHealth(s.daemonMode, runtimeInfo)
 
-	countCtx, countCancel := context.WithTimeout(context.Background(), 8*time.Second)
+	countCtx, countCancel := context.WithTimeout(ctx, 6*time.Second)
 	defer countCancel()
 
 	count, err := s.host.CountRunningContainers(countCtx)
